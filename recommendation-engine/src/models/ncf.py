@@ -395,7 +395,9 @@ class NCFRecommender:
                 if rating > 0:  # Only positive interactions
                     user_idx = self.user_encoder.transform([user])[0]
                     item_idx = self.item_encoder.transform([item])[0]
-                    interactions.append((user_idx, item_idx, float(rating)))
+                    # Normalize rating to 0-1 range (assuming max rating is 5)
+                    normalized_rating = float(rating) / 5.0
+                    interactions.append((user_idx, item_idx, normalized_rating))
         
         # Convert to arrays
         interaction_array = np.array(interactions)
@@ -705,9 +707,9 @@ class NCFRecommender:
             'users': self.users,
             'items': self.items,
             'config': {
-                'embedding_dim': self.params('embedding_dim'),
-                'layers': self.params('layers'),
-                'dropout': self.params('dropout')
+                'embedding_dim': self.params['embedding_dim'],
+                'layers': self.params['layers'],
+                'dropout': self.params['dropout']
             },
             'timestamp': datetime.now().isoformat()
         }

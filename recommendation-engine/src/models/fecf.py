@@ -237,12 +237,32 @@ class FeatureEnhancedCF:
         Returns:
             tuple: (interactions, user_map, item_map)
         """
-        # Build interactions from interactions_df
-        interactions = self.dataset.build_interactions([
-            (self._user_mapping[row['user_id']], self._item_mapping[row['project_id']], row['weight'])
-            for _, row in self.interactions_df.iterrows()
-            if row['user_id'] in self._user_mapping and row['project_id'] in self._item_mapping
-        ])
+        logger.info("Building interaction matrix")
+        
+        # Check if user IDs exist in mapping
+        missing_users = [user_id for user_id in self.interactions_df['user_id'].unique() 
+                        if user_id not in self._user_mapping]
+        if missing_users:
+            logger.warning(f"Some user IDs are missing from mapping: {missing_users[:5]}...")
+        
+        # Build interactions from interactions_df, skip any user/item not in mapping
+        interaction_tuples = []
+        for _, row in self.interactions_df.iterrows():
+            user_id = row['user_id']
+            project_id = row['project_id']
+            
+            if user_id in self._user_mapping and project_id in self._item_mapping:
+                user_idx = self._user_mapping[user_id]
+                item_idx = self._item_mapping[project_id]
+                weight = row['weight']
+                interaction_tuples.append((user_idx, item_idx, weight))
+        
+        # Check if we have any valid interactions
+        if not interaction_tuples:
+            raise ValueError("No valid interactions found after mapping")
+        
+        # Build interactions using dataset
+        interactions = self.dataset.build_interactions(interaction_tuples)
         
         return interactions
     
