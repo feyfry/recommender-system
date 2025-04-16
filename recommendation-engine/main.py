@@ -137,7 +137,8 @@ def train_models(args):
         
         # Inisialisasi model yang akan dilatih
         if train_fecf:
-            from src.models.fecf import FeatureEnhancedCF
+            # from src.models.fecf import FeatureEnhancedCF
+            from src.models.alt_fecf import FeatureEnhancedCF
             models_to_train.append(("FECF", FeatureEnhancedCF()))
         
         if train_ncf:
@@ -255,7 +256,8 @@ def evaluate_models(args):
     
     try:
         # Load FECF model
-        from src.models.fecf import FeatureEnhancedCF
+        # from src.models.fecf import FeatureEnhancedCF
+        from src.models.alt_fecf import FeatureEnhancedCF
         fecf = FeatureEnhancedCF()
         if fecf.load_data():
             models["fecf"] = fecf
@@ -378,7 +380,8 @@ def recommend(args):
     try:
         # Load appropriate model
         if model_type == 'fecf':
-            from src.models.fecf import FeatureEnhancedCF
+            # from src.models.fecf import FeatureEnhancedCF
+            from src.models.alt_fecf import FeatureEnhancedCF
             model = FeatureEnhancedCF()
         elif model_type == 'ncf':
             from src.models.ncf import NCFRecommender

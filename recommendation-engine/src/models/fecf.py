@@ -234,43 +234,40 @@ class FeatureEnhancedCF:
             logger.error(f"Error preparing dataset: {str(e)}")
             return False
     
-    def _build_interaction_matrix(self) -> csr_matrix:
+    def _build_interaction_matrix(self) -> Tuple[csr_matrix, Dict[str, int], Dict[str, int]]:
         """
-        Build sparse interaction matrix
+        Build sparse interaction matrix spesifik untuk LightFM 1.17
         
         Returns:
-            csr_matrix: Sparse interaction matrix
+            tuple: (interactions, user_map, item_map)
         """
-        logger.info("Building interaction matrix")
+        logger.info("Building interaction matrix for LightFM 1.17")
         
         # Log statistik untuk debugging
         total_interactions = len(self.interactions_df)
         valid_interactions = 0
         skipped_interactions = 0
         
-        # Build interactions from interactions_df, skip any user/item not in mapping
-        interaction_tuples = []
+        # Dapatkan data interaksi dalam format yang LightFM harapkan
+        interactions_data = []
         
-        # Proses setiap interaksi
+        # Pastikan interaksi dalam format yang benar
         for _, row in self.interactions_df.iterrows():
-            user_id = str(row['user_id'])  # Pastikan string
-            project_id = str(row['project_id'])  # Pastikan string
+            user_id = str(row['user_id'])
+            item_id = str(row['project_id'])
             weight = float(row['weight'])
             
-            # Hanya tambahkan jika user dan project ada dalam mapping
-            if user_id in self._user_mapping and project_id in self._item_mapping:
-                user_idx = self._user_mapping[user_id]
-                item_idx = self._item_mapping[project_id]
-                interaction_tuples.append((user_idx, item_idx, weight))
+            # Pastikan ID ada dalam mapping
+            if user_id in self._user_mapping and item_id in self._item_mapping:
+                interactions_data.append((user_id, item_id, weight))
                 valid_interactions += 1
             else:
                 skipped_interactions += 1
-                # Skip tapi jangan log semua untuk menghindari spam
                 if skipped_interactions < 10:
                     if user_id not in self._user_mapping:
                         logger.warning(f"User ID {user_id} tidak ditemukan dalam mapping")
-                    if project_id not in self._item_mapping:
-                        logger.warning(f"Project ID {project_id} tidak ditemukan dalam mapping")
+                    if item_id not in self._item_mapping:
+                        logger.warning(f"Project ID {item_id} tidak ditemukan dalam mapping")
         
         # Log statistik
         logger.info(f"Total interactions: {total_interactions}")
@@ -278,13 +275,73 @@ class FeatureEnhancedCF:
         logger.info(f"Skipped interactions: {skipped_interactions}")
         
         # Check if we have any valid interactions
-        if not interaction_tuples:
-            raise ValueError("No valid interactions found after mapping. Check your data.")
+        if not interactions_data:
+            raise ValueError("No valid interactions found after mapping")
         
-        # Build interactions using dataset
-        interactions = self.dataset.build_interactions(interaction_tuples)
-        
-        return interactions
+        # SOLUSI KHUSUS: Gunakan cara berbeda untuk membangun interaksi
+        # Langsung menggunakan build_interactions dengan tuple user, item, weight
+        try:
+            # Coba menggunakan _build_interaction dari dataset
+            from lightfm.data import Dataset
+            
+            # Berikan loggin maping sampel untuk debug
+            logger.info(f"User mapping sample: {list(self._user_mapping.items())[:3]}")
+            logger.info(f"Item mapping sample: {list(self._item_mapping.items())[:3]}")
+            
+            # Panggil build_interactions dengan pasangan (user_internal_id, item_internal_id, weight)
+            # Konversi data ke format yang diharapkan oleh LightFM
+            interactions_tuples = []
+            for user, item, weight in interactions_data:
+                user_idx = self._user_mapping[user]
+                item_idx = self._item_mapping[item]
+                interactions_tuples.append((user_idx, item_idx, weight))
+            
+            # Build interactions dari tuple yang sudah dikonversi ke internal ID
+            interactions = self.dataset.build_interactions(interactions_tuples)
+            
+            # Check shape untuk memastikan berhasil
+            if isinstance(interactions, tuple):
+                # Beberapa versi LightFM mengembalikan tuple (interactions, weights)
+                interactions_matrix = interactions[0]
+                logger.info(f"Built interactions with shape {interactions_matrix.shape}")
+                return interactions_matrix, self._user_mapping, self._item_mapping
+            else:
+                # Versi lain mengembalikan interactions matrix langsung
+                logger.info(f"Built interactions with shape {interactions.shape}")
+                return interactions, self._user_mapping, self._item_mapping
+                
+        except Exception as e:
+            logger.error(f"Error building interactions with LightFM: {str(e)}")
+            
+            # FALLBACK: Jika cara LightFM gagal, buat CSR matrix secara manual
+            try:
+                from scipy.sparse import csr_matrix, coo_matrix
+                
+                # Konversi interaksi ke format COO
+                rows = []
+                cols = []
+                data = []
+                
+                for user, item, weight in interactions_data:
+                    rows.append(self._user_mapping[user])
+                    cols.append(self._item_mapping[item])
+                    data.append(weight)
+                
+                # Create sparse matrix with correct shape
+                n_users = max(self._user_mapping.values()) + 1
+                n_items = max(self._item_mapping.values()) + 1
+                
+                logger.info(f"Creating manual CSR matrix with shape ({n_users}, {n_items})")
+                
+                coo = coo_matrix((data, (rows, cols)), shape=(n_users, n_items))
+                interactions = coo.tocsr()
+                
+                logger.info(f"Created manual CSR matrix with {len(data)} interactions")
+                return interactions, self._user_mapping, self._item_mapping
+                
+            except Exception as e2:
+                logger.error(f"Fallback matrix creation also failed: {str(e2)}")
+                raise ValueError(f"Failed to build interactions: Original error: {str(e)}, Fallback error: {str(e2)}")
     
     def _build_item_features(self) -> csr_matrix:
         """
@@ -396,6 +453,12 @@ class FeatureEnhancedCF:
         try:
             # Build interaction matrix and features
             interactions, user_map, item_map = self._build_interaction_matrix()
+
+            logger.info(f"Interaction matrix shape: {interactions.shape}")
+            logger.info(f"Number of interactions: {interactions.nnz}")
+            logger.info(f"User map sample: {list(user_map.items())[:3]}")
+            logger.info(f"Item map sample: {list(item_map.items())[:3]}")
+
             item_features = self._build_item_features()
             
             # Save item features for prediction
