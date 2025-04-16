@@ -1,0 +1,42 @@
+# Core dependencies
+numpy
+pandas
+scipy
+scikit-learn
+matplotlib
+python-dotenv
+requests
+pydantic
+
+# Recommender systems
+lightfm
+torch
+torchvision
+
+# Technical analysis
+# Note: Installing TA-Lib can be complex - see https://github.com/mrjbq7/ta-lib
+# Uncomment the line below if you have TA-Lib C library installed
+ta-lib
+yfinance
+
+# Alternative technical indicators library that doesn't require C dependencies
+pandas-ta
+
+# API
+fastapi
+uvicorn
+httpx
+aiohttp
+python-multipart
+
+# API Documentation
+swagger-ui-bundle
+
+# Database connection (for PostgreSQL)
+psycopg2-binary
+SQLAlchemy
+
+# Utilities
+tqdm
+joblib
+pyarrow
