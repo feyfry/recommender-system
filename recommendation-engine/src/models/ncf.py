@@ -388,6 +388,10 @@ class NCFRecommender:
         # Convert interactions to training format
         interactions = []
         
+        # Tentukan nilai max rating dari data secara dinamis
+        max_rating = float(self.interactions_df['weight'].max())
+        logger.info(f"Detected max rating value: {max_rating}")
+        
         for user in self.users:
             user_interactions = self.user_item_matrix.loc[user]
             for item in self.items:
@@ -395,8 +399,8 @@ class NCFRecommender:
                 if rating > 0:  # Only positive interactions
                     user_idx = self.user_encoder.transform([user])[0]
                     item_idx = self.item_encoder.transform([item])[0]
-                    # Normalize rating to 0-1 range (assuming max rating is 5)
-                    normalized_rating = float(rating) / 5.0
+                    # Normalize rating to 0-1 range dynamically
+                    normalized_rating = float(rating) / max_rating
                     interactions.append((user_idx, item_idx, normalized_rating))
         
         # Convert to arrays
@@ -408,6 +412,10 @@ class NCFRecommender:
         user_indices = interaction_array[:, 0]
         item_indices = interaction_array[:, 1]
         ratings = interaction_array[:, 2]
+        
+        # Log normalization info
+        logger.info(f"Normalized {len(ratings)} ratings to range [0, 1]")
+        logger.info(f"Rating statistics - Min: {ratings.min():.4f}, Max: {ratings.max():.4f}, Mean: {ratings.mean():.4f}")
         
         return user_indices, item_indices, ratings
     

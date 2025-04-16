@@ -144,9 +144,9 @@ class FeatureEnhancedCF:
                 logger.error("User-item matrix is empty or not loaded")
                 return False
             
-            # Fit users and items
-            users = list(self.user_item_matrix.index)
-            items = list(self.user_item_matrix.columns)
+            # PENTING: Pastikan daftar user dan item dalam format string
+            users = [str(user) for user in self.user_item_matrix.index]
+            items = [str(item) for item in self.user_item_matrix.columns]
             
             # Check if empty
             if not users or not items:
@@ -158,6 +158,10 @@ class FeatureEnhancedCF:
                 users=users,
                 items=items
             )
+
+            # Cetak beberapa sampel user untuk debugging
+            logger.info(f"Sample users: {users[:5]}")
+            logger.info(f"Sample items: {items[:5]}")
             
             # Extract feature names for items
             item_features = []
@@ -230,36 +234,52 @@ class FeatureEnhancedCF:
             logger.error(f"Error preparing dataset: {str(e)}")
             return False
     
-    def _build_interaction_matrix(self) -> Tuple[csr_matrix, Dict[str, int], Dict[str, int]]:
+    def _build_interaction_matrix(self) -> csr_matrix:
         """
-        Build sparse interaction matrix and mappings
+        Build sparse interaction matrix
         
         Returns:
-            tuple: (interactions, user_map, item_map)
+            csr_matrix: Sparse interaction matrix
         """
         logger.info("Building interaction matrix")
         
-        # Check if user IDs exist in mapping
-        missing_users = [user_id for user_id in self.interactions_df['user_id'].unique() 
-                        if user_id not in self._user_mapping]
-        if missing_users:
-            logger.warning(f"Some user IDs are missing from mapping: {missing_users[:5]}...")
+        # Log statistik untuk debugging
+        total_interactions = len(self.interactions_df)
+        valid_interactions = 0
+        skipped_interactions = 0
         
         # Build interactions from interactions_df, skip any user/item not in mapping
         interaction_tuples = []
+        
+        # Proses setiap interaksi
         for _, row in self.interactions_df.iterrows():
-            user_id = row['user_id']
-            project_id = row['project_id']
+            user_id = str(row['user_id'])  # Pastikan string
+            project_id = str(row['project_id'])  # Pastikan string
+            weight = float(row['weight'])
             
+            # Hanya tambahkan jika user dan project ada dalam mapping
             if user_id in self._user_mapping and project_id in self._item_mapping:
                 user_idx = self._user_mapping[user_id]
                 item_idx = self._item_mapping[project_id]
-                weight = row['weight']
                 interaction_tuples.append((user_idx, item_idx, weight))
+                valid_interactions += 1
+            else:
+                skipped_interactions += 1
+                # Skip tapi jangan log semua untuk menghindari spam
+                if skipped_interactions < 10:
+                    if user_id not in self._user_mapping:
+                        logger.warning(f"User ID {user_id} tidak ditemukan dalam mapping")
+                    if project_id not in self._item_mapping:
+                        logger.warning(f"Project ID {project_id} tidak ditemukan dalam mapping")
+        
+        # Log statistik
+        logger.info(f"Total interactions: {total_interactions}")
+        logger.info(f"Valid interactions: {valid_interactions}")
+        logger.info(f"Skipped interactions: {skipped_interactions}")
         
         # Check if we have any valid interactions
         if not interaction_tuples:
-            raise ValueError("No valid interactions found after mapping")
+            raise ValueError("No valid interactions found after mapping. Check your data.")
         
         # Build interactions using dataset
         interactions = self.dataset.build_interactions(interaction_tuples)
