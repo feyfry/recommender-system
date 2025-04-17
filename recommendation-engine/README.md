@@ -14,7 +14,7 @@ Sistem ini menggunakan data dari CoinGecko API untuk menyediakan rekomendasi pro
 - **Maturitas Proyek** (usia, aktivitas developer, engagement sosial)
 
 Sistem ini mengimplementasikan beberapa pendekatan rekomendasi:
-1. **Feature-Enhanced Collaborative Filtering** menggunakan LightFM
+1. **Feature-Enhanced Collaborative Filtering** menggunakan scikit-learn SVD
 2. **Neural Collaborative Filtering** menggunakan PyTorch
 3. **Model Hybrid** yang menggabungkan kedua pendekatan
 
@@ -71,9 +71,9 @@ Sistem terdiri dari tiga komponen utama:
 
 ## 📊 Model Rekomendasi
 
-### Feature-Enhanced CF (LightFM)
+### Feature-Enhanced CF (Scikit-learn SVD)
 
-Model Feature-Enhanced CF menggabungkan collaborative filtering dengan fitur proyek (kategori, blockchain, dll) untuk memberikan rekomendasi yang relevan, terutama berguna untuk skenario cold-start.
+Model Feature-Enhanced CF menggunakan SVD (Singular Value Decomposition) dari scikit-learn untuk matrix factorization dan menggabungkannya dengan content-based filtering berdasarkan fitur proyek (kategori, blockchain, dll). Implementasi ini menggantikan LightFM yang sebelumnya digunakan karena masalah kompatibilitas.
 
 ### Neural CF (PyTorch)
 
@@ -254,7 +254,7 @@ python main.py collect --limit 500 --detail-limit 100
 # tambahkan param --rate-limit 3 jika ingin menghindari rate limit lebih panjang, default sudah --rate-limit 2, tidak perlu di definisikan lagi
 
 # Memproses data yang dikumpulkan
-python main.py process --users 500
+python main.py process --users 5000  # Disarankan menggunakan 5000+ users untuk performa NCF yang lebih baik
 
 # Melatih model rekomendasi
 python main.py train --fecf --ncf --hybrid
@@ -341,7 +341,8 @@ web3-recommendation-system/
 │   │   └── technical_features.py  # Fitur teknikal
 │   │
 │   ├── models/           # Model rekomendasi
-│   │   ├── fecf.py       # Feature-Enhanced CF
+│   │   ├── fecf.py       # Feature-Enhanced CF (LightFM implementation)
+│   │   ├── alt_fecf.py   # Alternative FECF menggunakan scikit-learn
 │   │   ├── ncf.py        # Neural CF
 │   │   ├── hybrid.py     # Model Hybrid
 │   │   └── eval.py       # Evaluasi model
@@ -375,32 +376,49 @@ Laporan evaluasi disimpan di `data/models/`.
 
 ## 🔍 Pemecahan Masalah
 
-1. **Masalah Kompatibilitas Python**
-   - LightFM tidak kompatibel dengan Python 3.12+, gunakan Python 3.10
-   - Jika menggunakan sistem dengan multiple versi Python:
-     ```bash
-     # Windows
-     py -3.10 -m pip install -r requirements.txt
-     
-     # Linux/Mac
-     python3.10 -m pip install -r requirements.txt
-     ```
+1. **Performa NCF Rendah**
+   - NCF membutuhkan lebih banyak data pengguna untuk bekerja optimal
+   - Tingkatkan parameter epochs di `config.py`
+   ```python
+   NCF_PARAMS = {
+       "embedding_dim": 64,
+       "layers": [128, 64, 32, 16],
+       "learning_rate": 0.001,
+       "batch_size": 128,  # Kurangi dari 256
+       "epochs": 50,       # Tingkatkan dari 20
+       "val_ratio": 0.2,
+       "dropout": 0.2,
+       "weight_decay": 1e-4
+   }
+   ```
+   - Gunakan jumlah users yang lebih banyak saat memproses data:
+   ```bash
+   python main.py process --users 5000
+   ```
 
-2. **Rate Limiting CoinGecko API**
+2. **Masalah dengan LightFM**
+   - Jika LightFM bermasalah, gunakan implementasi alternatif dengan scikit-learn SVD (`alt_fecf.py`)
+   - Update `src/models/hybrid.py` agar menggunakan alt_fecf:
+   ```python
+   from src.models.alt_fecf import FeatureEnhancedCF
+   # from src.models.fecf import FeatureEnhancedCF  # Comment out original import
+   ```
+
+3. **Rate Limiting CoinGecko API**
    - Gunakan delay yang lebih panjang antar request:
      ```bash
      python main.py collect --rate-limit 3
      ```
    - Pertimbangkan untuk mendapatkan API key untuk limit yang lebih tinggi
 
-3. **Masalah Instalasi TA-Lib**
+4. **Masalah Instalasi TA-Lib**
    - Jika mengalami kesulitan menginstal TA-Lib, aktifkan fallback ke pandas-ta dengan mengedit `config.py`:
      ```python
      USE_TALIB = False  # Ubah ke False untuk menggunakan pandas-ta sebagai alternatif
      ```
    - Pastikan kompiler C tersedia di sistem Anda (Visual C++ di Windows, GCC di Linux)
 
-4. **Masalah Memori dengan Dataset Besar**
+5. **Masalah Memori dengan Dataset Besar**
    - Proses data dalam batch:
      ```bash
      python main.py process --batch-size 1000
@@ -410,26 +428,14 @@ Laporan evaluasi disimpan di `data/models/`.
      python main.py collect --limit 250
      ```
 
-5. **Error Pelatihan Model NCF**
-   - Jika Anda mengalami error "stack expects each tensor to be equal size" saat melatih model:
-     ```bash
-     # Melatih model secara terpisah
-     python main.py train --fecf  # Hanya melatih FECF
-     
-     # Atau gunakan batch size yang lebih kecil
-     python main.py train --ncf --batch-size 64
-     ```
-   - Model ini telah diperbarui untuk menangani batch yang tidak konsisten
-
-6. **Masalah Lingkungan Virtual**
-   - Jika terjadi konflik dependensi, buat lingkungan virtual baru:
-     ```bash
-     deactivate  # Keluar dari venv saat ini jika ada
-     rm -rf venv  # Hapus venv lama
-     py -3.10 -m venv venv  # Buat venv baru dengan Python 3.10
-     venv\Scripts\activate  # Aktifkan venv
-     pip install -r requirements.txt  # Install dependensi
-     ```
+6. **Penyesuaian Model Hybrid**
+   - Jika NCF tetap berkinerja buruk, sesuaikan bobot hybrid:
+   ```python
+   HYBRID_PARAMS = {
+       "ncf_weight": 0.3,   # Kurangi dari 0.5
+       "fecf_weight": 0.7   # Tingkatkan dari 0.5
+   }
+   ```
 
 ## 📝 Lisensi
 
@@ -444,7 +450,7 @@ Link Proyek: [https://github.com/feyfry/web3-recommendation-system](https://gith
 ## 🙏 Pengakuan
 
 - [CoinGecko API](https://www.coingecko.com/en/api) untuk data cryptocurrency
-- [LightFM](https://github.com/lyst/lightfm) untuk implementasi Feature-Enhanced CF
+- [scikit-learn](https://scikit-learn.org/) untuk implementasi SVD
 - [PyTorch](https://pytorch.org/) untuk implementasi Neural CF
 - [TA-Lib](https://github.com/mrjbq7/ta-lib) untuk indikator teknikal
 - [FastAPI](https://fastapi.tiangolo.com/) untuk layanan API

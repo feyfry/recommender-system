@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Tuple, Any, Union
 import time
 import pickle
 import random
+import copy
 from datetime import datetime
 from pathlib import Path
 
@@ -494,7 +495,7 @@ class NCFRecommender:
           num_epochs: Optional[int] = None, learning_rate: Optional[float] = None,
           save_model: bool = True) -> Dict[str, List[float]]:
         """
-        Train the NCF model (Versi Perbaikan)
+        Train the NCF model (Versi dengan Early Stopping)
         
         Args:
             val_ratio: Validation data ratio
@@ -508,7 +509,7 @@ class NCFRecommender:
         """
         # Use config params if not specified
         val_ratio = val_ratio if val_ratio is not None else self.params.get('val_ratio', 0.2)
-        batch_size = batch_size if batch_size is not None else self.params.get('batch_size', 256)
+        batch_size = batch_size if batch_size is not None else self.params.get('batch_size', 128)
         num_epochs = num_epochs if num_epochs is not None else self.params.get('epochs', 20)
         learning_rate = learning_rate if learning_rate is not None else self.params.get('learning_rate', 0.001)
         
@@ -551,7 +552,7 @@ class NCFRecommender:
             batch_size=batch_size, 
             shuffle=True, 
             num_workers=0,  # Using 0 to avoid issues with pickle
-            collate_fn=self.custom_collate_fn  # Use self to access instance method
+            collate_fn=self.custom_collate_fn
         )
         
         val_loader = DataLoader(
@@ -559,7 +560,7 @@ class NCFRecommender:
             batch_size=batch_size, 
             shuffle=False, 
             num_workers=0,
-            collate_fn=self.custom_collate_fn  # Use self to access instance method
+            collate_fn=self.custom_collate_fn
         )
         
         # Initialize model
@@ -579,12 +580,18 @@ class NCFRecommender:
         optimizer = optim.Adam(
             self.model.parameters(), 
             lr=learning_rate,
-            weight_decay=self.params.get('weight_decay', 1e-4)
+            weight_decay=self.params.get('weight_decay', 1e-3)  # Peningkatan weight decay
         )
         
         # Training loop
         train_losses = []
         val_losses = []
+        
+        # Early stopping parameters
+        patience = 5  # Jumlah epoch untuk sabar menunggu improvement
+        best_val_loss = float('inf')
+        patience_counter = 0
+        best_model_state = None
         
         logger.info(f"Starting training for {num_epochs} epochs")
         
@@ -668,12 +675,33 @@ class NCFRecommender:
             avg_val_loss = val_loss / max(val_batches, 1)
             val_losses.append(avg_val_loss)
             
+            # Early stopping check
+            if avg_val_loss < best_val_loss:
+                best_val_loss = avg_val_loss
+                patience_counter = 0
+                # Save best model state
+                best_model_state = copy.deepcopy(self.model.state_dict())
+                logger.info(f"New best validation loss: {best_val_loss:.4f}")
+            else:
+                patience_counter += 1
+                logger.info(f"Validation loss did not improve. Patience: {patience_counter}/{patience}")
+            
             # Log progress
             epoch_time = time.time() - epoch_start_time
             logger.info(f"Epoch {epoch}/{num_epochs} - "
                     f"Train Loss: {avg_train_loss:.4f}, "
                     f"Val Loss: {avg_val_loss:.4f}, "
                     f"Time: {epoch_time:.2f}s")
+            
+            # Check early stopping
+            if patience_counter >= patience:
+                logger.info(f"Early stopping triggered after {epoch} epochs")
+                break
+        
+        # Restore best model if we did early stopping
+        if best_model_state is not None and patience_counter >= patience:
+            logger.info(f"Restoring model to best state with validation loss {best_val_loss:.4f}")
+            self.model.load_state_dict(best_model_state)
         
         total_time = time.time() - start_time
         logger.info(f"Training completed in {total_time:.2f}s")
@@ -686,7 +714,9 @@ class NCFRecommender:
         return {
             'train_loss': train_losses,
             'val_loss': val_losses,
-            'training_time': total_time
+            'training_time': total_time,
+            'early_stopped': patience_counter >= patience,
+            'best_epoch': epoch - patience_counter if patience_counter >= patience else epoch
         }
     
     def save_model(self, filepath: Optional[str] = None) -> str:

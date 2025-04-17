@@ -9,7 +9,7 @@ requests
 pydantic
 
 # Recommender systems
-lightfm
+# lightfm
 torch
 torchvision
 

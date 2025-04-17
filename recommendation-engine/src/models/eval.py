@@ -26,7 +26,7 @@ from config import (
 )
 
 # Import model components (for type hints)
-from src.models.fecf import FeatureEnhancedCF
+from src.models.alt_fecf import FeatureEnhancedCF
 from src.models.ncf import NCFRecommender
 from src.models.hybrid import HybridRecommender
 
@@ -948,7 +948,7 @@ def _generate_markdown_report(results: Dict[str, Dict[str, Any]]) -> str:
 
 if __name__ == "__main__":
     # Test with dummy data
-    from src.models.fecf import FeatureEnhancedCF
+    from src.models.alt_fecf import FeatureEnhancedCF
     from src.models.ncf import NCFRecommender
     from src.models.hybrid import HybridRecommender
     

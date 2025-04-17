@@ -14,7 +14,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 # Model imports
-from src.models.fecf import FeatureEnhancedCF
+from src.models.alt_fecf import FeatureEnhancedCF
 from src.models.ncf import NCFRecommender
 from src.models.hybrid import HybridRecommender
 

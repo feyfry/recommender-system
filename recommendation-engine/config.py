@@ -41,17 +41,17 @@ CATEGORIES = [
 # Parameter model rekomendasi
 # - Neural Collaborative Filtering
 NCF_PARAMS = {
-    "embedding_dim": 64,
+    "embedding_dim": 32,         # Diturunkan dari 64
     "layers": [128, 64, 32, 16],
     "learning_rate": 0.001,
-    "batch_size": 256,
-    "epochs": 20,
+    "batch_size": 128,
+    "epochs": 15,
     "val_ratio": 0.2,
     "dropout": 0.2,
-    "weight_decay": 1e-4
+    "weight_decay": 1e-3         # Ditingkatkan dari 1e-4
 }
 
-# - Feature-Enhanced CF (LightFM)
+# - Feature-Enhanced CF (Scikit-learn)
 FECF_PARAMS = {
     "no_components": 64,
     "learning_rate": 0.05,
