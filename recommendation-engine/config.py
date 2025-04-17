@@ -41,17 +41,17 @@ CATEGORIES = [
 # Parameter model rekomendasi
 # - Neural Collaborative Filtering
 NCF_PARAMS = {
-    "embedding_dim": 64,        # Increase from 32
-    "layers": [256, 128, 64, 32], # Wider network
-    "learning_rate": 0.0005,    # Lower learning rate
-    "batch_size": 256,          # Larger batch size
-    "epochs": 30,               # More epochs
+    "embedding_dim": 64,
+    "layers": [128, 64, 32, 16],
+    "learning_rate": 0.001,
+    "batch_size": 256,
+    "epochs": 20,
     "val_ratio": 0.2,
-    "dropout": 0.1,             # Reduced dropout
-    "weight_decay": 5e-5        # Reduced weight decay
+    "dropout": 0.2,
+    "weight_decay": 1e-4
 }
 
-# - Feature-Enhanced CF (Scikit-learn)
+# - Feature-Enhanced CF (LightFM)
 FECF_PARAMS = {
     "no_components": 64,
     "learning_rate": 0.05,
@@ -62,8 +62,8 @@ FECF_PARAMS = {
 
 # - Hybrid Model
 HYBRID_PARAMS = {
-    "ncf_weight": 0.2,   # Decrease from 0.5
-    "fecf_weight": 0.8   # Increase from 0.5
+    "ncf_weight": 0.5,
+    "fecf_weight": 0.5
 }
 
 # Keputusan investasi

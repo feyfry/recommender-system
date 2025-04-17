@@ -254,7 +254,7 @@ python main.py collect --limit 500 --detail-limit 100
 # tambahkan param --rate-limit 3 jika ingin menghindari rate limit lebih panjang, default sudah --rate-limit 2, tidak perlu di definisikan lagi
 
 # Memproses data yang dikumpulkan
-python main.py process --users 5000  # Disarankan menggunakan 5000+ users untuk performa NCF yang lebih baik
+python main.py process --users 2000
 
 # Melatih model rekomendasi
 python main.py train --fecf --ncf --hybrid
@@ -263,7 +263,7 @@ python main.py train --fecf --ncf --hybrid
 python main.py evaluate --cold-start
 
 # Menghasilkan rekomendasi untuk pengguna
-python main.py recommend --user-id user_123 --model hybrid --num 10
+python main.py recommend --user-id user_1 --model fecf --num 10
 
 # Menghasilkan sinyal trading untuk proyek
 python main.py signals --project-id bitcoin --risk medium

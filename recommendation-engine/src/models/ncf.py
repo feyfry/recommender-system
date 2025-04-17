@@ -1,5 +1,5 @@
 """
-Neural Collaborative Filtering alternatif menggunakan TensorFlow
+Neural Collaborative Filtering menggunakan PyTorch
 """
 
 import os
@@ -9,15 +9,15 @@ import pandas as pd
 from typing import Dict, List, Optional, Tuple, Any, Union
 import time
 import pickle
+import random
+import copy
 from datetime import datetime
 from pathlib import Path
 
-import tensorflow as tf
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, Embedding, Flatten, Dense, Multiply, Concatenate, Dropout, BatchNormalization
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.regularizers import l2
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 
@@ -34,129 +34,265 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class NCFDataGenerator(tf.keras.utils.Sequence):
+class NCFDataset(Dataset):
     """
-    Data generator for NCF model with negative sampling
+    Dataset untuk Neural Collaborative Filtering dengan perbaikan untuk tensor kosong
     """
-    def __init__(self, user_indices, item_indices, ratings, batch_size=128, 
-                 num_negatives=4, shuffle=True, all_items=None, max_rating=None):
+    
+    def __init__(self, user_indices: np.ndarray, item_indices: np.ndarray, 
+                 ratings: np.ndarray, num_negative: int = 4):
         """
-        Initialize the data generator
-
+        Initialize dataset
+        
         Args:
-            user_indices: Array of user indices
-            item_indices: Array of item indices
-            ratings: Array of ratings/weights
-            batch_size: Batch size for training
-            num_negatives: Number of negative samples per positive sample
-            shuffle: Whether to shuffle data after each epoch
-            all_items: Array of all possible item indices
-            max_rating: Maximum rating value for normalization (dynamically detected)
+            user_indices: Array user indices
+            item_indices: Array item indices
+            ratings: Array ratings/interactions
+            num_negative: Jumlah sampel negatif per sampel positif
         """
         self.user_indices = user_indices
         self.item_indices = item_indices
         self.ratings = ratings
-        self.batch_size = batch_size
-        self.num_negatives = num_negatives
-        self.shuffle = shuffle
-        self.all_items = all_items if all_items is not None else np.unique(item_indices)
-        self.max_rating = max_rating if max_rating is not None else 5.0  # Default to 5.0 as fallback
+        self.num_negative = num_negative
         
-        # Create user-item interaction map for negative sampling
-        self.user_items = {}
-        for u, i in zip(user_indices, item_indices):
-            if u not in self.user_items:
-                self.user_items[u] = set()
-            self.user_items[u].add(i)
+        # Konversi ke tensor
+        self.user_indices_tensor = torch.LongTensor(user_indices)
+        self.item_indices_tensor = torch.LongTensor(item_indices)
+        self.ratings_tensor = torch.FloatTensor(ratings)
+        
+        # Map untuk negative sampling
+        self.user_item_map = self._create_user_item_map()
+        
+        # Generate semua unique item indices
+        self.all_items = np.unique(item_indices)
+        
+        # Generate negative samples di awal untuk menghindari inconsistency
+        self.neg_samples = self._pregenerate_negative_samples()
+        
+        # Panjang total dataset: sampel positif + sampel negatif
+        self.length = len(ratings) + len(self.neg_samples)
+
+    def _regenerate_negative_samples(self):
+        """
+        Pre-generate negative samples untuk menghindari tensor size mismatch
+        """
+        self.negative_samples = []
+        # Gunakan seed tetap untuk konsistensi
+        rng = np.random.default_rng(seed=42)
+        
+        for pos_idx in range(len(self.user_indices)):
+            user_idx = self.user_indices[pos_idx]
+            interacted_items = set(self.user_item_map.get(user_idx, []))
             
-        # Include negative samples
-        self.sample_size = len(user_indices) * (1 + num_negatives)
+            user_neg_samples = []
+            for _ in range(self.num_negative):
+                # Coba sebanyak 10 kali untuk menemukan item yang belum diinteraksi
+                for attempt in range(10):
+                    neg_item_idx = rng.choice(self.all_items)
+                    if neg_item_idx not in interacted_items:
+                        user_neg_samples.append(neg_item_idx)
+                        break
+                    # Jika setelah 10 kali tidak menemukan, gunakan item pertama
+                    if attempt == 9:
+                        neg_item_idx = self.all_items[0]
+                        user_neg_samples.append(neg_item_idx)
+            
+            # Add to negative samples list
+            self.negative_samples.append(user_neg_samples)
+
+    def _pregenerate_negative_samples(self):
+        """
+        Generate negative samples di awal
         
-        # Use a consistent RNG for reproducibility
-        self.rng = np.random.default_rng(42)
+        Returns:
+            list: List tuple (user_idx, item_idx, rating) untuk sampel negatif
+        """
+        # Gunakan seed tetap untuk reproducibility
+        rng = np.random.default_rng(42)
+        neg_samples = []
         
-        # Generate indices
-        self.indices = np.arange(len(user_indices))
-        self.on_epoch_end()
+        for user_idx in self.user_indices:
+            # Get items yang sudah diinteraksi
+            interacted_items = set(self.user_item_map.get(user_idx, []))
+            
+            # Generate negative samples untuk user ini
+            for _ in range(self.num_negative):
+                # Cari item yang belum diinteraksi
+                while True:
+                    neg_item_idx = rng.choice(self.all_items)
+                    if neg_item_idx not in interacted_items:
+                        break
+                
+                # Tambahkan sebagai sample negatif
+                neg_samples.append((user_idx, neg_item_idx, 0.0))
+        
+        return neg_samples
         
     def __len__(self):
-        """Number of batches per epoch"""
-        return int(np.ceil(self.sample_size / self.batch_size))
+        return self.length
     
-    def __getitem__(self, index):
-        """Generate one batch of data"""
-        # Generate indices of the batch
-        batch_indices = self.indices[index * self.batch_size:
-                                     min((index + 1) * self.batch_size, self.sample_size)]
+    def __getitem__(self, idx):
+        # Positive samples diakses langsung
+        if idx < len(self.ratings):
+            return (
+                self.user_indices_tensor[idx],
+                self.item_indices_tensor[idx], 
+                self.ratings_tensor[idx]
+            )
         
-        # Generate batch data
-        X, y = self._generate_batch(batch_indices)
-        return X, y
-    
-    def _generate_batch(self, batch_indices):
-        """Generate batch data"""
-        users, items, labels = [], [], []
+        # Negative samples diakses dari list yang sudah digenerate
+        neg_idx = idx - len(self.ratings)
+        if neg_idx < len(self.neg_samples):
+            user_idx, item_idx, rating = self.neg_samples[neg_idx]
+            return (
+                torch.tensor(user_idx, dtype=torch.long),
+                torch.tensor(item_idx, dtype=torch.long),
+                torch.tensor(rating, dtype=torch.float)
+            )
         
-        for idx in batch_indices:
-            # Determine if this is a positive or negative sample
-            is_negative = idx >= len(self.user_indices)
-            
-            if is_negative:
-                # Negative sample
-                pos_idx = idx % len(self.user_indices)
-                user_idx = self.user_indices[pos_idx]
-                
-                # Find a negative item for this user
-                item_idx = self._get_negative_item(user_idx)
-                label = 0.0
-            else:
-                # Positive sample
-                user_idx = self.user_indices[idx]
-                item_idx = self.item_indices[idx]
-                # Normalize to [0,1] using dynamic max rating
-                label = float(self.ratings[idx]) / self.max_rating
-            
-            users.append(user_idx)
-            items.append(item_idx)
-            labels.append(label)
-            
-        return [np.array(users), np.array(items)], np.array(labels)
+        # Fallback jika indeks terlalu besar (seharusnya tidak terjadi)
+        return (
+            torch.tensor(0, dtype=torch.long),
+            torch.tensor(0, dtype=torch.long),
+            torch.tensor(0.0, dtype=torch.float)
+        )
     
-    def _get_negative_item(self, user_idx):
-        """Generate a negative item (not interacted by user)"""
+    def _create_user_item_map(self) -> Dict[int, List[int]]:
+        """
+        Buat mapping user -> items untuk negative sampling
+        
+        Returns:
+            dict: Mapping user ke list item yang diinteraksi
+        """
+        user_item_map = {}
+        for user_idx, item_idx in zip(self.user_indices, self.item_indices):
+            if user_idx not in user_item_map:
+                user_item_map[user_idx] = []
+            user_item_map[user_idx].append(item_idx)
+        return user_item_map
+    
+    def _get_negative_item(self, user_idx: int) -> int:
+        """
+        Generate negative item (not interacted by user)
+        
+        Args:
+            user_idx: User index
+            
+        Returns:
+            int: Negative item index
+        """
+        # Items that user has interacted with
+        interacted_items = set(self.user_item_map.get(user_idx, []))
+        
+        # Membuat instance Generator
+        rng = np.random.default_rng(seed=42)  # or use hash(user_id) for user-specific seeding
+        
+        # Randomly select an item
         while True:
-            # Use consistent RNG for reproducibility
-            neg_item = self.rng.choice(self.all_items)
-            if user_idx not in self.user_items or neg_item not in self.user_items[user_idx]:
-                return neg_item
+            neg_item_idx = rng.choice(self.all_items)
+            if neg_item_idx not in interacted_items:
+                return neg_item_idx
+
+
+class NCFModel(nn.Module):
+    """
+    Neural Collaborative Filtering Model
+    """
     
-    def on_epoch_end(self):
-        """Updates indices after each epoch"""
-        # For positive samples, keep original indices
-        pos_indices = np.arange(len(self.user_indices))
+    def __init__(self, num_users: int, num_items: int, 
+             embedding_dim: int,
+             layers: List[int],
+             dropout: float):
+        """
+        Initialize NCF model
         
-        # For negative samples, create indices after the positive ones
-        neg_indices = np.arange(len(self.user_indices), self.sample_size)
+        Args:
+            num_users: Number of users
+            num_items: Number of items
+            embedding_dim: Dimension of embeddings
+            layers: List of MLP layer sizes
+            dropout: Dropout rate
+        """
+        super(NCFModel, self).__init__()
         
-        # Concatenate positive and negative indices
-        self.indices = np.concatenate([pos_indices, neg_indices])
+        # GMF part (General Matrix Factorization)
+        self.user_embedding_gmf = nn.Embedding(num_users, embedding_dim)
+        self.item_embedding_gmf = nn.Embedding(num_items, embedding_dim)
         
-        # Shuffle if needed using the RNG instance
-        if self.shuffle:
-            self.rng.shuffle(self.indices)
+        # MLP part (Multi-Layer Perceptron)
+        self.user_embedding_mlp = nn.Embedding(num_users, embedding_dim)
+        self.item_embedding_mlp = nn.Embedding(num_items, embedding_dim)
+        
+        # MLP layers
+        self.mlp_layers = nn.ModuleList()
+        input_size = 2 * embedding_dim
+        
+        for i, layer_size in enumerate(layers):
+            self.mlp_layers.append(nn.Linear(input_size, layer_size))
+            self.mlp_layers.append(nn.ReLU())
+            self.mlp_layers.append(nn.BatchNorm1d(layer_size))
+            self.mlp_layers.append(nn.Dropout(dropout))
+            input_size = layer_size
+        
+        # Output layer
+        self.output_layer = nn.Linear(layers[-1] + embedding_dim, 1)
+        self.sigmoid = nn.Sigmoid()
+        
+        # Initialize weights
+        self._init_weights()
+    
+    def _init_weights(self):
+        """Initialize model weights"""
+        # Xavier/Glorot initialization
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.Embedding):
+                nn.init.normal_(m.weight, mean=0, std=0.01)
+    
+    def forward(self, user_indices, item_indices):
+        """Forward pass"""
+        # GMF part
+        user_embedding_gmf = self.user_embedding_gmf(user_indices)
+        item_embedding_gmf = self.item_embedding_gmf(item_indices)
+        gmf_vector = user_embedding_gmf * item_embedding_gmf
+        
+        # MLP part
+        user_embedding_mlp = self.user_embedding_mlp(user_indices)
+        item_embedding_mlp = self.item_embedding_mlp(item_indices)
+        mlp_vector = torch.cat([user_embedding_mlp, item_embedding_mlp], dim=-1)
+        
+        # Process through MLP layers
+        for i in range(0, len(self.mlp_layers), 4):
+            mlp_vector = self.mlp_layers[i](mlp_vector)
+            mlp_vector = self.mlp_layers[i+1](mlp_vector)
+            mlp_vector = self.mlp_layers[i+2](mlp_vector)
+            mlp_vector = self.mlp_layers[i+3](mlp_vector)
+        
+        # Concatenate GMF and MLP vectors
+        combined_vector = torch.cat([gmf_vector, mlp_vector], dim=-1)
+        
+        # Final prediction
+        output = self.output_layer(combined_vector)
+        output = self.sigmoid(output)
+        
+        return output.view(-1)
 
 
 class NCFRecommender:
     """
-    Recommender using Neural Collaborative Filtering with TensorFlow
+    Recommender using Neural Collaborative Filtering
     """
     
-    def __init__(self, params: Optional[Dict[str, Any]] = None):
+    def __init__(self, params: Optional[Dict[str, Any]] = None, use_cuda: bool = True):
         """
         Initialize NCF Recommender
         
         Args:
             params: Model parameters (overwrites defaults from config)
+            use_cuda: Whether to use CUDA for training if available
         """
         # Model parameters
         self.params = params or NCF_PARAMS
@@ -166,17 +302,12 @@ class NCFRecommender:
         self.user_encoder = LabelEncoder()
         self.item_encoder = LabelEncoder()
         
-        # Setup device and memory management for TensorFlow
-        physical_devices = tf.config.list_physical_devices('GPU')
-        if physical_devices:
-            try:
-                # Allow memory growth for GPU
-                for device in physical_devices:
-                    tf.config.experimental.set_memory_growth(device, True)
-                logger.info(f"Using GPU: {physical_devices}")
-            except Exception as e:
-                logger.warning(f"Error configuring GPU: {e}")
-                
+        # Setup device
+        self.use_cuda = use_cuda and torch.cuda.is_available()
+        self.device = torch.device("cuda" if self.use_cuda else "cpu")
+        
+        logger.info(f"Using device: {self.device}")
+        
         # Data
         self.projects_df = None
         self.interactions_df = None
@@ -185,12 +316,6 @@ class NCFRecommender:
         # Keep track of original IDs
         self.users = None
         self.items = None
-        
-        # Max rating for normalization
-        self.max_rating = None
-        
-        # Extra tracking for model state
-        self.is_model_loaded = False
     
     def load_data(self, 
                  projects_path: Optional[str] = None, 
@@ -243,10 +368,6 @@ class NCFRecommender:
                 self.user_encoder.fit(self.users)
                 self.item_encoder.fit(self.items)
                 
-                # Detect max rating value for normalization
-                self.max_rating = float(self.interactions_df['weight'].max())
-                logger.info(f"Detected max rating value: {self.max_rating}")
-                
                 logger.info(f"Prepared {len(self.users)} users and {len(self.items)} items")
             else:
                 logger.error(f"Interactions file not found: {interactions_path}")
@@ -268,10 +389,9 @@ class NCFRecommender:
         # Convert interactions to training format
         interactions = []
         
-        # Ensure max_rating is detected
-        if self.max_rating is None:
-            self.max_rating = float(self.interactions_df['weight'].max())
-            logger.info(f"Detected max rating value: {self.max_rating}")
+        # Tentukan nilai max rating dari data secara dinamis
+        max_rating = float(self.interactions_df['weight'].max())
+        logger.info(f"Detected max rating value: {max_rating}")
         
         for user in self.users:
             user_interactions = self.user_item_matrix.loc[user]
@@ -280,7 +400,9 @@ class NCFRecommender:
                 if rating > 0:  # Only positive interactions
                     user_idx = self.user_encoder.transform([user])[0]
                     item_idx = self.item_encoder.transform([item])[0]
-                    interactions.append((user_idx, item_idx, rating))
+                    # Normalize rating to 0-1 range dynamically
+                    normalized_rating = float(rating) / max_rating
+                    interactions.append((user_idx, item_idx, normalized_rating))
         
         # Convert to arrays
         interaction_array = np.array(interactions)
@@ -288,91 +410,92 @@ class NCFRecommender:
         if len(interaction_array) == 0:
             raise ValueError("No interactions found in the data")
         
-        user_indices = interaction_array[:, 0].astype(np.int32)
-        item_indices = interaction_array[:, 1].astype(np.int32)
-        ratings = interaction_array[:, 2].astype(np.float32)
+        user_indices = interaction_array[:, 0]
+        item_indices = interaction_array[:, 1]
+        ratings = interaction_array[:, 2]
         
         # Log normalization info
-        logger.info(f"Prepared {len(ratings)} ratings for normalization with max value: {self.max_rating}")
+        logger.info(f"Normalized {len(ratings)} ratings to range [0, 1]")
         logger.info(f"Rating statistics - Min: {ratings.min():.4f}, Max: {ratings.max():.4f}, Mean: {ratings.mean():.4f}")
         
         return user_indices, item_indices, ratings
     
-    def _build_model(self, num_users: int, num_items: int) -> tf.keras.Model:
+    def custom_collate_fn(self, batch):
         """
-        Build NCF model
+        Custom collate function untuk menangani tensor dengan ukuran yang berbeda
         
         Args:
-            num_users: Number of users
-            num_items: Number of items
+            batch: Batch data dari DataLoader
             
         Returns:
-            tf.keras.Model: Built model
+            tuple: (users_tensor, items_tensor, ratings_tensor)
         """
-        # Parameters
-        embedding_dim = self.params['embedding_dim']
-        layers = self.params['layers']
-        reg = self.params.get('weight_decay', 1e-3)
-        dropout_rate = self.params.get('dropout', 0.2)
+        users = []
+        items = []
+        ratings = []
         
-        # Define inputs
-        user_input = Input(shape=(1,), name='user_input')
-        item_input = Input(shape=(1,), name='item_input')
+        for user, item, rating in batch:
+            # Handle single scalar value
+            if isinstance(user, torch.Tensor) and user.dim() == 0:
+                user = user.unsqueeze(0)
+            if isinstance(item, torch.Tensor) and item.dim() == 0:
+                item = item.unsqueeze(0)
+            if isinstance(rating, torch.Tensor) and rating.dim() == 0:
+                rating = rating.unsqueeze(0)
+                
+            # Handle empty tensors
+            if user.numel() == 0:
+                user = torch.zeros(1, dtype=torch.long)
+            if item.numel() == 0:
+                item = torch.zeros(1, dtype=torch.long)
+            if rating.numel() == 0:
+                rating = torch.zeros(1, dtype=torch.float)
+                
+            # Ensure all tensors are 1D and same length
+            if user.dim() > 1:
+                user = user.flatten()
+            if item.dim() > 1:
+                item = item.flatten()
+            if rating.dim() > 1:
+                rating = rating.flatten()
+                
+            # Ensure all tensors have same length
+            max_len = max(user.size(0), item.size(0), rating.size(0))
+            if user.size(0) < max_len:
+                user = torch.cat([user, torch.zeros(max_len - user.size(0), dtype=torch.long)])
+            if item.size(0) < max_len:
+                item = torch.cat([item, torch.zeros(max_len - item.size(0), dtype=torch.long)])
+            if rating.size(0) < max_len:
+                rating = torch.cat([rating, torch.zeros(max_len - rating.size(0), dtype=torch.float)])
+                
+            users.append(user)
+            items.append(item)
+            ratings.append(rating)
         
-        # GMF part
-        user_embedding_gmf = Embedding(num_users, embedding_dim, embeddings_regularizer=l2(reg),
-                                      name='user_embedding_gmf')(user_input)
-        item_embedding_gmf = Embedding(num_items, embedding_dim, embeddings_regularizer=l2(reg),
-                                      name='item_embedding_gmf')(item_input)
+        try:
+            # Stack tensors
+            users_tensor = torch.stack(users)
+            items_tensor = torch.stack(items)
+            ratings_tensor = torch.stack(ratings)
+            
+            return users_tensor, items_tensor, ratings_tensor
+        except Exception as e:
+            # Fallback jika stack masih gagal
+            print(f"Warning: Error in collate_fn: {e}")
+            
+            # Buat tensor dummy
+            batch_size = len(batch)
+            return (
+                torch.zeros((batch_size, 1), dtype=torch.long),
+                torch.zeros((batch_size, 1), dtype=torch.long),
+                torch.zeros((batch_size, 1), dtype=torch.float)
+            )
         
-        # Flatten embeddings
-        user_latent_gmf = Flatten()(user_embedding_gmf)
-        item_latent_gmf = Flatten()(item_embedding_gmf)
-        
-        # Element-wise product for GMF
-        gmf_vector = Multiply()([user_latent_gmf, item_latent_gmf])
-        
-        # MLP part
-        user_embedding_mlp = Embedding(num_users, embedding_dim, embeddings_regularizer=l2(reg),
-                                      name='user_embedding_mlp')(user_input)
-        item_embedding_mlp = Embedding(num_items, embedding_dim, embeddings_regularizer=l2(reg),
-                                      name='item_embedding_mlp')(item_input)
-        
-        # Flatten embeddings
-        user_latent_mlp = Flatten()(user_embedding_mlp)
-        item_latent_mlp = Flatten()(item_embedding_mlp)
-        
-        # Concatenate embeddings for MLP
-        mlp_vector = Concatenate()([user_latent_mlp, item_latent_mlp])
-        
-        # Build MLP layers
-        for i, layer_size in enumerate(layers):
-            mlp_vector = Dense(
-                layer_size, 
-                activation='relu',
-                kernel_regularizer=l2(reg),
-                name=f'mlp_layer_{i}'
-            )(mlp_vector)
-            mlp_vector = BatchNormalization(name=f'batch_norm_{i}')(mlp_vector)
-            mlp_vector = Dropout(dropout_rate, name=f'dropout_{i}')(mlp_vector)
-        
-        # Concatenate GMF and MLP
-        predict_vector = Concatenate()([gmf_vector, mlp_vector])
-        
-        # Final prediction layer
-        prediction = Dense(1, activation='sigmoid', kernel_regularizer=l2(reg),
-                         name='prediction')(predict_vector)
-        
-        # Build model
-        model = Model([user_input, item_input], prediction)
-        
-        return model
-    
     def train(self, val_ratio: Optional[float] = None, batch_size: Optional[int] = None, 
           num_epochs: Optional[int] = None, learning_rate: Optional[float] = None,
-          save_model: bool = True) -> Dict[str, Any]:
+          save_model: bool = True) -> Dict[str, List[float]]:
         """
-        Train the NCF model with Early Stopping
+        Train the NCF model (Versi dengan Early Stopping)
         
         Args:
             val_ratio: Validation data ratio
@@ -382,15 +505,15 @@ class NCFRecommender:
             save_model: Whether to save the model after training
             
         Returns:
-            dict: Training metrics
+            dict: Training metrics (loss per epoch)
         """
         # Use config params if not specified
         val_ratio = val_ratio if val_ratio is not None else self.params.get('val_ratio', 0.2)
-        batch_size = batch_size if batch_size is not None else self.params.get('batch_size', 256)
-        num_epochs = num_epochs if num_epochs is not None else self.params.get('epochs', 30)
-        learning_rate = learning_rate if learning_rate is not None else self.params.get('learning_rate', 0.0005)
+        batch_size = batch_size if batch_size is not None else self.params.get('batch_size', 128)
+        num_epochs = num_epochs if num_epochs is not None else self.params.get('epochs', 20)
+        learning_rate = learning_rate if learning_rate is not None else self.params.get('learning_rate', 0.001)
         
-        logger.info("Starting NCF training with TensorFlow")
+        logger.info("Starting NCF training")
         start_time = time.time()
         
         # Prepare data
@@ -407,108 +530,193 @@ class NCFRecommender:
             random_state=42
         )
         
-        train_users = user_indices[train_indices]
-        train_items = item_indices[train_indices]
+        train_user_indices = user_indices[train_indices]
+        train_item_indices = item_indices[train_indices]
         train_ratings = ratings[train_indices]
         
-        val_users = user_indices[val_indices]
-        val_items = item_indices[val_indices]
+        val_user_indices = user_indices[val_indices]
+        val_item_indices = item_indices[val_indices]
         val_ratings = ratings[val_indices]
         
-        # Create data generators with dynamic max_rating
-        all_items = np.unique(item_indices)
-        train_generator = NCFDataGenerator(
-            train_users, train_items, train_ratings,
-            batch_size=batch_size,
-            num_negatives=4,
-            all_items=all_items,
-            max_rating=self.max_rating  # Pass dynamic max_rating
+        # Create datasets dengan implementasi baru
+        train_dataset = NCFDataset(
+            train_user_indices, train_item_indices, train_ratings, num_negative=4
+        )
+        val_dataset = NCFDataset(
+            val_user_indices, val_item_indices, val_ratings, num_negative=4
         )
         
-        val_generator = NCFDataGenerator(
-            val_users, val_items, val_ratings,
-            batch_size=batch_size,
-            num_negatives=4,
-            all_items=all_items,
-            shuffle=False,
-            max_rating=self.max_rating  # Pass dynamic max_rating
+        # Create dataloaders with custom collate function
+        train_loader = DataLoader(
+            train_dataset, 
+            batch_size=batch_size, 
+            shuffle=True, 
+            num_workers=0,  # Using 0 to avoid issues with pickle
+            collate_fn=self.custom_collate_fn
+        )
+        
+        val_loader = DataLoader(
+            val_dataset, 
+            batch_size=batch_size, 
+            shuffle=False, 
+            num_workers=0,
+            collate_fn=self.custom_collate_fn
         )
         
         # Initialize model
         num_users = len(self.user_encoder.classes_)
         num_items = len(self.item_encoder.classes_)
+
+        self.model = NCFModel(
+            num_users=num_users,
+            num_items=num_items,
+            embedding_dim=self.params['embedding_dim'],
+            layers=self.params['layers'],
+            dropout=self.params['dropout']
+        ).to(self.device)
         
-        self.model = self._build_model(num_users, num_items)
-        
-        # Compile model
-        self.model.compile(
-            optimizer=Adam(learning_rate=learning_rate),
-            loss='binary_crossentropy',
-            metrics=['mse', 'mae']
+        # Loss function and optimizer
+        criterion = nn.BCELoss()
+        optimizer = optim.Adam(
+            self.model.parameters(), 
+            lr=learning_rate,
+            weight_decay=self.params.get('weight_decay', 1e-3)  # Peningkatan weight decay
         )
         
-        # Set up callbacks
-        callbacks = [
-            EarlyStopping(
-                monitor='val_loss',
-                patience=5,
-                restore_best_weights=True,
-                verbose=1
-            )
-        ]
+        # Training loop
+        train_losses = []
+        val_losses = []
         
-        # Create a temporary model checkpoint
-        temp_model_path = os.path.join(MODELS_DIR, "temp_ncf_model.h5")
-        os.makedirs(os.path.dirname(temp_model_path), exist_ok=True)
+        # Early stopping parameters
+        patience = 5  # Jumlah epoch untuk sabar menunggu improvement
+        best_val_loss = float('inf')
+        patience_counter = 0
+        best_model_state = None
         
-        model_checkpoint = ModelCheckpoint(
-            temp_model_path,
-            monitor='val_loss',
-            save_best_only=True,
-            verbose=0
-        )
-        callbacks.append(model_checkpoint)
-        
-        # Train model
         logger.info(f"Starting training for {num_epochs} epochs")
-        history = self.model.fit(
-            train_generator,
-            validation_data=val_generator,
-            epochs=num_epochs,
-            callbacks=callbacks,
-            verbose=1
-        )
         
-        # Clean up temporary model file
-        if os.path.exists(temp_model_path):
-            os.remove(temp_model_path)
+        for epoch in range(1, num_epochs + 1):
+            epoch_start_time = time.time()
+            
+            # Training
+            self.model.train()
+            train_loss = 0
+            train_batches = 0
+            
+            for batch_idx, (user_indices, item_indices, ratings) in enumerate(train_loader):
+                try:
+                    # Make sure to squeeze if dimensions are extra
+                    if user_indices.dim() > 1 and user_indices.size(1) == 1:
+                        user_indices = user_indices.squeeze(1)
+                    if item_indices.dim() > 1 and item_indices.size(1) == 1:
+                        item_indices = item_indices.squeeze(1)
+                    if ratings.dim() > 1 and ratings.size(1) == 1:
+                        ratings = ratings.squeeze(1)
+                    
+                    # Move to device
+                    user_indices = user_indices.to(self.device)
+                    item_indices = item_indices.to(self.device)
+                    ratings = ratings.to(self.device)
+                    
+                    # Forward pass
+                    outputs = self.model(user_indices, item_indices)
+                    loss = criterion(outputs, ratings)
+                    
+                    # Backward pass and optimize
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                    
+                    train_loss += loss.item()
+                    train_batches += 1
+                    
+                    if batch_idx % 10 == 0:
+                        logger.debug(f"Epoch {epoch}, Batch {batch_idx}: Loss {loss.item():.4f}")
+                        
+                except Exception as e:
+                    logger.warning(f"Error in training batch {batch_idx}: {e}")
+                    continue
+            
+            avg_train_loss = train_loss / max(train_batches, 1)
+            train_losses.append(avg_train_loss)
+            
+            # Validation
+            self.model.eval()
+            val_loss = 0
+            val_batches = 0
+            
+            with torch.no_grad():
+                for batch_idx, (user_indices, item_indices, ratings) in enumerate(val_loader):
+                    try:
+                        # Make sure to squeeze if dimensions are extra
+                        if user_indices.dim() > 1 and user_indices.size(1) == 1:
+                            user_indices = user_indices.squeeze(1)
+                        if item_indices.dim() > 1 and item_indices.size(1) == 1:
+                            item_indices = item_indices.squeeze(1)
+                        if ratings.dim() > 1 and ratings.size(1) == 1:
+                            ratings = ratings.squeeze(1)
+                        
+                        # Move to device
+                        user_indices = user_indices.to(self.device)
+                        item_indices = item_indices.to(self.device)
+                        ratings = ratings.to(self.device)
+                        
+                        # Forward pass
+                        outputs = self.model(user_indices, item_indices)
+                        loss = criterion(outputs, ratings)
+                        
+                        val_loss += loss.item()
+                        val_batches += 1
+                        
+                    except Exception as e:
+                        logger.warning(f"Error in validation batch {batch_idx}: {e}")
+                        continue
+            
+            avg_val_loss = val_loss / max(val_batches, 1)
+            val_losses.append(avg_val_loss)
+            
+            # Early stopping check
+            if avg_val_loss < best_val_loss:
+                best_val_loss = avg_val_loss
+                patience_counter = 0
+                # Save best model state
+                best_model_state = copy.deepcopy(self.model.state_dict())
+                logger.info(f"New best validation loss: {best_val_loss:.4f}")
+            else:
+                patience_counter += 1
+                logger.info(f"Validation loss did not improve. Patience: {patience_counter}/{patience}")
+            
+            # Log progress
+            epoch_time = time.time() - epoch_start_time
+            logger.info(f"Epoch {epoch}/{num_epochs} - "
+                    f"Train Loss: {avg_train_loss:.4f}, "
+                    f"Val Loss: {avg_val_loss:.4f}, "
+                    f"Time: {epoch_time:.2f}s")
+            
+            # Check early stopping
+            if patience_counter >= patience:
+                logger.info(f"Early stopping triggered after {epoch} epochs")
+                break
         
-        # Calculate metrics
-        train_loss = history.history['loss']
-        val_loss = history.history['val_loss']
+        # Restore best model if we did early stopping
+        if best_model_state is not None and patience_counter >= patience:
+            logger.info(f"Restoring model to best state with validation loss {best_val_loss:.4f}")
+            self.model.load_state_dict(best_model_state)
         
         total_time = time.time() - start_time
         logger.info(f"Training completed in {total_time:.2f}s")
         
-        # Set model loaded flag
-        self.is_model_loaded = True
-        
         # Save model if requested
         if save_model:
-            # Simpan model ke file default dan file ncf_model.pkl untuk kompabilitas dengan hybrid
-            model_path = os.path.join(MODELS_DIR, "ncf_tf_model.pkl")
+            model_path = os.path.join(MODELS_DIR, "ncf_model.pkl")
             self.save_model(model_path)
-            
-            # Simpan juga ke ncf_model.pkl untuk kompatibilitas dengan hybrid
-            compat_path = os.path.join(MODELS_DIR, "ncf_model.pkl")
-            self.save_model(compat_path)
         
         return {
-            'train_loss': train_loss,
-            'val_loss': val_loss,
+            'train_loss': train_losses,
+            'val_loss': val_losses,
             'training_time': total_time,
-            'early_stopped': len(train_loss) < num_epochs,
-            'best_epoch': np.argmin(val_loss) + 1
+            'early_stopped': patience_counter >= patience,
+            'best_epoch': epoch - patience_counter if patience_counter >= patience else epoch
         }
     
     def save_model(self, filepath: Optional[str] = None) -> str:
@@ -524,52 +732,31 @@ class NCFRecommender:
         if filepath is None:
             # Create default path
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filepath = os.path.join(MODELS_DIR, f"ncf_tf_model_{timestamp}.pkl")
+            filepath = os.path.join(MODELS_DIR, f"ncf_model_{timestamp}.pkl")
             
         # Create directory if it doesn't exist
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         
-        # Standardisasi penamaan file weights dengan format konsisten
-        # Gunakan struktur direktori yang sama dengan file pkl
-        weights_dirname = os.path.dirname(filepath)
-        weights_basename = os.path.basename(filepath).replace('.pkl', '_weights.h5')
-        weights_path = os.path.join(weights_dirname, weights_basename)
+        # Save model
+        model_state = {
+            'model_state_dict': self.model.state_dict(),
+            'user_encoder': self.user_encoder,
+            'item_encoder': self.item_encoder,
+            'users': self.users,
+            'items': self.items,
+            'config': {
+                'embedding_dim': self.params['embedding_dim'],
+                'layers': self.params['layers'],
+                'dropout': self.params['dropout']
+            },
+            'timestamp': datetime.now().isoformat()
+        }
         
-        logger.info(f"Saving model weights to {weights_path}")
-        
-        try:
-            # Save model weights
-            self.model.save_weights(weights_path)
+        with open(filepath, 'wb') as f:
+            pickle.dump(model_state, f)
             
-            # Save model state
-            model_state = {
-                'model_config': self.model.get_config(),
-                'model_weights_path': weights_path,  # Use consistent path
-                'user_encoder': self.user_encoder,
-                'item_encoder': self.item_encoder,
-                'users': self.users,
-                'items': self.items,
-                'max_rating': self.max_rating,
-                'config': {
-                    'embedding_dim': self.params['embedding_dim'],
-                    'layers': self.params['layers'],
-                    'dropout': self.params['dropout']
-                },
-                'timestamp': datetime.now().isoformat()
-            }
-            
-            with open(filepath, 'wb') as f:
-                pickle.dump(model_state, f)
-                
-            logger.info(f"Model saved to {filepath}")
-            return filepath
-            
-        except Exception as e:
-            logger.error(f"Error saving model: {str(e)}")
-            # Rollback jika terjadi error
-            if os.path.exists(weights_path):
-                os.remove(weights_path)
-            return None
+        logger.info(f"Model saved to {filepath}")
+        return filepath
     
     def load_model(self, filepath: str) -> bool:
         """
@@ -595,93 +782,39 @@ class NCFRecommender:
             logger.info(f"NCF model state contains keys: {list(model_state.keys())}")
                 
             # Extract components
-            model_config = model_state.get('model_config')
-            weights_path = model_state.get('model_weights_path')
-            
-            if model_config is None:
-                logger.error("No 'model_config' key in loaded NCF model")
+            state_dict = model_state.get('model_state_dict')
+            if state_dict is None:
+                logger.error("No 'model_state_dict' key in loaded NCF model")
                 return False
                 
             self.user_encoder = model_state.get('user_encoder')
             self.item_encoder = model_state.get('item_encoder')
             self.users = model_state.get('users')
             self.items = model_state.get('items')
-            self.params = model_state.get('config')
-            self.max_rating = model_state.get('max_rating')
-            
-            if self.max_rating is None:
-                logger.warning("No max_rating found in model state, using default value of 5.0")
-                self.max_rating = 5.0
+            config = model_state.get('config')
             
             # Create model with same architecture
             num_users = len(self.user_encoder.classes_)
             num_items = len(self.item_encoder.classes_)
             
-            # Rebuild model
-            self.model = self._build_model(num_users, num_items)
-            
-            # Compile model (needed before loading weights)
-            self.model.compile(
-                optimizer=Adam(learning_rate=self.params.get('learning_rate', 0.0005)),
-                loss='binary_crossentropy',
-                metrics=['mse', 'mae']
-            )
+            self.model = NCFModel(
+                num_users=num_users,
+                num_items=num_items,
+                embedding_dim=config['embedding_dim'],
+                layers=config['layers'],
+                dropout=config['dropout']
+            ).to(self.device)
             
             # Load weights
-            weights_loaded = False
-            
-            # Coba versi path yang ada di file state
-            if weights_path and os.path.exists(weights_path):
-                logger.info(f"Loading weights from specified path: {weights_path}")
-                try:
-                    self.model.load_weights(weights_path)
-                    weights_loaded = True
-                except Exception as e:
-                    logger.warning(f"Error loading weights from {weights_path}: {e}")
-            
-            # Coba alternatif penamaan weights jika belum berhasil
-            if not weights_loaded:
-                alternate_weights_path = filepath.replace('.pkl', '_weights.h5')
-                if os.path.exists(alternate_weights_path):
-                    logger.info(f"Trying alternate weights path: {alternate_weights_path}")
-                    try:
-                        self.model.load_weights(alternate_weights_path)
-                        weights_loaded = True
-                    except Exception as e:
-                        logger.warning(f"Error loading weights from alternate path: {e}")
-                        
-            # Coba alternatif penamaan lainnya
-            if not weights_loaded:
-                alternate_weights_path = filepath.replace('.pkl', '.weights.h5')
-                if os.path.exists(alternate_weights_path):
-                    logger.info(f"Trying second alternate weights path: {alternate_weights_path}")
-                    try:
-                        self.model.load_weights(alternate_weights_path)
-                        weights_loaded = True
-                    except Exception as e:
-                        logger.warning(f"Error loading weights from second alternate path: {e}")
-            
-            # Coba model weights langsung dari model state jika ada
-            if not weights_loaded and 'model_weights' in model_state:
-                logger.info("Loading weights directly from model state")
-                try:
-                    self.model.set_weights(model_state['model_weights'])
-                    weights_loaded = True
-                except Exception as e:
-                    logger.warning(f"Error loading weights from model state: {e}")
-            
-            if not weights_loaded:
-                logger.warning("Could not load weights, using initialized weights")
-            
-            # Set model loaded flag
-            self.is_model_loaded = True
+            self.model.load_state_dict(state_dict)
+            self.model.eval()  # Set to evaluation mode
             
             logger.info(f"NCF model successfully loaded from {filepath}")
             return True
                 
         except Exception as e:
             logger.error(f"Error loading NCF model: {str(e)}")
-            # Log traceback for debugging
+            # Log traceback untuk debugging
             import traceback
             logger.error(traceback.format_exc())
             return False
@@ -695,9 +828,7 @@ class NCFRecommender:
         """
         if self.model is None:
             return False
-        
-        # Gunakan flag tambahan untuk deteksi status model
-        return self.is_model_loaded
+        return True
     
     def predict(self, user_id: str, item_id: str) -> float:
         """
@@ -710,7 +841,7 @@ class NCFRecommender:
         Returns:
             float: Predicted rating (0-1)
         """
-        if not self.is_trained():
+        if self.model is None:
             logger.error("Model not trained or loaded")
             return 0.0
         
@@ -722,14 +853,16 @@ class NCFRecommender:
         user_idx = self.user_encoder.transform([user_id])[0]
         item_idx = self.item_encoder.transform([item_id])[0]
         
-        # Convert to tensors
-        user_tensor = np.array([user_idx])
-        item_tensor = np.array([item_idx])
+        # Convert to tensors and move to device
+        user_tensor = torch.LongTensor([user_idx]).to(self.device)
+        item_tensor = torch.LongTensor([item_idx]).to(self.device)
         
         # Make prediction
-        prediction = self.model.predict([user_tensor, item_tensor], verbose=0)[0][0]
+        self.model.eval()
+        with torch.no_grad():
+            prediction = self.model(user_tensor, item_tensor).item()
         
-        return float(prediction)
+        return prediction
     
     def recommend_for_user(self, user_id: str, n: int = 10, 
                          exclude_known: bool = True) -> List[Tuple[str, float]]:
@@ -744,10 +877,10 @@ class NCFRecommender:
         Returns:
             list: List of (project_id, score) tuples
         """
-        if not self.is_trained():
+        if self.model is None:
             logger.error("Model not trained or loaded")
             return []
-            
+        
         # Check if user exists
         if user_id not in self.users:
             logger.warning(f"User {user_id} not in training data")
@@ -769,26 +902,28 @@ class NCFRecommender:
         
         # Encode user
         user_idx = self.user_encoder.transform([user_id])[0]
+        user_tensor = torch.LongTensor([user_idx]).to(self.device)
         
         # Generate predictions for all candidate items
         predictions = []
         
         # Process in batches to avoid memory issues
-        batch_size = 256
+        batch_size = 128
         for i in range(0, len(candidate_items), batch_size):
             batch_items = candidate_items[i:i+batch_size]
             item_indices = self.item_encoder.transform(batch_items)
+            item_tensor = torch.LongTensor(item_indices).to(self.device)
             
-            # Create batch input tensors
-            user_tensor = np.full(len(batch_items), user_idx)
-            item_tensor = np.array(item_indices)
+            # Replicate user tensor for each item
+            batch_user_tensor = user_tensor.repeat(len(batch_items))
             
             # Make predictions
-            batch_predictions = self.model.predict([user_tensor, item_tensor], verbose=0).flatten()
+            self.model.eval()
+            with torch.no_grad():
+                batch_predictions = self.model(batch_user_tensor, item_tensor).cpu().numpy()
             
             # Store predictions
-            for item, score in zip(batch_items, batch_predictions):
-                predictions.append((item, float(score)))
+            predictions.extend(list(zip(batch_items, batch_predictions)))
         
         # Sort by prediction score
         predictions.sort(key=lambda x: x[1], reverse=True)
@@ -822,7 +957,7 @@ class NCFRecommender:
                 project_dict = project_data.iloc[0].to_dict()
                 
                 # Add recommendation score
-                project_dict['recommendation_score'] = score
+                project_dict['recommendation_score'] = float(score)
                 
                 # Add to results
                 detailed_recommendations.append(project_dict)
@@ -939,15 +1074,8 @@ if __name__ == "__main__":
     # Load data
     if ncf.load_data():
         # Train model
-        metrics = ncf.train(num_epochs=10, save_model=True)  # Short training for testing
+        metrics = ncf.train(num_epochs=5, save_model=True)  # Short training for testing
         print(f"Training metrics: {metrics}")
-        
-        # Test loading model
-        model_path = os.path.join(MODELS_DIR, "ncf_tf_model.pkl")
-        if os.path.exists(model_path):
-            print("\nTesting model loading...")
-            success = ncf.load_model(model_path)
-            print(f"Model loading {'successful' if success else 'failed'}")
         
         # Test recommendations
         if ncf.users:
@@ -965,5 +1093,11 @@ if __name__ == "__main__":
         for i, proj in enumerate(popular, 1):
             print(f"{i}. {proj.get('name', proj.get('id'))} - Score: {proj.get('popularity_score', 0):.4f}")
             
+        # Test trending projects
+        print("\nTrending projects:")
+        trending = ncf.get_trending_projects(n=5)
+        
+        for i, proj in enumerate(trending, 1):
+            print(f"{i}. {proj.get('name', proj.get('id'))} - Score: {proj.get('trend_score', 0):.4f}")
     else:
         print("Failed to load data for NCF model")
