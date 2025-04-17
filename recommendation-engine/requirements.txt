@@ -10,8 +10,9 @@ pydantic
 
 # Recommender systems
 # lightfm
-torch
-torchvision
+# torch
+# torchvision
+tensorflow
 
 # Technical analysis
 # Note: Installing TA-Lib can be complex - see https://github.com/mrjbq7/ta-lib
