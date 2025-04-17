@@ -676,6 +676,9 @@ def personalize_signals(signals: Dict[str, Any],
                 personalized['action'] = 'sell'
                 personalized['confidence'] = 0.5
                 personalized['personalized_message'] = "Converted to sell signal for your aggressive risk profile"
+            else:
+                # TAMBAHKAN BARIS INI:
+                personalized['personalized_message'] = "Holding despite your aggressive risk profile due to unclear signals"
                 
     else:  # medium
         personalized['personalized_message'] = "Signal matches your balanced risk profile"
