@@ -19,7 +19,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from config import HYBRID_PARAMS, MODELS_DIR, PROCESSED_DIR
 
 # Import model components
-from src.models.fecf import FeatureEnhancedCF
+# from src.models.fecf import FeatureEnhancedCF
+from src.models.alt_fecf import FeatureEnhancedCF
 from src.models.ncf import NCFRecommender
 
 # Setup logging
@@ -141,7 +142,7 @@ class HybridRecommender:
     
     def save_model(self, filepath: Optional[str] = None) -> str:
         """
-        Save hybrid model weights to file
+        Save hybrid model weights and references to component models
         
         Args:
             filepath: Path to save model, if None will use default path
@@ -157,22 +158,43 @@ class HybridRecommender:
         # Create directory if it doesn't exist
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         
-        # Component models are saved separately, we just save the weights here
+        # Get paths to component models
+        fecf_path = None
+        ncf_path = None
+        
+        # Find latest FECF model
+        fecf_models = [f for f in os.listdir(MODELS_DIR) if f.startswith("fecf_model_") and f.endswith(".pkl")]
+        if fecf_models:
+            fecf_path = os.path.join(MODELS_DIR, sorted(fecf_models)[-1])  # Get the latest
+            
+        # Find NCF model
+        ncf_path = os.path.join(MODELS_DIR, "ncf_model.pkl")
+        if not os.path.exists(ncf_path):
+            ncf_models = [f for f in os.listdir(MODELS_DIR) if f.startswith("ncf_model_") and f.endswith(".pkl")]
+            if ncf_models:
+                ncf_path = os.path.join(MODELS_DIR, sorted(ncf_models)[-1])  # Get the latest
+        
+        # Save model state with references to component models
         model_state = {
             'params': self.params,
+            'fecf_path': fecf_path,
+            'ncf_path': ncf_path,
             'timestamp': datetime.now().isoformat()
         }
         
         with open(filepath, 'wb') as f:
             pickle.dump(model_state, f)
             
-        logger.info(f"Hybrid model weights saved to {filepath}")
+        logger.info(f"Hybrid model saved to {filepath}")
+        logger.info(f"  - FECF reference: {fecf_path}")
+        logger.info(f"  - NCF reference: {ncf_path}")
+        
         return filepath
     
     def load_model(self, 
-                  hybrid_filepath: Optional[str] = None,
-                  fecf_filepath: Optional[str] = None, 
-                  ncf_filepath: Optional[str] = None) -> bool:
+              hybrid_filepath: Optional[str] = None,
+              fecf_filepath: Optional[str] = None, 
+              ncf_filepath: Optional[str] = None) -> bool:
         """
         Load model components
         
@@ -187,33 +209,72 @@ class HybridRecommender:
         # Load hybrid weights if provided
         if hybrid_filepath and os.path.exists(hybrid_filepath):
             try:
+                logger.info(f"Loading hybrid model from {hybrid_filepath}")
                 with open(hybrid_filepath, 'rb') as f:
                     model_state = pickle.load(f)
                     
                 self.params = model_state.get('params', self.params)
                 logger.info(f"Hybrid model weights loaded from {hybrid_filepath}")
+                
+                # Get component model paths from hybrid model if not provided
+                if fecf_filepath is None:
+                    fecf_filepath = model_state.get('fecf_path')
+                    logger.info(f"Using FECF path from hybrid model: {fecf_filepath}")
+                    
+                if ncf_filepath is None:
+                    ncf_filepath = model_state.get('ncf_path')
+                    logger.info(f"Using NCF path from hybrid model: {ncf_filepath}")
+                    
             except Exception as e:
                 logger.error(f"Error loading hybrid model: {str(e)}")
                 return False
         
         # Initialize component models if needed
         if self.fecf_model is None:
+            from src.models.alt_fecf import FeatureEnhancedCF
             self.fecf_model = FeatureEnhancedCF()
             
         if self.ncf_model is None:
+            from src.models.ncf import NCFRecommender
             self.ncf_model = NCFRecommender()
         
-        # Load FECF model if filepath provided
+        # Load component models
         fecf_success = True
-        if fecf_filepath:
+        if fecf_filepath and os.path.exists(fecf_filepath):
             fecf_success = self.fecf_model.load_model(fecf_filepath)
+            if fecf_success:
+                logger.info(f"FECF component loaded from {fecf_filepath}")
+            else:
+                logger.error(f"Failed to load FECF component from {fecf_filepath}")
         
-        # Load NCF model if filepath provided
         ncf_success = True
-        if ncf_filepath:
+        if ncf_filepath and os.path.exists(ncf_filepath):
             ncf_success = self.ncf_model.load_model(ncf_filepath)
-            
-        return fecf_success and ncf_success
+            if ncf_success:
+                logger.info(f"NCF component loaded from {ncf_filepath}")
+            else:
+                logger.error(f"Failed to load NCF component from {ncf_filepath}")
+        
+        # Model dianggap sukses jika minimal salah satu komponen berhasil dimuat
+        return fecf_success or ncf_success
+    
+    def is_trained(self) -> bool:
+        """
+        Check if model is trained and ready for predictions
+        
+        Returns:
+            bool: True if model is trained, False otherwise
+        """
+        # Hybrid model dianggap terlatih jika minimal satu komponen terlatih
+        fecf_trained = (self.fecf_model is not None and 
+                    hasattr(self.fecf_model, 'model') and 
+                    self.fecf_model.model is not None)
+        
+        ncf_trained = (self.ncf_model is not None and 
+                    hasattr(self.ncf_model, 'model') and 
+                    self.ncf_model.model is not None)
+        
+        return fecf_trained or ncf_trained
     
     def recommend_for_user(self, user_id: str, n: int = 10, 
                          exclude_known: bool = True) -> List[Tuple[str, float]]:

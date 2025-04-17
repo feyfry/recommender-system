@@ -739,16 +739,29 @@ class NCFRecommender:
             bool: Success status
         """
         try:
+            logger.info(f"Attempting to load NCF model from {filepath}")
+            
+            if not os.path.exists(filepath):
+                logger.error(f"Model file not found: {filepath}")
+                return False
+                
             with open(filepath, 'rb') as f:
                 model_state = pickle.load(f)
                 
+            # Log model state keys for debugging
+            logger.info(f"NCF model state contains keys: {list(model_state.keys())}")
+                
             # Extract components
-            state_dict = model_state['model_state_dict']
-            self.user_encoder = model_state['user_encoder']
-            self.item_encoder = model_state['item_encoder']
-            self.users = model_state['users']
-            self.items = model_state['items']
-            config = model_state['config']
+            state_dict = model_state.get('model_state_dict')
+            if state_dict is None:
+                logger.error("No 'model_state_dict' key in loaded NCF model")
+                return False
+                
+            self.user_encoder = model_state.get('user_encoder')
+            self.item_encoder = model_state.get('item_encoder')
+            self.users = model_state.get('users')
+            self.items = model_state.get('items')
+            config = model_state.get('config')
             
             # Create model with same architecture
             num_users = len(self.user_encoder.classes_)
@@ -764,13 +777,28 @@ class NCFRecommender:
             
             # Load weights
             self.model.load_state_dict(state_dict)
+            self.model.eval()  # Set to evaluation mode
             
-            logger.info(f"Model loaded from {filepath}")
+            logger.info(f"NCF model successfully loaded from {filepath}")
             return True
-            
+                
         except Exception as e:
-            logger.error(f"Error loading model: {str(e)}")
+            logger.error(f"Error loading NCF model: {str(e)}")
+            # Log traceback untuk debugging
+            import traceback
+            logger.error(traceback.format_exc())
             return False
+        
+    def is_trained(self) -> bool:
+        """
+        Check if model is trained and ready for predictions
+        
+        Returns:
+            bool: True if model is trained, False otherwise
+        """
+        if self.model is None:
+            return False
+        return True
     
     def predict(self, user_id: str, item_id: str) -> float:
         """

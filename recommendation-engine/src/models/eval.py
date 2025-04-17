@@ -12,6 +12,7 @@ import json
 from datetime import datetime
 from sklearn.model_selection import train_test_split
 from pathlib import Path
+import random
 
 # Path handling
 import sys
@@ -273,9 +274,10 @@ def evaluate_model(model_name: str,
                   test_users: List[str],
                   test_interactions: Dict[str, List[str]],
                   k_values: List[int] = [5, 10, 20],
-                  metrics: List[str] = ['precision', 'recall', 'ndcg', 'map', 'mrr', 'hit_ratio']) -> Dict[str, Any]:
+                  metrics: List[str] = ['precision', 'recall', 'ndcg', 'map', 'mrr', 'hit_ratio'],
+                  debug: bool = True) -> Dict[str, Any]:
     """
-    Evaluate a recommender model
+    Evaluate a recommender model with improved debugging
     
     Args:
         model_name: Name of the model
@@ -284,6 +286,7 @@ def evaluate_model(model_name: str,
         test_interactions: Dictionary mapping users to their test interactions
         k_values: List of k values for evaluation
         metrics: List of metrics to compute
+        debug: Whether to print debug information
         
     Returns:
         dict: Evaluation results
@@ -302,6 +305,14 @@ def evaluate_model(model_name: str,
     all_actual = []
     all_predicted = []
     
+    # DEBUG: Detailed logging
+    total_recommendations = 0
+    total_hits = 0
+    empty_recommendations = 0
+    
+    # Randomly choose a few users for detailed debugging
+    debug_users = random.sample(test_users, min(5, len(test_users))) if debug else []
+    
     # Generate recommendations for each test user
     for user_id in test_users:
         # Get actual test interactions
@@ -310,25 +321,66 @@ def evaluate_model(model_name: str,
         if not actual_items:
             continue
         
+        # DEBUG: Log sample users
+        is_debug_user = user_id in debug_users
+        if is_debug_user:
+            logger.info(f"DEBUG - Generating recommendations for user {user_id}")
+            logger.info(f"DEBUG - User has {len(actual_items)} test interactions")
+            logger.info(f"DEBUG - Sample test items: {actual_items[:3]}")
+        
         # Get recommendations (project IDs only)
         try:
             # Use model-specific recommendation method
             if hasattr(recommender, 'recommend_for_user'):
-                recommendations = recommender.recommend_for_user(user_id, n=max(k_values))
+                recommendations = recommender.recommend_for_user(user_id, n=max(k_values), exclude_known=False)
                 predicted_items = [item_id for item_id, _ in recommendations]
             else:
                 # Fallback for models without recommend_for_user
                 recommendations = recommender.recommend_projects(user_id, n=max(k_values))
                 predicted_items = [item.get('id') for item in recommendations]
+                
+            # DEBUG: Log recommendations
+            if is_debug_user:
+                logger.info(f"DEBUG - Received {len(predicted_items)} recommendations")
+                logger.info(f"DEBUG - Sample recommendations: {predicted_items[:5]}")
+                
+            # Count empty recommendations
+            if not predicted_items:
+                empty_recommendations += 1
+                if is_debug_user:
+                    logger.warning(f"DEBUG - No recommendations generated for user {user_id}")
+            
+            # Calculate hits (recommendations that match test items)
+            hits = set(predicted_items) & set(actual_items)
+            total_recommendations += len(predicted_items)
+            total_hits += len(hits)
+            
+            if is_debug_user:
+                logger.info(f"DEBUG - Found {len(hits)} hits out of {len(predicted_items)} recommendations")
+                if hits:
+                    logger.info(f"DEBUG - Hits: {list(hits)}")
+                    
         except Exception as e:
             logger.error(f"Error generating recommendations for user {user_id}: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             predicted_items = []
         
         # Store for later use
         all_actual.append(actual_items)
         all_predicted.append(predicted_items)
     
-    # Calculate metrics
+    # DEBUG: Overall statistics
+    if debug:
+        logger.info(f"DEBUG - Summary for {model_name}:")
+        logger.info(f"DEBUG - Total test users: {len(test_users)}")
+        logger.info(f"DEBUG - Users with empty recommendations: {empty_recommendations}")
+        logger.info(f"DEBUG - Total recommendations: {total_recommendations}")
+        logger.info(f"DEBUG - Total hits: {total_hits}")
+        if total_recommendations > 0:
+            logger.info(f"DEBUG - Overall hit rate: {total_hits/total_recommendations:.4f}")
+    
+    # Calculate metrics as before...
     for k in k_values:
         # Calculate precision, recall, and F1 for each user
         precision_sum = 0
@@ -381,9 +433,9 @@ def evaluate_model(model_name: str,
     
     logger.info(f"Evaluation of {model_name} completed in {eval_time:.2f}s")
     logger.info(f"Results: Precision@10={results['precision']:.4f}, "
-                f"Recall@10={results['recall']:.4f}, "
-                f"NDCG@10={results['ndcg']:.4f}, "
-                f"Hit Ratio@10={results['hit_ratio']:.4f}")
+               f"Recall@10={results['recall']:.4f}, "
+               f"NDCG@10={results['ndcg']:.4f}, "
+               f"Hit Ratio@10={results['hit_ratio']:.4f}")
     
     return results
 
@@ -446,17 +498,6 @@ def evaluate_all_models(models: Dict[str, Any],
                        save_results: bool = True) -> Dict[str, Dict[str, Any]]:
     """
     Evaluate multiple recommender models
-    
-    Args:
-        models: Dictionary mapping model names to model instances
-        user_item_matrix: User-item interaction matrix
-        test_ratio: Proportion of interactions to use for testing
-        min_interactions: Minimum number of interactions required for a user
-        k_values: List of k values for evaluation
-        save_results: Whether to save evaluation results
-        
-    Returns:
-        dict: Evaluation results for all models
     """
     # Prepare test data
     test_users, test_interactions = prepare_test_data(
@@ -466,9 +507,57 @@ def evaluate_all_models(models: Dict[str, Any],
         random_seed=EVAL_RANDOM_SEED
     )
     
+    logger.info(f"Prepared test data with {len(test_users)} users and {sum(len(items) for items in test_interactions.values())} test interactions")
+    
+    # PERBAIKAN: Eksplisit muat model sebelum evaluasi
+    for model_name, model in models.items():
+        # Periksa apakah model perlu dimuat
+        if hasattr(model, 'model') and model.model is None:
+            logger.info(f"Model {model_name} not loaded, trying to load from saved file...")
+            
+            # Cari file model berdasarkan jenis model
+            if model_name == 'fecf':
+                # Cari file FECF model terbaru
+                fecf_files = [f for f in os.listdir(MODELS_DIR) 
+                            if f.startswith("fecf_model_") and f.endswith(".pkl")]
+                if fecf_files:
+                    latest_model = sorted(fecf_files)[-1]
+                    model_path = os.path.join(MODELS_DIR, latest_model)
+                    logger.info(f"Loading {model_name} from {model_path}")
+                    model.load_model(model_path)
+            
+            elif model_name == 'ncf':
+                # Coba path model NCF default
+                model_path = os.path.join(MODELS_DIR, "ncf_model.pkl")
+                if os.path.exists(model_path):
+                    logger.info(f"Loading {model_name} from {model_path}")
+                    model.load_model(model_path)
+            
+            elif model_name == 'hybrid':
+                # Cari hybrid model terbaru
+                hybrid_files = [f for f in os.listdir(MODELS_DIR) 
+                            if f.startswith("hybrid_model_") and f.endswith(".pkl")]
+                if hybrid_files:
+                    latest_model = sorted(hybrid_files)[-1]
+                    model_path = os.path.join(MODELS_DIR, latest_model)
+                    logger.info(f"Loading {model_name} from {model_path}")
+                    model.load_model(model_path)
+    
     # Evaluate each model
     results = {}
     for model_name, model in models.items():
+        # Verifikasi model sudah dimuat
+        if hasattr(model, 'model') and model.model is None:
+            logger.error(f"Model {model_name} could not be loaded for evaluation")
+            results[model_name] = {
+                "precision": 0.0,
+                "recall": 0.0,
+                "ndcg": 0.0,
+                "hit_ratio": 0.0,
+                "error": "model_not_loaded"
+            }
+            continue
+            
         model_results = evaluate_model(
             model_name=model_name,
             recommender=model,
@@ -494,19 +583,19 @@ def evaluate_cold_start(model: Any,
                        k_values: List[int] = EVAL_K_VALUES) -> Dict[str, Any]:
     """
     Evaluate model performance on cold-start users
-    
-    Args:
-        model: Model to evaluate
-        model_name: Name of the model
-        user_item_matrix: User-item interaction matrix
-        cold_start_users: Number of cold-start users to simulate
-        test_ratio: Proportion of interactions to hold out for testing
-        k_values: List of k values for evaluation
-        
-    Returns:
-        dict: Evaluation results for cold-start scenario
     """
     logger.info(f"Evaluating {model_name} on cold-start scenario")
+    
+    # PERBAIKAN: Verifikasi model sebelum evaluasi
+    if hasattr(model, 'model') and model.model is None:
+        logger.error(f"Model {model_name} not trained or loaded")
+        return {
+            "precision": 0.0, 
+            "recall": 0.0, 
+            "ndcg": 0.0, 
+            "hit_ratio": 0.0, 
+            "error": "model_not_loaded"
+        }
     
     # Find users with sufficient interactions
     user_counts = (user_item_matrix > 0).sum(axis=1)

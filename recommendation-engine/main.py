@@ -237,10 +237,18 @@ def train_models(args):
 def evaluate_models(args):
     """
     Evaluasi model rekomendasi
-    
-    Args:
-        args: Command line arguments
     """
+    # Aktifkan debug mode jika parameter tersedia
+    debug_mode = getattr(args, 'debug', False)
+    if debug_mode:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logging.getLogger('src.models').setLevel(logging.DEBUG)
+        logger.info("Debug mode enabled for evaluation")
+    
+    # Tampilkan semua file model yang tersedia
+    model_files = [f for f in os.listdir(MODELS_DIR) if f.endswith('.pkl')]
+    logger.info(f"Available model files: {model_files}")
+    
     from src.models.eval import (
         evaluate_all_models, 
         evaluate_cold_start, 
@@ -251,28 +259,66 @@ def evaluate_models(args):
     logger.info("Starting model evaluation")
     print("Evaluating recommendation models...")
     
-    # Load models
+    # Load models dengan eksplisit menemukan file
     models = {}
     
     try:
         # Load FECF model
-        # from src.models.fecf import FeatureEnhancedCF
         from src.models.alt_fecf import FeatureEnhancedCF
         fecf = FeatureEnhancedCF()
         if fecf.load_data():
-            models["fecf"] = fecf
+            # Cari file model FECF terbaru
+            fecf_files = [f for f in os.listdir(MODELS_DIR) 
+                        if f.startswith("fecf_model_") and f.endswith(".pkl")]
+            if fecf_files:
+                latest_model = sorted(fecf_files)[-1]
+                model_path = os.path.join(MODELS_DIR, latest_model)
+                logger.info(f"Explicitly loading FECF from {model_path}")
+                if fecf.load_model(model_path):
+                    logger.info("FECF model loaded successfully")
+                    models["fecf"] = fecf
+                else:
+                    logger.error("Failed to load FECF model")
         
         # Load NCF model
         from src.models.ncf import NCFRecommender
         ncf = NCFRecommender()
         if ncf.load_data():
-            models["ncf"] = ncf
+            # Path NCF model default
+            model_path = os.path.join(MODELS_DIR, "ncf_model.pkl")
+            if os.path.exists(model_path):
+                logger.info(f"Explicitly loading NCF from {model_path}")
+                if ncf.load_model(model_path):
+                    logger.info("NCF model loaded successfully")
+                    models["ncf"] = ncf
+                else:
+                    logger.error("Failed to load NCF model")
         
         # Load Hybrid model
         from src.models.hybrid import HybridRecommender
         hybrid = HybridRecommender()
         if hybrid.load_data():
-            models["hybrid"] = hybrid
+            # Cari hybrid model terbaru
+            hybrid_files = [f for f in os.listdir(MODELS_DIR) 
+                         if f.startswith("hybrid_model_") and f.endswith(".pkl")]
+            if hybrid_files:
+                latest_model = sorted(hybrid_files)[-1]
+                model_path = os.path.join(MODELS_DIR, latest_model)
+                logger.info(f"Explicitly loading Hybrid from {model_path}")
+                if hybrid.load_model(model_path):
+                    logger.info("Hybrid model loaded successfully")
+                    models["hybrid"] = hybrid
+                else:
+                    logger.error("Failed to load Hybrid model")
+        
+        # Verifikasi model sudah dimuat
+        for model_name, model in list(models.items()):
+            if hasattr(model, 'is_trained'):
+                try:
+                    if not model.is_trained():
+                        logger.warning(f"Model {model_name} is not ready for evaluation")
+                except AttributeError as e:
+                    logger.error(f"Error checking if {model_name} is trained: {str(e)}")
         
         if not models:
             logger.error("No models available for evaluation")
@@ -355,9 +401,13 @@ def evaluate_models(args):
         return True
         
     except Exception as e:
-        logger.error(f"Error during evaluation: {str(e)}")
+        logger.error(f"Error during evaluation setup: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         print(f"❌ Error during evaluation: {str(e)}")
         return False
+
+# Perbaikan untuk main.py - fungsi recommend
 
 def recommend(args):
     """
@@ -380,7 +430,6 @@ def recommend(args):
     try:
         # Load appropriate model
         if model_type == 'fecf':
-            # from src.models.fecf import FeatureEnhancedCF
             from src.models.alt_fecf import FeatureEnhancedCF
             model = FeatureEnhancedCF()
         elif model_type == 'ncf':
@@ -394,6 +443,45 @@ def recommend(args):
         if not model.load_data():
             logger.error("Failed to load data")
             print("❌ Failed to load data")
+            return False
+            
+        # PERBAIKAN: Eksplisit load model file
+        model_loaded = False
+        
+        if model_type == 'fecf':
+            # Cari file FECF model terbaru
+            fecf_files = [f for f in os.listdir(MODELS_DIR) 
+                          if f.startswith("fecf_model_") and f.endswith(".pkl")]
+            if fecf_files:
+                latest_model = sorted(fecf_files)[-1]
+                model_path = os.path.join(MODELS_DIR, latest_model)
+                logger.info(f"Loading FECF model from {model_path}")
+                model_loaded = model.load_model(model_path)
+        elif model_type == 'ncf':
+            # Coba path model NCF default
+            model_path = os.path.join(MODELS_DIR, "ncf_model.pkl")
+            if os.path.exists(model_path):
+                logger.info(f"Loading NCF model from {model_path}")
+                model_loaded = model.load_model(model_path)
+        else:  # hybrid
+            # Cari hybrid model terbaru
+            hybrid_files = [f for f in os.listdir(MODELS_DIR) 
+                          if f.startswith("hybrid_model_") and f.endswith(".pkl")]
+            if hybrid_files:
+                latest_model = sorted(hybrid_files)[-1]
+                model_path = os.path.join(MODELS_DIR, latest_model)
+                logger.info(f"Loading Hybrid model from {model_path}")
+                model_loaded = model.load_model(model_path)
+                
+        if not model_loaded:
+            logger.error(f"Failed to load {model_type} model")
+            print(f"❌ Failed to load {model_type} model")
+            return False
+            
+        # Verifikasi model sudah dimuat dengan benar
+        if hasattr(model, 'is_trained') and not model.is_trained():
+            logger.error(f"Model {model_type} loaded but not properly initialized")
+            print(f"❌ Model {model_type} not properly initialized")
             return False
         
         # Check for cold-start user
@@ -460,6 +548,8 @@ def recommend(args):
     except Exception as e:
         logger.error(f"Error generating recommendations: {str(e)}")
         print(f"❌ Error generating recommendations: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return False
 
 def trading_signals(args):
@@ -743,6 +833,108 @@ def analyze_results(args):
         logger.error(f"Error analyzing results: {str(e)}")
         print(f"❌ Error analyzing results: {str(e)}")
         return False
+    
+def debug_recommendations(args):
+    """
+    Debug recommendations for a specific user
+    
+    Args:
+        args: Command line arguments
+    """
+    user_id = args.user_id
+    model_type = args.model
+    n = args.num
+    
+    print(f"Debugging recommendations for user '{user_id}' using {model_type} model...")
+    
+    try:
+        # Load appropriate model
+        if model_type == 'fecf':
+            from src.models.alt_fecf import FeatureEnhancedCF
+            model = FeatureEnhancedCF()
+        elif model_type == 'ncf':
+            from src.models.ncf import NCFRecommender
+            model = NCFRecommender()
+        else:  # hybrid
+            from src.models.hybrid import HybridRecommender
+            model = HybridRecommender()
+        
+        # Load data and model
+        print("Loading data...")
+        model.load_data()
+        
+        # Find latest model file
+        if model_type == 'fecf':
+            model_files = [f for f in os.listdir(MODELS_DIR) 
+                         if f.startswith("fecf_model_") and f.endswith(".pkl")]
+            if model_files:
+                latest_model = sorted(model_files)[-1]
+                model_path = os.path.join(MODELS_DIR, latest_model)
+                print(f"Loading model from: {model_path}")
+                model.load_model(model_path)
+        elif model_type == 'ncf':
+            model_path = os.path.join(MODELS_DIR, "ncf_model.pkl")
+            print(f"Loading model from: {model_path}")
+            model.load_model(model_path)
+        else:
+            model_files = [f for f in os.listdir(MODELS_DIR) 
+                         if f.startswith("hybrid_model_") and f.endswith(".pkl")]
+            if model_files:
+                latest_model = sorted(model_files)[-1]
+                model_path = os.path.join(MODELS_DIR, latest_model)
+                print(f"Loading model from: {model_path}")
+                model.load_model(model_path)
+        
+        # Check if user exists
+        user_exists = True
+        if hasattr(model, 'user_item_matrix'):
+            if user_id not in model.user_item_matrix.index:
+                print(f"WARNING: User '{user_id}' not found in training data")
+                print("Will use cold-start recommendations")
+                user_exists = False
+        
+        # Get user's known items
+        known_items = []
+        if user_exists and hasattr(model, 'user_item_matrix'):
+            user_items = model.user_item_matrix.loc[user_id]
+            known_items = user_items[user_items > 0].index.tolist()
+            print(f"User has {len(known_items)} known items")
+            if known_items:
+                print(f"Sample known items: {known_items[:5]}")
+        
+        # Get recommendations
+        print("\nGenerating recommendations...")
+        
+        # Test both with and without exclusion
+        for exclude in [True, False]:
+            if hasattr(model, 'recommend_for_user'):
+                recs = model.recommend_for_user(user_id, n=n, exclude_known=exclude)
+                
+                print(f"\nRecommendations (exclude_known={exclude}):")
+                print(f"Generated {len(recs)} recommendations")
+                
+                for i, (item_id, score) in enumerate(recs[:10], 1):
+                    is_known = item_id in known_items
+                    print(f"{i}. Item: {item_id}, Score: {score:.4f} {'(KNOWN)' if is_known else ''}")
+            else:
+                recs = model.recommend_projects(user_id, n=n)
+                
+                print(f"\nRecommendations (built-in method):")
+                print(f"Generated {len(recs)} recommendations")
+                
+                for i, rec in enumerate(recs[:10], 1):
+                    item_id = rec.get('id')
+                    score = rec.get('recommendation_score', 0)
+                    is_known = item_id in known_items
+                    print(f"{i}. Item: {item_id}, Score: {score:.4f} {'(KNOWN)' if is_known else ''}")
+        
+        return True
+    
+    except Exception as e:
+        print(f"Error during debugging: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return False
 
 def run_pipeline(args):
     """
@@ -943,6 +1135,7 @@ Examples:
     evaluate_parser.add_argument("--min-interactions", type=int, default=5, help="Minimum interactions for test users")
     evaluate_parser.add_argument("--cold-start", action="store_true", help="Evaluate cold-start scenarios")
     evaluate_parser.add_argument("--format", choices=["text", "markdown", "html"], default="markdown", help="Output format")
+    evaluate_parser.add_argument("--debug", action="store_true", help="Enable detailed debug logging")
     
     # recommend command
     recommend_parser = subparsers.add_parser("recommend", help="Generate recommendations for a user")
@@ -963,6 +1156,12 @@ Examples:
     api_parser = subparsers.add_parser("api", help="Start API server")
     api_parser.add_argument("--host", default="0.0.0.0", help="API host")
     api_parser.add_argument("--port", type=int, default=8000, help="API port")
+
+    # debug command
+    debug_parser = subparsers.add_parser("debug", help="Debug recommendations for a user")
+    debug_parser.add_argument("--user-id", required=True, help="User ID to debug recommendations for")
+    debug_parser.add_argument("--model", choices=["fecf", "ncf", "hybrid"], default="hybrid", help="Model to use")
+    debug_parser.add_argument("--num", type=int, default=20, help="Number of recommendations")
     
     # run command
     run_parser = subparsers.add_parser("run", help="Run complete pipeline")
@@ -995,6 +1194,8 @@ Examples:
         start_api(args)
     elif args.command == "run":
         run_pipeline(args)
+    elif args.command == "debug":
+        debug_recommendations(args)
     else:
         parser.print_help()
 

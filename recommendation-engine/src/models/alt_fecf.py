@@ -157,27 +157,36 @@ class FeatureEnhancedCF:
         """
         # Extract relevant columns - exclude ID and numeric metrics
         exclude_cols = ['id', 'market_cap', 'total_volume', 'current_price', 
-                      'price_change_percentage_24h', 'price_change_percentage_7d_in_currency',
-                      'popularity_score', 'trend_score', 'developer_activity_score', 
-                      'social_engagement_score']
+                    'price_change_percentage_24h', 'price_change_percentage_7d_in_currency',
+                    'popularity_score', 'trend_score', 'developer_activity_score', 
+                    'social_engagement_score']
         
         feature_cols = [col for col in self.features_df.columns if col not in exclude_cols]
         
         # Convert to sparse matrix
         item_features = self.features_df.set_index('id')[feature_cols]
         
-        # Make sure all projects are included
-        all_projects = set(self.user_item_matrix.columns)
-        missing_projects = all_projects - set(item_features.index)
+        # CRITICAL FIX: Ensure all items in user_item_matrix are in the features
+        all_items = set(self.user_item_matrix.columns)
+        available_items = set(item_features.index)
         
-        if missing_projects:
-            logger.warning(f"{len(missing_projects)} projects missing from features data")
+        # Check for missing items - this is where the issue happens
+        missing_items = all_items - available_items
+        
+        if missing_items:
+            logger.warning(f"{len(missing_items)} projects missing from features data")
             # Add empty rows for missing projects
-            for project in missing_projects:
-                item_features.loc[project] = 0
+            for project in missing_items:
+                # Create a DataFrame with zeros for missing items
+                zeros_df = pd.DataFrame(
+                    {col: [0] for col in feature_cols},
+                    index=[project]
+                )
+                # Append to item_features using concat
+                item_features = pd.concat([item_features, zeros_df])
         
-        # Filter to only include projects in user-item matrix
-        item_features = item_features.loc[self.user_item_matrix.columns]
+        # Ensure only items in user-item matrix are included
+        item_features = item_features.reindex(index=self.user_item_matrix.columns, fill_value=0)
         
         # Convert to sparse matrix
         features_matrix = csr_matrix(item_features.values)
@@ -285,10 +294,23 @@ class FeatureEnhancedCF:
             bool: Success status
         """
         try:
+            logger.info(f"Attempting to load FECF model from {filepath}")
+            
+            if not os.path.exists(filepath):
+                logger.error(f"Model file not found: {filepath}")
+                return False
+                
             with open(filepath, 'rb') as f:
                 model_state = pickle.load(f)
                 
+            # Log model state keys for debugging
+            logger.info(f"Model state contains keys: {list(model_state.keys())}")
+                
             self.model = model_state.get('model')
+            if self.model is None:
+                logger.error("No 'model' key in loaded state")
+                return False
+                
             self._user_mapping = model_state.get('user_mapping', {})
             self._item_mapping = model_state.get('item_mapping', {})
             self._reverse_user_mapping = model_state.get('reverse_user_mapping', {})
@@ -296,17 +318,31 @@ class FeatureEnhancedCF:
             self.item_similarity_matrix = model_state.get('item_similarity_matrix')
             self.params = model_state.get('params', self.params)
             
-            logger.info(f"Model loaded from {filepath}")
+            logger.info(f"FECF model successfully loaded from {filepath}")
             return True
-            
+                
         except Exception as e:
             logger.error(f"Error loading model: {str(e)}")
+            # Log traceback untuk debugging
+            import traceback
+            logger.error(traceback.format_exc())
             return False
+        
+    def is_trained(self) -> bool:
+        """
+        Check if model is trained and ready for predictions
+        
+        Returns:
+            bool: True if model is trained, False otherwise
+        """
+        if self.model is None:
+            return False
+        return True
     
     def recommend_for_user(self, user_id: str, n: int = 10, 
-                         exclude_known: bool = True) -> List[Tuple[str, float]]:
+                     exclude_known: bool = True) -> List[Tuple[str, float]]:
         """
-        Generate recommendations for a user
+        Generate recommendations for a user with improved debugging
         
         Args:
             user_id: User ID
@@ -332,6 +368,7 @@ class FeatureEnhancedCF:
         known_items = set()
         if exclude_known:
             known_items = set(user_ratings[user_ratings > 0].index)
+            logger.debug(f"User {user_id} has {len(known_items)} known items to exclude")
             
         # Get all items
         all_items = list(self.user_item_matrix.columns)
@@ -339,7 +376,7 @@ class FeatureEnhancedCF:
         # Calculate scores for all items
         scores = []
         for item_id in all_items:
-            if item_id in known_items:
+            if item_id in known_items and exclude_known:
                 continue
                 
             # Find item index
@@ -363,7 +400,12 @@ class FeatureEnhancedCF:
         # Sort by score
         scores.sort(key=lambda x: x[1], reverse=True)
         
-        # Return top n
+        # Return top n with logging
+        if not scores:
+            logger.warning(f"No recommendations generated for user {user_id}")
+        else:
+            logger.debug(f"Generated {len(scores)} candidates for user {user_id}")
+            
         return scores[:n]
     
     def _get_cold_start_recommendations(self, n: int = 10) -> List[Tuple[str, float]]:
