@@ -583,17 +583,19 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
     
     # Generate target price if applicable
     target_price = None
-    
-    if 'volume' in prices_df.columns:
+
+    if 'high' in prices_df.columns and 'low' in prices_df.columns:
         atr = calculate_atr(high_prices, low_prices, close_prices)
         latest_atr = atr.iloc[-1]
         
         if action == "buy":
             # Target price for buying: current price + 2*ATR
-            target_price = latest_close + (2 * latest_atr)
+            # Use abs() to ensure positive ATR value
+            target_price = latest_close + (2 * abs(latest_atr))
         elif action == "sell":
             # Target price for selling: current price - 2*ATR
-            target_price = latest_close - (2 * latest_atr)
+            # Use abs() to ensure positive ATR value
+            target_price = latest_close - (2 * abs(latest_atr))
     
     # Check if confidence meets threshold
     strong_signal = confidence >= CONFIDENCE_THRESHOLD
@@ -626,13 +628,6 @@ def personalize_signals(signals: Dict[str, Any],
                       risk_tolerance: str = 'medium') -> Dict[str, Any]:
     """
     Personalize trading signals based on user risk tolerance
-    
-    Args:
-        signals: Trading signals from generate_trading_signals
-        risk_tolerance: User risk tolerance ('low', 'medium', 'high')
-        
-    Returns:
-        dict: Personalized trading signals
     """
     # Create a copy to avoid modifying the original
     personalized = signals.copy()
@@ -677,7 +672,7 @@ def personalize_signals(signals: Dict[str, Any],
                 personalized['confidence'] = 0.5
                 personalized['personalized_message'] = "Converted to sell signal for your aggressive risk profile"
             else:
-                # TAMBAHKAN BARIS INI:
+                # TAMBAHKAN INI: Default message untuk hold dengan profil high risk
                 personalized['personalized_message'] = "Holding despite your aggressive risk profile due to unclear signals"
                 
     else:  # medium

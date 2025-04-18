@@ -554,12 +554,13 @@ def recommend(args):
 
 def trading_signals(args):
     """
-    Generate trading signals for a project
+    Generate trading signals for a project using real market data
     
     Args:
         args: Command line arguments
     """
     from src.technical.signals import generate_trading_signals, personalize_signals
+    from src.data.collector import fetch_real_market_data
     
     logger.info(f"Generating trading signals for project {args.project_id}")
     
@@ -571,46 +572,15 @@ def trading_signals(args):
     print(f"Generating trading signals for project '{project_id}'...")
     
     try:
-        # Create synthetic price data for demonstration
-        import pandas as pd
-        import numpy as np
-        from datetime import datetime, timedelta
+        # Fetch real market data instead of using synthetic data
+        print(f"Fetching real market data for {project_id}...")
+        df = fetch_real_market_data(project_id, days=days)
         
-        # Number of data points
-        n = days * 24  # Hourly data
-        
-        # Generate timestamps
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days)
-        dates = pd.date_range(start=start_date, end=end_date, periods=n)
-        
-        # Set seed based on project_id for reproducibility but different per project
-        seed = sum(ord(c) for c in project_id)
-        rng = np.random.default_rng(seed)  # Create Generator instance with seed
-        
-        # Base price varies by project
-        base_price = (seed % 1000) + 1  # $1 to $1000
-        
-        # Trend component (generally up or down based on project_id)
-        trend = np.linspace(0, (seed % 200) - 100, n) / 100  # -1 to +1 trend
-        
-        # Volatility component
-        volatility = max(0.001, min(0.1, (seed % 100) / 1000))  # 0.001 to 0.1
-        
-        # Generate price data with random walk
-        close = base_price * (1 + trend + np.cumsum(rng.normal(0, volatility, n)))
-        high = close * (1 + rng.uniform(0, volatility * 2, n))
-        low = close * (1 - rng.uniform(0, volatility * 2, n))
-        volume = rng.uniform(base_price * 1000, base_price * 10000, n)
-        
-        # Create DataFrame
-        df = pd.DataFrame({
-            'close': close,
-            'high': high,
-            'low': low,
-            'volume': volume
-        }, index=dates)
-        
+        if df.empty:
+            logger.error(f"Failed to fetch market data for {project_id}")
+            print(f"❌ Failed to fetch market data for {project_id}")
+            return False
+            
         # Generate trading signals
         signals = generate_trading_signals(df)
         

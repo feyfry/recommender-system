@@ -6,6 +6,7 @@ import os
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
+import pandas as pd
 from fastapi import APIRouter, HTTPException, Query, Depends, Body, Path
 from pydantic import BaseModel, Field
 
@@ -67,7 +68,7 @@ class ProjectResponse(BaseModel):
     popularity_score: Optional[float] = None
     trend_score: Optional[float] = None
     category: Optional[str] = None
-    chain: Optional[str] = None
+    chain: Optional[str] = None  # Must be optional to handle NaN
     recommendation_score: float
 
 class RecommendationResponse(BaseModel):
@@ -159,6 +160,24 @@ def get_cache_key(request: RecommendationRequest) -> str:
     """Generate cache key from request parameters"""
     return f"{request.user_id}:{request.model_type}:{request.num_recommendations}:{request.category}:{request.chain}"
 
+def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Clean project data to handle NaN values
+    
+    Args:
+        project_dict: Project data dictionary
+        
+    Returns:
+        dict: Cleaned project data
+    """
+    result = {}
+    for key, value in project_dict.items():
+        if pd.isna(value):
+            result[key] = None
+        else:
+            result[key] = value
+    return result
+
 # Routes
 @router.post("/projects", response_model=RecommendationResponse)
 async def recommend_projects(request: RecommendationRequest):
@@ -233,29 +252,35 @@ async def recommend_projects(request: RecommendationRequest):
                     n=request.num_recommendations
                 )
         
-        # Create response
+        # Create response with sanitized data
+        project_responses = []
+        for rec in recommendations:
+            # Sanitize data (handle NaN values)
+            clean_rec = sanitize_project_data(rec)
+            
+            project_responses.append(
+                ProjectResponse(
+                    id=clean_rec.get('id'),
+                    name=clean_rec.get('name'),
+                    symbol=clean_rec.get('symbol'),
+                    image_url=clean_rec.get('image_url'),
+                    price_usd=clean_rec.get('price_usd'),
+                    price_change_24h=clean_rec.get('price_change_24h'),
+                    price_change_7d=clean_rec.get('price_change_7d'),
+                    market_cap=clean_rec.get('market_cap'),
+                    volume_24h=clean_rec.get('volume_24h'),
+                    popularity_score=clean_rec.get('popularity_score'),
+                    trend_score=clean_rec.get('trend_score'),
+                    category=clean_rec.get('primary_category', clean_rec.get('category')),
+                    chain=clean_rec.get('chain'),
+                    recommendation_score=clean_rec.get('recommendation_score', 0.5)
+                )
+            )
+        
         response = RecommendationResponse(
             user_id=request.user_id,
             model_type=request.model_type,
-            recommendations=[
-                ProjectResponse(
-                    id=rec.get('id'),
-                    name=rec.get('name'),
-                    symbol=rec.get('symbol'),
-                    image_url=rec.get('image_url'),
-                    price_usd=rec.get('price_usd'),
-                    price_change_24h=rec.get('price_change_24h'),
-                    price_change_7d=rec.get('price_change_7d'),
-                    market_cap=rec.get('market_cap'),
-                    volume_24h=rec.get('volume_24h'),
-                    popularity_score=rec.get('popularity_score'),
-                    trend_score=rec.get('trend_score'),
-                    category=rec.get('primary_category', rec.get('category')),
-                    chain=rec.get('chain'),
-                    recommendation_score=rec.get('recommendation_score', 0.5)
-                )
-                for rec in recommendations
-            ],
+            recommendations=project_responses,
             timestamp=datetime.now(),
             is_cold_start=is_cold_start,
             category_filter=request.category,
@@ -287,25 +312,32 @@ async def get_trending_projects(
         model = get_model(model_type)
         trending = model.get_trending_projects(n=limit)
         
-        return [
-            ProjectResponse(
-                id=rec.get('id'),
-                name=rec.get('name'),
-                symbol=rec.get('symbol'),
-                image_url=rec.get('image_url'),
-                price_usd=rec.get('price_usd'),
-                price_change_24h=rec.get('price_change_24h'),
-                price_change_7d=rec.get('price_change_7d'),
-                market_cap=rec.get('market_cap'),
-                volume_24h=rec.get('volume_24h'),
-                popularity_score=rec.get('popularity_score'),
-                trend_score=rec.get('trend_score'),
-                category=rec.get('primary_category', rec.get('category')),
-                chain=rec.get('chain'),
-                recommendation_score=rec.get('recommendation_score', 0.5)
+        # Create response with sanitized data
+        project_responses = []
+        for rec in trending:
+            # Sanitize data (handle NaN values)
+            clean_rec = sanitize_project_data(rec)
+            
+            project_responses.append(
+                ProjectResponse(
+                    id=clean_rec.get('id'),
+                    name=clean_rec.get('name'),
+                    symbol=clean_rec.get('symbol'),
+                    image_url=clean_rec.get('image_url'),
+                    price_usd=clean_rec.get('price_usd'),
+                    price_change_24h=clean_rec.get('price_change_24h'),
+                    price_change_7d=clean_rec.get('price_change_7d'),
+                    market_cap=clean_rec.get('market_cap'),
+                    volume_24h=clean_rec.get('volume_24h'),
+                    popularity_score=clean_rec.get('popularity_score'),
+                    trend_score=clean_rec.get('trend_score'),
+                    category=clean_rec.get('primary_category', clean_rec.get('category')),
+                    chain=clean_rec.get('chain'),
+                    recommendation_score=clean_rec.get('recommendation_score', 0.5)
+                )
             )
-            for rec in trending
-        ]
+            
+        return project_responses
     
     except Exception as e:
         logger.error(f"Error getting trending projects: {str(e)}")
@@ -323,25 +355,32 @@ async def get_popular_projects(
         model = get_model(model_type)
         popular = model.get_popular_projects(n=limit)
         
-        return [
-            ProjectResponse(
-                id=rec.get('id'),
-                name=rec.get('name'),
-                symbol=rec.get('symbol'),
-                image_url=rec.get('image_url'),
-                price_usd=rec.get('price_usd'),
-                price_change_24h=rec.get('price_change_24h'),
-                price_change_7d=rec.get('price_change_7d'),
-                market_cap=rec.get('market_cap'),
-                volume_24h=rec.get('volume_24h'),
-                popularity_score=rec.get('popularity_score'),
-                trend_score=rec.get('trend_score'),
-                category=rec.get('primary_category', rec.get('category')),
-                chain=rec.get('chain'),
-                recommendation_score=rec.get('recommendation_score', 0.5)
+        # Create response with sanitized data
+        project_responses = []
+        for rec in popular:
+            # Sanitize data (handle NaN values)
+            clean_rec = sanitize_project_data(rec)
+            
+            project_responses.append(
+                ProjectResponse(
+                    id=clean_rec.get('id'),
+                    name=clean_rec.get('name'),
+                    symbol=clean_rec.get('symbol'),
+                    image_url=clean_rec.get('image_url'),
+                    price_usd=clean_rec.get('price_usd'),
+                    price_change_24h=clean_rec.get('price_change_24h'),
+                    price_change_7d=clean_rec.get('price_change_7d'),
+                    market_cap=clean_rec.get('market_cap'),
+                    volume_24h=clean_rec.get('volume_24h'),
+                    popularity_score=clean_rec.get('popularity_score'),
+                    trend_score=clean_rec.get('trend_score'),
+                    category=clean_rec.get('primary_category', clean_rec.get('category')),
+                    chain=clean_rec.get('chain'),
+                    recommendation_score=clean_rec.get('recommendation_score', 0.5)
+                )
             )
-            for rec in popular
-        ]
+            
+        return project_responses
     
     except Exception as e:
         logger.error(f"Error getting popular projects: {str(e)}")
@@ -365,25 +404,32 @@ async def get_similar_projects(
         
         similar = model.get_similar_projects(project_id, n=limit)
         
-        return [
-            ProjectResponse(
-                id=rec.get('id'),
-                name=rec.get('name'),
-                symbol=rec.get('symbol'),
-                image_url=rec.get('image_url'),
-                price_usd=rec.get('price_usd'),
-                price_change_24h=rec.get('price_change_24h'),
-                price_change_7d=rec.get('price_change_7d'),
-                market_cap=rec.get('market_cap'),
-                volume_24h=rec.get('volume_24h'),
-                popularity_score=rec.get('popularity_score'),
-                trend_score=rec.get('trend_score'),
-                category=rec.get('primary_category', rec.get('category')),
-                chain=rec.get('chain'),
-                recommendation_score=rec.get('similarity_score', 0.5)
+        # Create response with sanitized data
+        project_responses = []
+        for rec in similar:
+            # Sanitize data (handle NaN values)
+            clean_rec = sanitize_project_data(rec)
+            
+            project_responses.append(
+                ProjectResponse(
+                    id=clean_rec.get('id'),
+                    name=clean_rec.get('name'),
+                    symbol=clean_rec.get('symbol'),
+                    image_url=clean_rec.get('image_url'),
+                    price_usd=clean_rec.get('price_usd'),
+                    price_change_24h=clean_rec.get('price_change_24h'),
+                    price_change_7d=clean_rec.get('price_change_7d'),
+                    market_cap=clean_rec.get('market_cap'),
+                    volume_24h=clean_rec.get('volume_24h'),
+                    popularity_score=clean_rec.get('popularity_score'),
+                    trend_score=clean_rec.get('trend_score'),
+                    category=clean_rec.get('primary_category', clean_rec.get('category')),
+                    chain=clean_rec.get('chain'),
+                    recommendation_score=clean_rec.get('similarity_score', 0.5)
+                )
             )
-            for rec in similar
-        ]
+            
+        return project_responses
     
     except Exception as e:
         logger.error(f"Error getting similar projects: {str(e)}")

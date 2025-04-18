@@ -18,6 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 # Technical analysis imports
 from src.technical.indicators import TechnicalIndicators
 from src.technical.signals import generate_trading_signals, personalize_signals, detect_market_events
+from src.data.collector import fetch_real_market_data
 
 # Setup router
 router = APIRouter(
@@ -38,10 +39,10 @@ _price_data_cache = {}
 _signals_cache = {}
 _cache_ttl = 1800  # 30 minutes in seconds
 
-# Mock API function to get price data (in a real app, this would fetch from a database or external API)
-async def get_price_data(project_id: str, days: int = 30, interval: str = "1h") -> pd.DataFrame:
+# Function to get price data using real market data
+async def get_price_data(project_id: str, days: int = 30, interval: str = "1d") -> pd.DataFrame:
     """
-    Get historical price data for a project
+    Get historical price data for a project using real market data
     
     Args:
         project_id: Project ID
@@ -62,54 +63,13 @@ async def get_price_data(project_id: str, days: int = 30, interval: str = "1h") 
             return cache_entry['data']
     
     try:
-        # In a real app, this would query a database or external API
-        # For now, generate synthetic data for demo purposes
+        # Get real market data
+        logger.info(f"Fetching real market data for {project_id}")
+        df = fetch_real_market_data(project_id, days=days)
         
-        # Number of data points
-        if interval == "1h":
-            n_points = days * 24
-        elif interval == "1d":
-            n_points = days
-        elif interval == "15m":
-            n_points = days * 24 * 4
-        else:
-            n_points = days
-        
-        # Generate timestamps
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days)
-        dates = pd.date_range(start=start_date, end=end_date, periods=n_points)
-        
-        # Set seed based on project_id for reproducibility but different per project
-        seed = sum(ord(c) for c in project_id)
-        rng = np.random.default_rng(seed)  # Create Generator instance with seed
-
-        # Base price varies by project
-        base_price = (seed % 1000) + 1  # $1 to $1000
-
-        # Trend component (generally up or down based on project_id)
-        trend = np.linspace(0, (seed % 200) - 100, n_points) / 100  # -1 to +1 trend
-
-        # Volatility component
-        volatility = max(0.001, min(0.1, (seed % 100) / 1000))  # 0.001 to 0.1
-
-        # Generate price data with random walk
-        # Using cumsum of normal random values for realistic price movements
-        close = base_price * (1 + trend + np.cumsum(rng.normal(0, volatility, n_points)))
-        high = close * (1 + rng.uniform(0, volatility * 2, n_points))
-        low = close * (1 - rng.uniform(0, volatility * 2, n_points))
-        open_prices = close * (1 + rng.normal(0, volatility, n_points))
-        volume = rng.uniform(base_price * 1000, base_price * 10000, n_points)
-        
-        # Create DataFrame
-        df = pd.DataFrame({
-            'timestamp': dates,
-            'open': open_prices,
-            'high': high,
-            'low': low,
-            'close': close,
-            'volume': volume
-        }).set_index('timestamp')
+        if df.empty:
+            logger.error(f"Failed to fetch market data for {project_id}")
+            raise HTTPException(status_code=500, detail=f"Failed to fetch price data for {project_id}")
         
         # Store in cache
         _price_data_cache[cache_key] = {
@@ -127,7 +87,7 @@ async def get_price_data(project_id: str, days: int = 30, interval: str = "1h") 
 class TradingSignalRequest(BaseModel):
     project_id: str
     days: int = Field(30, ge=1, le=365)
-    interval: str = Field("1h", description="Price data interval")
+    interval: str = Field("1d", description="Price data interval")
     risk_tolerance: str = Field("medium", description="User risk tolerance (low, medium, high)")
 
 class IndicatorValue(BaseModel):
@@ -192,7 +152,7 @@ async def get_trading_signals(request: TradingSignalRequest):
             return cache_entry['data']
     
     try:
-        # Get price data
+        # Get real price data
         price_data = await get_price_data(
             request.project_id, 
             days=request.days, 
@@ -240,7 +200,7 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
     logger.info(f"Technical indicators request for {request.project_id}")
     
     try:
-        # Get price data
+        # Get real price data
         price_data = await get_price_data(
             request.project_id, 
             days=request.days, 
@@ -253,6 +213,11 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
         
         # Extract requested indicators from the last row
         latest_data = df_with_indicators.iloc[-1].to_dict()
+        
+        # Fix any NaN values
+        for k, v in list(latest_data.items()):
+            if pd.isna(v):
+                latest_data[k] = 0.0
         
         indicators_result = {}
         
@@ -383,7 +348,7 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
 async def get_market_events(
     project_id: str = Path(..., description="Project ID"),
     days: int = Query(30, ge=1, le=365),
-    interval: str = Query("1h", description="Price data interval")
+    interval: str = Query("1d", description="Price data interval")
 ):
     """
     Detect market events such as pumps, dumps, high volatility, etc.
@@ -391,7 +356,7 @@ async def get_market_events(
     logger.info(f"Market events request for {project_id}")
     
     try:
-        # Get price data
+        # Get real price data
         price_data = await get_price_data(
             project_id, 
             days=days, 
@@ -429,7 +394,7 @@ async def get_technical_alerts(
     logger.info(f"Technical alerts request for {project_id}")
     
     try:
-        # Get price data
+        # Get real price data
         price_data = await get_price_data(
             project_id, 
             days=days, 
@@ -473,12 +438,11 @@ async def predict_future_price(
 ):
     """
     Predict future price movement based on technical analysis
-    This is a simplified prediction for demonstration purposes.
     """
     logger.info(f"Price prediction request for {project_id}")
     
     try:
-        # Get price data
+        # Get real price data
         price_data = await get_price_data(
             project_id, 
             days=days, 
@@ -492,7 +456,7 @@ async def predict_future_price(
         current_price = float(price_data['close'].iloc[-1])
         
         # Use ATR for volatility if available
-        if 'volume' in price_data.columns:
+        if 'high' in price_data.columns and 'low' in price_data.columns:
             from src.technical.signals import calculate_atr
             atr = calculate_atr(
                 price_data['high'], 
@@ -564,7 +528,7 @@ async def predict_future_price(
             "predicted_change_percent": price_change,
             "confidence": confidence,
             "predictions": predictions,
-            "notes": "This is a simple prediction model for demonstration purposes only. Real-world predictions would use more sophisticated models."
+            "data_source": "Real market data"
         }
         
     except Exception as e:
