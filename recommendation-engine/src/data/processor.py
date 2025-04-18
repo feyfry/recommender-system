@@ -40,7 +40,7 @@ class DataProcessor:
         self.category_mappings = {
             'ai': [
                 'ai', 'artificial-intelligence', 'artificial intelligence', 'artificial-intelligence-ai',
-                'machine-learning', 'large-language-models', 'llm'
+                'artificial intelligence (ai)', 'machine-learning', 'large-language-models', 'llm'
             ],
             'defi': [
                 'defi', 'decentralized-finance', 'decentralized-finance-defi', 'lending', 'yield-farming',
@@ -48,18 +48,20 @@ class DataProcessor:
             ],
             'nft': [
                 'nft', 'non-fungible-tokens', 'non-fungible-tokens-nft', 'collectibles', 'digital-art',
-                'generative-art'
+                'generative-art', 'nfts', 'nfts-marketplace'
             ],
             'layer-1': [
-                'layer-1', 'layer1', 'l1', 'blockchain-service', 'smart-contract-platform'
+                'layer-1', 'layer1', 'l1', 'blockchain-service', 'smart-contract-platform',
+                'smart contract platform'
             ],
             'layer-2': [
                 'layer-2', 'layer2', 'l2', 'scaling', 'optimistic-rollups', 'zk-rollups',
-                'zero-knowledge', 'zk'
+                'zero-knowledge', 'zk', 'zero knowledge (zk)', 'layer 2 (l2)', 'rollup'
             ],
             'gaming': [
                 'gaming', 'play-to-earn', 'p2e', 'game', 'metaverse', 'gaming-guild',
-                'gaming-blockchains', 'gaming-marketplace'
+                'gaming-blockchains', 'gaming-marketplace', 'gaming (gamefi)', 'play to earn',
+                'gamefi', 'game-fi'
             ],
             'stablecoin': [
                 'stablecoin', 'stablecoins', 'stablecoin-algorithmically-stabilized', 
@@ -76,13 +78,13 @@ class DataProcessor:
         
         # Definisikan prioritas kategori
         self.category_priority = [
-            'ai',         # AI memiliki prioritas tertinggi
-            'layer-1',    # Layer-1 chains
+            'layer-1',    # Layer-1 chains prioritas tertinggi
             'layer-2',    # Layer-2 scaling solutions
             'defi',       # DeFi projects
-            'stablecoin', # Stablecoins
+            'nft',        # NFT projects
             'gaming',     # Gaming/Metaverse
-            'nft',        # NFT projects (prioritas lebih rendah)
+            'ai',         # AI prioritas diturunkan
+            'stablecoin', # Stablecoins
             'exchange',   # Exchange tokens
             'meme'        # Meme tokens (prioritas terendah)
         ]
@@ -355,7 +357,10 @@ class DataProcessor:
         if 'platforms' in df.columns:
             # Jika platforms adalah string, konversi ke dict
             if df['platforms'].dtype == 'object' and isinstance(df['platforms'].iloc[0], str):
-                df['platforms'] = df['platforms'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
+                # Fix untuk double quotes: ""ethereum"" -> "ethereum"
+                df['platforms'] = df['platforms'].apply(
+                    lambda x: json.loads(x.replace('""', '"')) if isinstance(x, str) else x
+                )
             # Pastikan nilai None diganti dengan dict kosong
             df['platforms'] = df['platforms'].fillna({})
         else:
@@ -370,7 +375,8 @@ class DataProcessor:
                     return []
                 if isinstance(x, str):
                     try:
-                        return json.loads(x)
+                        # Fix untuk double quotes: ""NFT"" -> "NFT"
+                        return json.loads(x.replace('""', '"'))
                     except:
                         return []
                 return []
@@ -418,28 +424,65 @@ class DataProcessor:
                 return query_category
             return 'unknown'
         
-        # Normalisasi kategori
+        # Normalisasi kategori (convert ke lowercase untuk perbandingan)
         normalized_categories = [cat.lower() for cat in categories if cat]
         
-        # Log actual categories for debugging purposes
-        if 'id' in row and row['id'] in ['render-token', 'immutable-x']:
-            logger.debug(f"Extracting primary category for {row['id']}")
-            logger.debug(f"Categories: {normalized_categories}")
-            if query_category:
-                logger.debug(f"Query category: {query_category}")
-        
-        # Temukan kategori berdasarkan prioritas
-        for priority_cat in self.category_priority:
-            aliases = self.category_mappings.get(priority_cat, [])
+        # Fungsi untuk mendeteksi keyword dari kategori prioritas dalam kategori
+        def contains_category_keywords(categories, priority_cat, mappings):
+            aliases = mappings.get(priority_cat, [])
             
-            # Cari dalam kategori (exact match)
-            if priority_cat in normalized_categories or any(alias in normalized_categories for alias in aliases):
+            # Exact match cek
+            if priority_cat in categories:
+                return True
+                
+            # Cek alias exact match
+            for alias in aliases:
+                if alias in categories:
+                    return True
+            
+            # Untuk partial match, gunakan hanya beberapa keyword penting
+            main_keywords = [priority_cat] + aliases[:3]  # Gunakan hanya beberapa alias utama
+            for category in categories:
+                for keyword in main_keywords:
+                    if keyword in category:
+                        return True
+            
+            return False
+        
+        # Dicari berdasarkan prioritas tetapi fokus pada beberapa kategori awal
+        # Gaming dan NFT projects sering muncul di coin yang serupa
+        specific_categories = {
+            'layer-1': contains_category_keywords(normalized_categories, 'layer-1', self.category_mappings),
+            'layer-2': contains_category_keywords(normalized_categories, 'layer-2', self.category_mappings),
+            'gaming': contains_category_keywords(normalized_categories, 'gaming', self.category_mappings),
+            'nft': contains_category_keywords(normalized_categories, 'nft', self.category_mappings),
+            'defi': contains_category_keywords(normalized_categories, 'defi', self.category_mappings),
+            'ai': contains_category_keywords(normalized_categories, 'ai', self.category_mappings),
+        }
+        
+        # Cari kategori berdasarkan prioritas
+        for priority_cat in self.category_priority:
+            if specific_categories.get(priority_cat, False):
                 return priority_cat
             
-            # Cari kategori yang mengandung alias (partial match)
-            for alias in aliases:
-                if any(alias in cat for cat in normalized_categories):
+            # Pengecekan lengkap jika belum ditemukan di specific_categories
+            if priority_cat not in specific_categories:
+                aliases = self.category_mappings.get(priority_cat, [])
+                
+                # Exact match
+                if priority_cat in normalized_categories:
                     return priority_cat
+                
+                # Alias exact match
+                for alias in aliases:
+                    if alias in normalized_categories:
+                        return priority_cat
+                
+                # Partial match (gunakan dengan hati-hati)
+                for category in normalized_categories:
+                    for alias in aliases:
+                        if alias in category:
+                            return priority_cat
         
         # Fallback ke query_category jika tersedia dan bukan 'unknown' atau 'top'
         if query_category and query_category != 'unknown' and query_category != 'top':
