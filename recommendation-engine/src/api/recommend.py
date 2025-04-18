@@ -1,5 +1,5 @@
 """
-API endpoints untuk rekomendasi proyek Web3
+API endpoints untuk rekomendasi proyek Web3 (dengan perbaikan nama field image)
 """
 
 import os
@@ -59,7 +59,7 @@ class ProjectResponse(BaseModel):
     id: str
     name: Optional[str] = None
     symbol: Optional[str] = None
-    image_url: Optional[str] = None
+    image: Optional[str] = None  # Menggunakan image, bukan image_url
     price_usd: Optional[float] = None
     price_change_24h: Optional[float] = None
     price_change_7d: Optional[float] = None
@@ -171,11 +171,14 @@ def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
         dict: Cleaned project data
     """
     result = {}
+    
     for key, value in project_dict.items():
+        # Handle NaN values
         if pd.isna(value):
             result[key] = None
         else:
             result[key] = value
+    
     return result
 
 # Routes
@@ -263,7 +266,7 @@ async def recommend_projects(request: RecommendationRequest):
                     id=clean_rec.get('id'),
                     name=clean_rec.get('name'),
                     symbol=clean_rec.get('symbol'),
-                    image_url=clean_rec.get('image_url'),
+                    image=clean_rec.get('image'),  # Using image field
                     price_usd=clean_rec.get('price_usd'),
                     price_change_24h=clean_rec.get('price_change_24h'),
                     price_change_7d=clean_rec.get('price_change_7d'),
@@ -298,6 +301,8 @@ async def recommend_projects(request: RecommendationRequest):
         
     except Exception as e:
         logger.error(f"Error generating recommendations: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Recommendation error: {str(e)}")
 
 @router.get("/trending", response_model=List[ProjectResponse])
@@ -323,7 +328,7 @@ async def get_trending_projects(
                     id=clean_rec.get('id'),
                     name=clean_rec.get('name'),
                     symbol=clean_rec.get('symbol'),
-                    image_url=clean_rec.get('image_url'),
+                    image=clean_rec.get('image'),  # Using image field
                     price_usd=clean_rec.get('price_usd'),
                     price_change_24h=clean_rec.get('price_change_24h'),
                     price_change_7d=clean_rec.get('price_change_7d'),
@@ -341,6 +346,8 @@ async def get_trending_projects(
     
     except Exception as e:
         logger.error(f"Error getting trending projects: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 @router.get("/popular", response_model=List[ProjectResponse])
@@ -366,7 +373,7 @@ async def get_popular_projects(
                     id=clean_rec.get('id'),
                     name=clean_rec.get('name'),
                     symbol=clean_rec.get('symbol'),
-                    image_url=clean_rec.get('image_url'),
+                    image=clean_rec.get('image'),  # Using image field
                     price_usd=clean_rec.get('price_usd'),
                     price_change_24h=clean_rec.get('price_change_24h'),
                     price_change_7d=clean_rec.get('price_change_7d'),
@@ -384,6 +391,8 @@ async def get_popular_projects(
     
     except Exception as e:
         logger.error(f"Error getting popular projects: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 @router.get("/similar/{project_id}", response_model=List[ProjectResponse])
@@ -415,7 +424,7 @@ async def get_similar_projects(
                     id=clean_rec.get('id'),
                     name=clean_rec.get('name'),
                     symbol=clean_rec.get('symbol'),
-                    image_url=clean_rec.get('image_url'),
+                    image=clean_rec.get('image'),  # Using image field
                     price_usd=clean_rec.get('price_usd'),
                     price_change_24h=clean_rec.get('price_change_24h'),
                     price_change_7d=clean_rec.get('price_change_7d'),
@@ -433,6 +442,8 @@ async def get_similar_projects(
     
     except Exception as e:
         logger.error(f"Error getting similar projects: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 # Clear cache endpoint (admin only)

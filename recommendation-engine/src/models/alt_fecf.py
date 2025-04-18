@@ -449,11 +449,31 @@ class FeatureEnhancedCF:
             project_data = self.projects_df[self.projects_df['id'] == project_id]
             
             if not project_data.empty:
-                # Convert to dictionary
+                # Convert to dictionary with all available fields
                 project_dict = project_data.iloc[0].to_dict()
                 
                 # Add recommendation score
-                project_dict['recommendation_score'] = score
+                project_dict['recommendation_score'] = float(score)
+                
+                # Ensure critical fields are available (even if null)
+                required_fields = ['id', 'name', 'symbol', 'image', 'price_usd', 'market_cap', 
+                                'volume_24h', 'price_change_24h', 'price_change_7d', 
+                                'popularity_score', 'trend_score', 'primary_category', 'chain']
+                
+                for field in required_fields:
+                    if field not in project_dict:
+                        # Try alternate field names
+                        if field == 'price_usd' and 'current_price' in project_dict:
+                            project_dict['price_usd'] = project_dict['current_price']
+                        elif field == 'volume_24h' and 'total_volume' in project_dict:
+                            project_dict['volume_24h'] = project_dict['total_volume']
+                        elif field == 'price_change_7d' and 'price_change_percentage_7d_in_currency' in project_dict:
+                            project_dict['price_change_7d'] = project_dict['price_change_percentage_7d_in_currency']
+                        elif field == 'category' and 'primary_category' in project_dict:
+                            project_dict['category'] = project_dict['primary_category']
+                        else:
+                            # Default to None
+                            project_dict[field] = None
                 
                 # Add to results
                 detailed_recommendations.append(project_dict)
@@ -507,15 +527,36 @@ class FeatureEnhancedCF:
                 
                 # Add similarity score
                 project_dict['similarity_score'] = float(similarity)
+                project_dict['recommendation_score'] = float(similarity)  # For API consistency
+                
+                # Ensure critical fields are available (even if null)
+                required_fields = ['id', 'name', 'symbol', 'image', 'price_usd', 'market_cap', 
+                                'volume_24h', 'price_change_24h', 'price_change_7d', 
+                                'popularity_score', 'trend_score', 'primary_category', 'chain']
+                
+                for field in required_fields:
+                    if field not in project_dict:
+                        # Try alternate field names
+                        if field == 'price_usd' and 'current_price' in project_dict:
+                            project_dict['price_usd'] = project_dict['current_price']
+                        elif field == 'volume_24h' and 'total_volume' in project_dict:
+                            project_dict['volume_24h'] = project_dict['total_volume']
+                        elif field == 'price_change_7d' and 'price_change_percentage_7d_in_currency' in project_dict:
+                            project_dict['price_change_7d'] = project_dict['price_change_percentage_7d_in_currency']
+                        elif field == 'category' and 'primary_category' in project_dict:
+                            project_dict['category'] = project_dict['primary_category']
+                        else:
+                            # Default to None
+                            project_dict[field] = None
                 
                 # Add to results
                 similar_projects.append(project_dict)
-                
+                    
         return similar_projects
     
     def get_cold_start_recommendations(self, 
-                                     user_interests: Optional[List[str]] = None,
-                                     n: int = 10) -> List[Dict[str, Any]]:
+                                 user_interests: Optional[List[str]] = None,
+                                 n: int = 10) -> List[Dict[str, Any]]:
         """
         Get recommendations for cold-start users based on interests
         
@@ -556,12 +597,46 @@ class FeatureEnhancedCF:
             for _, project in recommendations.iterrows():
                 project_dict = project.to_dict()
                 project_dict['recommendation_score'] = float(project_dict.get('combined_score', 0))
+                
+                # Ensure critical fields are available (even if null)
+                required_fields = ['id', 'name', 'symbol', 'image', 'price_usd', 'market_cap', 
+                                'volume_24h', 'price_change_24h', 'price_change_7d',
+                                'popularity_score', 'trend_score', 'primary_category', 'chain']
+                
+                for field in required_fields:
+                    if field not in project_dict:
+                        # Try alternate field names
+                        if field == 'price_usd' and 'current_price' in project_dict:
+                            project_dict['price_usd'] = project_dict['current_price']
+                        elif field == 'volume_24h' and 'total_volume' in project_dict:
+                            project_dict['volume_24h'] = project_dict['total_volume']
+                        elif field == 'price_change_7d' and 'price_change_percentage_7d_in_currency' in project_dict:
+                            project_dict['price_change_7d'] = project_dict['price_change_percentage_7d_in_currency']
+                        elif field == 'category' and 'primary_category' in project_dict:
+                            project_dict['category'] = project_dict['primary_category']
+                        else:
+                            # Default to None
+                            project_dict[field] = None
+                
                 result.append(project_dict)
                 
             return result
         else:
-            # Just return top n projects if no scores available
-            return filtered_projects.head(n).to_dict('records')
+            # Just return top n projects with minimal fields if no scores available
+            projects = filtered_projects.head(n)
+            result = []
+            
+            for _, project in projects.iterrows():
+                project_dict = project.to_dict()
+                project_dict['recommendation_score'] = 0.5  # Default neutral score
+                
+                # Ensure image field exists
+                if 'image' not in project_dict:
+                    project_dict['image'] = None
+                    
+                result.append(project_dict)
+                
+            return result
     
     def get_trending_projects(self, n: int = 10) -> List[Dict[str, Any]]:
         """
@@ -574,12 +649,37 @@ class FeatureEnhancedCF:
             list: List of trending project dictionaries
         """
         if 'trend_score' in self.projects_df.columns:
+            # Sort by trend score
             trending = self.projects_df.sort_values('trend_score', ascending=False).head(n)
             result = []
             
             for _, project in trending.iterrows():
+                # Get complete project data
                 project_dict = project.to_dict()
+                
+                # Ensure we add recommendation score for consistency
                 project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0))
+                
+                # Ensure critical fields are available (even if null)
+                required_fields = ['id', 'name', 'symbol', 'image', 'price_usd', 'market_cap', 
+                                'volume_24h', 'price_change_24h', 'price_change_7d', 
+                                'popularity_score', 'trend_score', 'primary_category', 'chain']
+                
+                for field in required_fields:
+                    if field not in project_dict:
+                        # Try alternate field names
+                        if field == 'price_usd' and 'current_price' in project_dict:
+                            project_dict['price_usd'] = project_dict['current_price']
+                        elif field == 'volume_24h' and 'total_volume' in project_dict:
+                            project_dict['volume_24h'] = project_dict['total_volume']
+                        elif field == 'price_change_7d' and 'price_change_percentage_7d_in_currency' in project_dict:
+                            project_dict['price_change_7d'] = project_dict['price_change_percentage_7d_in_currency']
+                        elif field == 'category' and 'primary_category' in project_dict:
+                            project_dict['category'] = project_dict['primary_category']
+                        else:
+                            # Default to None
+                            project_dict[field] = None
+                
                 result.append(project_dict)
                 
             return result
@@ -602,15 +702,56 @@ class FeatureEnhancedCF:
             result = []
             
             for _, project in popular.iterrows():
+                # Get complete project data
                 project_dict = project.to_dict()
-                project_dict['recommendation_score'] = float(project_dict.get('popularity_score', 0))
-                result.append(project_dict)
                 
+                # Ensure we add recommendation score for consistency
+                project_dict['recommendation_score'] = float(project_dict.get('popularity_score', 0))
+                
+                # Ensure critical fields are available (even if null)
+                required_fields = ['id', 'name', 'symbol', 'image', 'price_usd', 'market_cap', 
+                                'volume_24h', 'price_change_24h', 'price_change_7d', 
+                                'popularity_score', 'trend_score', 'primary_category', 'chain']
+                
+                for field in required_fields:
+                    if field not in project_dict:
+                        # Try alternate field names
+                        if field == 'price_usd' and 'current_price' in project_dict:
+                            project_dict['price_usd'] = project_dict['current_price']
+                        elif field == 'volume_24h' and 'total_volume' in project_dict:
+                            project_dict['volume_24h'] = project_dict['total_volume']
+                        elif field == 'price_change_7d' and 'price_change_percentage_7d_in_currency' in project_dict:
+                            project_dict['price_change_7d'] = project_dict['price_change_percentage_7d_in_currency']
+                        elif field == 'category' and 'primary_category' in project_dict:
+                            project_dict['category'] = project_dict['primary_category']
+                        else:
+                            # Default to None
+                            project_dict[field] = None
+                            
+                result.append(project_dict)
+                    
             return result
         elif 'market_cap' in self.projects_df.columns:
             # Use market cap as fallback
             popular = self.projects_df.sort_values('market_cap', ascending=False).head(n)
-            return popular.to_dict('records')
+            
+            # Ensure all required fields are present
+            result = []
+            for _, project in popular.iterrows():
+                project_dict = project.to_dict()
+                project_dict['recommendation_score'] = float(project_dict.get('market_cap', 0)) / 1e9  # Normalize market cap
+                
+                # Add missing fields
+                if 'image' not in project_dict:
+                    project_dict['image'] = None
+                
+                result.append(project_dict)
+                
+            return result
         else:
             # Just return first n projects
-            return self.projects_df.head(n).to_dict('records')
+            projects = self.projects_df.head(n)
+            return [
+                {**row.to_dict(), 'recommendation_score': 0.5, 'image': row.get('image', None)}
+                for _, row in projects.iterrows()
+            ]
