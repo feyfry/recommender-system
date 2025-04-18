@@ -771,7 +771,7 @@ class DataProcessor:
         return interactions_df
     
     def _save_processed_data(self, projects_df: pd.DataFrame, interactions_df: pd.DataFrame, 
-                            features_df: pd.DataFrame) -> None:
+                        features_df: pd.DataFrame) -> None:
         """
         Simpan data yang sudah diproses
         
@@ -796,3 +796,97 @@ class DataProcessor:
         projects_df_csv = projects_df.copy()
         
         if 'platforms' in projects_df_csv.columns:
+            projects_df_csv['platforms'] = projects_df_csv['platforms'].apply(
+                lambda x: json.dumps(x) if isinstance(x, dict) else x
+            )
+            
+        if 'categories' in projects_df_csv.columns:
+            projects_df_csv['categories'] = projects_df_csv['categories'].apply(
+                lambda x: json.dumps(x) if isinstance(x, list) else x
+            )
+        
+        # Simpan dengan timestamp
+        projects_df_csv.to_csv(projects_path, index=False)
+        interactions_df.to_csv(interactions_path, index=False)
+        features_df.to_csv(features_path, index=False)
+        
+        # Simpan standard path
+        projects_df_csv.to_csv(projects_std_path, index=False)
+        interactions_df.to_csv(interactions_std_path, index=False)
+        features_df.to_csv(features_std_path, index=False)
+        
+        logger.info(f"Saved processed data to {PROCESSED_DIR}")
+        logger.info(f"Projects: {len(projects_df)} rows with {len(projects_df.columns)} columns")
+        logger.info(f"Interactions: {len(interactions_df)} rows")
+        logger.info(f"Features: {features_df.shape}")
+
+    def load_processed_data(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """
+        Load data yang sudah diproses dari standar path
+        
+        Returns:
+            tuple: (projects_df, interactions_df, features_df)
+        """
+        # Standard paths
+        projects_path = os.path.join(PROCESSED_DIR, "projects.csv")
+        interactions_path = os.path.join(PROCESSED_DIR, "interactions.csv")
+        features_path = os.path.join(PROCESSED_DIR, "features.csv")
+        
+        # Cek apakah file ada
+        if not all(os.path.exists(path) for path in [projects_path, interactions_path, features_path]):
+            logger.warning("Processed data files not found, processing raw data...")
+            return self.process_data()
+        
+        # Load data
+        projects_df = pd.read_csv(projects_path)
+        interactions_df = pd.read_csv(interactions_path)
+        features_df = pd.read_csv(features_path)
+        
+        # Convert string representations back to Python objects
+        if 'platforms' in projects_df.columns:
+            projects_df['platforms'] = projects_df['platforms'].apply(
+                lambda x: json.loads(x) if isinstance(x, str) else x
+            )
+            
+        if 'categories' in projects_df.columns:
+            projects_df['categories'] = projects_df['categories'].apply(
+                lambda x: json.loads(x) if isinstance(x, str) else x
+            )
+        
+        logger.info(f"Loaded processed data: {len(projects_df)} projects, {len(interactions_df)} interactions")
+        return projects_df, interactions_df, features_df
+
+
+if __name__ == "__main__":
+    # Test mode
+    processor = DataProcessor()
+    
+    # Process data
+    try:
+        projects_df, interactions_df, features_df = processor.process_data(n_users=100)
+        
+        print(f"Processed {len(projects_df)} projects")
+        print(f"Generated {len(interactions_df)} interactions")
+        print(f"Created feature matrix with shape {features_df.shape}")
+        
+        # Print top projects by popularity
+        print("\nTop 5 projects by popularity:")
+        top_popular = projects_df.sort_values('popularity_score', ascending=False).head(5)
+        for _, row in top_popular.iterrows():
+            print(f"{row['name']} ({row['symbol']}): Score={row['popularity_score']:.2f}, Category={row['primary_category']}")
+        
+        # Print top trending projects
+        print("\nTop 5 trending projects:")
+        top_trending = projects_df.sort_values('trend_score', ascending=False).head(5)
+        for _, row in top_trending.iterrows():
+            print(f"{row['name']} ({row['symbol']}): Score={row['trend_score']:.2f}, Category={row['primary_category']}")
+        
+        # Print category distribution
+        print("\nCategory distribution:")
+        category_counts = projects_df['primary_category'].value_counts()
+        for category, count in category_counts.items():
+            print(f"{category}: {count} projects")
+        
+    except ValueError as e:
+        print(f"Error: {e}")
+        print("Make sure to run data collection first!")
