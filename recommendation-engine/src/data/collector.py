@@ -313,13 +313,15 @@ class CoinGeckoCollector:
             logger.error("Failed to fetch trending coins")
             return None
     
-    def collect_all_data(self, limit: int = TOP_COINS_LIMIT, detail_limit: int = TOP_COINS_DETAIL) -> bool:
+    def collect_all_data(self, limit: int = TOP_COINS_LIMIT, detail_limit: int = TOP_COINS_DETAIL, 
+                         include_categories: bool = False) -> bool:
         """
         Collect all required data
         
         Args:
             limit: Number of top coins to fetch 
             detail_limit: Number of coins to fetch details for
+            include_categories: Whether to also fetch coins by category (from CATEGORIES in config.py)
             
         Returns:
             bool: Success status
@@ -337,17 +339,21 @@ class CoinGeckoCollector:
             # Collect all coins data
             all_coins = top_coins.copy()
             
-            # 2. Fetch coins by category
-            for category in CATEGORIES:
-                logger.info(f"Processing category: {category}")
-                category_coins = self.fetch_category_coins(category)
-                
-                if category_coins:
-                    # Add to all coins
-                    all_coins.extend(category_coins)
+            # 2. Fetch coins by category (only if explicitly requested)
+            if include_categories:
+                logger.info("Including category-specific coins as requested")
+                for category in CATEGORIES:
+                    logger.info(f"Processing category: {category}")
+                    category_coins = self.fetch_category_coins(category)
                     
-                # Respect rate limits
-                time.sleep(self.rate_limit)
+                    if category_coins:
+                        # Add to all coins
+                        all_coins.extend(category_coins)
+                        
+                    # Respect rate limits
+                    time.sleep(self.rate_limit)
+            else:
+                logger.info("Skipping category-specific coin collection")
             
             # Remove duplicates based on id
             unique_ids = set()
@@ -358,7 +364,8 @@ class CoinGeckoCollector:
                     unique_ids.add(coin['id'])
                     unique_coins.append(coin)
             
-            logger.info(f"Collected {len(unique_coins)} unique coins across all categories")
+            logger.info(f"Collected {len(unique_coins)} unique coins" + 
+                       (" across all categories" if include_categories else " from top coins"))
             
             # Save combined unique coins to single file
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -552,7 +559,7 @@ if __name__ == "__main__":
         print("CoinGecko API is available")
         
         # Collect data with smaller limits for testing
-        success = collector.collect_all_data(limit=10, detail_limit=3)
+        success = collector.collect_all_data(limit=10, detail_limit=3, include_categories=False)
         
         if success:
             print("Data collection successful!")

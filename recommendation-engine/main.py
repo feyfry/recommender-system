@@ -45,6 +45,7 @@ def collect_data(args):
     limit = getattr(args, 'limit', 500)
     detail_limit = getattr(args, 'detail_limit', 100)
     rate_limit = getattr(args, 'rate_limit', 2.0)
+    include_categories = getattr(args, 'include_categories', False)
 
     # Initialize collector with rate limit
     collector = CoinGeckoCollector(rate_limit=rate_limit)
@@ -56,8 +57,8 @@ def collect_data(args):
         return False
     
     start_time = time.time()
-    # Menggunakan parameter limit dan detail_limit
-    result = collector.collect_all_data(limit=limit, detail_limit=detail_limit)
+    # Using parameters limit, detail_limit, and include_categories
+    result = collector.collect_all_data(limit=limit, detail_limit=detail_limit, include_categories=include_categories)
     
     if result:
         elapsed_time = time.time() - start_time
@@ -1088,6 +1089,7 @@ Examples:
     collect_parser.add_argument("--limit", type=int, default=500, help="Number of coins to collect")
     collect_parser.add_argument("--detail-limit", type=int, default=100, help="Number of coins to get detailed data for")
     collect_parser.add_argument("--rate-limit", type=float, default=2.0, help="Delay between API requests in seconds")
+    collect_parser.add_argument("--include-categories", action="store_true", help="Also collect coins by categories defined in config.py")
     
     # process command
     process_parser = subparsers.add_parser("process", help="Process collected data")
