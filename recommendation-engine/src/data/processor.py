@@ -38,25 +38,64 @@ class DataProcessor:
         
         # Definisikan kategori mapping untuk normalisasi
         self.category_mappings = {
-            'defi': ['defi', 'decentralized-finance', 'decentralized-finance-defi', 'lending', 'yield-farming'],
-            'nft': ['nft', 'non-fungible-tokens', 'non-fungible-tokens-nft', 'collectibles'],
-            'layer-1': ['layer-1', 'layer1', 'l1', 'blockchain-service', 'smart-contract-platform'],
-            'layer-2': ['layer-2', 'layer2', 'l2', 'scaling'],
-            'gaming': ['gaming', 'play-to-earn', 'p2e', 'game', 'metaverse', 'gaming-guild'],
-            'stablecoin': ['stablecoin', 'stablecoin-algorithmically-stabilized', 'stablecoin-asset-backed'],
-            'meme': ['meme', 'meme-token', 'dog', 'inu', 'cat', 'food'],
-            'exchange': ['exchange', 'exchange-token', 'exchange-based', 'centralized-exchange'],
+            'ai': [
+                'ai', 'artificial-intelligence', 'artificial intelligence', 'artificial-intelligence-ai',
+                'machine-learning', 'large-language-models', 'llm'
+            ],
+            'defi': [
+                'defi', 'decentralized-finance', 'decentralized-finance-defi', 'lending', 'yield-farming',
+                'yield-aggregator', 'dex', 'derivatives', 'synthetic-assets'
+            ],
+            'nft': [
+                'nft', 'non-fungible-tokens', 'non-fungible-tokens-nft', 'collectibles', 'digital-art',
+                'generative-art'
+            ],
+            'layer-1': [
+                'layer-1', 'layer1', 'l1', 'blockchain-service', 'smart-contract-platform'
+            ],
+            'layer-2': [
+                'layer-2', 'layer2', 'l2', 'scaling', 'optimistic-rollups', 'zk-rollups',
+                'zero-knowledge', 'zk'
+            ],
+            'gaming': [
+                'gaming', 'play-to-earn', 'p2e', 'game', 'metaverse', 'gaming-guild',
+                'gaming-blockchains', 'gaming-marketplace'
+            ],
+            'stablecoin': [
+                'stablecoin', 'stablecoins', 'stablecoin-algorithmically-stabilized', 
+                'stablecoin-asset-backed', 'fiat-backed'
+            ],
+            'meme': [
+                'meme', 'meme-token', 'dog', 'inu', 'cat', 'food', 'memes'
+            ],
+            'exchange': [
+                'exchange', 'exchange-token', 'exchange-based', 'centralized-exchange', 'cex',
+                'dex', 'decentralized-exchange'
+            ],
         }
+        
+        # Definisikan prioritas kategori
+        self.category_priority = [
+            'ai',         # AI memiliki prioritas tertinggi
+            'layer-1',    # Layer-1 chains
+            'layer-2',    # Layer-2 scaling solutions
+            'defi',       # DeFi projects
+            'stablecoin', # Stablecoins
+            'gaming',     # Gaming/Metaverse
+            'nft',        # NFT projects (prioritas lebih rendah)
+            'exchange',   # Exchange tokens
+            'meme'        # Meme tokens (prioritas terendah)
+        ]
         
         # Definisikan platform mapping untuk normalisasi chain
         self.blockchain_platforms = {
-            'ethereum': ['eth', 'erc20', 'erc-20', 'erc721', 'erc-721'],
-            'binance-smart-chain': ['bnb', 'bsc', 'bep20', 'bep-20'],
-            'solana': ['sol'],
-            'polygon-pos': ['polygon', 'matic'],
-            'avalanche': ['avax'],
-            'tron': ['trx'],
-            'cardano': ['ada']
+            'ethereum': ['eth', 'erc20', 'erc-20', 'erc721', 'erc-721', 'ethereum-ecosystem'],
+            'binance-smart-chain': ['bnb', 'bsc', 'bep20', 'bep-20', 'bnb-chain-ecosystem'],
+            'solana': ['sol', 'spl', 'solana-ecosystem'],
+            'polygon-pos': ['polygon', 'matic', 'polygon-ecosystem'],
+            'avalanche': ['avax', 'avalanche-ecosystem'],
+            'tron': ['trx', 'trc20', 'trc-20'],
+            'cardano': ['ada', 'cardano-ecosystem']
         }
     
     def load_latest_data(self) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
@@ -68,31 +107,86 @@ class DataProcessor:
         """
         logger.info("Loading raw data")
         
-        # Mencari file market data terbaru
-        market_files = [f for f in os.listdir(RAW_DIR) if f.startswith("coins_markets_") and f.endswith(".json")]
+        # Check for combined file first
+        combined_files = [f for f in os.listdir(RAW_DIR) if f.startswith("combined_coins_") and f.endswith(".json")]
         
-        if not market_files:
-            logger.error("No market data files found")
-            return None, None, None
-        
-        # Mengumpulkan semua data market
-        all_market_data = []
-        for file in market_files:
+        if combined_files:
+            # Use the latest combined file
+            latest_combined = sorted(combined_files)[-1]
+            combined_path = os.path.join(RAW_DIR, latest_combined)
+            
+            logger.info(f"Using latest combined file: {latest_combined}")
+            
             try:
-                with open(os.path.join(RAW_DIR, file), 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    if isinstance(data, list):
-                        all_market_data.extend(data)
+                with open(combined_path, 'r', encoding='utf-8') as f:
+                    combined_data = json.load(f)
+                
+                market_df = pd.DataFrame(combined_data)
+                logger.info(f"Loaded {len(market_df)} entries from combined file")
+                
+                # Ensure no duplicates
+                market_df = market_df.drop_duplicates(subset='id')
+                logger.info(f"After removing duplicates: {len(market_df)} entries")
+                
             except Exception as e:
-                logger.error(f"Error loading market data file {file}: {e}")
+                logger.error(f"Error loading combined file: {e}")
+                market_df = None
+        else:
+            # No combined file, use individual market files
+            logger.info("No combined file found, loading individual market files")
+            
+            # Mencari file market data terbaru
+            market_files = [f for f in os.listdir(RAW_DIR) if f.startswith("coins_markets_") and f.endswith(".json")]
+            
+            if not market_files:
+                logger.error("No market data files found")
+                return None, None, None
+            
+            # Mengumpulkan semua data market
+            all_market_data = []
+            for file in market_files:
+                try:
+                    with open(os.path.join(RAW_DIR, file), 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        if isinstance(data, list):
+                            # Extract category from filename if possible
+                            category = None
+                            if '_all_' not in file and '_page' not in file:
+                                # Try to extract category from filename (e.g. coins_markets_defi_20250418.json -> defi)
+                                match = re.search(r'coins_markets_([a-zA-Z0-9-]+)_\d+', file)
+                                if match and match.group(1) != 'all':
+                                    category = match.group(1)
+                                    logger.info(f"Extracted category '{category}' from filename: {file}")
+                            
+                            # Add category info if available and not already present
+                            if category:
+                                for item in data:
+                                    if 'query_category' not in item:
+                                        item['query_category'] = category
+                            
+                            all_market_data.extend(data)
+                except Exception as e:
+                    logger.error(f"Error loading market data file {file}: {e}")
+            
+            if not all_market_data:
+                logger.error("No market data loaded")
+                return None, None, None
+            
+            # Membuat DataFrame market dan menghapus duplikat
+            market_df = pd.DataFrame(all_market_data)
+            
+            # Log kolom yang tersedia untuk debugging
+            logger.info(f"Market data columns: {market_df.columns.tolist()}")
+            
+            # Hapus duplikat berdasarkan id
+            original_len = len(market_df)
+            market_df = market_df.drop_duplicates(subset='id')
+            logger.info(f"Removed {original_len - len(market_df)} duplicate entries")
         
-        if not all_market_data:
-            logger.error("No market data loaded")
-            return None, None, None
-        
-        # Membuat DataFrame market dan menghapus duplikat
-        market_df = pd.DataFrame(all_market_data)
-        market_df = market_df.drop_duplicates(subset='id')
+        # Add query_category if missing
+        if 'query_category' not in market_df.columns:
+            logger.warning("query_category column not found, adding default value")
+            market_df['query_category'] = 'unknown'
         
         # Load detail coin
         detail_files = [f for f in os.listdir(RAW_DIR) if f.startswith("coin_details_") and f.endswith(".json")]
@@ -129,6 +223,8 @@ class DataProcessor:
         
         # Buat DataFrame detail
         detailed_df = pd.DataFrame(detailed_data) if detailed_data else None
+        if detailed_df is not None:
+            logger.info(f"Loaded detailed data for {len(detailed_df)} coins")
         
         # Load kategori
         categories_df = None
@@ -137,6 +233,7 @@ class DataProcessor:
                 with open(os.path.join(RAW_DIR, "coins_categories.json"), 'r', encoding='utf-8') as f:
                     categories_data = json.load(f)
                 categories_df = pd.DataFrame(categories_data)
+                logger.info(f"Loaded {len(categories_df)} categories")
             except Exception as e:
                 logger.error(f"Error loading categories data: {e}")
         
@@ -149,6 +246,7 @@ class DataProcessor:
                 if 'coins' in trending_data:
                     trending_coins = [item['item'] for item in trending_data['coins']]
                     trending_df = pd.DataFrame(trending_coins)
+                    logger.info(f"Loaded {len(trending_df)} trending coins")
             except Exception as e:
                 logger.error(f"Error loading trending data: {e}")
         
@@ -156,10 +254,32 @@ class DataProcessor:
         projects_df = None
         if detailed_df is not None and not detailed_df.empty:
             projects_df = market_df.merge(detailed_df, on='id', how='left', suffixes=('', '_detailed'))
+            logger.info(f"Merged market and detailed data: {len(projects_df)} rows")
         else:
             projects_df = market_df
+            logger.info(f"Using market data only: {len(projects_df)} rows")
         
-        logger.info(f"Loaded {len(projects_df)} projects, {len(categories_df) if categories_df is not None else 0} categories")
+        # Verifikasi apakah ada kolom yang diharapkan tapi hilang
+        expected_columns = [
+            'id', 'symbol', 'name', 'image', 'current_price', 'market_cap',
+            'total_volume', 'price_change_percentage_24h', 
+            'price_change_percentage_7d_in_currency',
+            'sparkline_in_7d', 'query_category'
+        ]
+        
+        missing_columns = [col for col in expected_columns if col not in projects_df.columns]
+        if missing_columns:
+            logger.warning(f"Missing expected columns: {missing_columns}")
+            
+            # Add missing columns with default values
+            for col in missing_columns:
+                if col == 'sparkline_in_7d':
+                    projects_df[col] = None
+                elif col == 'query_category':
+                    projects_df[col] = 'unknown'
+                else:
+                    projects_df[col] = None
+        
         return projects_df, categories_df, trending_df
     
     def process_data(self, n_users: int = 500) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -196,7 +316,7 @@ class DataProcessor:
     
     def _clean_project_data(self, projects_df: pd.DataFrame, trending_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
         """
-        Bersihkan dan standarisasi data proyek
+        Bersihkan dan standarisasi data proyek dengan peningkatan penanganan kategori
         
         Args:
             projects_df: DataFrame proyek yang akan dibersihkan
@@ -259,8 +379,10 @@ class DataProcessor:
         else:
             df['categories'] = [[] for _ in range(len(df))]
         
-        # Ekstrak primary_category dan chain
-        df['primary_category'] = df.apply(lambda row: self._extract_primary_category(row['categories']), axis=1)
+        # Ekstrak primary_category dengan algoritma yang diperbaiki
+        df['primary_category'] = df.apply(self._extract_primary_category_improved, axis=1)
+        
+        # Ekstrak chain
         df['chain'] = df.apply(lambda row: self._extract_primary_chain(row['platforms']), axis=1)
         
         # Hitung skor popularitas dan tren
@@ -276,29 +398,53 @@ class DataProcessor:
             df['is_trending'] = 0
         
         return df
-    
-    def _extract_primary_category(self, categories: List[str]) -> str:
+        
+    def _extract_primary_category_improved(self, row) -> str:
         """
-        Ekstrak kategori utama dari daftar kategori
+        Ekstrak kategori utama dengan algoritma yang diperbaiki
         
         Args:
-            categories: Daftar kategori koin
+            row: Baris DataFrame 
             
         Returns:
             str: Kategori utama yang dinormalisasi
         """
+        categories = row.get('categories', [])
+        query_category = row.get('query_category')
+        
         if not categories:
+            # Fallback ke query_category jika tersedia
+            if query_category and query_category != 'unknown' and query_category != 'top':
+                return query_category
             return 'unknown'
-            
+        
         # Normalisasi kategori
         normalized_categories = [cat.lower() for cat in categories if cat]
         
-        # Cek setiap kategori terhadap mapping
-        for category_name, aliases in self.category_mappings.items():
-            for alias in aliases:
-                if alias in normalized_categories:
-                    return category_name
+        # Log actual categories for debugging purposes
+        if 'id' in row and row['id'] in ['render-token', 'immutable-x']:
+            logger.debug(f"Extracting primary category for {row['id']}")
+            logger.debug(f"Categories: {normalized_categories}")
+            if query_category:
+                logger.debug(f"Query category: {query_category}")
         
+        # Temukan kategori berdasarkan prioritas
+        for priority_cat in self.category_priority:
+            aliases = self.category_mappings.get(priority_cat, [])
+            
+            # Cari dalam kategori (exact match)
+            if priority_cat in normalized_categories or any(alias in normalized_categories for alias in aliases):
+                return priority_cat
+            
+            # Cari kategori yang mengandung alias (partial match)
+            for alias in aliases:
+                if any(alias in cat for cat in normalized_categories):
+                    return priority_cat
+        
+        # Fallback ke query_category jika tersedia dan bukan 'unknown' atau 'top'
+        if query_category and query_category != 'unknown' and query_category != 'top':
+            return query_category
+            
         # Jika tidak ada match, ambil kategori pertama
         return categories[0].lower() if categories else 'unknown'
     
@@ -331,7 +477,7 @@ class DataProcessor:
         platform_keys = [p.lower() for p in platforms.keys()]
         for chain_name, aliases in self.blockchain_platforms.items():
             for alias in aliases:
-                if alias in platform_keys:
+                if any(alias in p for p in platform_keys):
                     return chain_name
         
         # Jika tidak ada match, ambil platform pertama
@@ -646,68 +792,7 @@ class DataProcessor:
         interactions_std_path = os.path.join(PROCESSED_DIR, "interactions.csv")
         features_std_path = os.path.join(PROCESSED_DIR, "features.csv")
         
-        # Simpan dengan timestamp
-        projects_df.to_csv(projects_path, index=False)
-        interactions_df.to_csv(interactions_path, index=False)
-        features_df.to_csv(features_path, index=False)
+        # Convert dicts and lists to string before saving to CSV
+        projects_df_csv = projects_df.copy()
         
-        # Simpan standard path
-        projects_df.to_csv(projects_std_path, index=False)
-        interactions_df.to_csv(interactions_std_path, index=False)
-        features_df.to_csv(features_std_path, index=False)
-        
-        logger.info(f"Saved processed data to {PROCESSED_DIR}")
-    
-    def load_processed_data(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """
-        Load data yang sudah diproses dari standar path
-        
-        Returns:
-            tuple: (projects_df, interactions_df, features_df)
-        """
-        # Standard paths
-        projects_path = os.path.join(PROCESSED_DIR, "projects.csv")
-        interactions_path = os.path.join(PROCESSED_DIR, "interactions.csv")
-        features_path = os.path.join(PROCESSED_DIR, "features.csv")
-        
-        # Cek apakah file ada
-        if not all(os.path.exists(path) for path in [projects_path, interactions_path, features_path]):
-            logger.warning("Processed data files not found, processing raw data...")
-            return self.process_data()
-        
-        # Load data
-        projects_df = pd.read_csv(projects_path)
-        interactions_df = pd.read_csv(interactions_path)
-        features_df = pd.read_csv(features_path)
-        
-        logger.info(f"Loaded processed data: {len(projects_df)} projects, {len(interactions_df)} interactions")
-        return projects_df, interactions_df, features_df
-
-
-if __name__ == "__main__":
-    # Test mode
-    processor = DataProcessor()
-    
-    # Process data
-    try:
-        projects_df, interactions_df, features_df = processor.process_data(n_users=100)
-        
-        print(f"Processed {len(projects_df)} projects")
-        print(f"Generated {len(interactions_df)} interactions")
-        print(f"Created feature matrix with shape {features_df.shape}")
-        
-        # Print top projects by popularity
-        print("\nTop 5 projects by popularity:")
-        top_popular = projects_df.sort_values('popularity_score', ascending=False).head(5)
-        for _, row in top_popular.iterrows():
-            print(f"{row['name']} ({row['symbol']}): Score={row['popularity_score']:.2f}, Category={row['primary_category']}")
-        
-        # Print top trending projects
-        print("\nTop 5 trending projects:")
-        top_trending = projects_df.sort_values('trend_score', ascending=False).head(5)
-        for _, row in top_trending.iterrows():
-            print(f"{row['name']} ({row['symbol']}): Score={row['trend_score']:.2f}, Category={row['primary_category']}")
-        
-    except ValueError as e:
-        print(f"Error: {e}")
-        print("Make sure to run data collection first!")
+        if 'platforms' in projects_df_csv.columns:

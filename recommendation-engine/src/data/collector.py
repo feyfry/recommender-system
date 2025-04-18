@@ -147,6 +147,10 @@ class CoinGeckoCollector:
             data = self.make_request('coins/markets', params)
             
             if data:
+                # Add query_category field to track source
+                for item in data:
+                    item['query_category'] = 'top'
+                    
                 all_coins.extend(data)
                 
                 # Save data to file
@@ -177,17 +181,63 @@ class CoinGeckoCollector:
         
         return all_coins
     
-    def fetch_coin_details(self, coin_id: str) -> Optional[Dict]:
+    def fetch_category_coins(self, category: str) -> Optional[List[Dict]]:
+        """
+        Fetch coins for a specific category
+        
+        Args:
+            category: Category name
+            
+        Returns:
+            list: List of coin data
+        """
+        logger.info(f"Fetching coins for category: {category}")
+        
+        params = {
+            'vs_currency': 'usd',
+            'order': 'market_cap_desc',
+            'per_page': 250,  # Max per page
+            'page': 1,
+            'sparkline': True,
+            'price_change_percentage': '1h,24h,7d,30d',
+            'category': category
+        }
+        
+        data = self.make_request('coins/markets', params)
+        
+        if data:
+            # Add query_category field to track source
+            for item in data:
+                item['query_category'] = category
+                
+            # Save to file
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = os.path.join(RAW_DIR, f"coins_markets_{category}_{timestamp}.json")
+            
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"Saved {len(data)} {category} coins to {filename}")
+            
+            return data
+        else:
+            logger.error(f"Failed to fetch coins for category: {category}")
+            return None
+    
+    def fetch_coin_details(self, coin_id: str, index: int = 0, total: int = 0) -> Optional[Dict]:
         """
         Fetch detailed info for a specific coin
         
         Args:
             coin_id: CoinGecko coin ID
+            index: Current index for progress tracking
+            total: Total number of coins to fetch
             
         Returns:
             dict: Coin details
         """
-        logger.info(f"Fetching details for {coin_id}")
+        progress = f"({index}/{total})" if total > 0 else ""
+        logger.info(f"Fetching details for {coin_id} {progress}")
         
         params = {
             'localization': 'false',
@@ -284,7 +334,52 @@ class CoinGeckoCollector:
                 logger.error("Failed to fetch top coins")
                 return False
             
-            # 2. Fetch detailed info for top coins
+            # Collect all coins data
+            all_coins = top_coins.copy()
+            
+            # 2. Fetch coins by category
+            for category in CATEGORIES:
+                logger.info(f"Processing category: {category}")
+                category_coins = self.fetch_category_coins(category)
+                
+                if category_coins:
+                    # Add to all coins
+                    all_coins.extend(category_coins)
+                    
+                # Respect rate limits
+                time.sleep(self.rate_limit)
+            
+            # Remove duplicates based on id
+            unique_ids = set()
+            unique_coins = []
+            
+            for coin in all_coins:
+                if coin['id'] not in unique_ids:
+                    unique_ids.add(coin['id'])
+                    unique_coins.append(coin)
+            
+            logger.info(f"Collected {len(unique_coins)} unique coins across all categories")
+            
+            # Save combined unique coins to single file
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            combined_filename = os.path.join(RAW_DIR, f"combined_coins_{timestamp}.json")
+            
+            with open(combined_filename, 'w', encoding='utf-8') as f:
+                json.dump(unique_coins, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"Saved {len(unique_coins)} unique coins to {combined_filename}")
+            
+            # Also save as CSV for easier analysis
+            coins_df = pd.DataFrame(unique_coins)
+            if 'sparkline_in_7d' in coins_df.columns:
+                # Convert sparkline dict to string to save in CSV
+                coins_df['sparkline_in_7d'] = coins_df['sparkline_in_7d'].apply(lambda x: json.dumps(x) if isinstance(x, dict) else x)
+            
+            csv_filename = os.path.join(RAW_DIR, f"combined_coins_{timestamp}.csv")
+            coins_df.to_csv(csv_filename, index=False)
+            logger.info(f"Saved combined coins as CSV to {csv_filename}")
+            
+            # 3. Fetch detailed info for top coins
             if detail_limit > 0:
                 # Get top N coins
                 detail_ids = [coin['id'] for coin in top_coins[:detail_limit]]
@@ -292,19 +387,22 @@ class CoinGeckoCollector:
                 logger.info(f"Fetching details for {len(detail_ids)} coins")
                 
                 success_count = 0
-                for coin_id in detail_ids:
-                    if self.fetch_coin_details(coin_id):
+                for idx, coin_id in enumerate(detail_ids, 1):
+                    if self.fetch_coin_details(coin_id, idx, len(detail_ids)):
                         success_count += 1
+                    
+                    # Respect rate limits
+                    time.sleep(self.rate_limit)
                 
                 logger.info(f"Successfully fetched details for {success_count}/{len(detail_ids)} coins")
             
-            # 3. Fetch categories
+            # 4. Fetch categories
             categories = self.fetch_coin_categories()
             
             if not categories:
                 logger.warning("Failed to fetch categories")
             
-            # 4. Fetch trending coins
+            # 5. Fetch trending coins
             trending = self.fetch_trending_coins()
             
             if not trending:
