@@ -191,8 +191,6 @@ async def get_trading_signals(request: TradingSignalRequest):
         logger.error(f"Error generating trading signals: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
-# Complete implementation for the indicators endpoint in src/api/analysis.py
-
 @router.post("/indicators", response_model=TechnicalIndicatorsResponse)
 async def get_technical_indicators(request: TechnicalIndicatorsRequest):
     """
