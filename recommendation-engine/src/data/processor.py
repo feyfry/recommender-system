@@ -31,62 +31,288 @@ class DataProcessor:
     
     def __init__(self):
         """
-        Inisialisasi processor dengan kategori dan platform normalisasi
+        Inisialisasi processor dengan kategori dan platform normalisasi - versi yang lebih akurat
         """
         # Pastikan direktori ada
         os.makedirs(PROCESSED_DIR, exist_ok=True)
         
-        # Definisikan kategori mapping untuk normalisasi
+        # Definisikan mapping kategori utama untuk normalisasi
         self.category_mappings = {
-            'ai': [
-                'ai', 'artificial-intelligence', 'artificial intelligence', 'artificial-intelligence-ai',
-                'artificial intelligence (ai)', 'machine-learning', 'large-language-models', 'llm'
-            ],
-            'defi': [
-                'defi', 'decentralized-finance', 'decentralized-finance-defi', 'lending', 'yield-farming',
-                'yield-aggregator', 'dex', 'derivatives', 'synthetic-assets'
-            ],
-            'nft': [
-                'nft', 'non-fungible-tokens', 'non-fungible-tokens-nft', 'collectibles', 'digital-art',
-                'generative-art', 'nfts', 'nfts-marketplace'
-            ],
+            # Layer dan Infrastruktur
             'layer-1': [
-                'layer-1', 'layer1', 'l1', 'blockchain-service', 'smart-contract-platform',
-                'smart contract platform'
+                'layer-1', 'layer1', 'l1', 'smart-contract-platform', 'blockchain-service',
+                'proof-of-work-pow', 'proof-of-stake-pos', 'sidechain',
+                'infrastructure', 'modular-blockchain'
             ],
             'layer-2': [
-                'layer-2', 'layer2', 'l2', 'scaling', 'optimistic-rollups', 'zk-rollups',
-                'zero-knowledge', 'zk', 'zero knowledge (zk)', 'layer 2 (l2)', 'rollup'
+                'layer-2', 'layer2', 'l2', 'scaling', 'rollup', 'optimistic-rollups', 'zk-rollups',
+                'zero-knowledge', 'zk', 'zero knowledge (zk)', 'layer 2 (l2)', 'layer-2-scaling',
+                'bitcoin-layer-2', 'superchain-ecosystem', 'data-availability'
+            ],
+            'layer-0': [
+                'layer-0', 'layer0', 'l0', 'cross-chain-communication', 'interoperability',
+                'blockchain-interoperability', 'cross-chain'
+            ],
+            'layer-3': ['layer-3', 'layer3', 'l3'],
+            
+            # DeFi
+            'defi': [
+                'defi', 'decentralized-finance', 'decentralized-finance-defi', 'yield-farming', 
+                'lending-borrowing', 'yield-aggregator', 'liquidity-protocol', 'dex',
+                'defi-index', 'stablecoin-protocol', 'automated-market-maker-amm',
+                'yield-optimizer', 'fixed-interest', 'btcfi', 'lsdfi', 'curve-ecosystem'
+            ],
+            'dex': [
+                'dex', 'decentralized-exchange', 'dex-aggregator', 'swap', 'amm'
+            ],
+            'stablecoin': [
+                'stablecoin', 'stablecoins', 'usd-stablecoin', 'eur-stablecoin', 
+                'fiat-backed-stablecoin', 'crypto-backed-stablecoin', 'algorithmic-stablecoin',
+                'commodity-backed-stablecoin', 'yield-bearing-stablecoins'
+            ],
+            'liquid-staking': [
+                'liquid-staking', 'liquid-staking-tokens', 'liquid-staked-eth', 'liquid-staking-governance-tokens',
+                'liquid-staked-btc', 'liquid-staked-sol', 'liquid-staked-apt', 'liquid-staked-sui'
+            ],
+            'restaking': [
+                'restaking', 'liquid-restaking-tokens', 'liquid-restaked-eth', 'liquid-restaking-governance-token'
+            ],
+            'lending': [
+                'lending', 'lending-borrowing', 'borrowing', 'credit', 'loan'
+            ],
+            'yield': [
+                'yield-farming', 'yield-aggregator', 'yield-optimizer', 'yield-tokenization',
+                'yield-tokenization-product', 'farming-as-a-service'
+            ],
+            
+            # Collectibles & Gaming
+            'nft': [
+                'nft', 'non-fungible-tokens', 'non-fungible-tokens-nft', 'collectibles', 'digital-art',
+                'generative-art', 'nfts', 'nfts-marketplace', 'nft-marketplace', 'nft-index',
+                'nft-aggregator', 'nft-lending-borrowing', 'fractionalized-nft', 'nft-derivatives',
+                'nft-launchpad', 'nft-amm', 'nftfi'
             ],
             'gaming': [
                 'gaming', 'play-to-earn', 'p2e', 'game', 'metaverse', 'gaming-guild',
                 'gaming-blockchains', 'gaming-marketplace', 'gaming (gamefi)', 'play to earn',
-                'gamefi', 'game-fi'
+                'gamefi', 'game-fi', 'gaming-utility-token', 'gaming-governance-token',
+                'gaming-platform', 'rpg', 'simulation-games', 'massively-multiplayer-online-mmo',
+                'racing-games', 'fighting-games', 'card-games', 'strategy-games',
+                'adventure-games', 'arcade-games', 'sports-games', 'on-chain-gaming',
+                'animal-racing', 'farming-games', 'shooting-games'
             ],
-            'stablecoin': [
-                'stablecoin', 'stablecoins', 'stablecoin-algorithmically-stabilized', 
-                'stablecoin-asset-backed', 'fiat-backed'
+            'metaverse': [
+                'metaverse', 'virtual-reality', 'augmented-reality', 'virtual-world'
             ],
+            
+            # AI & Tech
+            'ai': [
+                'ai', 'artificial-intelligence', 'artificial intelligence', 'artificial-intelligence-ai',
+                'artificial intelligence (ai)', 'machine-learning', 'large-language-models', 'llm',
+                'ai-framework', 'ai-applications', 'ai-agents', 'defai', 'ai-meme-coins'
+            ],
+            'privacy': [
+                'privacy-coins', 'privacy-blockchain', 'vpn', 'privacy-protocol', 'privacy-token'
+            ],
+            'identity': [
+                'identity', 'name-service', 'digital-identity', 'identity-verification'
+            ],
+            'iot': [
+                'internet-of-things-iot', 'iot', 'depin', 'mobile-mining'
+            ],
+            'storage': [
+                'storage', 'decentralized-storage', 'file-storage', 'cloud-storage'
+            ],
+            
+            # Meme & Social Tokens
             'meme': [
-                'meme', 'meme-token', 'dog', 'inu', 'cat', 'food', 'memes'
+                'meme', 'meme-token', 'dog-themed-coins', 'elon-musk-inspired-coins',
+                'frog-themed-coins', 'cat-themed-coins', 'duck-themed-coins',
+                'memes', 'parody-meme-coins', 'ai-meme-coins', 'solana-meme-coins',
+                'sui-meme', 'tron-meme', 'base-meme-coins', 'mascot-themed',
+                'wall-street-bets-themed', 'zodiac-themed', 'emoji-themed',
+                'sticker-themed-coin', 'christmas-themed', 'chinese-meme'
             ],
-            'exchange': [
-                'exchange', 'exchange-token', 'exchange-based', 'centralized-exchange', 'cex',
-                'dex', 'decentralized-exchange'
+            'exchange-token': [
+                'exchange', 'exchange-token', 'exchange-based-tokens', 'centralized-exchange-token-cex',
+                'dex', 'decentralized-exchange', 'cefi'
             ],
+            'fan-token': [
+                'fan-token', 'sports', 'gaming-guild', 'guild-scholarship', 'celebrity-themed-coins'
+            ],
+            'social': [
+                'socialfi', 'social-token', 'social-media', 'friend-tech', 'farcaster-ecosystem',
+                'telegram_apps'
+            ],
+            
+            # Real World Assets
+            'rwa': [
+                'real-world-assets-rwa', 'asset-backed-tokens', 'wrapped-tokens',
+                'tokenized-products', 'tokenized-commodities', 'tokenized-gold',
+                'tokenized-silver', 'tokenized-stock', 'tokenized-treasury-bonds-t',
+                'rwa-protocol', 'realt-tokens'
+            ],
+            'real-estate': [
+                'real-estate', 'property', 'realt-tokens', 'real-estate-token'
+            ],
+            
+            # Other Categories
+            'bridge': [
+                'bridged-tokens', 'bridged-stablecoins', 'bridged-usdt', 'bridged-usdc',
+                'bridged-weth', 'bridged-wbtc', 'bridge-governance-tokens', 'bridged-frax',
+                'bridged-wbnb', 'bridged-wavax', 'bridged-wsteth', 'cross-chain'
+            ],
+            'dao': [
+                'dao', 'decentralized-autonomous-organization', 'governance', 'metagovernance'
+            ],
+            'oracle': [
+                'oracle', 'data-oracle', 'price-oracle'
+            ],
+            'prediction': [
+                'prediction-markets', 'forecasting', 'prediction-protocol', 'betting',
+                'gambling'
+            ],
+            'token-standard': [
+                'token-standards', 'erc-404', 'brc-20', 'drc-20', 'asc-20',
+                'src-20', 'erc20i', 'hybrid-token-standards', 'token-2022'
+            ],
+            'launchpad': [
+                'launchpad', 'tokenfi-launchpad', 'chaingpt-pad', 'camelot-launchpad',
+                'poolz-finance-launchpad', 'hyperxpad-launchpad', 'bitstarters-launchpad'
+            ],
+            'tourism': [
+                'tourism', 'travel', 'vacation', 'hospitality'
+            ],
+            'charity': [
+                'charity', 'donations', 'philanthropy', 'non-profit'
+            ],
+            'energy': [
+                'energy', 'renewable-energy', 'electricity', 'power'
+            ],
+            'sports': [
+                'sports', 'sports-games', 'fan-token', 'sports-betting'
+            ],
+            'education': [
+                'education', 'learning', 'training', 'academic'
+            ],
+            'science': [
+                'decentralized-science-desci', 'science', 'research', 'desci-meme'
+            ],
+            'insurance': [
+                'insurance', 'risk-protection', 'coverage'
+            ],
+            'marketing': [
+                'marketing', 'advertisement', 'promotion'
+            ],
+            'music': [
+                'music', 'audio', 'sound', 'entertainment'
+            ],
+            'healthcare': [
+                'healthcare', 'medical', 'wellness', 'health'
+            ],
+            'legal': [
+                'legal', 'law', 'compliance', 'regulation'
+            ],
+            'eco-friendly': [
+                'eco-friendly', 'green', 'sustainable', 'environmental'
+            ],
+            
+            # Ecosistemas de Blockchain específicos
+            'ethereum-ecosystem': ['ethereum-ecosystem', 'ethereum'],
+            'binance-smart-chain': ['binance-smart-chain', 'bsc', 'bnb-chain-ecosystem', 'bnb'],
+            'solana-ecosystem': ['solana-ecosystem', 'solana', 'sol'],
+            'polygon-ecosystem': ['polygon-ecosystem', 'polygon', 'matic'],
+            'avalanche-ecosystem': ['avalanche-ecosystem', 'avalanche', 'avax'],
+            'arbitrum-ecosystem': ['arbitrum-ecosystem', 'arbitrum'],
+            'optimism-ecosystem': ['optimism-ecosystem', 'optimism', 'op'],
+            'base-ecosystem': ['base-ecosystem', 'base'],
+            'fantom-ecosystem': ['fantom-ecosystem', 'fantom', 'ftm'],
+            'cosmos-ecosystem': ['cosmos-ecosystem', 'cosmos', 'atom'],
+            'tron-ecosystem': ['tron-ecosystem', 'tron', 'trx'],
+            'cardano-ecosystem': ['cardano-ecosystem', 'cardano', 'ada'],
+            'bitcoin-ecosystem': ['bitcoin-ecosystem', 'bitcoin', 'btc'],
+            'sui-ecosystem': ['sui-ecosystem', 'sui'],
+            'near-protocol-ecosystem': ['near-protocol-ecosystem', 'near'],
+            'aptos-ecosystem': ['aptos-ecosystem', 'aptos', 'apt'],
+            'ton-ecosystem': ['ton-ecosystem', 'ton'],
+            'blast-ecosystem': ['blast-ecosystem', 'blast'],
+            'starknet-ecosystem': ['starknet-ecosystem', 'starknet'],
         }
         
-        # Definisikan prioritas kategori
+        # Lista de categori ecosystem
+        self.ecosystem_categories = [
+            'ethereum-ecosystem', 'binance-smart-chain', 'solana-ecosystem', 'polygon-ecosystem',
+            'avalanche-ecosystem', 'arbitrum-ecosystem', 'optimism-ecosystem', 'base-ecosystem',
+            'fantom-ecosystem', 'cosmos-ecosystem', 'tron-ecosystem', 'cardano-ecosystem', 
+            'bitcoin-ecosystem', 'sui-ecosystem', 'near-protocol-ecosystem', 'aptos-ecosystem',
+            'ton-ecosystem', 'blast-ecosystem', 'starknet-ecosystem', 'xdai-ecosystem',
+            'osmosis-ecosytem', 'cronos-ecosystem', 'chiliz-ecosystem', 'harmony-ecosystem',
+            'energi-ecosystem', 'linea-ecosystem', 'klaytn-ecosystem', 'sonic-ecosystem',
+            'bitcichain-ecosystem', 'hedera-ecosystem', 'algorand-ecosystem', 'mantle-ecosystem',
+            'xrp-ledger-ecosystem', 'metis-ecosystem', 'moonriver-ecosystem', 'tezos-ecosystem',
+            'sora-ecosystem', 'berachain-ecosystem', 'multiversx-ecosystem', 'scroll-ecosystem',
+            'stellar-ecosystem'
+        ]
+        
+        # Definisikan prioritas kategori - REVISI BESAR DISINI
         self.category_priority = [
-            'layer-1',    # Layer-1 chains prioritas tertinggi
-            'layer-2',    # Layer-2 scaling solutions
-            'defi',       # DeFi projects
-            'nft',        # NFT projects
-            'gaming',     # Gaming/Metaverse
-            'ai',         # AI prioritas diturunkan
-            'stablecoin', # Stablecoins
-            'exchange',   # Exchange tokens
-            'meme'        # Meme tokens (prioritas terendah)
+            # Top priorities - Kategori Utama
+            'layer-2',       # Layer-2 scaling solutions (prioritas tertinggi)
+            'layer-1',       # Layer-1 chains 
+            'defi',          # DeFi projects
+            'dex',           # DEX platforms
+            'stablecoin',    # Stablecoins
+            'liquid-staking', # Liquid staking
+            'restaking',     # Restaking protocols
+            'lending',       # Lending platforms
+            'yield',         # Yield farming/aggregators
+            'nft',           # NFT projects
+            'gaming',        # Gaming/GameFi
+            'metaverse',     # Metaverse projects
+            'ai',            # AI projects
+            'meme',          # Meme tokens
+            'rwa',           # Real world assets
+            'exchange-token', # Exchange tokens
+            'bridge',        # Bridge protocols
+            'privacy',       # Privacy coins/protocols
+            'token-standard', # Token standards
+            
+            # Secondary categories - Kategori Sekunder
+            'oracle',        # Oracles
+            'dao',           # DAOs
+            'launchpad',     # Launchpads
+            'prediction',    # Prediction markets
+            'identity',      # Identity solutions
+            'storage',       # Storage solutions
+            'iot',           # IoT projects
+            'layer-0',       # Layer-0/Cross-chain
+            'layer-3',       # Layer-3 solutions
+            'fan-token',     # Fan tokens
+            'social',        # Social tokens/platforms
+            'tourism',       # Tourism related
+            'healthcare',    # Healthcare
+            'education',     # Education
+            'legal',         # Legal
+            'insurance',     # Insurance
+            'marketing',     # Marketing
+            'charity',       # Charity
+            'energy',        # Energy
+            'sports',        # Sports
+            'music',         # Music
+            'real-estate',   # Real estate
+            'science',       # Science
+            'eco-friendly',  # Eco-friendly
+            
+            # Ecosystem categories - Prioritas terendah (hanya jika tidak ada yang lain)
+            'ethereum-ecosystem',
+            'binance-smart-chain',
+            'solana-ecosystem',
+            'polygon-ecosystem',
+            'avalanche-ecosystem',
+            'arbitrum-ecosystem',
+            'optimism-ecosystem',
+            'base-ecosystem',
+            'other-ecosystem'  # Fallback for other ecosystems
         ]
         
         # Definisikan platform mapping untuk normalisasi chain
@@ -96,8 +322,19 @@ class DataProcessor:
             'solana': ['sol', 'spl', 'solana-ecosystem'],
             'polygon-pos': ['polygon', 'matic', 'polygon-ecosystem'],
             'avalanche': ['avax', 'avalanche-ecosystem'],
-            'tron': ['trx', 'trc20', 'trc-20'],
-            'cardano': ['ada', 'cardano-ecosystem']
+            'tron': ['trx', 'trc20', 'trc-20', 'tron-ecosystem'],
+            'cardano': ['ada', 'cardano-ecosystem'],
+            'arbitrum': ['arb', 'arbitrum-ecosystem'],
+            'optimism': ['op', 'optimism-ecosystem'],
+            'base': ['base-ecosystem'],
+            'sui': ['sui-ecosystem'],
+            'near': ['near-protocol-ecosystem'],
+            'aptos': ['apt', 'aptos-ecosystem'],
+            'ton': ['ton-ecosystem'],
+            'bitcoin': ['btc', 'bitcoin-ecosystem', 'brc-20'],
+            'cosmos': ['atom', 'cosmos-ecosystem'],
+            'blast': ['blast-ecosystem'],
+            'fantom': ['ftm', 'fantom-ecosystem'],
         }
     
     def load_latest_data(self) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
@@ -129,6 +366,11 @@ class DataProcessor:
                 # Ensure no duplicates
                 market_df = market_df.drop_duplicates(subset='id')
                 logger.info(f"After removing duplicates: {len(market_df)} entries")
+                
+                # Hapus kolom sparkline_in_7d jika ada
+                if 'sparkline_in_7d' in market_df.columns:
+                    logger.info("Removing sparkline_in_7d column from combined data")
+                    market_df = market_df.drop(columns=['sparkline_in_7d'])
                 
             except Exception as e:
                 logger.error(f"Error loading combined file: {e}")
@@ -165,6 +407,11 @@ class DataProcessor:
                                 for item in data:
                                     if 'query_category' not in item:
                                         item['query_category'] = category
+                            
+                            # Hapus sparkline_in_7d jika ada
+                            for item in data:
+                                if 'sparkline_in_7d' in item:
+                                    del item['sparkline_in_7d']
                             
                             all_market_data.extend(data)
                 except Exception as e:
@@ -266,7 +513,7 @@ class DataProcessor:
             'id', 'symbol', 'name', 'image', 'current_price', 'market_cap',
             'total_volume', 'price_change_percentage_24h', 
             'price_change_percentage_7d_in_currency',
-            'sparkline_in_7d', 'query_category'
+            'query_category'
         ]
         
         missing_columns = [col for col in expected_columns if col not in projects_df.columns]
@@ -275,18 +522,148 @@ class DataProcessor:
             
             # Add missing columns with default values
             for col in missing_columns:
-                if col == 'sparkline_in_7d':
-                    projects_df[col] = None
-                elif col == 'query_category':
+                if col == 'query_category':
                     projects_df[col] = 'unknown'
                 else:
                     projects_df[col] = None
         
         return projects_df, categories_df, trending_df
     
+    def validate_processed_data(self, projects_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Memvalidasi data yang diproses untuk memastikan integritas data
+        
+        Args:
+            projects_df: DataFrame proyek yang akan divalidasi
+            
+        Returns:
+            pd.DataFrame: Laporan validasi
+        """
+        logger.info("Validating processed data")
+        
+        validation_results = {
+            "total_projects": len(projects_df),
+            "issues_found": 0,
+            "issues_details": []
+        }
+        
+        # 1. Cek format JSON untuk platforms dan categories
+        json_issues = 0
+        for idx, row in projects_df.iterrows():
+            # Cek platforms
+            if 'platforms' in projects_df.columns:
+                platforms = row['platforms']
+                if not isinstance(platforms, dict) and not pd.isna(platforms):
+                    json_issues += 1
+                    validation_results["issues_details"].append({
+                        "id": row.get('id', f"Row {idx}"),
+                        "issue": "platforms is not a valid dictionary",
+                        "value": str(platforms)[:100]
+                    })
+            
+            # Cek categories
+            if 'categories' in projects_df.columns:
+                categories = row['categories']
+                if not isinstance(categories, list) and not pd.isna(categories):
+                    json_issues += 1
+                    validation_results["issues_details"].append({
+                        "id": row.get('id', f"Row {idx}"),
+                        "issue": "categories is not a valid list",
+                        "value": str(categories)[:100]
+                    })
+        
+        validation_results["json_format_issues"] = json_issues
+        validation_results["issues_found"] += json_issues
+        
+        # 2. Cek konsistensi antara primary_category dan categories
+        category_mismatch = 0
+        for idx, row in projects_df.iterrows():
+            if 'primary_category' in projects_df.columns and 'categories' in projects_df.columns:
+                primary_cat = row['primary_category']
+                categories = row['categories'] if isinstance(row['categories'], list) else []
+                
+                if categories and primary_cat not in ['unknown', 'other-ecosystem']:
+                    # Cek apakah primary_category match dengan salah satu kategori asli
+                    # atau setidaknya sebagian dari kategori asli
+                    normalized_categories = [cat.lower() for cat in categories if cat]
+                    found_match = False
+                    
+                    # Cek match eksak
+                    if primary_cat in normalized_categories:
+                        found_match = True
+                    else:
+                        # Cek partial match
+                        for cat in normalized_categories:
+                            if primary_cat in cat or cat in primary_cat:
+                                found_match = True
+                                break
+                            
+                            # Cek jika primary_cat adalah ecosystem tapi disingkat
+                            if primary_cat in ['ethereum', 'binance', 'solana', 'polygon', 'avalanche', 
+                                            'arbitrum', 'optimism', 'base', 'fantom', 'cosmos']:
+                                ecosystem_cat = f"{primary_cat}-ecosystem"
+                                if ecosystem_cat in cat or cat in ecosystem_cat:
+                                    found_match = True
+                                    break
+                    
+                    # Jika tidak ada match, catat masalah
+                    if not found_match:
+                        category_mismatch += 1
+                        validation_results["issues_details"].append({
+                            "id": row.get('id', f"Row {idx}"),
+                            "issue": "primary_category doesn't match any category in categories",
+                            "primary_category": primary_cat,
+                            "categories": str(categories)
+                        })
+        
+        validation_results["category_mismatch_issues"] = category_mismatch
+        validation_results["issues_found"] += category_mismatch
+        
+        # 3. Cek nilai yang kosong untuk field penting
+        null_issues = 0
+        important_fields = ['id', 'name', 'symbol', 'current_price', 'market_cap', 'total_volume']
+        
+        for field in important_fields:
+            if field in projects_df.columns:
+                null_count = projects_df[field].isna().sum()
+                if null_count > 0:
+                    null_issues += null_count
+                    validation_results["issues_details"].append({
+                        "issue": f"Null values in {field}",
+                        "count": null_count
+                    })
+        
+        validation_results["null_value_issues"] = null_issues
+        validation_results["issues_found"] += null_issues
+        
+        # 4. Logika validasi khusus untuk menunjukkan contoh mismatch
+        # Tunjukkan 5 baris acak untuk diperiksa
+        if len(projects_df) > 0:
+            sample_rows = projects_df.sample(min(5, len(projects_df)))
+            validation_results["sample_rows"] = []
+            
+            for _, row in sample_rows.iterrows():
+                sample = {
+                    "id": row.get('id', 'N/A'),
+                    "name": row.get('name', 'N/A'),
+                    "symbol": row.get('symbol', 'N/A'),
+                    "primary_category": row.get('primary_category', 'N/A'),
+                    "categories": str(row.get('categories', [])),
+                }
+                validation_results["sample_rows"].append(sample)
+        
+        # Log hasil validasi
+        logger.info(f"Validation completed. Found {validation_results['issues_found']} issues.")
+        if validation_results['issues_found'] > 0:
+            logger.warning(f"JSON format issues: {validation_results['json_format_issues']}")
+            logger.warning(f"Category mismatch issues: {validation_results['category_mismatch_issues']}")
+            logger.warning(f"Null value issues: {validation_results['null_value_issues']}")
+        
+        return validation_results
+    
     def process_data(self, n_users: int = 500) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """
-        Proses data mentah dan persiapkan untuk sistem rekomendasi
+        Proses data mentah dan persiapkan untuk sistem rekomendasi, dengan validasi hasil
         
         Args:
             n_users: Jumlah user sintetis untuk dibuat
@@ -311,7 +688,18 @@ class DataProcessor:
         # 3. Buat data interaksi sintetis
         interactions_df = self._create_synthetic_interactions(projects_df, n_users)
         
-        # 4. Simpan data yang sudah diproses
+        # 4. Validasi hasil pemrosesan
+        validation_results = self.validate_processed_data(projects_df)
+        
+        # Log hasil validasi 
+        logger.info(f"Data validation results: {validation_results['issues_found']} issues found.")
+        
+        # Jika ada masalah serius, tampilkan log peringatan
+        if validation_results['issues_found'] > 100:
+            logger.warning(f"High number of data issues detected: {validation_results['issues_found']}")
+            logger.warning("Please check data integrity before proceeding")
+        
+        # 5. Simpan data yang sudah diproses
         self._save_processed_data(projects_df, interactions_df, features_df)
         
         return projects_df, interactions_df, features_df
@@ -332,6 +720,11 @@ class DataProcessor:
         # Buat salinan untuk dimodifikasi
         df = projects_df.copy()
         
+        # Hapus kolom sparkline_in_7d jika ada
+        if 'sparkline_in_7d' in df.columns:
+            logger.info("Removing sparkline_in_7d column")
+            df = df.drop(columns=['sparkline_in_7d'])
+        
         # Tangani nilai NaN
         df['market_cap'] = df['market_cap'].fillna(0)
         df['total_volume'] = df['total_volume'].fillna(0)
@@ -339,7 +732,7 @@ class DataProcessor:
         
         # Pastikan kolom numerical ada
         for col in ['price_change_percentage_24h', 'price_change_percentage_7d_in_currency', 
-                   'price_change_percentage_30d_in_currency', 'price_change_percentage_1h_in_currency']:
+                'price_change_percentage_30d_in_currency', 'price_change_percentage_1h_in_currency']:
             if col in df.columns:
                 df[col] = df[col].fillna(0)
             else:
@@ -347,7 +740,7 @@ class DataProcessor:
         
         # Tangani kolom sosial
         for col in ['reddit_subscribers', 'twitter_followers', 'github_stars', 
-                  'github_subscribers', 'github_forks']:
+                'github_subscribers', 'github_forks']:
             if col in df.columns:
                 df[col] = df[col].fillna(0).astype(int)
             else:
@@ -365,7 +758,7 @@ class DataProcessor:
             df['platforms'] = df['platforms'].fillna({})
         else:
             df['platforms'] = [{} for _ in range(len(df))]
-            
+                
         # Tangani kolom categories dengan cara yang lebih aman
         if 'categories' in df.columns:
             def clean_categories(x):
@@ -380,7 +773,7 @@ class DataProcessor:
                     except:
                         return []
                 return []
-            
+                
             df['categories'] = df['categories'].apply(clean_categories)
         else:
             df['categories'] = [[] for _ in range(len(df))]
@@ -407,7 +800,7 @@ class DataProcessor:
         
     def _extract_primary_category_improved(self, row) -> str:
         """
-        Ekstrak kategori utama dengan algoritma yang diperbaiki
+        Ekstrak kategori utama dengan algoritma yang diperbaiki secara komprehensif
         
         Args:
             row: Baris DataFrame 
@@ -421,11 +814,46 @@ class DataProcessor:
         if not categories:
             # Fallback ke query_category jika tersedia
             if query_category and query_category != 'unknown' and query_category != 'top':
+                # Check if the query_category matches any of our category mappings
+                for category, aliases in self.category_mappings.items():
+                    if query_category.lower() in aliases:
+                        return category
+                # Else return it as-is
                 return query_category
             return 'unknown'
         
         # Normalisasi kategori (convert ke lowercase untuk perbandingan)
         normalized_categories = [cat.lower() for cat in categories if cat]
+        
+        # 1. LANGKAH PERTAMA: Cek eksplisit untuk kategori yang ada dalam category_mappings 
+        #    dan cocokkan dengan kategori yang ada dalam categories[]
+        matched_categories = []
+        for category_key, aliases in self.category_mappings.items():
+            for normalized_cat in normalized_categories:
+                if normalized_cat in aliases or any(alias == normalized_cat for alias in aliases):
+                    matched_categories.append(category_key)
+                    break
+        
+        # 2. LANGKAH KEDUA: Jika ada kategori yang cocok, prioritaskan berdasarkan urutan kategori
+        if matched_categories:
+            # Cari yang terdaftar lebih awal dalam category_priority
+            for priority_cat in self.category_priority:
+                if priority_cat in matched_categories:
+                    return priority_cat
+            # Jika tidak ada yang sesuai prioritas, ambil yang pertama ditemukan
+            return matched_categories[0]
+        
+        # 3. LANGKAH KETIGA: Penanganan khusus untuk kasus di mana tidak ada yang cocok langsung
+        # Coba deteksi dengan pencocokan parsial pada kata kunci
+        
+        # Khusus untuk layer-2 dan layer-1
+        for category in normalized_categories:
+            # Deteksi Layer 2 terlebih dahulu
+            if any(l2_term in category for l2_term in ['layer 2', 'layer-2', 'layer2', 'l2']):
+                return 'layer-2'
+            # Kemudian deteksi Layer 1
+            if any(l1_term in category for l1_term in ['layer 1', 'layer-1', 'layer1', 'l1']):
+                return 'layer-1'
         
         # Fungsi untuk mendeteksi keyword dari kategori prioritas dalam kategori
         def contains_category_keywords(categories, priority_cat, mappings):
@@ -440,56 +868,45 @@ class DataProcessor:
                 if alias in categories:
                     return True
             
-            # Untuk partial match, gunakan hanya beberapa keyword penting
-            main_keywords = [priority_cat] + aliases[:3]  # Gunakan hanya beberapa alias utama
+            # Untuk partial match, gunakan semua keyword penting
             for category in categories:
-                for keyword in main_keywords:
+                for keyword in aliases:
                     if keyword in category:
                         return True
             
             return False
         
-        # Dicari berdasarkan prioritas tetapi fokus pada beberapa kategori awal
-        # Gaming dan NFT projects sering muncul di coin yang serupa
-        specific_categories = {
-            'layer-1': contains_category_keywords(normalized_categories, 'layer-1', self.category_mappings),
-            'layer-2': contains_category_keywords(normalized_categories, 'layer-2', self.category_mappings),
-            'gaming': contains_category_keywords(normalized_categories, 'gaming', self.category_mappings),
-            'nft': contains_category_keywords(normalized_categories, 'nft', self.category_mappings),
-            'defi': contains_category_keywords(normalized_categories, 'defi', self.category_mappings),
-            'ai': contains_category_keywords(normalized_categories, 'ai', self.category_mappings),
-        }
+        # 4. LANGKAH KEEMPAT: Coba dengan pendekatan pencocokan parsial untuk semua kategori
+        # Saring dulu berdasarkan kategori ekosistem
+        for category in normalized_categories:
+            if any(ecosystem in category for ecosystem in self.ecosystem_categories):
+                # Deteksi blockchain ecosystem
+                for ecosystem in self.ecosystem_categories:
+                    if ecosystem in category or category in self.category_mappings.get(ecosystem, []):
+                        # Jika tidak ada kategori yang lebih spesifik, gunakan ecosystem
+                        return ecosystem.split('-')[0] if '-ecosystem' in ecosystem else ecosystem
         
-        # Cari kategori berdasarkan prioritas
+        # 5. LANGKAH KELIMA: Cek dengan prioritas terurut
         for priority_cat in self.category_priority:
-            if specific_categories.get(priority_cat, False):
+            if contains_category_keywords(normalized_categories, priority_cat, self.category_mappings):
                 return priority_cat
-            
-            # Pengecekan lengkap jika belum ditemukan di specific_categories
-            if priority_cat not in specific_categories:
-                aliases = self.category_mappings.get(priority_cat, [])
-                
-                # Exact match
-                if priority_cat in normalized_categories:
-                    return priority_cat
-                
-                # Alias exact match
-                for alias in aliases:
-                    if alias in normalized_categories:
-                        return priority_cat
-                
-                # Partial match (gunakan dengan hati-hati)
-                for category in normalized_categories:
-                    for alias in aliases:
-                        if alias in category:
-                            return priority_cat
         
-        # Fallback ke query_category jika tersedia dan bukan 'unknown' atau 'top'
+        # 6. LANGKAH KEENAM: Fallback ke query_category jika tersedia dan spesifik
         if query_category and query_category != 'unknown' and query_category != 'top':
             return query_category
             
-        # Jika tidak ada match, ambil kategori pertama
-        return categories[0].lower() if categories else 'unknown'
+        # 7. LANGKAH KETUJUH: Jika tidak ada yang cocok, gunakan kategori pertama dari categories
+        if categories and isinstance(categories[0], str):
+            first_category = categories[0].lower()
+            # Cek jika kategori pertama adalah ecosystem, jika ya coba filter ke kategori dasar
+            for ecosystem in self.ecosystem_categories:
+                if ecosystem in first_category:
+                    base_ecosystem = ecosystem.split('-')[0] if '-ecosystem' in ecosystem else ecosystem
+                    return base_ecosystem
+            return first_category
+        
+        # 8. Fallback akhir jika semua gagal
+        return 'unknown'
     
     def _extract_primary_chain(self, platforms: Dict[str, str]) -> str:
         """
@@ -813,10 +1230,38 @@ class DataProcessor:
         
         return interactions_df
     
-    def _save_processed_data(self, projects_df: pd.DataFrame, interactions_df: pd.DataFrame, 
-                        features_df: pd.DataFrame) -> None:
+    def clean_json_string(self, json_str):
         """
-        Simpan data yang sudah diproses
+        Membersihkan string JSON dari kutip ganda yang tidak valid
+        
+        Args:
+            json_str: String JSON yang akan dibersihkan
+            
+        Returns:
+            str: String JSON yang sudah dibersihkan
+        """
+        if not isinstance(json_str, str):
+            return json_str
+            
+        # Pola untuk menemukan kutip ganda berlebih
+        pattern = r'"{2,}([^"]+)"{2,}'
+        # Ganti dengan kutip tunggal yang benar
+        cleaned = re.sub(pattern, r'"\1"', json_str)
+        
+        # Bersihkan kutip ganda di awal dan akhir juga
+        if cleaned.startswith('""') and cleaned.endswith('""'):
+            cleaned = cleaned[1:-1]
+        
+        # Perbaiki struktur JSON dengan kutip ganda pada kunci dan nilai
+        cleaned = cleaned.replace('"{', '{').replace('}"', '}')
+        cleaned = cleaned.replace('"[', '[').replace(']"', ']')
+        
+        return cleaned
+    
+    def _save_processed_data(self, projects_df: pd.DataFrame, interactions_df: pd.DataFrame, 
+                    features_df: pd.DataFrame) -> None:
+        """
+        Simpan data yang sudah diproses dengan perbaikan untuk JSON
         
         Args:
             projects_df: DataFrame proyek
@@ -839,13 +1284,21 @@ class DataProcessor:
         projects_df_csv = projects_df.copy()
         
         if 'platforms' in projects_df_csv.columns:
-            projects_df_csv['platforms'] = projects_df_csv['platforms'].apply(
-                lambda x: json.dumps(x) if isinstance(x, dict) else x
-            )
+            # Pastikan nilai None dikonversi ke dict kosong
+            projects_df_csv['platforms'] = projects_df_csv['platforms'].fillna({})
             
+            # Gunakan json.dumps dengan parameter yang benar
+            projects_df_csv['platforms'] = projects_df_csv['platforms'].apply(
+                lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, dict) else x
+            )
+                
         if 'categories' in projects_df_csv.columns:
+            # Pastikan nilai None dikonversi ke list kosong
+            projects_df_csv['categories'] = projects_df_csv['categories'].fillna([])
+            
+            # Gunakan json.dumps dengan parameter yang benar
             projects_df_csv['categories'] = projects_df_csv['categories'].apply(
-                lambda x: json.dumps(x) if isinstance(x, list) else x
+                lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, list) else x
             )
         
         # Simpan dengan timestamp
@@ -865,7 +1318,7 @@ class DataProcessor:
 
     def load_processed_data(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """
-        Load data yang sudah diproses dari standar path
+        Load data yang sudah diproses dengan perbaikan untuk JSON
         
         Returns:
             tuple: (projects_df, interactions_df, features_df)
@@ -885,16 +1338,26 @@ class DataProcessor:
         interactions_df = pd.read_csv(interactions_path)
         features_df = pd.read_csv(features_path)
         
-        # Convert string representations back to Python objects
+        # Convert string representations back to Python objects dengan pembersihan yang ditingkatkan
         if 'platforms' in projects_df.columns:
-            projects_df['platforms'] = projects_df['platforms'].apply(
-                lambda x: json.loads(x) if isinstance(x, str) else x
-            )
+            def process_platforms(x):
+                if isinstance(x, str):
+                    return json.loads(self.clean_json_string(x))
+                elif pd.isna(x):
+                    return {}
+                return x
             
+            projects_df['platforms'] = projects_df['platforms'].apply(process_platforms)
+                
         if 'categories' in projects_df.columns:
-            projects_df['categories'] = projects_df['categories'].apply(
-                lambda x: json.loads(x) if isinstance(x, str) else x
-            )
+            def process_categories(x):
+                if isinstance(x, str):
+                    return json.loads(self.clean_json_string(x))
+                elif pd.isna(x):
+                    return []
+                return x
+            
+            projects_df['categories'] = projects_df['categories'].apply(process_categories)
         
         logger.info(f"Loaded processed data: {len(projects_df)} projects, {len(interactions_df)} interactions")
         return projects_df, interactions_df, features_df

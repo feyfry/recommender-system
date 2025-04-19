@@ -135,13 +135,13 @@ class CoinGeckoCollector:
             
             logger.info(f"Fetching page {page} with {per_page} coins")
             
-            # Pastikan sparkline=true diberikan untuk mendapatkan sparkline_in_7d
+            # Perubahan: Hapus parameter sparkline=true untuk menghindari pengambilan data sparkline
             params = {
                 'vs_currency': 'usd',
                 'order': 'market_cap_desc',
                 'per_page': per_page,
                 'page': page,
-                'sparkline': 'true',
+                'sparkline': 'false',  # Diubah dari 'true' menjadi 'false'
                 'price_change_percentage': '1h,24h,7d,30d'
             }
             
@@ -194,13 +194,13 @@ class CoinGeckoCollector:
         """
         logger.info(f"Fetching coins for category: {category}")
         
-        # Pastikan sparkline=true diberikan untuk mendapatkan sparkline_in_7d
+        # Perubahan: Hapus parameter sparkline=true untuk menghindari pengambilan data sparkline
         params = {
             'vs_currency': 'usd',
             'order': 'market_cap_desc',
             'per_page': 250,  # Max per page
             'page': 1,
-            'sparkline': 'true',  # Pastikan ini true untuk mendapatkan sparkline_in_7d
+            'sparkline': 'false',  # Diubah dari 'true' menjadi 'false'
             'price_change_percentage': '1h,24h,7d,30d',
             'category': category
         }
@@ -242,13 +242,14 @@ class CoinGeckoCollector:
         logger.info(f"Fetching details for {coin_id} {progress}")
         
         # Pastikan untuk mendapatkan market_data, yang berisi data price dan lainnya
+        # Perubahan: Hapus sparkline=true dari parameter
         params = {
             'localization': 'false',
             'tickers': 'false',
             'market_data': 'true',
             'community_data': 'true',
             'developer_data': 'true',
-            'sparkline': 'true'  # Menambahkan parameter ini untuk sparkline data jika tersedia
+            'sparkline': 'false'  # Diubah dari 'true' menjadi 'false'
         }
         
         data = self.make_request(f'coins/{coin_id}', params)
