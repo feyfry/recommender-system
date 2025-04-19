@@ -18,6 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from src.models.alt_fecf import FeatureEnhancedCF
 from src.models.ncf import NCFRecommender
 from src.models.hybrid import HybridRecommender
+from config import MODELS_DIR
 
 # Setup router
 router = APIRouter(
@@ -81,10 +82,89 @@ class RecommendationResponse(BaseModel):
     chain_filter: Optional[str] = None
     execution_time: float
 
+def load_models_on_startup():
+    """
+    Load recommendation models on API startup
+    """
+    logger.info("Loading recommendation models on startup...")
+    
+    # Find model files
+    try:
+        # Check for FECF model files
+        fecf_files = [f for f in os.listdir(MODELS_DIR) 
+                     if f.startswith("fecf_model_") and f.endswith(".pkl")]
+        
+        if fecf_files:
+            latest_fecf = sorted(fecf_files)[-1]
+            fecf_path = os.path.join(MODELS_DIR, latest_fecf)
+            
+            # Initialize and load FECF model
+            logger.info(f"Loading FECF model from {fecf_path}")
+            model = FeatureEnhancedCF()
+            if model.load_data():
+                if model.load_model(fecf_path):
+                    _models["fecf"] = model
+                    logger.info("FECF model loaded successfully")
+                else:
+                    logger.error(f"Failed to load FECF model from {fecf_path}")
+            else:
+                logger.error("Failed to load data for FECF model")
+        else:
+            logger.warning("No FECF model files found")
+            
+        # Check for NCF model file
+        ncf_path = os.path.join(MODELS_DIR, "ncf_model.pkl")
+        if os.path.exists(ncf_path):
+            # Initialize and load NCF model
+            logger.info(f"Loading NCF model from {ncf_path}")
+            model = NCFRecommender()
+            if model.load_data():
+                if model.load_model(ncf_path):
+                    _models["ncf"] = model
+                    logger.info("NCF model loaded successfully")
+                else:
+                    logger.error(f"Failed to load NCF model from {ncf_path}")
+            else:
+                logger.error("Failed to load data for NCF model")
+        else:
+            logger.warning(f"NCF model file not found at {ncf_path}")
+            
+        # Check for Hybrid model files
+        hybrid_files = [f for f in os.listdir(MODELS_DIR) 
+                      if f.startswith("hybrid_model_") and f.endswith(".pkl")]
+        
+        if hybrid_files:
+            latest_hybrid = sorted(hybrid_files)[-1]
+            hybrid_path = os.path.join(MODELS_DIR, latest_hybrid)
+            
+            # Initialize and load Hybrid model
+            logger.info(f"Loading Hybrid model from {hybrid_path}")
+            model = HybridRecommender()
+            if model.load_data():
+                if model.load_model(hybrid_path):
+                    _models["hybrid"] = model
+                    logger.info("Hybrid model loaded successfully")
+                else:
+                    logger.error(f"Failed to load Hybrid model from {hybrid_path}")
+            else:
+                logger.error("Failed to load data for Hybrid model")
+        else:
+            logger.warning("No Hybrid model files found")
+            
+        logger.info(f"Models loaded on startup: {list(_models.keys())}")
+        
+    except Exception as e:
+        logger.error(f"Error loading models on startup: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+# Add this line right after the router declaration
+load_models_on_startup()
+
 # Helper functions
 def get_model(model_type: str) -> Any:
     """
-    Get or initialize model based on type
+    Get or initialize model based on type with improved error handling
     
     Args:
         model_type: Type of model ('fecf', 'ncf', 'hybrid')
@@ -99,9 +179,13 @@ def get_model(model_type: str) -> Any:
     
     # Return existing model if available
     if _models[model_type] is not None:
-        return _models[model_type]
+        # Verify the model is properly loaded
+        if hasattr(_models[model_type], 'model') and _models[model_type].model is None:
+            logger.warning(f"{model_type} model is loaded but not trained, attempting to reload")
+        else:
+            return _models[model_type]
     
-    # Initialize model
+    # Initialize model if it's not loaded yet
     try:
         if model_type == "fecf":
             model = FeatureEnhancedCF()
@@ -111,25 +195,42 @@ def get_model(model_type: str) -> Any:
             model = HybridRecommender()
         
         # Load data
-        model.load_data()
-        
-        # Try to load pre-trained model
+        data_loaded = model.load_data()
+        if not data_loaded:
+            logger.error(f"Failed to load data for {model_type} model")
+            # Try to return whatever we have, even if incomplete
+            if _models[model_type] is not None:
+                return _models[model_type]
+            return model
+            
+        # Find model file paths
+        model_loaded = False
         if model_type == "fecf":
-            model_path = os.path.join("data", "models", "fecf_model.pkl")
-            if os.path.exists(model_path):
-                model.load_model(model_path)
+            fecf_files = [f for f in os.listdir(MODELS_DIR) 
+                        if f.startswith("fecf_model_") and f.endswith(".pkl")]
+            if fecf_files:
+                latest_fecf = sorted(fecf_files)[-1]
+                model_path = os.path.join(MODELS_DIR, latest_fecf)
+                logger.info(f"Loading {model_type} model from {model_path}")
+                model_loaded = model.load_model(model_path)
         elif model_type == "ncf":
-            model_path = os.path.join("data", "models", "ncf_model.pkl")
+            model_path = os.path.join(MODELS_DIR, "ncf_model.pkl")
             if os.path.exists(model_path):
-                model.load_model(model_path)
-        elif model_type == "hybrid":
-            fecf_path = os.path.join("data", "models", "fecf_model.pkl")
-            ncf_path = os.path.join("data", "models", "ncf_model.pkl")
-            if os.path.exists(fecf_path) or os.path.exists(ncf_path):
-                model.load_model(
-                    fecf_filepath=fecf_path if os.path.exists(fecf_path) else None,
-                    ncf_filepath=ncf_path if os.path.exists(ncf_path) else None
-                )
+                logger.info(f"Loading {model_type} model from {model_path}")
+                model_loaded = model.load_model(model_path)
+        else:  # hybrid
+            hybrid_files = [f for f in os.listdir(MODELS_DIR) 
+                         if f.startswith("hybrid_model_") and f.endswith(".pkl")]
+            if hybrid_files:
+                latest_hybrid = sorted(hybrid_files)[-1]
+                model_path = os.path.join(MODELS_DIR, latest_hybrid)
+                logger.info(f"Loading {model_type} model from {model_path}")
+                model_loaded = model.load_model(model_path)
+        
+        if model_loaded:
+            logger.info(f"{model_type} model loaded successfully")
+        else:
+            logger.warning(f"Could not load {model_type} model file")
         
         # Store model for later use
         _models[model_type] = model
@@ -138,6 +239,13 @@ def get_model(model_type: str) -> Any:
     
     except Exception as e:
         logger.error(f"Error initializing {model_type} model: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        # Fallback to existing model if available, even if it might not be fully loaded
+        if _models[model_type] is not None:
+            return _models[model_type]
+            
         raise HTTPException(status_code=500, detail=f"Model initialization error: {str(e)}")
 
 def is_cold_start_user(user_id: str, model: Any) -> bool:

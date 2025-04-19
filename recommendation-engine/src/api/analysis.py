@@ -191,6 +191,8 @@ async def get_trading_signals(request: TradingSignalRequest):
         logger.error(f"Error generating trading signals: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
+# Complete implementation for the indicators endpoint in src/api/analysis.py
+
 @router.post("/indicators", response_model=TechnicalIndicatorsResponse)
 async def get_technical_indicators(request: TechnicalIndicatorsRequest):
     """
@@ -207,132 +209,471 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
             interval=request.interval
         )
         
-        # Calculate indicators
-        ti = TechnicalIndicators(price_data)
-        df_with_indicators = ti.add_indicators()
+        if price_data.empty:
+            raise HTTPException(status_code=404, detail=f"No price data found for {request.project_id}")
+        
+        # Ensure all price columns are numeric
+        for col in price_data.columns:
+            price_data[col] = pd.to_numeric(price_data[col], errors='coerce')
+        
+        # Calculate indicators with error handling
+        try:
+            ti = TechnicalIndicators(price_data)
+            df_with_indicators = ti.add_indicators()
+        except Exception as e:
+            logger.error(f"Error calculating indicators: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"Error calculating indicators: {str(e)}")
         
         # Extract requested indicators from the last row
         latest_data = df_with_indicators.iloc[-1].to_dict()
         
-        # Fix any NaN values
+        # Fix any NaN or non-primitive values
         for k, v in list(latest_data.items()):
             if pd.isna(v):
                 latest_data[k] = 0.0
+            elif not isinstance(v, (int, float, bool, str)):
+                # Convert non-primitive types to string
+                latest_data[k] = str(v)
         
         indicators_result = {}
         
-        # RSI
-        if "rsi" in request.indicators and "rsi" in latest_data:
-            rsi_value = latest_data["rsi"]
-            rsi_signal = "oversold" if rsi_value < 30 else "overbought" if rsi_value > 70 else "neutral"
-            indicators_result["rsi"] = {
-                "value": float(rsi_value),
-                "signal": rsi_signal,
-                "description": f"RSI is {rsi_signal} at {rsi_value:.2f}"
-            }
-        
-        # MACD
-        if "macd" in request.indicators and all(k in latest_data for k in ["macd", "macd_signal", "macd_hist"]):
-            macd_value = latest_data["macd"]
-            signal_value = latest_data["macd_signal"]
-            hist_value = latest_data["macd_hist"]
+        # Safely extract indicators with complete error handling
+        try:
+            # RSI
+            if "rsi" in request.indicators and "rsi" in latest_data:
+                rsi_value = float(latest_data["rsi"])
+                rsi_signal = "oversold" if rsi_value < 30 else "overbought" if rsi_value > 70 else "neutral"
+                indicators_result["rsi"] = {
+                    "value": rsi_value,
+                    "signal": rsi_signal,
+                    "description": f"RSI is {rsi_signal} at {rsi_value:.2f}"
+                }
             
-            macd_signal = "bullish" if macd_value > signal_value else "bearish"
+            # MACD
+            if "macd" in request.indicators and all(k in latest_data for k in ["macd", "macd_signal"]):
+                try:
+                    macd_value = float(latest_data["macd"])
+                    signal_value = float(latest_data["macd_signal"])
+                    hist_value = float(latest_data.get("macd_hist", macd_value - signal_value))
+                    
+                    macd_signal = "bullish" if macd_value > signal_value else "bearish"
+                    
+                    # Check for crossover
+                    macd_cross_up = False
+                    macd_cross_down = False
+                    if "macd_cross_up" in df_with_indicators.columns:
+                        macd_cross_up = bool(df_with_indicators["macd_cross_up"].iloc[-1])
+                    if "macd_cross_down" in df_with_indicators.columns:
+                        macd_cross_down = bool(df_with_indicators["macd_cross_down"].iloc[-1])
+                    
+                    if macd_cross_up:
+                        macd_signal = "strong_bullish"
+                        description = "MACD crossed above signal line (strong buy)"
+                    elif macd_cross_down:
+                        macd_signal = "strong_bearish"
+                        description = "MACD crossed below signal line (strong sell)"
+                    else:
+                        description = f"MACD is {macd_signal} at {macd_value:.4f} (Signal: {signal_value:.4f})"
+                    
+                    indicators_result["macd"] = {
+                        "value": macd_value,
+                        "signal_line": signal_value,
+                        "histogram": hist_value,
+                        "signal": macd_signal,
+                        "description": description
+                    }
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error calculating MACD indicators: {str(e)}")
             
-            # Check for crossover
-            if df_with_indicators["macd_cross_up"].iloc[-1] == 1:
-                macd_signal = "strong_bullish"
-                description = "MACD crossed above signal line (strong buy)"
-            elif df_with_indicators["macd_cross_down"].iloc[-1] == 1:
-                macd_signal = "strong_bearish"
-                description = "MACD crossed below signal line (strong sell)"
-            else:
-                description = f"MACD is {macd_signal} at {macd_value:.4f} (Signal: {signal_value:.4f})"
+            # Bollinger Bands
+            if "bollinger" in request.indicators:
+                try:
+                    bb_columns = ["bb_upper", "bb_middle", "bb_lower"]
+                    if all(col in latest_data for col in bb_columns):
+                        upper = float(latest_data["bb_upper"])
+                        middle = float(latest_data["bb_middle"])
+                        lower = float(latest_data["bb_lower"])
+                        close = float(latest_data["close"])
+                        
+                        # Calculate %B safely
+                        bb_width = upper - lower
+                        if bb_width > 0:
+                            bb_pct = (close - lower) / bb_width
+                        else:
+                            bb_pct = 0.5
+                        
+                        if close > upper:
+                            bb_signal = "overbought"
+                            description = "Price is above upper Bollinger Band (potential reversal)"
+                        elif close < lower:
+                            bb_signal = "oversold"
+                            description = "Price is below lower Bollinger Band (potential reversal)"
+                        elif bb_pct > 0.8:
+                            bb_signal = "high"
+                            description = "Price is near upper Bollinger Band"
+                        elif bb_pct < 0.2:
+                            bb_signal = "low"
+                            description = "Price is near lower Bollinger Band"
+                        else:
+                            bb_signal = "neutral"
+                            description = "Price is within Bollinger Bands"
+                        
+                        indicators_result["bollinger"] = {
+                            "upper": upper,
+                            "middle": middle,
+                            "lower": lower,
+                            "percent_b": bb_pct,
+                            "signal": bb_signal,
+                            "description": description
+                        }
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error calculating Bollinger Band indicators: {str(e)}")
             
-            indicators_result["macd"] = {
-                "value": float(macd_value),
-                "signal_line": float(signal_value),
-                "histogram": float(hist_value),
-                "signal": macd_signal,
-                "description": description
-            }
-        
-        # Bollinger Bands
-        if "bollinger" in request.indicators and all(k in latest_data for k in ["bb_upper", "bb_middle", "bb_lower"]):
-            upper = latest_data["bb_upper"]
-            middle = latest_data["bb_middle"]
-            lower = latest_data["bb_lower"]
-            close = latest_data["close"]
-            
-            bb_pct = (close - lower) / (upper - lower) if upper > lower else 0.5
-            
-            if close > upper:
-                bb_signal = "overbought"
-                description = "Price is above upper Bollinger Band (potential reversal)"
-            elif close < lower:
-                bb_signal = "oversold"
-                description = "Price is below lower Bollinger Band (potential reversal)"
-            elif bb_pct > 0.8:
-                bb_signal = "high"
-                description = "Price is near upper Bollinger Band"
-            elif bb_pct < 0.2:
-                bb_signal = "low"
-                description = "Price is near lower Bollinger Band"
-            else:
-                bb_signal = "neutral"
-                description = "Price is within Bollinger Bands"
-            
-            indicators_result["bollinger"] = {
-                "upper": float(upper),
-                "middle": float(middle),
-                "lower": float(lower),
-                "percent_b": float(bb_pct),
-                "signal": bb_signal,
-                "description": description
-            }
-        
-        # Moving Averages
-        if "sma" in request.indicators:
-            ma_data = {}
-            ma_periods = [5, 10, 20, 50, 100, 200]
-            
-            for period in ma_periods:
-                sma_key = f"sma_{period}"
-                if sma_key in latest_data:
-                    ma_data[f"sma_{period}"] = float(latest_data[sma_key])
-            
-            # Detect Golden/Death Cross
-            if "golden_cross" in latest_data and latest_data["golden_cross"] == 1:
-                ma_signal = "strong_bullish"
-                description = "Golden Cross detected (50-day MA crossed above 200-day MA)"
-            elif "death_cross" in latest_data and latest_data["death_cross"] == 1:
-                ma_signal = "strong_bearish"
-                description = "Death Cross detected (50-day MA crossed below 200-day MA)"
-            elif "sma_20" in latest_data and "sma_50" in latest_data:
-                if latest_data["close"] > latest_data["sma_20"] > latest_data["sma_50"]:
-                    ma_signal = "bullish"
-                    description = "Price is above 20 and 50-day moving averages (bullish trend)"
-                elif latest_data["close"] < latest_data["sma_20"] < latest_data["sma_50"]:
-                    ma_signal = "bearish"
-                    description = "Price is below 20 and 50-day moving averages (bearish trend)"
-                else:
+            # Moving Averages
+            if "sma" in request.indicators:
+                try:
+                    ma_data = {}
+                    ma_periods = [5, 10, 20, 50, 100, 200]
+                    
+                    for period in ma_periods:
+                        sma_key = f"sma_{period}"
+                        if sma_key in latest_data:
+                            ma_data[f"sma_{period}"] = float(latest_data[sma_key])
+                    
+                    # Define signals based on key moving averages
                     ma_signal = "neutral"
-                    description = "Moving average alignment is mixed"
-            else:
-                ma_signal = "neutral"
-                description = "Insufficient moving average data"
+                    description = "Moving averages are neutral"
+                    
+                    # Detect Golden/Death Cross
+                    if "golden_cross" in latest_data and latest_data["golden_cross"] == 1:
+                        ma_signal = "strong_bullish"
+                        description = "Golden Cross detected (50-day MA crossed above 200-day MA)"
+                    elif "death_cross" in latest_data and latest_data["death_cross"] == 1:
+                        ma_signal = "strong_bearish"
+                        description = "Death Cross detected (50-day MA crossed below 200-day MA)"
+                    elif "sma_20" in latest_data and "sma_50" in latest_data:
+                        close = float(latest_data["close"])
+                        sma_20 = float(latest_data["sma_20"])
+                        sma_50 = float(latest_data["sma_50"])
+                        
+                        if close > sma_20 > sma_50:
+                            ma_signal = "bullish"
+                            description = "Price is above 20 and 50-day moving averages (bullish trend)"
+                        elif close < sma_20 < sma_50:
+                            ma_signal = "bearish"
+                            description = "Price is below 20 and 50-day moving averages (bearish trend)"
+                    
+                    indicators_result["moving_averages"] = {
+                        "values": ma_data,
+                        "signal": ma_signal,
+                        "description": description
+                    }
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error calculating Moving Average indicators: {str(e)}")
             
-            indicators_result["moving_averages"] = {
-                "values": ma_data,
-                "signal": ma_signal,
-                "description": description
-            }
+            # Stochastic Oscillator
+            if "stochastic" in request.indicators:
+                try:
+                    if "stoch_k" in latest_data and "stoch_d" in latest_data:
+                        k_value = float(latest_data["stoch_k"])
+                        d_value = float(latest_data["stoch_d"])
+                        
+                        if k_value < 20:
+                            stoch_signal = "oversold"
+                            description = f"Stochastic Oscillator is oversold at {k_value:.2f}"
+                        elif k_value > 80:
+                            stoch_signal = "overbought"
+                            description = f"Stochastic Oscillator is overbought at {k_value:.2f}"
+                        else:
+                            stoch_signal = "neutral"
+                            description = f"Stochastic Oscillator is neutral at {k_value:.2f}"
+                        
+                        # Check for stochastic crossover
+                        if "stoch_cross_up" in latest_data and latest_data["stoch_cross_up"] == 1:
+                            if k_value < 20:
+                                stoch_signal = "strong_buy"
+                                description = "Stochastic %K crossed above %D from oversold (strong buy signal)"
+                        elif "stoch_cross_down" in latest_data and latest_data["stoch_cross_down"] == 1:
+                            if k_value > 80:
+                                stoch_signal = "strong_sell"
+                                description = "Stochastic %K crossed below %D from overbought (strong sell signal)"
+                        
+                        indicators_result["stochastic"] = {
+                            "k": k_value,
+                            "d": d_value,
+                            "signal": stoch_signal,
+                            "description": description
+                        }
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error calculating Stochastic indicators: {str(e)}")
+            
+            # ATR (Average True Range) - volatility indicator
+            if "atr" in request.indicators:
+                try:
+                    if "atr" in latest_data:
+                        atr_value = float(latest_data["atr"])
+                        close = float(latest_data["close"])
+                        
+                        # Calculate ATR as percentage of price
+                        atr_percent = (atr_value / close) * 100 if close > 0 else 0
+                        
+                        if atr_percent > 5:
+                            volatility = "very_high"
+                            description = f"Very high volatility (ATR: {atr_percent:.2f}% of price)"
+                        elif atr_percent > 3:
+                            volatility = "high"
+                            description = f"High volatility (ATR: {atr_percent:.2f}% of price)"
+                        elif atr_percent > 1.5:
+                            volatility = "moderate"
+                            description = f"Moderate volatility (ATR: {atr_percent:.2f}% of price)"
+                        else:
+                            volatility = "low"
+                            description = f"Low volatility (ATR: {atr_percent:.2f}% of price)"
+                        
+                        indicators_result["atr"] = {
+                            "value": atr_value,
+                            "percent_of_price": atr_percent,
+                            "volatility": volatility,
+                            "description": description
+                        }
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error calculating ATR indicators: {str(e)}")
+            
+            # ADX (Average Directional Index) - trend strength
+            if "adx" in request.indicators:
+                try:
+                    if "adx" in latest_data:
+                        adx_value = float(latest_data["adx"])
+                        
+                        if "plus_di" in latest_data and "minus_di" in latest_data:
+                            plus_di = float(latest_data["plus_di"])
+                            minus_di = float(latest_data["minus_di"])
+                            
+                            if adx_value > 25:
+                                if plus_di > minus_di:
+                                    trend_signal = "strong_uptrend"
+                                    description = f"Strong uptrend (ADX: {adx_value:.2f}, +DI > -DI)"
+                                else:
+                                    trend_signal = "strong_downtrend"
+                                    description = f"Strong downtrend (ADX: {adx_value:.2f}, -DI > +DI)"
+                            elif adx_value > 20:
+                                if plus_di > minus_di:
+                                    trend_signal = "moderate_uptrend"
+                                    description = f"Moderate uptrend (ADX: {adx_value:.2f}, +DI > -DI)"
+                                else:
+                                    trend_signal = "moderate_downtrend"
+                                    description = f"Moderate downtrend (ADX: {adx_value:.2f}, -DI > +DI)"
+                            else:
+                                trend_signal = "weak_trend"
+                                description = f"Weak trend (ADX: {adx_value:.2f})"
+                        else:
+                            # If DI values not available
+                            if adx_value > 25:
+                                trend_signal = "strong_trend"
+                                description = f"Strong trend detected (ADX: {adx_value:.2f})"
+                            elif adx_value > 20:
+                                trend_signal = "moderate_trend"
+                                description = f"Moderate trend (ADX: {adx_value:.2f})"
+                            else:
+                                trend_signal = "weak_trend"
+                                description = f"Weak trend (ADX: {adx_value:.2f})"
+                        
+                        indicators_result["adx"] = {
+                            "value": adx_value,
+                            "plus_di": float(latest_data.get("plus_di", 0)),
+                            "minus_di": float(latest_data.get("minus_di", 0)),
+                            "trend": trend_signal,
+                            "description": description
+                        }
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error calculating ADX indicators: {str(e)}")
+            
+            # Volume indicators
+            if "volume" in request.indicators and "volume" in latest_data:
+                try:
+                    volume_value = float(latest_data["volume"])
+                    
+                    # Volume analysis
+                    if "volume_sma_20" in latest_data:
+                        volume_avg = float(latest_data["volume_sma_20"])
+                        volume_ratio = volume_value / volume_avg if volume_avg > 0 else 1.0
+                        
+                        if volume_ratio > 2.0:
+                            volume_signal = "very_high"
+                            description = f"Volume is {volume_ratio:.2f}x average (very high)"
+                        elif volume_ratio > 1.5:
+                            volume_signal = "high"
+                            description = f"Volume is {volume_ratio:.2f}x average (high)"
+                        elif volume_ratio < 0.5:
+                            volume_signal = "low"
+                            description = f"Volume is {volume_ratio:.2f}x average (low)"
+                        else:
+                            volume_signal = "normal"
+                            description = f"Volume is {volume_ratio:.2f}x average (normal)"
+                    else:
+                        volume_signal = "unknown"
+                        description = "Volume comparison not available"
+                    
+                    indicators_result["volume"] = {
+                        "value": volume_value,
+                        "signal": volume_signal,
+                        "ratio": volume_ratio if 'volume_ratio' in locals() else None,
+                        "description": description
+                    }
+                    
+                    # On Balance Volume
+                    if "obv" in latest_data:
+                        obv_value = float(latest_data["obv"])
+                        indicators_result["obv"] = {
+                            "value": obv_value
+                        }
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error calculating Volume indicators: {str(e)}")
+            
+            # Money Flow Index
+            if "mfi" in request.indicators and "mfi" in latest_data:
+                try:
+                    mfi_value = float(latest_data["mfi"])
+                    
+                    if mfi_value < 20:
+                        mfi_signal = "oversold"
+                        description = f"Money Flow Index is oversold at {mfi_value:.2f}"
+                    elif mfi_value > 80:
+                        mfi_signal = "overbought"
+                        description = f"Money Flow Index is overbought at {mfi_value:.2f}"
+                    else:
+                        mfi_signal = "neutral"
+                        description = f"Money Flow Index is neutral at {mfi_value:.2f}"
+                    
+                    indicators_result["mfi"] = {
+                        "value": mfi_value,
+                        "signal": mfi_signal,
+                        "description": description
+                    }
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error calculating MFI indicators: {str(e)}")
+            
+            # Price ROC (Rate of Change)
+            if "roc" in request.indicators and "roc" in latest_data:
+                try:
+                    roc_value = float(latest_data["roc"])
+                    
+                    if roc_value > 10:
+                        roc_signal = "strong_bullish"
+                        description = f"Very high rate of change: {roc_value:.2f}% (strongly bullish)"
+                    elif roc_value > 5:
+                        roc_signal = "bullish"
+                        description = f"High rate of change: {roc_value:.2f}% (bullish)"
+                    elif roc_value < -10:
+                        roc_signal = "strong_bearish"
+                        description = f"Very low rate of change: {roc_value:.2f}% (strongly bearish)"
+                    elif roc_value < -5:
+                        roc_signal = "bearish"
+                        description = f"Low rate of change: {roc_value:.2f}% (bearish)"
+                    else:
+                        roc_signal = "neutral"
+                        description = f"Moderate rate of change: {roc_value:.2f}% (neutral)"
+                    
+                    indicators_result["roc"] = {
+                        "value": roc_value,
+                        "signal": roc_signal,
+                        "description": description
+                    }
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error calculating ROC indicators: {str(e)}")
+            
+            # Williams %R
+            if "willr" in request.indicators and "willr" in latest_data:
+                try:
+                    willr_value = float(latest_data["willr"])
+                    
+                    if willr_value < -80:
+                        willr_signal = "oversold"
+                        description = f"Williams %R is oversold at {willr_value:.2f}"
+                    elif willr_value > -20:
+                        willr_signal = "overbought"
+                        description = f"Williams %R is overbought at {willr_value:.2f}"
+                    else:
+                        willr_signal = "neutral"
+                        description = f"Williams %R is neutral at {willr_value:.2f}"
+                    
+                    indicators_result["willr"] = {
+                        "value": willr_value,
+                        "signal": willr_signal,
+                        "description": description
+                    }
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error calculating Williams %R indicators: {str(e)}")
+            
+            # Commodity Channel Index (CCI)
+            if "cci" in request.indicators and "cci" in latest_data:
+                try:
+                    cci_value = float(latest_data["cci"])
+                    
+                    if cci_value > 100:
+                        cci_signal = "overbought"
+                        description = f"CCI is overbought at {cci_value:.2f}"
+                    elif cci_value < -100:
+                        cci_signal = "oversold"
+                        description = f"CCI is oversold at {cci_value:.2f}"
+                    else:
+                        cci_signal = "neutral"
+                        description = f"CCI is neutral at {cci_value:.2f}"
+                    
+                    indicators_result["cci"] = {
+                        "value": cci_value,
+                        "signal": cci_signal,
+                        "description": description
+                    }
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error calculating CCI indicators: {str(e)}")
+                    
+            # Overall signal based on multiple indicators
+            if "overall_signal" in latest_data:
+                try:
+                    overall_signal = str(latest_data["overall_signal"])
+                    
+                    # Add to result
+                    indicators_result["overall"] = {
+                        "signal": overall_signal,
+                        "buy_strength": float(latest_data.get("buy_strength", 50)),
+                        "description": f"Overall signal: {overall_signal}"
+                    }
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error calculating overall signal: {str(e)}")
+            elif "buy_signals" in latest_data and "sell_signals" in latest_data:
+                try:
+                    buy_signals = int(latest_data["buy_signals"])
+                    sell_signals = int(latest_data["sell_signals"])
+                    
+                    if buy_signals > sell_signals:
+                        overall_signal = "buy"
+                    elif sell_signals > buy_signals:
+                        overall_signal = "sell"
+                    else:
+                        overall_signal = "hold"
+                    
+                    indicators_result["overall"] = {
+                        "signal": overall_signal,
+                        "buy_signals": buy_signals,
+                        "sell_signals": sell_signals,
+                        "description": f"Overall signal based on {buy_signals} buy vs {sell_signals} sell indicators"
+                    }
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Error calculating overall signal from buy/sell counts: {str(e)}")
+            
+        except Exception as e:
+            logger.error(f"Error processing indicator data: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
         
         # Create response
         response = TechnicalIndicatorsResponse(
             project_id=request.project_id,
             indicators=indicators_result,
-            latest_close=float(latest_data["close"]),
+            latest_close=float(latest_data.get("close", 0)),
             latest_timestamp=df_with_indicators.index[-1],
             period=f"{request.days} days ({request.interval})",
             execution_time=(datetime.now() - start_time).total_seconds()
@@ -340,8 +681,13 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
         
         return response
         
+    except HTTPException as he:
+        # Re-raise HTTP exceptions
+        raise he
     except Exception as e:
         logger.error(f"Error calculating technical indicators: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 @router.get("/market-events/{project_id}", response_model=MarketEventResponse)

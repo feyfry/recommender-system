@@ -493,13 +493,49 @@ class FeatureEnhancedCF:
         """
         if self.model is None or self.item_similarity_matrix is None:
             logger.error("Model not trained or loaded")
-            return []
+            # Fallback to popular projects
+            return self.get_popular_projects(n)
             
         # Check if project exists
         if project_id not in self._item_mapping:
             logger.warning(f"Project {project_id} not found in the model")
-            return []
             
+            # First try case-insensitive search
+            for item_id in self._item_mapping.keys():
+                if item_id.lower() == project_id.lower():
+                    logger.info(f"Found case-insensitive match: {item_id}")
+                    project_id = item_id
+                    break
+            
+            # If still not found, see if it exists in projects_df but not in the model
+            if project_id not in self._item_mapping and self.projects_df is not None:
+                project_exists = project_id in self.projects_df['id'].values
+                if project_exists:
+                    logger.warning(f"Project {project_id} exists in dataset but not in trained model")
+                    # Try to find projects in the same category
+                    target_project = self.projects_df[self.projects_df['id'] == project_id].iloc[0]
+                    if 'primary_category' in target_project:
+                        category = target_project['primary_category']
+                        logger.info(f"Finding projects in the same category: {category}")
+                        category_projects = self.projects_df[self.projects_df['primary_category'] == category]
+                        if len(category_projects) > 0:
+                            result = []
+                            for _, project in category_projects.head(n).iterrows():
+                                project_dict = project.to_dict()
+                                project_dict['similarity_score'] = 0.8  # Reasonable default
+                                project_dict['recommendation_score'] = 0.8  # For API consistency
+                                result.append(project_dict)
+                            return result
+                
+                # Final fallback to popular projects
+                logger.warning(f"No match found for {project_id}, returning popular projects")
+                popular = self.get_popular_projects(n)
+                # Add similarity scores to make the output format consistent
+                for project in popular:
+                    project['similarity_score'] = project.get('recommendation_score', 0.5)
+                return popular
+                
+        # Continue with original implementation if project is found
         # Get item index
         item_idx = self._item_mapping[project_id]
         

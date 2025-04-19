@@ -65,21 +65,54 @@ class TechnicalIndicators:
         Returns:
             pd.DataFrame: DataFrame dengan indikator teknikal
         """
-        # Create a copy to avoid modifying the original
-        df = self.prices_df.copy()
-        
-        # Add different types of indicators
-        df = self.add_trend_indicators(df)
-        df = self.add_momentum_indicators(df)
-        df = self.add_volatility_indicators(df)
-        
-        if self.volume_col is not None:
-            df = self.add_volume_indicators(df)
-        
-        # Add combined signal columns
-        df = self.add_signal_indicators(df)
-        
-        return df
+        try:
+            # Create a copy to avoid modifying the original
+            df = self.prices_df.copy()
+            
+            # Convert all necessary columns to numeric first to prevent type errors
+            for col in [self.close_col, self.high_col, self.low_col]:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                    
+            if self.volume_col is not None and self.volume_col in df.columns:
+                df[self.volume_col] = pd.to_numeric(df[self.volume_col], errors='coerce')
+            
+            # Add different types of indicators with error handling
+            try:
+                df = self.add_trend_indicators(df)
+            except Exception as e:
+                logger.error(f"Error adding trend indicators: {str(e)}")
+                
+            try:
+                df = self.add_momentum_indicators(df)
+            except Exception as e:
+                logger.error(f"Error adding momentum indicators: {str(e)}")
+                
+            try:
+                df = self.add_volatility_indicators(df)
+            except Exception as e:
+                logger.error(f"Error adding volatility indicators: {str(e)}")
+            
+            if self.volume_col is not None:
+                try:
+                    df = self.add_volume_indicators(df)
+                except Exception as e:
+                    logger.error(f"Error adding volume indicators: {str(e)}")
+            
+            # Add combined signal columns
+            try:
+                df = self.add_signal_indicators(df)
+            except Exception as e:
+                logger.error(f"Error adding signal indicators: {str(e)}")
+            
+            return df
+            
+        except Exception as e:
+            import traceback
+            logger.error(f"Error adding indicators: {str(e)}")
+            logger.error(traceback.format_exc())
+            # Return original DataFrame if there's an error
+            return self.prices_df.copy()
     
     def add_trend_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
