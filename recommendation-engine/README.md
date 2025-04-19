@@ -1,4 +1,4 @@
-# Web3 Recommendation System
+# Recommendation System Web3 Based
 
 Sistem rekomendasi untuk proyek Web3 (cryptocurrency, token, NFT, DeFi) berbasis popularitas, tren investasi, dan analisis teknikal, membandingkan pendekatan Neural CF dan Feature-Enhanced CF.
 
@@ -77,7 +77,7 @@ Model Feature-Enhanced CF menggunakan SVD (Singular Value Decomposition) dari sc
 
 ### Neural CF (PyTorch)
 
-Model Neural CF menggunakan deep learning untuk menangkap pola kompleks dalam interaksi user-item, menggabungkan matrix factorization dengan jaringan multi-layer perceptron untuk akurasi yang lebih baik.
+Model Neural CF menggunakan deep learning untuk menangkap pola kompleks dalam interaksi user-item, menggabungkan matrix factorization dengan jaringan multi-layer perceptron untuk akurasi yang lebih baik. Model menggunakan embeddings untuk user dan item, serta layer MLP untuk mempelajari pola interaksi non-linear.
 
 ### Model Hybrid
 
@@ -100,7 +100,8 @@ Sinyal dipersonalisasi berdasarkan toleransi risiko pengguna (rendah, menengah, 
 
 ### Prasyarat
 
-- Python 3.10 (LightFM tidak kompatibel dengan Python 3.12+)
+- Python 3.12+ terintegrasi dengan baik dengan alt_fecf.py (default)
+- Jika ingin menggunakan LightFM dari file fecf.py, gunakan Python 3.10 tapi tidak disarankan...karena masih terdapat kesalahan yang tidak diketahui.
 - pip (Python package manager)
 - CoinGecko API key (untuk pengumpulan data)
 - PostgreSQL (untuk penyimpanan data)
@@ -108,55 +109,46 @@ Sinyal dipersonalisasi berdasarkan toleransi risiko pengguna (rendah, menengah, 
 ### Langkah Instalasi
 
 1. Clone repository:
-	```bash
-	git clone https://github.com/feyfry/web3-recommender-system.git
-	cd web3-recommendation-system
-	```
+```bash
+git clone https://github.com/feyfry/web3-recommender-system.git
+cd web3-recommendation-system
+```
 
-2. Pastikan Python 3.10 terinstal:
-	```bash
-	# Periksa versi Python yang tersedia
-	py --list
+2. Buat dan aktifkan lingkungan virtual:
+```bash
+# Windows
+python -m venv venv
+venv\Scripts\activate
 
-	# Jika Python 3.10 tidak terdaftar, Anda perlu menginstalnya terlebih dahulu
-	```
+# Linux/Mac
+python -m venv venv
+source venv/bin/activate
 
-3. Buat dan aktifkan lingkungan virtual dengan Python 3.10:
-	```bash
-	# Windows
-	py -3.10 -m venv venv
-	venv\Scripts\activate
+# Git Bash di Windows
+python -m venv venv
+source venv/Scripts/activate
+```
 
-	# Linux/Mac
-	python3.10 -m venv venv
-	source venv/bin/activate
+3. Install dependensi dalam lingkungan virtual:
+- Saat Anda mengaktifkan Library TA-LIB di requirements.txt pastikan terminal yang Anda gunakan adalah CMD jika memakai Windows, jika memaksa menggunakan GitBash, itu akan error.
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-	# Git Bash di Windows
-	py -3.10 -m venv venv
-	source venv/Scripts/activate
-	```
-
-4. Install dependensi dalam lingkungan virtual:
-	```bash
-	pip install -r requirements.txt
-	```
-
-5. Konfigurasi API key:
+4. Konfigurasi API key:
    - Buat file `.env` di direktori root
    - Tambahkan CoinGecko API key Anda:
-     ```
-     COINGECKO_API_KEY="your-api-key"
-     ```
+```
+COINGECKO_API_KEY="your-api-key"
+```
 
-6. Setup database:
+5. Setup database:
    - Buat database PostgreSQL
    - Update konfigurasi database di `config.py`
 
 ### Instalasi TA-Lib (Opsional)
 
 TA-Lib memerlukan kompilasi library C dan bisa cukup rumit, terutama di Windows. Berikut panduan lengkap instalasinya.
-
----
 
 #### 🪟 Windows
 
@@ -187,60 +179,60 @@ TA-Lib memerlukan kompilasi library C dan bisa cukup rumit, terutama di Windows.
 
 4. **Aktifkan virtual environment Anda (jika ada, bisa skip tahap ini):**
 
-   ```bash
-   path\to\your\venv\Scripts\activate
-   ```
+```bash
+path\to\your\venv\Scripts\activate
+```
 
 5. **Install Python wrapper TA-Lib:**
-	```bash
-	pip install ta-lib
-	```
+```bash
+pip install ta-lib
+```
 
 #### 🍎 macOS
-   ```bash
-   # Install TA-Lib library dengan Homebrew
-   brew install ta-lib
+```bash
+# Install TA-Lib library dengan Homebrew
+brew install ta-lib
 
-   # Install wrapper Python-nya
-   pip install ta-lib
-   ```
+# Install wrapper Python-nya
+pip install ta-lib
+```
 
 #### 🐧 Linux (Ubuntu/Debian)
-   ```bash
-   # Install dependensi build
-   sudo apt-get update
-   sudo apt-get install -y build-essential wget
+```bash
+# Install dependensi build
+sudo apt-get update
+sudo apt-get install -y build-essential wget
 
-   # Download dan ekstrak TA-Lib source
-   wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
-   tar -xzf ta-lib-0.4.0-src.tar.gz
-   cd ta-lib/
+# Download dan ekstrak TA-Lib source
+wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
+tar -xzf ta-lib-0.4.0-src.tar.gz
+cd ta-lib/
 
-   # Konfigurasi, compile, dan install
-   ./configure --prefix=/usr
-   make
-   sudo make install
+# Konfigurasi, compile, dan install
+./configure --prefix=/usr
+make
+sudo make install
 
-   # Install Python wrapper
-   pip install ta-lib
-   ```
+# Install Python wrapper
+pip install ta-lib
+```
 
 #### 🔁 Alternatif Non-Kompilasi (pandas-ta)
 Jika instalasi TA-Lib terlalu ribet, Anda bisa pakai alternatif yang ringan dan berbasis pandas:
-   ```bash
-   pip install pandas-ta
-   ```
+```bash
+pip install pandas-ta
+```
 
 #### 📌 Catatan Tambahan:
-   - Pastikan pip dan python yang Anda pakai dari virtual environment (venv).
-   - Untuk cek versi Python:
-      ```
-      python --version
-      ```
-   - Untuk cek lokasi pip:
-      ```
-      where pip
-      ```
+- Pastikan pip dan python yang Anda pakai dari virtual environment (venv).
+- Untuk cek versi Python:
+```
+python --version
+```
+- Untuk cek lokasi pip:
+```
+where pip
+```
 
 ## 🚀 Penggunaan
 
@@ -251,7 +243,7 @@ Project ini menyediakan CLI komprehensif untuk semua fungsi utama:
 ```bash
 # Mengumpulkan data dari CoinGecko
 python main.py collect --limit 500 --detail-limit 100
-# tambahkan param --rate-limit 3 jika ingin menghindari rate limit lebih panjang, default sudah --rate-limit 2, tidak perlu di definisikan lagi
+# tambahkan param --rate-limit 3 jika ingin menghindari rate limit lebih panjang
 
 # Memproses data yang dikumpulkan
 python main.py process --users 2000
@@ -273,6 +265,9 @@ python main.py api
 
 # Menjalankan pipeline lengkap terorganisir
 python main.py run
+
+# Debugging rekomendasi untuk pengguna tertentu
+python main.py debug --user-id user_1 --model hybrid --num 20
 ```
 
 ### Pipeline yang Terorganisir
@@ -280,10 +275,9 @@ Pipeline baru yang terorganisir memiliki langkah-langkah yang ditentukan dengan 
 
 1. **Data Collection**: Mengumpulkan data dari CoinGecko API
 2. **Data Processing**: Memproses data mentah dengan perhitungan metrik
-3. **Building Matrices**: Membangun matriks user-item dan similarity
-4. **Model Training**: Melatih model rekomendasi
-5. **Sample Recommendations**: Generasi rekomendasi sampel (opsional)
-6. **Analysis**: Analisis hasil rekomendasi (opsional)
+3. **Model Training**: Melatih model rekomendasi
+4. **Sample Recommendations**: Generasi rekomendasi sampel (opsional)
+5. **Result Analysis**: Analisis hasil rekomendasi (opsional)
 
 Untuk menjalankan pipeline dengan opsi kustom:
 ```bash
@@ -294,31 +288,452 @@ python main.py run
 python main.py run --skip-recommendations --skip-analysis
 ```
 
-### Menggunakan API
+## 🌐 API Reference
 
-Server API dapat dijalankan dengan:
+Sistem ini menyediakan RESTful API yang komprehensif menggunakan FastAPI. Server API dapat dijalankan dengan:
 ```bash
 python main.py api
 ```
 
-Endpoint API:
-- `/recommend/projects` - Mendapatkan rekomendasi proyek
-- `/recommend/trending` - Mendapatkan proyek trending
-- `/recommend/popular` - Mendapatkan proyek populer
-- `/recommend/similar/{project_id}` - Mendapatkan proyek serupa
-- `/analysis/trading-signals` - Mendapatkan sinyal trading
-- `/analysis/indicators` - Mendapatkan indikator teknikal
-- `/analysis/market-events/{project_id}` - Mendeteksi peristiwa pasar
-- `/analysis/alerts/{project_id}` - Mendapatkan alert teknikal
-- `/analysis/price-prediction/{project_id}` - Mendapatkan prediksi harga
+Secara default, API akan berjalan di `http://0.0.0.0:8000`.
 
-### Integrasi dengan Laravel
+### Endpoint Rekomendasi
+
+#### 1. Dapatkan Rekomendasi Proyek
+
+**Endpoint:** `POST /recommend/projects`
+
+**Request Body:**
+```json
+{
+  "user_id": "user_123",
+  "model_type": "hybrid",
+  "num_recommendations": 10,
+  "exclude_known": true,
+  "category": "defi",
+  "chain": "ethereum",
+  "user_interests": ["defi", "nft", "gaming"],
+  "risk_tolerance": "medium"
+}
+```
+
+**Response:**
+```json
+{
+  "user_id": "user_123",
+  "model_type": "hybrid",
+  "recommendations": [
+    {
+      "id": "bitcoin",
+      "name": "Bitcoin",
+      "symbol": "BTC",
+      "image": "https://example.com/btc.png",
+      "price_usd": 50000,
+      "price_change_24h": 2.5,
+      "price_change_7d": -1.2,
+      "market_cap": 1000000000000,
+      "volume_24h": 30000000000,
+      "popularity_score": 98.5,
+      "trend_score": 85.2,
+      "category": "layer-1",
+      "chain": "bitcoin",
+      "recommendation_score": 0.95
+    }
+  ],
+  "timestamp": "2025-04-19T10:30:00Z",
+  "is_cold_start": false,
+  "category_filter": "defi",
+  "chain_filter": "ethereum",
+  "execution_time": 0.125
+}
+```
+
+#### 2. Dapatkan Proyek Trending
+
+**Endpoint:** `GET /recommend/trending`
+
+**Parameters:**
+- `limit` (int, optional): Jumlah proyek (default: 10)
+- `model_type` (string, optional): Model yang digunakan (default: "fecf")
+
+**Response:** Array dari objek `ProjectResponse`
+
+#### 3. Dapatkan Proyek Populer
+
+**Endpoint:** `GET /recommend/popular`
+
+**Parameters:**
+- `limit` (int, optional): Jumlah proyek (default: 10)
+- `model_type` (string, optional): Model yang digunakan (default: "fecf")
+
+**Response:** Array dari objek `ProjectResponse`
+
+#### 4. Dapatkan Proyek Serupa
+
+**Endpoint:** `GET /recommend/similar/{project_id}`
+
+**Parameters:**
+- `project_id` (string): ID proyek
+- `limit` (int, optional): Jumlah proyek serupa (default: 10)
+- `model_type` (string, optional): Model yang digunakan (default: "fecf")
+
+**Response:** Array dari objek `ProjectResponse`
+
+### Endpoint Analisis Teknikal
+
+#### 1. Dapatkan Sinyal Trading
+
+**Endpoint:** `POST /analysis/trading-signals`
+
+**Request Body:**
+```json
+{
+  "project_id": "bitcoin",
+  "days": 30,
+  "interval": "1d",
+  "risk_tolerance": "medium"
+}
+```
+
+**Response:**
+```json
+{
+  "project_id": "bitcoin",
+  "action": "buy",
+  "confidence": 0.85,
+  "strong_signal": true,
+  "evidence": [
+    "RSI is oversold at 28.50",
+    "MACD crossed above signal line (bullish)",
+    "Price below lower Bollinger Band (oversold)"
+  ],
+  "target_price": 52500.0,
+  "personalized_message": "Signal matches your balanced risk profile",
+  "risk_profile": "medium",
+  "indicators": {
+    "rsi": 28.5,
+    "macd": 250.75,
+    "macd_signal": 210.25,
+    "macd_histogram": 40.5
+  },
+  "timestamp": "2025-04-19T10:30:00Z"
+}
+```
+
+#### 2. Dapatkan Indikator Teknikal
+
+**Endpoint:** `POST /analysis/indicators`
+
+**Request Body:**
+```json
+{
+  "project_id": "bitcoin",
+  "days": 30,
+  "interval": "1d",
+  "indicators": ["rsi", "macd", "bollinger", "sma"]
+}
+```
+
+**Response:**
+```json
+{
+  "project_id": "bitcoin",
+  "indicators": {
+    "rsi": {
+      "value": 45.5,
+      "signal": "neutral",
+      "description": "RSI is neutral at 45.50"
+    },
+    "macd": {
+      "value": 250.75,
+      "signal_line": 210.25,
+      "histogram": 40.5,
+      "signal": "bullish",
+      "description": "MACD is bullish at 250.75 (Signal: 210.25)"
+    },
+    "bollinger": {
+      "upper": 51200.0,
+      "middle": 50000.0,
+      "lower": 48800.0,
+      "percent_b": 0.62,
+      "signal": "neutral",
+      "description": "Price is within Bollinger Bands"
+    },
+    "moving_averages": {
+      "values": {
+        "sma_5": 50200.0,
+        "sma_20": 49500.0,
+        "sma_50": 48000.0,
+        "sma_200": 42000.0
+      },
+      "signal": "bullish",
+      "description": "Price is above 20 and 50-day moving averages (bullish trend)"
+    }
+  },
+  "latest_close": 50150.0,
+  "latest_timestamp": "2025-04-19T00:00:00Z",
+  "period": "30 days (1d)",
+  "execution_time": 0.235
+}
+```
+
+#### 3. Deteksi Peristiwa Pasar
+
+**Endpoint:** `GET /analysis/market-events/{project_id}`
+
+**Parameters:**
+- `project_id` (string): ID proyek
+- `days` (int, optional): Jumlah hari data historis (default: 30)
+- `interval` (string, optional): Interval data (default: "1d")
+
+**Response:**
+```json
+{
+  "project_id": "bitcoin",
+  "latest_event": "pump",
+  "event_counts": {
+    "pump": 3,
+    "dump": 1,
+    "high_volatility": 5,
+    "volume_spike": 2
+  },
+  "close_price": 50150.0,
+  "timestamp": "2025-04-19T00:00:00Z"
+}
+```
+
+#### 4. Dapatkan Alert Teknikal
+
+**Endpoint:** `GET /analysis/alerts/{project_id}`
+
+**Parameters:**
+- `project_id` (string): ID proyek
+- `days` (int, optional): Jumlah hari data historis (default: 30)
+- `interval` (string, optional): Interval data (default: "1d")
+- `lookback` (int, optional): Jumlah periode untuk melihat alert (default: 5)
+
+**Response:**
+```json
+{
+  "project_id": "bitcoin",
+  "alerts": [
+    {
+      "date": "2025-04-18T00:00:00Z",
+      "type": "macd_cross_up",
+      "message": "MACD crossed above signal line (bullish)",
+      "signal": "buy",
+      "strength": 0.8
+    },
+    {
+      "date": "2025-04-17T00:00:00Z",
+      "type": "rsi_oversold",
+      "message": "RSI is oversold at 28.50",
+      "signal": "buy",
+      "strength": 0.75
+    }
+  ],
+  "count": 2,
+  "period": "30 days (1d)",
+  "lookback": 5
+}
+```
+
+#### 5. Prediksi Harga
+
+**Endpoint:** `GET /analysis/price-prediction/{project_id}`
+
+**Parameters:**
+- `project_id` (string): ID proyek
+- `days` (int, optional): Jumlah hari data historis (default: 30)
+- `prediction_days` (int, optional): Jumlah hari prediksi (default: 7)
+- `interval` (string, optional): Interval data (default: "1d")
+
+**Response:**
+```json
+{
+  "project_id": "bitcoin",
+  "current_price": 50150.0,
+  "prediction_direction": "up",
+  "predicted_change_percent": 5.2,
+  "confidence": 0.75,
+  "predictions": [
+    {
+      "date": "2025-04-20T00:00:00Z",
+      "predicted_price": 50750.0,
+      "confidence": 0.75
+    },
+    {
+      "date": "2025-04-21T00:00:00Z",
+      "predicted_price": 51200.0,
+      "confidence": 0.7
+    }
+  ],
+  "data_source": "Real market data"
+}
+```
+
+### Endpoint Interaksi Pengguna
+
+#### 1. Catat Interaksi Pengguna
+
+**Endpoint:** `POST /interactions/record`
+
+**Request Body:**
+```json
+{
+  "user_id": "user_123",
+  "project_id": "bitcoin",
+  "interaction_type": "view",
+  "weight": 1,
+  "context": {
+    "source": "homepage",
+    "duration": 120
+  },
+  "timestamp": "2025-04-19T10:25:30Z"
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Interaction recorded successfully"
+}
+```
+
+### Endpoint Admin
+
+#### 1. Latih Model
+
+**Endpoint:** `POST /admin/train-models`
+
+**Request Body:**
+```json
+{
+  "models": ["fecf", "ncf", "hybrid"],
+  "save_model": true
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Models trained successfully: [\"fecf\", \"ncf\", \"hybrid\"]"
+}
+```
+
+#### 2. Sinkronisasi Data
+
+**Endpoint:** `POST /admin/sync-data`
+
+**Request Body:**
+```json
+{
+  "projects_updated": true,
+  "users_count": 5000
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Data processed successfully"
+}
+```
+
+#### 3. Hapus Cache
+
+**Endpoint:** `POST /recommend/cache/clear` dan `POST /analysis/cache/clear`
+
+**Response:**
+```json
+{
+  "message": "Cache cleared (35 entries)"
+}
+```
+
+### Endpoint Utama dan Health Check
+
+#### 1. Informasi API
+
+**Endpoint:** `GET /`
+
+**Response:** Informasi tentang endpoint yang tersedia dan versi API
+
+#### 2. Health Check
+
+**Endpoint:** `GET /health`
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "timestamp": 1713617400.123
+}
+```
+
+## 🔄 Integrasi dengan Laravel
 
 Recommendation Engine ini dirancang untuk diintegrasikan dengan aplikasi Laravel dengan menghubungkan API endpoints ke backend Laravel. Dalam arsitektur ini:
 
 1. Recommendation Engine berjalan sebagai layanan terpisah
 2. Backend Laravel memanggil API engine untuk mendapatkan rekomendasi
 3. Frontend Laravel Blade + React menampilkan rekomendasi kepada pengguna
+
+### Contoh integrasi dari Laravel ke API engine:
+
+```php
+// Example Laravel Controller
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
+
+class RecommendationController extends Controller
+{
+    private $apiUrl = 'http://localhost:8000';
+    
+    public function getRecommendations(Request $request)
+    {
+        $user = auth()->user();
+        
+        $response = Http::post($this->apiUrl . '/recommend/projects', [
+            'user_id' => $user->id,
+            'model_type' => 'hybrid',
+            'num_recommendations' => 10,
+            'exclude_known' => true,
+            'category' => $request->input('category'),
+            'chain' => $request->input('chain'),
+            'risk_tolerance' => $user->risk_profile ?? 'medium'
+        ]);
+        
+        if ($response->successful()) {
+            return view('recommendations', [
+                'recommendations' => $response->json('recommendations')
+            ]);
+        }
+        
+        return back()->with('error', 'Failed to get recommendations');
+    }
+    
+    public function recordInteraction(Request $request)
+    {
+        $user = auth()->user();
+        
+        $response = Http::post($this->apiUrl . '/interactions/record', [
+            'user_id' => $user->id,
+            'project_id' => $request->input('project_id'),
+            'interaction_type' => $request->input('type'),
+            'weight' => 1,
+            'timestamp' => now()->toIso8601String()
+        ]);
+        
+        return $response->successful() 
+            ? response()->json(['status' => 'success']) 
+            : response()->json(['status' => 'error'], 500);
+    }
+}
+```
 
 ## 📂 Struktur Proyek
 
@@ -341,7 +756,7 @@ web3-recommendation-system/
 │   │   └── technical_features.py  # Fitur teknikal
 │   │
 │   ├── models/           # Model rekomendasi
-│   │   ├── fecf.py       # Feature-Enhanced CF (LightFM implementation)
+│   │   ├── fecf.py       # Original Feature-Enhanced CF (LightFM implementation)
 │   │   ├── alt_fecf.py   # Alternative FECF menggunakan scikit-learn
 │   │   ├── ncf.py        # Neural CF
 │   │   ├── hybrid.py     # Model Hybrid
@@ -371,8 +786,9 @@ Model dievaluasi menggunakan metrik standar sistem rekomendasi:
 - **NDCG@K**: Normalized Discounted Cumulative Gain (mempertimbangkan ranking)
 - **MRR**: Mean Reciprocal Rank
 - **Hit Ratio**: Rasio pengguna yang menerima minimal satu rekomendasi relevan
+- **MAP@K**: Mean Average Precision at K
 
-Laporan evaluasi disimpan di `data/models/`.
+Laporan evaluasi disimpan di `data/models/` dalam format JSON, markdown, atau teks biasa.
 
 ## 🔍 Pemecahan Masalah
 
@@ -396,13 +812,18 @@ Laporan evaluasi disimpan di `data/models/`.
    python main.py process --users 5000
    ```
 
-2. **Masalah dengan LightFM**
-   - Jika LightFM bermasalah, gunakan implementasi alternatif dengan scikit-learn SVD (`alt_fecf.py`)
-   - Update `src/models/hybrid.py` agar menggunakan alt_fecf:
+2. **Menggunakan Implementasi Alternatif (alt_fecf vs fecf)**
+   - Sistem secara default menggunakan implementasi scikit-learn SVD (`alt_fecf.py`)
+   - Jika ingin menggunakan implementasi LightFM original, aktifkan di `src/models/hybrid.py`:
    ```python
-   from src.models.alt_fecf import FeatureEnhancedCF
-   # from src.models.fecf import FeatureEnhancedCF  # Comment out original import
+   from src.models.fecf import FeatureEnhancedCF  # Uncomment untuk menggunakan LightFM
+   # from src.models.alt_fecf import FeatureEnhancedCF  # Comment jika menggunakan LightFM
    ```
+   - Jika menggunakan LightFM, pastikan untuk menginstall LightFM:
+   ```bash
+   pip install lightfm
+   ```
+   - Perhatikan bahwa LightFM memerlukan Python 3.10 (tidak kompatibel dengan Python 3.12+)
 
 3. **Rate Limiting CoinGecko API**
    - Gunakan delay yang lebih panjang antar request:
@@ -412,10 +833,6 @@ Laporan evaluasi disimpan di `data/models/`.
    - Pertimbangkan untuk mendapatkan API key untuk limit yang lebih tinggi
 
 4. **Masalah Instalasi TA-Lib**
-   - Jika mengalami kesulitan menginstal TA-Lib, aktifkan fallback ke pandas-ta dengan mengedit `config.py`:
-     ```python
-     USE_TALIB = False  # Ubah ke False untuk menggunakan pandas-ta sebagai alternatif
-     ```
    - Pastikan kompiler C tersedia di sistem Anda (Visual C++ di Windows, GCC di Linux)
 
 5. **Masalah Memori dengan Dataset Besar**
@@ -437,15 +854,29 @@ Laporan evaluasi disimpan di `data/models/`.
    }
    ```
 
+7. **Model Loading Issues**
+   - Jika model tidak dimuat dengan benar, periksa file model di direktori `data/models/`
+   - Gunakan opsi debug untuk melihat detil loading proses model:
+   ```bash
+   python main.py debug --user-id user_1 --model hybrid --num 10
+   ```
+
+8. **Caching Issues pada API**
+   - Jika API memberikan hasil yang tidak diperbarui, hapus cache:
+   ```bash
+   curl -X POST http://localhost:8000/recommend/cache/clear
+   curl -X POST http://localhost:8000/analysis/cache/clear
+   ```
+
 ## 📝 Lisensi
 
-Didistribusikan di bawah Lisensi MIT. Lihat `LICENSE` untuk informasi lebih lanjut.
+Didistribusikan di bawah Lisensi MIT.
 
 ## 📬 Kontak
 
-Nama Anda - email@example.com
+Nama Anda - feyfeifry@gmail.com
 
-Link Proyek: [https://github.com/feyfry/web3-recommendation-system](https://github.com/feyfry/web3-recommendation-system)
+Link Proyek: [https://github.com/feyfry/recommender-system](https://github.com/feyfry/recommender-system)
 
 ## 🙏 Pengakuan
 

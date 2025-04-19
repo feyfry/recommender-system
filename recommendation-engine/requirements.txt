@@ -17,7 +17,7 @@ torchvision
 # Technical analysis
 # Note: Installing TA-Lib can be complex - see https://github.com/mrjbq7/ta-lib
 # Uncomment the line below if you have TA-Lib C library installed
-# ta-lib
+ta-lib
 yfinance
 
 # Alternative technical indicators library that doesn't require C dependencies
