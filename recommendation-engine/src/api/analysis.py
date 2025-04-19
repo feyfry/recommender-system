@@ -165,6 +165,20 @@ async def get_trading_signals(request: TradingSignalRequest):
         # Personalize based on risk tolerance
         personalized = personalize_signals(signals, risk_tolerance=request.risk_tolerance)
         
+        # Sanitize NaN values in indicators
+        if 'indicators' in personalized:
+            for key, value in list(personalized['indicators'].items()):
+                if pd.isna(value):
+                    personalized['indicators'][key] = 0.0  # Replace NaN with 0.0
+                    
+        # Sanitize target_price if it's NaN
+        if 'target_price' in personalized and pd.isna(personalized['target_price']):
+            personalized['target_price'] = None
+            
+        # Sanitize confidence if it's NaN
+        if 'confidence' in personalized and pd.isna(personalized['confidence']):
+            personalized['confidence'] = 0.5  # Default confidence
+        
         # Create response
         response = TradingSignalResponse(
             project_id=request.project_id,
@@ -189,6 +203,8 @@ async def get_trading_signals(request: TradingSignalRequest):
         
     except Exception as e:
         logger.error(f"Error generating trading signals: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())  # Added to log the full traceback
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 @router.post("/indicators", response_model=TechnicalIndicatorsResponse)

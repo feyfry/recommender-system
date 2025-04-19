@@ -607,18 +607,18 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
         "strong_signal": strong_signal,
         "evidence": evidence,
         "indicators": {
-            "rsi": float(latest_rsi),
-            "macd": float(latest_macd),
-            "macd_signal": float(latest_signal),
-            "macd_histogram": float(latest_histogram),
-            "bollinger_percent": float(bb_percent),
-            "stochastic_k": float(latest_k),
-            "stochastic_d": float(latest_d),
-            "adx": float(latest_adx)
+            "rsi": float(np.nan_to_num(latest_rsi)),
+            "macd": float(np.nan_to_num(latest_macd)),
+            "macd_signal": float(np.nan_to_num(latest_signal)),
+            "macd_histogram": float(np.nan_to_num(latest_histogram)),
+            "bollinger_percent": float(np.nan_to_num(bb_percent)),
+            "stochastic_k": float(np.nan_to_num(latest_k)),
+            "stochastic_d": float(np.nan_to_num(latest_d)),
+            "adx": float(np.nan_to_num(latest_adx))
         }
     }
     
-    if target_price is not None:
+    if target_price is not None and not pd.isna(target_price):
         recommendation["target_price"] = float(target_price)
     
     return recommendation
