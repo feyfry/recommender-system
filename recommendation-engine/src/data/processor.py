@@ -1283,23 +1283,43 @@ class DataProcessor:
         # Convert dicts and lists to string before saving to CSV
         projects_df_csv = projects_df.copy()
         
+        # Perbaiki kolom 'platforms' - Tangani dengan pendekatan yang lebih aman
         if 'platforms' in projects_df_csv.columns:
-            # Pastikan nilai None dikonversi ke dict kosong
-            projects_df_csv['platforms'] = projects_df_csv['platforms'].fillna({})
+            def process_platforms(x):
+                if isinstance(x, dict):
+                    return json.dumps(x, ensure_ascii=False)
+                elif x is None or (isinstance(x, float) and np.isnan(x)):
+                    return json.dumps({}, ensure_ascii=False)
+                else:
+                    try:
+                        # Coba parse jika itu string JSON
+                        if isinstance(x, str):
+                            return json.dumps(json.loads(x), ensure_ascii=False)
+                    except:
+                        pass
+                    # Default ke dict kosong untuk nilai yang tidak diketahui
+                    return json.dumps({}, ensure_ascii=False)
             
-            # Gunakan json.dumps dengan parameter yang benar
-            projects_df_csv['platforms'] = projects_df_csv['platforms'].apply(
-                lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, dict) else x
-            )
-                
+            projects_df_csv['platforms'] = projects_df_csv['platforms'].apply(process_platforms)
+        
+        # Perbaiki kolom 'categories' - Tangani dengan pendekatan yang lebih aman
         if 'categories' in projects_df_csv.columns:
-            # Pastikan nilai None dikonversi ke list kosong
-            projects_df_csv['categories'] = projects_df_csv['categories'].fillna([])
+            def process_categories(x):
+                if isinstance(x, list):
+                    return json.dumps(x, ensure_ascii=False)
+                elif x is None or (isinstance(x, float) and np.isnan(x)):
+                    return json.dumps([], ensure_ascii=False)
+                else:
+                    try:
+                        # Coba parse jika itu string JSON
+                        if isinstance(x, str):
+                            return json.dumps(json.loads(x), ensure_ascii=False)
+                    except:
+                        pass
+                    # Default ke list kosong untuk nilai yang tidak diketahui
+                    return json.dumps([], ensure_ascii=False)
             
-            # Gunakan json.dumps dengan parameter yang benar
-            projects_df_csv['categories'] = projects_df_csv['categories'].apply(
-                lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, list) else x
-            )
+            projects_df_csv['categories'] = projects_df_csv['categories'].apply(process_categories)
         
         # Simpan dengan timestamp
         projects_df_csv.to_csv(projects_path, index=False)
