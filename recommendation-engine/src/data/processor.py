@@ -800,33 +800,51 @@ class DataProcessor:
         
     def _extract_primary_category_improved(self, row) -> str:
         """
-        Ekstrak kategori utama dengan algoritma yang diperbaiki secara komprehensif
+        Extract primary category with an improved algorithm that prioritizes 
+        the first category and then uses mapping if needed
         
         Args:
-            row: Baris DataFrame 
+            row: Row from DataFrame 
             
         Returns:
-            str: Kategori utama yang dinormalisasi
+            str: Normalized primary category
         """
         categories = row.get('categories', [])
         query_category = row.get('query_category')
         
+        # Handle empty categories
         if not categories:
-            # Fallback ke query_category jika tersedia
+            # Fallback to query_category if available
             if query_category and query_category != 'unknown' and query_category != 'top':
                 # Check if the query_category matches any of our category mappings
                 for category, aliases in self.category_mappings.items():
                     if query_category.lower() in aliases:
                         return category
-                # Else return it as-is
                 return query_category
             return 'unknown'
         
-        # Normalisasi kategori (convert ke lowercase untuk perbandingan)
+        # APPROACH 1: Use first category (most important) if available
+        if categories and isinstance(categories[0], str):
+            first_category = categories[0].lower()
+            
+            # Check if first category is in our mappings
+            for category_key, aliases in self.category_mappings.items():
+                if first_category in aliases or any(alias == first_category for alias in aliases):
+                    return category_key
+                    
+            # Special handling for ecosystem categories
+            for ecosystem in self.ecosystem_categories:
+                if ecosystem in first_category:
+                    base_ecosystem = ecosystem.split('-')[0] if '-ecosystem' in ecosystem else ecosystem
+                    return base_ecosystem
+                    
+            # Return first category as-is if no mapping found
+            return first_category
+        
+        # APPROACH 2: Fallback to priority-based matching for all categories
         normalized_categories = [cat.lower() for cat in categories if cat]
         
-        # 1. LANGKAH PERTAMA: Cek eksplisit untuk kategori yang ada dalam category_mappings 
-        #    dan cocokkan dengan kategori yang ada dalam categories[]
+        # First check for direct matches in category_mappings
         matched_categories = []
         for category_key, aliases in self.category_mappings.items():
             for normalized_cat in normalized_categories:
@@ -834,78 +852,23 @@ class DataProcessor:
                     matched_categories.append(category_key)
                     break
         
-        # 2. LANGKAH KEDUA: Jika ada kategori yang cocok, prioritaskan berdasarkan urutan kategori
+        # If we have matches, use priority to select the best one
         if matched_categories:
-            # Cari yang terdaftar lebih awal dalam category_priority
+            # Find which category has highest priority
             for priority_cat in self.category_priority:
                 if priority_cat in matched_categories:
                     return priority_cat
-            # Jika tidak ada yang sesuai prioritas, ambil yang pertama ditemukan
+            # If not in priority list, just return the first match
             return matched_categories[0]
         
-        # 3. LANGKAH KETIGA: Penanganan khusus untuk kasus di mana tidak ada yang cocok langsung
-        # Coba deteksi dengan pencocokan parsial pada kata kunci
-        
-        # Khusus untuk layer-2 dan layer-1
-        for category in normalized_categories:
-            # Deteksi Layer 2 terlebih dahulu
-            if any(l2_term in category for l2_term in ['layer 2', 'layer-2', 'layer2', 'l2']):
-                return 'layer-2'
-            # Kemudian deteksi Layer 1
-            if any(l1_term in category for l1_term in ['layer 1', 'layer-1', 'layer1', 'l1']):
-                return 'layer-1'
-        
-        # Fungsi untuk mendeteksi keyword dari kategori prioritas dalam kategori
-        def contains_category_keywords(categories, priority_cat, mappings):
-            aliases = mappings.get(priority_cat, [])
-            
-            # Exact match cek
-            if priority_cat in categories:
-                return True
-                
-            # Cek alias exact match
-            for alias in aliases:
-                if alias in categories:
-                    return True
-            
-            # Untuk partial match, gunakan semua keyword penting
-            for category in categories:
-                for keyword in aliases:
-                    if keyword in category:
-                        return True
-            
-            return False
-        
-        # 4. LANGKAH KEEMPAT: Coba dengan pendekatan pencocokan parsial untuk semua kategori
-        # Saring dulu berdasarkan kategori ekosistem
-        for category in normalized_categories:
-            if any(ecosystem in category for ecosystem in self.ecosystem_categories):
-                # Deteksi blockchain ecosystem
-                for ecosystem in self.ecosystem_categories:
-                    if ecosystem in category or category in self.category_mappings.get(ecosystem, []):
-                        # Jika tidak ada kategori yang lebih spesifik, gunakan ecosystem
-                        return ecosystem.split('-')[0] if '-ecosystem' in ecosystem else ecosystem
-        
-        # 5. LANGKAH KELIMA: Cek dengan prioritas terurut
-        for priority_cat in self.category_priority:
-            if contains_category_keywords(normalized_categories, priority_cat, self.category_mappings):
-                return priority_cat
-        
-        # 6. LANGKAH KEENAM: Fallback ke query_category jika tersedia dan spesifik
+        # APPROACH 3: Fallback to query_category if available
         if query_category and query_category != 'unknown' and query_category != 'top':
             return query_category
             
-        # 7. LANGKAH KETUJUH: Jika tidak ada yang cocok, gunakan kategori pertama dari categories
+        # APPROACH 4: Last resort - return the first raw category or unknown
         if categories and isinstance(categories[0], str):
-            first_category = categories[0].lower()
-            # Cek jika kategori pertama adalah ecosystem, jika ya coba filter ke kategori dasar
-            for ecosystem in self.ecosystem_categories:
-                if ecosystem in first_category:
-                    base_ecosystem = ecosystem.split('-')[0] if '-ecosystem' in ecosystem else ecosystem
-                    return base_ecosystem
-            return first_category
+            return categories[0].lower()
         
-        # 8. Fallback akhir jika semua gagal
         return 'unknown'
     
     def _extract_primary_chain(self, platforms: Dict[str, str]) -> str:
@@ -1232,77 +1195,96 @@ class DataProcessor:
     
     def clean_json_string(self, json_str):
         """
-        Membersihkan string JSON dari kutip ganda yang tidak valid
+        Comprehensively clean JSON string from invalid double quotes
         
         Args:
-            json_str: String JSON yang akan dibersihkan
+            json_str: String JSON that needs cleaning
             
         Returns:
-            str: String JSON yang sudah dibersihkan
+            str: Properly cleaned JSON string
         """
+        import re
+        
         if not isinstance(json_str, str):
             return json_str
-            
-        # Pola untuk menemukan kutip ganda berlebih
-        pattern = r'"{2,}([^"]+)"{2,}'
-        # Ganti dengan kutip tunggal yang benar
-        cleaned = re.sub(pattern, r'"\1"', json_str)
         
-        # Bersihkan kutip ganda di awal dan akhir juga
-        if cleaned.startswith('""') and cleaned.endswith('""'):
-            cleaned = cleaned[1:-1]
+        # Step 1: Fix double quotes at the beginning and end of the entire string
+        if json_str.startswith('""') and json_str.endswith('""'):
+            json_str = json_str[1:-1]
         
-        # Perbaiki struktur JSON dengan kutip ganda pada kunci dan nilai
-        cleaned = cleaned.replace('"{', '{').replace('}"', '}')
-        cleaned = cleaned.replace('"[', '[').replace(']"', ']')
+        # Step 2: Fix patterns like ""key"": ""value"" to "key": "value"
+        # This handles the issue with platforms and other objects
+        pattern = r'""([^"]+)""\s*:\s*""([^"]+)""'
+        json_str = re.sub(pattern, r'"\1": "\2"', json_str)
         
-        return cleaned
+        # Step 3: Fix patterns like [""item1"", ""item2""] to ["item1", "item2"]
+        # This handles the issue with categories and other arrays
+        pattern = r'\[""([^"]+)"",\s*""([^"]+)""'
+        while re.search(pattern, json_str):
+            json_str = re.sub(pattern, r'["\1", "\2"', json_str)
+        
+        # Fix the closing bracket too
+        pattern = r'""([^"]+)""\]'
+        json_str = re.sub(pattern, r'"\1"]', json_str)
+        
+        # Step 4: Fix any remaining ""value"" patterns
+        pattern = r'""([^"]+)""'
+        json_str = re.sub(pattern, r'"\1"', json_str)
+        
+        # Step 5: Fix structure quirks (e.g. quoted braces)
+        json_str = json_str.replace('"{', '{').replace('}"', '}')
+        json_str = json_str.replace('"[', '[').replace(']"', ']')
+        
+        return json_str
     
     def _save_processed_data(self, projects_df: pd.DataFrame, interactions_df: pd.DataFrame, 
                     features_df: pd.DataFrame) -> None:
         """
-        Simpan data yang sudah diproses dengan perbaikan untuk JSON
+        Save processed data with improved JSON handling
         
         Args:
-            projects_df: DataFrame proyek
-            interactions_df: DataFrame interaksi
-            features_df: DataFrame fitur
+            projects_df: DataFrame of projects
+            interactions_df: DataFrame of interactions
+            features_df: DataFrame of features
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Simpan DataFrame
+        # Paths with timestamp
         projects_path = os.path.join(PROCESSED_DIR, f"projects_{timestamp}.csv")
         interactions_path = os.path.join(PROCESSED_DIR, f"interactions_{timestamp}.csv")
         features_path = os.path.join(PROCESSED_DIR, f"features_{timestamp}.csv")
         
-        # Simpan standard path juga
+        # Standard paths
         projects_std_path = os.path.join(PROCESSED_DIR, "projects.csv")
         interactions_std_path = os.path.join(PROCESSED_DIR, "interactions.csv")
         features_std_path = os.path.join(PROCESSED_DIR, "features.csv")
         
-        # Convert dicts and lists to string before saving to CSV
+        # Create a copy for CSV export
         projects_df_csv = projects_df.copy()
         
-        # Perbaiki kolom 'platforms' - Tangani dengan pendekatan yang lebih aman
+        # Properly handle 'platforms' column
         if 'platforms' in projects_df_csv.columns:
             def process_platforms(x):
                 if isinstance(x, dict):
+                    # Use json.dumps with ensure_ascii=False to avoid escaping Unicode
                     return json.dumps(x, ensure_ascii=False)
                 elif x is None or (isinstance(x, float) and np.isnan(x)):
                     return json.dumps({}, ensure_ascii=False)
                 else:
                     try:
-                        # Coba parse jika itu string JSON
+                        # Try to parse the string if it's already a JSON string
                         if isinstance(x, str):
-                            return json.dumps(json.loads(x), ensure_ascii=False)
+                            # Clean the string first
+                            cleaned = self.clean_json_string(x)
+                            return json.dumps(json.loads(cleaned), ensure_ascii=False)
                     except:
                         pass
-                    # Default ke dict kosong untuk nilai yang tidak diketahui
+                    # Default to empty dict for unknown values
                     return json.dumps({}, ensure_ascii=False)
             
             projects_df_csv['platforms'] = projects_df_csv['platforms'].apply(process_platforms)
         
-        # Perbaiki kolom 'categories' - Tangani dengan pendekatan yang lebih aman
+        # Properly handle 'categories' column
         if 'categories' in projects_df_csv.columns:
             def process_categories(x):
                 if isinstance(x, list):
@@ -1311,23 +1293,25 @@ class DataProcessor:
                     return json.dumps([], ensure_ascii=False)
                 else:
                     try:
-                        # Coba parse jika itu string JSON
+                        # Try to parse the string if it's already a JSON string
                         if isinstance(x, str):
-                            return json.dumps(json.loads(x), ensure_ascii=False)
+                            # Clean the string first
+                            cleaned = self.clean_json_string(x)
+                            return json.dumps(json.loads(cleaned), ensure_ascii=False)
                     except:
                         pass
-                    # Default ke list kosong untuk nilai yang tidak diketahui
+                    # Default to empty list for unknown values
                     return json.dumps([], ensure_ascii=False)
             
             projects_df_csv['categories'] = projects_df_csv['categories'].apply(process_categories)
         
-        # Simpan dengan timestamp
-        projects_df_csv.to_csv(projects_path, index=False)
+        # Save with timestamp
+        projects_df_csv.to_csv(projects_path, index=False, quoting=1)  # Use quoting=1 to quote strings only
         interactions_df.to_csv(interactions_path, index=False)
         features_df.to_csv(features_path, index=False)
         
-        # Simpan standard path
-        projects_df_csv.to_csv(projects_std_path, index=False)
+        # Save standard paths
+        projects_df_csv.to_csv(projects_std_path, index=False, quoting=1)
         interactions_df.to_csv(interactions_std_path, index=False)
         features_df.to_csv(features_std_path, index=False)
         
@@ -1338,7 +1322,7 @@ class DataProcessor:
 
     def load_processed_data(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """
-        Load data yang sudah diproses dengan perbaikan untuk JSON
+        Load processed data with improved JSON handling
         
         Returns:
             tuple: (projects_df, interactions_df, features_df)
@@ -1348,39 +1332,59 @@ class DataProcessor:
         interactions_path = os.path.join(PROCESSED_DIR, "interactions.csv")
         features_path = os.path.join(PROCESSED_DIR, "features.csv")
         
-        # Cek apakah file ada
+        # Check if files exist
         if not all(os.path.exists(path) for path in [projects_path, interactions_path, features_path]):
             logger.warning("Processed data files not found, processing raw data...")
             return self.process_data()
         
-        # Load data
-        projects_df = pd.read_csv(projects_path)
-        interactions_df = pd.read_csv(interactions_path)
-        features_df = pd.read_csv(features_path)
-        
-        # Convert string representations back to Python objects dengan pembersihan yang ditingkatkan
-        if 'platforms' in projects_df.columns:
-            def process_platforms(x):
-                if isinstance(x, str):
-                    return json.loads(self.clean_json_string(x))
-                elif pd.isna(x):
-                    return {}
-                return x
+        try:
+            # Load data
+            projects_df = pd.read_csv(projects_path)
+            interactions_df = pd.read_csv(interactions_path)
+            features_df = pd.read_csv(features_path)
             
-            projects_df['platforms'] = projects_df['platforms'].apply(process_platforms)
+            # Convert string representations back to Python objects
+            if 'platforms' in projects_df.columns:
+                def process_platforms(x):
+                    if isinstance(x, str):
+                        try:
+                            # Clean the string first then parse
+                            cleaned = self.clean_json_string(x)
+                            return json.loads(cleaned)
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"Error parsing platforms JSON: {e}. Original value: {x[:100]}")
+                            return {}
+                    elif pd.isna(x):
+                        return {}
+                    return x
                 
-        if 'categories' in projects_df.columns:
-            def process_categories(x):
-                if isinstance(x, str):
-                    return json.loads(self.clean_json_string(x))
-                elif pd.isna(x):
-                    return []
-                return x
+                projects_df['platforms'] = projects_df['platforms'].apply(process_platforms)
+                    
+            if 'categories' in projects_df.columns:
+                def process_categories(x):
+                    if isinstance(x, str):
+                        try:
+                            # Clean the string first then parse
+                            cleaned = self.clean_json_string(x)
+                            return json.loads(cleaned)
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"Error parsing categories JSON: {e}. Original value: {x[:100]}")
+                            return []
+                    elif pd.isna(x):
+                        return []
+                    return x
+                
+                projects_df['categories'] = projects_df['categories'].apply(process_categories)
             
-            projects_df['categories'] = projects_df['categories'].apply(process_categories)
-        
-        logger.info(f"Loaded processed data: {len(projects_df)} projects, {len(interactions_df)} interactions")
-        return projects_df, interactions_df, features_df
+            logger.info(f"Loaded processed data: {len(projects_df)} projects, {len(interactions_df)} interactions")
+            return projects_df, interactions_df, features_df
+            
+        except Exception as e:
+            logger.error(f"Error loading processed data: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            logger.info("Attempting to process raw data instead...")
+            return self.process_data()
 
 
 if __name__ == "__main__":
