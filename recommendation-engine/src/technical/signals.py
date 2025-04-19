@@ -1,5 +1,5 @@
 """
-Modul untuk menghasilkan sinyal trading berdasarkan analisis teknikal
+Modul untuk menghasilkan sinyal trading berdasarkan analisis teknikal (VERSI YANG DIPERBAIKI)
 """
 
 import os
@@ -15,6 +15,8 @@ from pathlib import Path
 try:
     import talib
     TALIB_AVAILABLE = True
+    logger = logging.getLogger(__name__)
+    logger.info("TA-Lib berhasil diimpor dan tersedia untuk penggunaan")
 except ImportError:
     TALIB_AVAILABLE = False
     logging.warning("TA-Lib not available, using pandas-based indicators instead")
@@ -43,21 +45,47 @@ def calculate_rsi(prices: pd.Series, window: int = 14) -> pd.Series:
     Returns:
         pd.Series: RSI values
     """
+    # Pastikan ada cukup data untuk perhitungan
+    if len(prices) < window * 2:
+        logger.warning(f"Tidak cukup data untuk menghitung RSI. Minimal {window * 2} titik data diperlukan.")
+        return pd.Series(np.nan, index=prices.index)
+        
     if TALIB_AVAILABLE:
-        return pd.Series(talib.RSI(prices.values, timeperiod=window), index=prices.index)
+        try:
+            # Pastikan input adalah array numpy yang valid
+            if np.isnan(prices.values).any():
+                prices_cleaned = prices.fillna(method='ffill').fillna(method='bfill')
+                rsi = pd.Series(talib.RSI(prices_cleaned.values, timeperiod=window), index=prices.index)
+            else:
+                rsi = pd.Series(talib.RSI(prices.values, timeperiod=window), index=prices.index)
+                
+            # Jika masih ada NaN, coba metode pandas sebagai fallback
+            if np.isnan(rsi.values).all():
+                logger.warning("TA-Lib RSI mengembalikan semua NaN, menggunakan implementasi pandas sebagai fallback")
+                return _calculate_rsi_pandas(prices, window)
+                
+            return rsi
+        except Exception as e:
+            logger.error(f"Error saat menghitung RSI dengan TA-Lib: {str(e)}")
+            return _calculate_rsi_pandas(prices, window)
     else:
-        # Calculate RSI using pandas
-        delta = prices.diff()
-        gain = delta.where(delta > 0, 0)
-        loss = -delta.where(delta < 0, 0)
-        
-        avg_gain = gain.rolling(window=window).mean()
-        avg_loss = loss.rolling(window=window).mean()
-        
-        rs = avg_gain / avg_loss.replace(0, np.finfo(float).eps)  # Avoid division by zero
-        rsi = 100 - (100 / (1 + rs))
-        
-        return rsi
+        return _calculate_rsi_pandas(prices, window)
+
+
+def _calculate_rsi_pandas(prices: pd.Series, window: int = 14) -> pd.Series:
+    """Implementasi RSI menggunakan pandas"""
+    # Calculate RSI using pandas
+    delta = prices.diff()
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    
+    avg_gain = gain.rolling(window=window).mean()
+    avg_loss = loss.rolling(window=window).mean()
+    
+    rs = avg_gain / avg_loss.replace(0, np.finfo(float).eps)  # Avoid division by zero
+    rsi = 100 - (100 / (1 + rs))
+    
+    return rsi
 
 
 def calculate_macd(prices: pd.Series, 
@@ -76,26 +104,62 @@ def calculate_macd(prices: pd.Series,
     Returns:
         tuple: (macd, signal, histogram)
     """
+    min_periods_needed = slow_period + signal_period + 5  # Tambahan 5 untuk margin keamanan
+    
+    # Pastikan ada cukup data untuk perhitungan
+    if len(prices) < min_periods_needed:
+        logger.warning(f"Tidak cukup data untuk menghitung MACD dengan benar. Minimal {min_periods_needed} titik data diperlukan.")
+        empty_series = pd.Series(np.nan, index=prices.index)
+        return empty_series, empty_series, empty_series
+    
     if TALIB_AVAILABLE:
-        macd, signal, hist = talib.MACD(
-            prices.values, 
-            fastperiod=fast_period, 
-            slowperiod=slow_period, 
-            signalperiod=signal_period
-        )
-        return (pd.Series(macd, index=prices.index),
-                pd.Series(signal, index=prices.index),
-                pd.Series(hist, index=prices.index))
+        try:
+            # Pastikan input adalah array numpy yang valid
+            if np.isnan(prices.values).any():
+                prices_cleaned = prices.fillna(method='ffill').fillna(method='bfill')
+                macd, signal, hist = talib.MACD(
+                    prices_cleaned.values, 
+                    fastperiod=fast_period, 
+                    slowperiod=slow_period, 
+                    signalperiod=signal_period
+                )
+            else:
+                macd, signal, hist = talib.MACD(
+                    prices.values, 
+                    fastperiod=fast_period, 
+                    slowperiod=slow_period, 
+                    signalperiod=signal_period
+                )
+                
+            # Cek hasilnya valid
+            if np.isnan(macd).all() or np.isnan(signal).all():
+                logger.warning("TA-Lib MACD mengembalikan semua NaN, menggunakan implementasi pandas sebagai fallback")
+                return _calculate_macd_pandas(prices, fast_period, slow_period, signal_period)
+                
+            return (pd.Series(macd, index=prices.index),
+                    pd.Series(signal, index=prices.index),
+                    pd.Series(hist, index=prices.index))
+        except Exception as e:
+            logger.error(f"Error saat menghitung MACD dengan TA-Lib: {str(e)}")
+            return _calculate_macd_pandas(prices, fast_period, slow_period, signal_period)
     else:
-        # Calculate MACD using pandas
-        fast_ema = prices.ewm(span=fast_period, adjust=False).mean()
-        slow_ema = prices.ewm(span=slow_period, adjust=False).mean()
-        
-        macd = fast_ema - slow_ema
-        signal = macd.ewm(span=signal_period, adjust=False).mean()
-        histogram = macd - signal
-        
-        return macd, signal, histogram
+        return _calculate_macd_pandas(prices, fast_period, slow_period, signal_period)
+
+
+def _calculate_macd_pandas(prices: pd.Series, 
+                          fast_period: int = 12, 
+                          slow_period: int = 26, 
+                          signal_period: int = 9) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """Implementasi MACD menggunakan pandas"""
+    # Calculate MACD using pandas
+    fast_ema = prices.ewm(span=fast_period, adjust=False).mean()
+    slow_ema = prices.ewm(span=slow_period, adjust=False).mean()
+    
+    macd = fast_ema - slow_ema
+    signal = macd.ewm(span=signal_period, adjust=False).mean()
+    histogram = macd - signal
+    
+    return macd, signal, histogram
 
 
 def calculate_bollinger_bands(prices: pd.Series, window: int = 20, num_std: float = 2.0) -> Tuple[pd.Series, pd.Series, pd.Series]:
@@ -110,26 +174,58 @@ def calculate_bollinger_bands(prices: pd.Series, window: int = 20, num_std: floa
     Returns:
         tuple: (upper_band, middle_band, lower_band)
     """
+    # Pastikan ada cukup data untuk perhitungan
+    if len(prices) < window:
+        logger.warning(f"Tidak cukup data untuk menghitung Bollinger Bands. Minimal {window} titik data diperlukan.")
+        empty_series = pd.Series(np.nan, index=prices.index)
+        return empty_series, empty_series, empty_series
+        
     if TALIB_AVAILABLE:
-        upper, middle, lower = talib.BBANDS(
-            prices.values, 
-            timeperiod=window, 
-            nbdevup=num_std, 
-            nbdevdn=num_std, 
-            matype=0
-        )
-        return (pd.Series(upper, index=prices.index),
-                pd.Series(middle, index=prices.index),
-                pd.Series(lower, index=prices.index))
+        try:
+            # Pastikan input adalah array numpy yang valid
+            if np.isnan(prices.values).any():
+                prices_cleaned = prices.fillna(method='ffill').fillna(method='bfill')
+                upper, middle, lower = talib.BBANDS(
+                    prices_cleaned.values, 
+                    timeperiod=window, 
+                    nbdevup=num_std, 
+                    nbdevdn=num_std, 
+                    matype=0
+                )
+            else:
+                upper, middle, lower = talib.BBANDS(
+                    prices.values, 
+                    timeperiod=window, 
+                    nbdevup=num_std, 
+                    nbdevdn=num_std, 
+                    matype=0
+                )
+                
+            # Cek hasilnya valid
+            if np.isnan(middle).all():
+                logger.warning("TA-Lib BBANDS mengembalikan semua NaN, menggunakan implementasi pandas sebagai fallback")
+                return _calculate_bollinger_pandas(prices, window, num_std)
+                
+            return (pd.Series(upper, index=prices.index),
+                    pd.Series(middle, index=prices.index),
+                    pd.Series(lower, index=prices.index))
+        except Exception as e:
+            logger.error(f"Error saat menghitung Bollinger Bands dengan TA-Lib: {str(e)}")
+            return _calculate_bollinger_pandas(prices, window, num_std)
     else:
-        # Calculate Bollinger Bands using pandas
-        middle = prices.rolling(window=window).mean()
-        std = prices.rolling(window=window).std()
-        
-        upper = middle + (std * num_std)
-        lower = middle - (std * num_std)
-        
-        return upper, middle, lower
+        return _calculate_bollinger_pandas(prices, window, num_std)
+
+
+def _calculate_bollinger_pandas(prices: pd.Series, window: int = 20, num_std: float = 2.0) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """Implementasi Bollinger Bands menggunakan pandas"""
+    # Calculate Bollinger Bands using pandas
+    middle = prices.rolling(window=window).mean()
+    std = prices.rolling(window=window).std()
+    
+    upper = middle + (std * num_std)
+    lower = middle - (std * num_std)
+    
+    return upper, middle, lower
 
 
 def calculate_stochastic(prices: pd.Series, 
@@ -150,135 +246,72 @@ def calculate_stochastic(prices: pd.Series,
     Returns:
         tuple: (k, d)
     """
+    # Pastikan ada cukup data untuk perhitungan
+    if len(prices) < k_period + d_period:
+        logger.warning(f"Tidak cukup data untuk menghitung Stochastic. Minimal {k_period + d_period} titik data diperlukan.")
+        empty_series = pd.Series(np.nan, index=prices.index)
+        return empty_series, empty_series
+        
     if TALIB_AVAILABLE:
-        k, d = talib.STOCH(
-            high_prices.values, 
-            low_prices.values, 
-            prices.values, 
-            fastk_period=k_period, 
-            slowk_period=d_period, 
-            slowk_matype=0, 
-            slowd_period=d_period, 
-            slowd_matype=0
-        )
-        return pd.Series(k, index=prices.index), pd.Series(d, index=prices.index)
+        try:
+            # Pastikan input adalah array numpy yang valid
+            if np.isnan(high_prices.values).any() or np.isnan(low_prices.values).any() or np.isnan(prices.values).any():
+                high_cleaned = high_prices.fillna(method='ffill').fillna(method='bfill')
+                low_cleaned = low_prices.fillna(method='ffill').fillna(method='bfill')
+                close_cleaned = prices.fillna(method='ffill').fillna(method='bfill')
+                k, d = talib.STOCH(
+                    high_cleaned.values, 
+                    low_cleaned.values, 
+                    close_cleaned.values, 
+                    fastk_period=k_period, 
+                    slowk_period=d_period, 
+                    slowk_matype=0, 
+                    slowd_period=d_period, 
+                    slowd_matype=0
+                )
+            else:
+                k, d = talib.STOCH(
+                    high_prices.values, 
+                    low_prices.values, 
+                    prices.values, 
+                    fastk_period=k_period, 
+                    slowk_period=d_period, 
+                    slowk_matype=0, 
+                    slowd_period=d_period, 
+                    slowd_matype=0
+                )
+                
+            # Cek hasilnya valid
+            if np.isnan(k).all() or np.isnan(d).all():
+                logger.warning("TA-Lib STOCH mengembalikan semua NaN, menggunakan implementasi pandas sebagai fallback")
+                return _calculate_stochastic_pandas(prices, high_prices, low_prices, k_period, d_period)
+                
+            return pd.Series(k, index=prices.index), pd.Series(d, index=prices.index)
+        except Exception as e:
+            logger.error(f"Error saat menghitung Stochastic dengan TA-Lib: {str(e)}")
+            return _calculate_stochastic_pandas(prices, high_prices, low_prices, k_period, d_period)
     else:
-        # Calculate Stochastic Oscillator using pandas
-        lowest_low = low_prices.rolling(window=k_period).min()
-        highest_high = high_prices.rolling(window=k_period).max()
-        
-        k = 100 * (prices - lowest_low) / (highest_high - lowest_low).replace(0, np.finfo(float).eps)
-        d = k.rolling(window=d_period).mean()
-        
-        return k, d
+        return _calculate_stochastic_pandas(prices, high_prices, low_prices, k_period, d_period)
 
 
-def calculate_atr(high_prices: pd.Series, 
-                low_prices: pd.Series, 
-                close_prices: pd.Series, 
-                window: int = 14) -> pd.Series:
-    """
-    Calculate Average True Range (ATR)
+def _calculate_stochastic_pandas(prices: pd.Series, 
+                              high_prices: pd.Series, 
+                              low_prices: pd.Series,
+                              k_period: int = 14, 
+                              d_period: int = 3) -> Tuple[pd.Series, pd.Series]:
+    """Implementasi Stochastic Oscillator menggunakan pandas"""
+    # Calculate Stochastic Oscillator using pandas
+    lowest_low = low_prices.rolling(window=k_period).min()
+    highest_high = high_prices.rolling(window=k_period).max()
     
-    Args:
-        high_prices: Series of high prices
-        low_prices: Series of low prices
-        close_prices: Series of closing prices
-        window: Window size for ATR calculation
-        
-    Returns:
-        pd.Series: ATR values
-    """
-    if TALIB_AVAILABLE:
-        atr = talib.ATR(
-            high_prices.values, 
-            low_prices.values, 
-            close_prices.values, 
-            timeperiod=window
-        )
-        return pd.Series(atr, index=close_prices.index)
-    else:
-        # Calculate ATR using pandas
-        prev_close = close_prices.shift(1)
-        tr1 = high_prices - low_prices  # High - Low
-        tr2 = (high_prices - prev_close).abs()  # |High - Previous Close|
-        tr3 = (low_prices - prev_close).abs()  # |Low - Previous Close|
-        
-        true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        atr = true_range.rolling(window=window).mean()
-        
-        return atr
-
-
-def calculate_adx(high_prices: pd.Series, 
-                low_prices: pd.Series, 
-                close_prices: pd.Series, 
-                window: int = 14) -> Tuple[pd.Series, pd.Series, pd.Series]:
-    """
-    Calculate Average Directional Index (ADX)
+    # Hindari pembagian dengan nol
+    denominator = highest_high - lowest_low
+    denominator = denominator.replace(0, np.finfo(float).eps)
     
-    Args:
-        high_prices: Series of high prices
-        low_prices: Series of low prices
-        close_prices: Series of closing prices
-        window: Window size for ADX calculation
-        
-    Returns:
-        tuple: (adx, plus_di, minus_di)
-    """
-    if TALIB_AVAILABLE:
-        adx = talib.ADX(
-            high_prices.values, 
-            low_prices.values, 
-            close_prices.values, 
-            timeperiod=window
-        )
-        plus_di = talib.PLUS_DI(
-            high_prices.values, 
-            low_prices.values, 
-            close_prices.values, 
-            timeperiod=window
-        )
-        minus_di = talib.MINUS_DI(
-            high_prices.values, 
-            low_prices.values, 
-            close_prices.values, 
-            timeperiod=window
-        )
-        return (pd.Series(adx, index=close_prices.index),
-                pd.Series(plus_di, index=close_prices.index),
-                pd.Series(minus_di, index=close_prices.index))
-    else:
-        # Calculate ADX using pandas (simplified implementation)
-        # This is a simplified version and doesn't exactly match TA-Lib
-        
-        # 1. True Range
-        prev_close = close_prices.shift(1)
-        tr1 = high_prices - low_prices  # High - Low
-        tr2 = (high_prices - prev_close).abs()  # |High - Previous Close|
-        tr3 = (low_prices - prev_close).abs()  # |Low - Previous Close|
-        
-        true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        atr = true_range.rolling(window=window).mean()
-        
-        # 2. Directional Movement
-        high_diff = high_prices - high_prices.shift(1)
-        low_diff = low_prices.shift(1) - low_prices
-        
-        plus_dm = high_diff.where((high_diff > low_diff) & (high_diff > 0), 0)
-        minus_dm = low_diff.where((low_diff > high_diff) & (low_diff > 0), 0)
-        
-        # 3. Directional Indicators
-        plus_di = 100 * (plus_dm.rolling(window=window).mean() / atr)
-        minus_di = 100 * (minus_dm.rolling(window=window).mean() / atr)
-        
-        # 4. Directional Index
-        dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.finfo(float).eps))
-        
-        # 5. Average Directional Index
-        adx = dx.rolling(window=window).mean()
-        
-        return adx, plus_di, minus_di
+    k = 100 * (prices - lowest_low) / denominator
+    d = k.rolling(window=d_period).mean()
+    
+    return k, d
 
 
 def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGNAL_WINDOW) -> Dict[str, Any]:
@@ -306,6 +339,17 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
                 "confidence": 0.0
             }
     
+    # Pastikan minimal data cukup untuk perhitungan (setidaknya 50 data poin)
+    min_required_points = 50
+    if len(prices_df) < min_required_points:
+        logger.warning(f"Tidak cukup data untuk analisis teknikal yang akurat. Minimal {min_required_points} titik data diperlukan, hanya {len(prices_df)} tersedia.")
+        logger.info(f"Coba tambahkan parameter 'days' dengan nilai lebih besar (misalnya, 60 atau 90)")
+        return {
+            "error": f"Insufficient data points for accurate analysis. Need at least {min_required_points}, got {len(prices_df)}.",
+            "action": "hold",
+            "confidence": 0.0
+        }
+    
     # Use appropriate column names or defaults
     close_col = 'close'
     high_col = 'high' if 'high' in prices_df.columns else close_col
@@ -315,6 +359,12 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
     close_prices = prices_df[close_col]
     high_prices = prices_df[high_col]
     low_prices = prices_df[low_col]
+    
+    # Check if TA-Lib is available and log it
+    if TALIB_AVAILABLE:
+        logger.info("Menggunakan TA-Lib untuk perhitungan indikator teknikal")
+    else:
+        logger.info("TA-Lib tidak tersedia, menggunakan implementasi pandas")
     
     # Calculate indicators
     # 1. RSI
@@ -337,23 +387,38 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
     sma_50 = close_prices.rolling(window=50).mean()
     sma_200 = close_prices.rolling(window=200).mean()
     
+    # Log status perhitungan indikator
+    for indicator_name, indicator_data in [
+        ("RSI", rsi), 
+        ("MACD", macd),
+        ("MACD Signal", signal),
+        ("Bollinger Middle", middle_band),
+        ("Stochastic K", k),
+        ("ADX", adx)
+    ]:
+        valid_points = indicator_data.count()
+        total_points = len(indicator_data)
+        logger.info(f"Indikator {indicator_name}: {valid_points}/{total_points} titik data valid")
+    
     # Get latest values
     latest_close = close_prices.iloc[-1]
-    latest_rsi = rsi.iloc[-1]
-    latest_macd = macd.iloc[-1]
-    latest_signal = signal.iloc[-1]
-    latest_histogram = histogram.iloc[-1]
-    latest_upper = upper_band.iloc[-1]
-    latest_middle = middle_band.iloc[-1]
-    latest_lower = lower_band.iloc[-1]
-    latest_k = k.iloc[-1]
-    latest_d = d.iloc[-1]
-    latest_adx = adx.iloc[-1]
-    latest_plus_di = plus_di.iloc[-1]
-    latest_minus_di = minus_di.iloc[-1]
-    latest_sma_20 = sma_20.iloc[-1]
-    latest_sma_50 = sma_50.iloc[-1]
-    latest_sma_200 = sma_200.iloc[-1]
+    latest_rsi = rsi.iloc[-1] if not pd.isna(rsi.iloc[-1]) else 50  # Default ke netral jika tidak valid
+    latest_macd = macd.iloc[-1] if not pd.isna(macd.iloc[-1]) else 0
+    latest_signal = signal.iloc[-1] if not pd.isna(signal.iloc[-1]) else 0
+    latest_histogram = histogram.iloc[-1] if not pd.isna(histogram.iloc[-1]) else 0
+    latest_upper = upper_band.iloc[-1] if not pd.isna(upper_band.iloc[-1]) else latest_close * 1.05
+    latest_middle = middle_band.iloc[-1] if not pd.isna(middle_band.iloc[-1]) else latest_close
+    latest_lower = lower_band.iloc[-1] if not pd.isna(lower_band.iloc[-1]) else latest_close * 0.95
+    latest_k = k.iloc[-1] if not pd.isna(k.iloc[-1]) else 50
+    latest_d = d.iloc[-1] if not pd.isna(d.iloc[-1]) else 50
+    latest_adx = adx.iloc[-1] if not pd.isna(adx.iloc[-1]) else 15
+    latest_plus_di = plus_di.iloc[-1] if not pd.isna(plus_di.iloc[-1]) else 20
+    latest_minus_di = minus_di.iloc[-1] if not pd.isna(minus_di.iloc[-1]) else 20
+    
+    # Validasi nilai sma
+    latest_sma_20 = sma_20.iloc[-1] if not pd.isna(sma_20.iloc[-1]) else latest_close
+    latest_sma_50 = sma_50.iloc[-1] if not pd.isna(sma_50.iloc[-1]) else latest_close
+    latest_sma_200 = sma_200.iloc[-1] if not pd.isna(sma_200.iloc[-1]) else latest_close
     
     # Calculate signals
     signals = {}
@@ -378,9 +443,17 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
             'description': f"RSI is neutral at {latest_rsi:.2f}"
         }
     
-    # MACD signals
-    macd_cross_up = (macd.iloc[-1] > signal.iloc[-1]) and (macd.iloc[-2] <= signal.iloc[-2])
-    macd_cross_down = (macd.iloc[-1] < signal.iloc[-1]) and (macd.iloc[-2] >= signal.iloc[-2])
+    # MACD signals - perbaiki pengecekan crossover
+    # Pastikan kita memiliki setidaknya 2 data poin valid
+    valid_macd = macd.dropna()
+    valid_signal = signal.dropna()
+    
+    macd_cross_up = False
+    macd_cross_down = False
+    
+    if len(valid_macd) >= 2 and len(valid_signal) >= 2:
+        macd_cross_up = (valid_macd.iloc[-1] > valid_signal.iloc[-1]) and (valid_macd.iloc[-2] <= valid_signal.iloc[-2])
+        macd_cross_down = (valid_macd.iloc[-1] < valid_signal.iloc[-1]) and (valid_macd.iloc[-2] >= valid_signal.iloc[-2])
     
     if macd_cross_up:
         signals['macd'] = {
@@ -414,32 +487,40 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
         }
     
     # Bollinger Bands signals
-    bb_percent = (latest_close - latest_lower) / (latest_upper - latest_lower)
-    
-    if latest_close > latest_upper:
-        signals['bollinger'] = {
-            'signal': 'sell',
-            'strength': 0.7,
-            'description': "Price above upper Bollinger Band (overbought)"
-        }
-    elif latest_close < latest_lower:
-        signals['bollinger'] = {
-            'signal': 'buy',
-            'strength': 0.7,
-            'description': "Price below lower Bollinger Band (oversold)"
-        }
-    elif bb_percent > 0.8:
-        signals['bollinger'] = {
-            'signal': 'sell',
-            'strength': 0.6,
-            'description': "Price near upper Bollinger Band (potential reversal)"
-        }
-    elif bb_percent < 0.2:
-        signals['bollinger'] = {
-            'signal': 'buy',
-            'strength': 0.6,
-            'description': "Price near lower Bollinger Band (potential reversal)"
-        }
+    # Cek apakah nilai Bollinger Bands valid
+    if not pd.isna(latest_upper) and not pd.isna(latest_lower) and latest_upper > latest_lower:
+        bb_percent = (latest_close - latest_lower) / (latest_upper - latest_lower)
+        
+        if latest_close > latest_upper:
+            signals['bollinger'] = {
+                'signal': 'sell',
+                'strength': 0.7,
+                'description': "Price above upper Bollinger Band (overbought)"
+            }
+        elif latest_close < latest_lower:
+            signals['bollinger'] = {
+                'signal': 'buy',
+                'strength': 0.7,
+                'description': "Price below lower Bollinger Band (oversold)"
+            }
+        elif bb_percent > 0.8:
+            signals['bollinger'] = {
+                'signal': 'sell',
+                'strength': 0.6,
+                'description': "Price near upper Bollinger Band (potential reversal)"
+            }
+        elif bb_percent < 0.2:
+            signals['bollinger'] = {
+                'signal': 'buy',
+                'strength': 0.6,
+                'description': "Price near lower Bollinger Band (potential reversal)"
+            }
+        else:
+            signals['bollinger'] = {
+                'signal': 'hold',
+                'strength': 0.5,
+                'description': "Price within Bollinger Bands (neutral)"
+            }
     else:
         signals['bollinger'] = {
             'signal': 'hold',
@@ -447,9 +528,16 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
             'description': "Price within Bollinger Bands (neutral)"
         }
     
-    # Stochastic signals
-    stoch_cross_up = (k.iloc[-1] > d.iloc[-1]) and (k.iloc[-2] <= d.iloc[-2])
-    stoch_cross_down = (k.iloc[-1] < d.iloc[-1]) and (k.iloc[-2] >= d.iloc[-2])
+    # Stochastic signals - perbaiki pengecekan crossover
+    valid_k = k.dropna()
+    valid_d = d.dropna()
+    
+    stoch_cross_up = False
+    stoch_cross_down = False
+    
+    if len(valid_k) >= 2 and len(valid_d) >= 2:
+        stoch_cross_up = (valid_k.iloc[-1] > valid_d.iloc[-1]) and (valid_k.iloc[-2] <= valid_d.iloc[-2])
+        stoch_cross_down = (valid_k.iloc[-1] < valid_d.iloc[-1]) and (valid_k.iloc[-2] >= valid_d.iloc[-2])
     
     if latest_k < 20 and stoch_cross_up:
         signals['stochastic'] = {
@@ -504,8 +592,16 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
         }
     
     # Moving Average signals
-    golden_cross = (sma_50.iloc[-1] > sma_200.iloc[-1]) and (sma_50.iloc[-2] <= sma_200.iloc[-2])
-    death_cross = (sma_50.iloc[-1] < sma_200.iloc[-1]) and (sma_50.iloc[-2] >= sma_200.iloc[-2])
+    # Perbaiki pengecekan golden cross / death cross
+    valid_sma_50 = sma_50.dropna()
+    valid_sma_200 = sma_200.dropna()
+    
+    golden_cross = False
+    death_cross = False
+    
+    if len(valid_sma_50) >= 2 and len(valid_sma_200) >= 2:
+        golden_cross = (valid_sma_50.iloc[-1] > valid_sma_200.iloc[-1]) and (valid_sma_50.iloc[-2] <= valid_sma_200.iloc[-2])
+        death_cross = (valid_sma_50.iloc[-1] < valid_sma_200.iloc[-1]) and (valid_sma_50.iloc[-2] >= valid_sma_200.iloc[-2])
     
     if golden_cross:
         signals['moving_avg'] = {
@@ -586,7 +682,7 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
 
     if 'high' in prices_df.columns and 'low' in prices_df.columns:
         atr = calculate_atr(high_prices, low_prices, close_prices)
-        latest_atr = atr.iloc[-1]
+        latest_atr = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else (latest_close * 0.02)  # Default to 2% of price
         
         if action == "buy":
             # Target price for buying: current price + 2*ATR
@@ -600,6 +696,12 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
     # Check if confidence meets threshold
     strong_signal = confidence >= CONFIDENCE_THRESHOLD
     
+    # Calculate Bollinger Percent B untuk API response
+    if pd.isna(latest_upper) or pd.isna(latest_lower) or latest_upper == latest_lower:
+        bb_percent_b = 0.5  # Default ke nilai netral
+    else:
+        bb_percent_b = (latest_close - latest_lower) / (latest_upper - latest_lower)
+    
     # Create final recommendation
     recommendation = {
         "action": action,
@@ -611,7 +713,7 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
             "macd": float(np.nan_to_num(latest_macd)),
             "macd_signal": float(np.nan_to_num(latest_signal)),
             "macd_histogram": float(np.nan_to_num(latest_histogram)),
-            "bollinger_percent": float(np.nan_to_num(bb_percent)),
+            "bollinger_percent": float(np.nan_to_num(bb_percent_b)),
             "stochastic_k": float(np.nan_to_num(latest_k)),
             "stochastic_d": float(np.nan_to_num(latest_d)),
             "adx": float(np.nan_to_num(latest_adx))
@@ -624,6 +726,221 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
     return recommendation
 
 
+def calculate_atr(high_prices: pd.Series, 
+                low_prices: pd.Series, 
+                close_prices: pd.Series, 
+                window: int = 14) -> pd.Series:
+    """
+    Calculate Average True Range (ATR)
+    
+    Args:
+        high_prices: Series of high prices
+        low_prices: Series of low prices
+        close_prices: Series of closing prices
+        window: Window size for ATR calculation
+        
+    Returns:
+        pd.Series: ATR values
+    """
+    # Pastikan ada cukup data untuk perhitungan
+    if len(close_prices) < window + 1:  # +1 untuk previous close
+        logger.warning(f"Tidak cukup data untuk menghitung ATR. Minimal {window + 1} titik data diperlukan.")
+        return pd.Series(np.nan, index=close_prices.index)
+        
+    if TALIB_AVAILABLE:
+        try:
+            # Pastikan input adalah array numpy yang valid
+            if np.isnan(high_prices.values).any() or np.isnan(low_prices.values).any() or np.isnan(close_prices.values).any():
+                high_cleaned = high_prices.fillna(method='ffill').fillna(method='bfill')
+                low_cleaned = low_prices.fillna(method='ffill').fillna(method='bfill')
+                close_cleaned = close_prices.fillna(method='ffill').fillna(method='bfill')
+                atr = talib.ATR(
+                    high_cleaned.values, 
+                    low_cleaned.values, 
+                    close_cleaned.values, 
+                    timeperiod=window
+                )
+            else:
+                atr = talib.ATR(
+                    high_prices.values, 
+                    low_prices.values, 
+                    close_prices.values, 
+                    timeperiod=window
+                )
+                
+            # Cek hasilnya valid
+            if np.isnan(atr).all():
+                logger.warning("TA-Lib ATR mengembalikan semua NaN, menggunakan implementasi pandas sebagai fallback")
+                return _calculate_atr_pandas(high_prices, low_prices, close_prices, window)
+                
+            return pd.Series(atr, index=close_prices.index)
+        except Exception as e:
+            logger.error(f"Error saat menghitung ATR dengan TA-Lib: {str(e)}")
+            return _calculate_atr_pandas(high_prices, low_prices, close_prices, window)
+    else:
+        return _calculate_atr_pandas(high_prices, low_prices, close_prices, window)
+
+
+def _calculate_atr_pandas(high_prices: pd.Series, 
+                      low_prices: pd.Series, 
+                      close_prices: pd.Series, 
+                      window: int = 14) -> pd.Series:
+    """Implementasi ATR menggunakan pandas"""
+    # Calculate ATR using pandas
+    prev_close = close_prices.shift(1)
+    tr1 = high_prices - low_prices  # High - Low
+    tr2 = (high_prices - prev_close).abs()  # |High - Previous Close|
+    tr3 = (low_prices - prev_close).abs()  # |Low - Previous Close|
+    
+    # Handle NaN values in each component
+    tr1 = tr1.fillna(0)
+    tr2 = tr2.fillna(0)
+    tr3 = tr3.fillna(0)
+    
+    true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = true_range.rolling(window=window).mean()
+    
+    return atr
+
+
+def calculate_adx(high_prices: pd.Series, 
+                low_prices: pd.Series, 
+                close_prices: pd.Series, 
+                window: int = 14) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    Calculate Average Directional Index (ADX)
+    
+    Args:
+        high_prices: Series of high prices
+        low_prices: Series of low prices
+        close_prices: Series of closing prices
+        window: Window size for ADX calculation
+        
+    Returns:
+        tuple: (adx, plus_di, minus_di)
+    """
+    # Pastikan ada cukup data untuk perhitungan
+    min_periods_needed = window * 3  # ADX membutuhkan banyak data historis
+    if len(close_prices) < min_periods_needed:
+        logger.warning(f"Tidak cukup data untuk menghitung ADX. Minimal {min_periods_needed} titik data diperlukan.")
+        empty_series = pd.Series(np.nan, index=close_prices.index)
+        return empty_series, empty_series, empty_series
+        
+    if TALIB_AVAILABLE:
+        try:
+            # Pastikan input adalah array numpy yang valid
+            if np.isnan(high_prices.values).any() or np.isnan(low_prices.values).any() or np.isnan(close_prices.values).any():
+                high_cleaned = high_prices.fillna(method='ffill').fillna(method='bfill')
+                low_cleaned = low_prices.fillna(method='ffill').fillna(method='bfill')
+                close_cleaned = close_prices.fillna(method='ffill').fillna(method='bfill')
+                adx = talib.ADX(
+                    high_cleaned.values, 
+                    low_cleaned.values, 
+                    close_cleaned.values, 
+                    timeperiod=window
+                )
+                plus_di = talib.PLUS_DI(
+                    high_cleaned.values, 
+                    low_cleaned.values, 
+                    close_cleaned.values, 
+                    timeperiod=window
+                )
+                minus_di = talib.MINUS_DI(
+                    high_cleaned.values, 
+                    low_cleaned.values, 
+                    close_cleaned.values, 
+                    timeperiod=window
+                )
+            else:
+                adx = talib.ADX(
+                    high_prices.values, 
+                    low_prices.values, 
+                    close_prices.values, 
+                    timeperiod=window
+                )
+                plus_di = talib.PLUS_DI(
+                    high_prices.values, 
+                    low_prices.values, 
+                    close_prices.values, 
+                    timeperiod=window
+                )
+                minus_di = talib.MINUS_DI(
+                    high_prices.values, 
+                    low_prices.values, 
+                    close_prices.values, 
+                    timeperiod=window
+                )
+                
+            # Cek hasilnya valid
+            if np.isnan(adx).all() or np.isnan(plus_di).all() or np.isnan(minus_di).all():
+                logger.warning("TA-Lib ADX mengembalikan semua NaN, menggunakan implementasi pandas sebagai fallback")
+                return _calculate_adx_pandas(high_prices, low_prices, close_prices, window)
+                
+            return (pd.Series(adx, index=close_prices.index),
+                    pd.Series(plus_di, index=close_prices.index),
+                    pd.Series(minus_di, index=close_prices.index))
+        except Exception as e:
+            logger.error(f"Error saat menghitung ADX dengan TA-Lib: {str(e)}")
+            return _calculate_adx_pandas(high_prices, low_prices, close_prices, window)
+    else:
+        return _calculate_adx_pandas(high_prices, low_prices, close_prices, window)
+
+
+def _calculate_adx_pandas(high_prices: pd.Series, 
+                      low_prices: pd.Series, 
+                      close_prices: pd.Series, 
+                      window: int = 14) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """Implementasi ADX menggunakan pandas"""
+    try:
+        # 1. True Range
+        prev_close = close_prices.shift(1)
+        tr1 = high_prices - low_prices  # High - Low
+        tr2 = (high_prices - prev_close).abs()  # |High - Previous Close|
+        tr3 = (low_prices - prev_close).abs()  # |Low - Previous Close|
+        
+        # Handle NaN values
+        tr1 = tr1.fillna(0)
+        tr2 = tr2.fillna(0)
+        tr3 = tr3.fillna(0)
+        
+        true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = true_range.rolling(window=window).mean()
+        
+        # 2. Directional Movement
+        high_diff = high_prices - high_prices.shift(1)
+        low_diff = low_prices.shift(1) - low_prices
+        
+        # Handle NaN values
+        high_diff = high_diff.fillna(0)
+        low_diff = low_diff.fillna(0)
+        
+        plus_dm = high_diff.where((high_diff > low_diff) & (high_diff > 0), 0)
+        minus_dm = low_diff.where((low_diff > high_diff) & (low_diff > 0), 0)
+        
+        # 3. Directional Indicators
+        # Avoid division by zero
+        atr_safe = atr.replace(0, np.finfo(float).eps)
+        
+        plus_di = 100 * (plus_dm.rolling(window=window).mean() / atr_safe)
+        minus_di = 100 * (minus_dm.rolling(window=window).mean() / atr_safe)
+        
+        # 4. Directional Index
+        plus_minus_sum = plus_di + minus_di
+        plus_minus_sum_safe = plus_minus_sum.replace(0, np.finfo(float).eps)
+        
+        dx = 100 * ((plus_di - minus_di).abs() / plus_minus_sum_safe)
+        
+        # 5. Average Directional Index
+        adx = dx.rolling(window=window).mean()
+        
+        return adx, plus_di, minus_di
+    except Exception as e:
+        logger.error(f"Error dalam perhitungan ADX pandas: {str(e)}")
+        # Return empty series if calculation fails
+        empty_series = pd.Series(np.nan, index=close_prices.index)
+        return empty_series, empty_series, empty_series
+
+
 def personalize_signals(signals: Dict[str, Any], 
                       risk_tolerance: str = 'medium') -> Dict[str, Any]:
     """
@@ -631,6 +948,12 @@ def personalize_signals(signals: Dict[str, Any],
     """
     # Create a copy to avoid modifying the original
     personalized = signals.copy()
+    
+    # Jika ada error dalam signals, langsung return
+    if 'error' in signals:
+        personalized['personalized_message'] = "Tidak dapat membuat sinyal personal: " + signals.get('error', 'Unknown error')
+        personalized['risk_profile'] = risk_tolerance
+        return personalized
     
     # Default confidence threshold for different risk profiles
     thresholds = {
@@ -672,7 +995,6 @@ def personalize_signals(signals: Dict[str, Any],
                 personalized['confidence'] = 0.5
                 personalized['personalized_message'] = "Converted to sell signal for your aggressive risk profile"
             else:
-                # TAMBAHKAN INI: Default message untuk hold dengan profil high risk
                 personalized['personalized_message'] = "Holding despite your aggressive risk profile due to unclear signals"
                 
     else:  # medium
@@ -705,6 +1027,15 @@ def detect_market_events(prices_df: pd.DataFrame,
             logger.error(f"Required column '{col}' not found in prices_df")
             return {"error": f"Missing required column: {col}"}
     
+    # Pastikan ada cukup data untuk perhitungan
+    if len(prices_df) < window * 2:
+        logger.warning(f"Tidak cukup data untuk deteksi market events. Minimal {window * 2} titik data diperlukan.")
+        return {
+            "error": f"Insufficient data for market event detection. Need at least {window * 2} points.",
+            "latest_event": "unknown",
+            "event_counts": {"pump": 0, "dump": 0, "high_volatility": 0}
+        }
+    
     # Use appropriate column names or defaults
     close_col = 'close'
     
@@ -722,11 +1053,13 @@ def detect_market_events(prices_df: pd.DataFrame,
     upper_bound = ma + (threshold * std)
     lower_bound = ma - (threshold * std)
     
-    # Detect events
+    # Detect events (pastikan data cukup untuk perhitungan)
+    valid_data = ~(close_prices.isna() | ma.isna() | std.isna() | returns.isna())
+    
     events = {
-        "pump": close_prices > upper_bound,
-        "dump": close_prices < lower_bound,
-        "high_volatility": returns.abs() > (returns.std() * threshold)
+        "pump": (close_prices > upper_bound) & valid_data,
+        "dump": (close_prices < lower_bound) & valid_data,
+        "high_volatility": (returns.abs() > (returns.std() * threshold)) & valid_data
     }
     
     # Count events
@@ -739,11 +1072,11 @@ def detect_market_events(prices_df: pd.DataFrame,
     # Get latest event (if any)
     latest_event = "normal"
     
-    if events["pump"].iloc[-1]:
+    if len(events["pump"]) > 0 and events["pump"].iloc[-1]:
         latest_event = "pump"
-    elif events["dump"].iloc[-1]:
+    elif len(events["dump"]) > 0 and events["dump"].iloc[-1]:
         latest_event = "dump"
-    elif events["high_volatility"].iloc[-1]:
+    elif len(events["high_volatility"]) > 0 and events["high_volatility"].iloc[-1]:
         latest_event = "high_volatility"
     
     return {

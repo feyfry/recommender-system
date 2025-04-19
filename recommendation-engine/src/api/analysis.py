@@ -86,7 +86,7 @@ async def get_price_data(project_id: str, days: int = 30, interval: str = "1d") 
 # Pydantic models
 class TradingSignalRequest(BaseModel):
     project_id: str
-    days: int = Field(30, ge=1, le=365)
+    days: int = Field(50, ge=1, le=365)
     interval: str = Field("1d", description="Price data interval")
     risk_tolerance: str = Field("medium", description="User risk tolerance (low, medium, high)")
 
@@ -135,7 +135,11 @@ async def get_trading_signals(request: TradingSignalRequest):
     Get trading signals based on technical analysis
     """
     start_time = datetime.now()
-    logger.info(f"Trading signal request for {request.project_id}")
+    logger.info(f"Trading signal request for {request.project_id} with days={request.days}")
+    
+    # Check if request has valid number of days
+    if request.days < 50:
+        logger.warning(f"Requested days {request.days} is below recommended minimum of 50. This may result in inaccurate signals.")
     
     # Check cache first
     cache_key = f"{request.project_id}:{request.days}:{request.interval}:{request.risk_tolerance}"
@@ -159,25 +163,62 @@ async def get_trading_signals(request: TradingSignalRequest):
             interval=request.interval
         )
         
+        if price_data.empty:
+            logger.error(f"No price data available for {request.project_id}")
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No price data available for {request.project_id}"
+            )
+        
+        logger.info(f"Got {len(price_data)} data points for {request.project_id}")
+        
+        # Check for sufficient data
+        if len(price_data) < 50:
+            logger.warning(f"Insufficient data points for accurate technical analysis: {len(price_data)} < 50 recommended minimum")
+            
+            # Continue with warning but don't fail the request
+            if len(price_data) < 20:
+                # However, if there's really too little data, return a proper error
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Insufficient data for technical analysis. Got {len(price_data)} points, need at least 20. Try increasing 'days' parameter."
+                )
+        
         # Generate trading signals
         signals = generate_trading_signals(price_data)
+        
+        # Check if the result contains an error
+        if 'error' in signals:
+            logger.error(f"Error in signal generation: {signals['error']}")
+            raise HTTPException(
+                status_code=400, 
+                detail=signals['error']
+            )
         
         # Personalize based on risk tolerance
         personalized = personalize_signals(signals, risk_tolerance=request.risk_tolerance)
         
-        # Sanitize NaN values in indicators
+        # Sanitize NaN values in indicators (enhance with more verbose messages)
         if 'indicators' in personalized:
             for key, value in list(personalized['indicators'].items()):
                 if pd.isna(value):
-                    personalized['indicators'][key] = 0.0  # Replace NaN with 0.0
+                    logger.warning(f"NaN value detected for indicator {key}, replacing with 0.0")
+                    personalized['indicators'][key] = 0.0
                     
         # Sanitize target_price if it's NaN
         if 'target_price' in personalized and pd.isna(personalized['target_price']):
-            personalized['target_price'] = None
+            logger.warning("NaN value detected for target_price, removing from response")
+            personalized.pop('target_price')
             
         # Sanitize confidence if it's NaN
         if 'confidence' in personalized and pd.isna(personalized['confidence']):
-            personalized['confidence'] = 0.5  # Default confidence
+            logger.warning("NaN value detected for confidence, setting to default 0.5")
+            personalized['confidence'] = 0.5
+            
+        # Check evidence quality
+        if len(personalized.get('evidence', [])) == 0:
+            logger.warning("No evidence found for trading signal")
+            personalized['evidence'] = ["Not enough data for detailed signal analysis"]
         
         # Create response
         response = TradingSignalResponse(
@@ -193,6 +234,10 @@ async def get_trading_signals(request: TradingSignalRequest):
             timestamp=datetime.now()
         )
         
+        # Log indicator values for debugging
+        logger.info(f"MACD value: {response.indicators.get('macd', 'N/A')}")
+        logger.info(f"RSI value: {response.indicators.get('rsi', 'N/A')}")
+        
         # Store in cache
         _signals_cache[cache_key] = {
             'data': response,
@@ -201,10 +246,13 @@ async def get_trading_signals(request: TradingSignalRequest):
         
         return response
         
+    except HTTPException as he:
+        # Re-raise HTTP exceptions
+        raise he
     except Exception as e:
         logger.error(f"Error generating trading signals: {str(e)}")
         import traceback
-        logger.error(traceback.format_exc())  # Added to log the full traceback
+        logger.error(traceback.format_exc())  # Log the full traceback
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 @router.post("/indicators", response_model=TechnicalIndicatorsResponse)
@@ -707,7 +755,7 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
 @router.get("/market-events/{project_id}", response_model=MarketEventResponse)
 async def get_market_events(
     project_id: str = Path(..., description="Project ID"),
-    days: int = Query(30, ge=1, le=365),
+    days: int = Query(40, ge=1, le=365),
     interval: str = Query("1d", description="Price data interval")
 ):
     """
@@ -792,8 +840,8 @@ async def get_technical_alerts(
 @router.get("/price-prediction/{project_id}")
 async def predict_future_price(
     project_id: str = Path(..., description="Project ID"),
-    days: int = Query(30, ge=1, le=365, description="Historical data days"),
-    prediction_days: int = Query(7, ge=1, le=30, description="Days to predict"),
+    days: int = Query(50, ge=1, le=365, description="Historical data days"),
+    prediction_days: int = Query(7, ge=1, le=50, description="Days to predict"),
     interval: str = Query("1d", description="Price data interval")
 ):
     """
