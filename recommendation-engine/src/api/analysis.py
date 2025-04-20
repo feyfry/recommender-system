@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # Cache for price data and signals
 _price_data_cache = {}
 _signals_cache = {}
-_cache_ttl = 1800  # 30 minutes in seconds
+_cache_ttl = 300  # 5 minutes in seconds
 
 # Function to get price data using real market data
 async def get_price_data(project_id: str, days: int = 30, interval: str = "1d") -> pd.DataFrame:
