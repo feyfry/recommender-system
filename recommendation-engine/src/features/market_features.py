@@ -1,10 +1,10 @@
 """
-Modul untuk ekstraksi dan perhitungan fitur berbasis market
+Modul untuk ekstraksi dan perhitungan fitur berbasis market dengan dukungan periode dinamis
 """
 
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Dict, List, Optional, Union, Tuple, Any
 import logging
 
 # Setup logging
@@ -20,9 +20,10 @@ def calculate_market_metrics(price_df: pd.DataFrame,
                             volume_col: Optional[str] = 'volume_24h',
                             market_cap_col: Optional[str] = 'market_cap',
                             date_col: str = 'timestamp',
-                            window_sizes: List[int] = [7, 14, 30]) -> pd.DataFrame:
+                            window_sizes: List[int] = [7, 14, 30],
+                            indicator_periods: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
     """
-    Hitung metrik pasar seperti volatilitas, rasio volume, dll.
+    Hitung metrik pasar seperti volatilitas, rasio volume, dll dengan periode dinamis
     
     Args:
         price_df: DataFrame dengan data harga time series
@@ -31,11 +32,45 @@ def calculate_market_metrics(price_df: pd.DataFrame,
         market_cap_col: Nama kolom kapitalisasi pasar
         date_col: Nama kolom tanggal
         window_sizes: Ukuran window untuk perhitungan metrik
+        indicator_periods: Dictionary dengan periode kustom untuk indikator:
+            - rsi_period: Periode RSI (default 14)
+            - macd_fast: Periode MACD cepat (default 12)
+            - macd_slow: Periode MACD lambat (default 26)
+            - macd_signal: Periode MACD signal (default 9)
+            - bb_period: Periode Bollinger Bands (default 20)
+            - stoch_k: Periode Stochastic %K (default 14)
+            - stoch_d: Periode Stochastic %D (default 3)
+            - ma_short: Periode MA jangka pendek (default 20)
+            - ma_medium: Periode MA jangka menengah (default 50)
+            - ma_long: Periode MA jangka panjang (default 200)
         
     Returns:
         pd.DataFrame: DataFrame dengan metrik market tambahan
     """
-    logger.info("Calculating market metrics")
+    logger.info("Calculating market metrics with custom periods")
+    
+    # Set periode default
+    periods = {
+        'rsi_period': 14,
+        'macd_fast': 12,
+        'macd_slow': 26,
+        'macd_signal': 9,
+        'bb_period': 20,
+        'stoch_k': 14,
+        'stoch_d': 3,
+        'ma_short': 20,
+        'ma_medium': 50,
+        'ma_long': 200,
+        'adx_period': 14
+    }
+    
+    # Update dengan periode kustom jika disediakan
+    if indicator_periods:
+        for key, value in indicator_periods.items():
+            if key in periods:
+                periods[key] = value
+                
+    logger.info(f"Using indicator periods: RSI={periods['rsi_period']}, MACD={periods['macd_fast']}/{periods['macd_slow']}/{periods['macd_signal']}, BB={periods['bb_period']}")
     
     # Pastikan DataFrame disalin untuk menghindari perubahan pada original
     result_df = price_df.copy()
@@ -106,15 +141,21 @@ def calculate_market_metrics(price_df: pd.DataFrame,
         # Volume to Market Cap ratio (liquidity indicator)
         result_df['volume_to_mcap'] = result_df[volume_col] / result_df[market_cap_col]
     
-    # 9. MACD (Moving Average Convergence Divergence)
-    ema12 = result_df[price_col].ewm(span=12, adjust=False).mean()
-    ema26 = result_df[price_col].ewm(span=26, adjust=False).mean()
-    result_df['macd'] = ema12 - ema26
-    result_df['macd_signal'] = result_df['macd'].ewm(span=9, adjust=False).mean()
+    # 9. MACD (Moving Average Convergence Divergence) dengan periode kustom
+    macd_fast = periods['macd_fast']
+    macd_slow = periods['macd_slow']
+    macd_signal = periods['macd_signal']
+    
+    ema_fast = result_df[price_col].ewm(span=macd_fast, adjust=False).mean()
+    ema_slow = result_df[price_col].ewm(span=macd_slow, adjust=False).mean()
+    result_df['macd'] = ema_fast - ema_slow
+    result_df['macd_signal'] = result_df['macd'].ewm(span=macd_signal, adjust=False).mean()
     result_df['macd_histogram'] = result_df['macd'] - result_df['macd_signal']
     
     # 10. Average Directional Index (ADX) - trend strength
     if 'high' in result_df.columns and 'low' in result_df.columns:
+        adx_period = periods['adx_period']
+        
         result_df['dm_plus'] = np.where(
             (result_df['high'] - result_df['high'].shift(1)) > (result_df['low'].shift(1) - result_df['low']),
             np.maximum(result_df['high'] - result_df['high'].shift(1), 0),
@@ -126,87 +167,135 @@ def calculate_market_metrics(price_df: pd.DataFrame,
             0
         )
         
-        atr14 = result_df['true_range'].rolling(14).mean()
-        result_df['di_plus'] = 100 * (result_df['dm_plus'].rolling(14).mean() / atr14)
-        result_df['di_minus'] = 100 * (result_df['dm_minus'].rolling(14).mean() / atr14)
+        atr14 = result_df['true_range'].rolling(adx_period).mean()
+        result_df['di_plus'] = 100 * (result_df['dm_plus'].rolling(adx_period).mean() / atr14)
+        result_df['di_minus'] = 100 * (result_df['dm_minus'].rolling(adx_period).mean() / atr14)
         
         result_df['dx'] = 100 * (abs(result_df['di_plus'] - result_df['di_minus']) /
                                (result_df['di_plus'] + result_df['di_minus']).replace(0, 0.001))
-        result_df['adx'] = result_df['dx'].rolling(14).mean()
+        result_df['adx'] = result_df['dx'].rolling(adx_period).mean()
     
     # Hitung composite sentiment score berdasarkan indikator-indikator
-    result_df['market_sentiment'] = calculate_market_sentiment(result_df)
+    result_df['market_sentiment'] = calculate_market_sentiment(result_df, indicator_periods)
     
     return result_df
 
 
-def calculate_market_sentiment(data: pd.DataFrame) -> pd.Series:
+def calculate_market_sentiment(data: pd.DataFrame, 
+                             indicator_periods: Optional[Dict[str, Any]] = None,
+                             sentiment_weights: Optional[Dict[str, float]] = None,
+                             sentiment_thresholds: Optional[Dict[str, Dict[str, float]]] = None) -> pd.Series:
     """
-    Hitung skor sentimen pasar berdasarkan indikator teknikal
+    Hitung skor sentimen pasar berdasarkan indikator teknikal dengan parameter yang dapat dikonfigurasi
     
     Args:
         data: DataFrame dengan indikator pasar
+        indicator_periods: Dictionary dengan periode kustom untuk indikator
+        sentiment_weights: Bobot kustom untuk indikator berbeda dalam perhitungan sentimen
+        sentiment_thresholds: Threshold kustom untuk indikator berbeda
         
     Returns:
         pd.Series: Skor sentimen pasar (0-100)
     """
+    # Set default thresholds
+    default_thresholds = {
+        'rsi': {'oversold': 30, 'overbought': 70},
+        'macd': {'margin': 0},
+        'bb': {'lower': 0.2, 'upper': 0.8},
+        'ma': {'margin': 0},
+        'roc': {'max': 10},
+        'adx': {'strong': 25}
+    }
+    
+    # Update thresholds dengan nilai kustom
+    thresholds = default_thresholds.copy()
+    if sentiment_thresholds:
+        for key, value in sentiment_thresholds.items():
+            if key in thresholds:
+                thresholds[key].update(value)
+    
+    # Set default periods jika tidak ada yang disediakan
+    periods = {
+        'rsi_period': 14,
+        'macd_fast': 12,
+        'macd_slow': 26,
+        'macd_signal': 9,
+        'bb_period': 20,
+        'stoch_k': 14,
+        'stoch_d': 3,
+        'ma_short': 20,
+        'ma_medium': 50,
+        'ma_long': 200,
+        'roc_period': 14
+    }
+    
+    # Update dengan periode kustom jika disediakan
+    if indicator_periods:
+        for key, value in indicator_periods.items():
+            if key in periods:
+                periods[key] = value
+    
     # Inisialisasi skor dasar
     sentiment_score = pd.Series(index=data.index, data=50)  # Netral di 50
     
     indicators = []
     weights = []
     
-    # 1. RSI
-    if 'rsi_14d' in data.columns:
-        # RSI > 70 (overbought/bearish), RSI < 30 (oversold/bullish)
-        rsi = data['rsi_14d'].fillna(50)
+    # 1. RSI dengan threshold kustom
+    rsi_col = f"rsi_{periods['rsi_period']}d"
+    if rsi_col in data.columns:
+        # RSI > threshold['rsi']['overbought'] (bearish), RSI < threshold['rsi']['oversold'] (bullish)
+        rsi = data[rsi_col].fillna(50)
         rsi_score = 100 - rsi  # Invert karena RSI tinggi = bearish
         indicators.append(rsi_score)
-        weights.append(0.15)
+        weights.append(sentiment_weights.get('rsi', 0.15) if sentiment_weights else 0.15)
     
     # 2. MACD
     if all(col in data.columns for col in ['macd', 'macd_signal']):
         # MACD > Signal (bullish), MACD < Signal (bearish)
         macd_diff = data['macd'] - data['macd_signal']
         macd_max = abs(macd_diff).max()
-        if macd_max > 0:
+        if macd_max > thresholds['macd']['margin']:
             macd_score = 50 + 50 * (macd_diff / macd_max)
             indicators.append(macd_score)
-            weights.append(0.15)
+            weights.append(sentiment_weights.get('macd', 0.15) if sentiment_weights else 0.15)
     
-    # 3. Bollinger %B
-    if 'bollinger_pct_20d' in data.columns:
-        # %B near 1 (overbought/bearish), %B near 0 (oversold/bullish)
-        bb_score = 100 - data['bollinger_pct_20d'].fillna(0.5) * 100
+    # 3. Bollinger %B dengan threshold kustom
+    bb_col = f"bollinger_pct_{periods['bb_period']}d"
+    if bb_col in data.columns:
+        # %B near thresholds['bb']['upper'] (bearish), %B near thresholds['bb']['lower'] (bullish)
+        bb_score = 100 - data[bb_col].fillna(0.5) * 100
         indicators.append(bb_score)
-        weights.append(0.10)
+        weights.append(sentiment_weights.get('bb', 0.10) if sentiment_weights else 0.10)
     
     # 4. Price vs MA
-    if 'ma_20d' in data.columns and 'price_usd' in data.columns:
+    ma_col = f"ma_{periods['ma_short']}d"
+    if ma_col in data.columns and 'price_usd' in data.columns:
         # Price > MA (bullish), Price < MA (bearish)
-        price_vs_ma = (data['price_usd'] / data['ma_20d']).fillna(1)
+        price_vs_ma = (data['price_usd'] / data[ma_col]).fillna(1)
         price_ma_score = 50 + 50 * (price_vs_ma - 1)
         # Clip to reasonable range
         price_ma_score = price_ma_score.clip(0, 100)
         indicators.append(price_ma_score)
-        weights.append(0.20)
+        weights.append(sentiment_weights.get('ma', 0.20) if sentiment_weights else 0.20)
     
-    # 5. ROC (Rate of Change)
-    if 'roc_14d' in data.columns:
+    # 5. ROC (Rate of Change) dengan threshold kustom
+    roc_col = f"roc_{periods['roc_period']}d"
+    if roc_col in data.columns:
         # ROC > 0 (bullish), ROC < 0 (bearish)
-        roc_max = abs(data['roc_14d']).max()
+        roc_max = max(abs(data[roc_col]).max(), thresholds['roc']['max'])
         if roc_max > 0:
-            roc_score = 50 + 50 * (data['roc_14d'] / roc_max)
+            roc_score = 50 + 50 * (data[roc_col] / roc_max)
             roc_score = roc_score.clip(0, 100)
             indicators.append(roc_score)
-            weights.append(0.15)
+            weights.append(sentiment_weights.get('roc', 0.15) if sentiment_weights else 0.15)
     
-    # 6. ADX (trend strength)
+    # 6. ADX (trend strength) dengan threshold kustom
     if 'adx' in data.columns:
-        # ADX > 25 (strong trend), < 20 (weak trend)
+        # ADX > thresholds['adx']['strong'] (strong trend), < 20 (weak trend)
         # Ini bukan indikator arah, jadi tidak mempengaruhi sentiment
         # Tapi bisa dijadikan faktor pengali untuk indikator lain
-        adx_factor = (data['adx'] / 25).clip(0, 2)
+        adx_factor = (data['adx'] / thresholds['adx']['strong']).clip(0, 2)
         # Terapkan sebagai faktor amplifikasi
         if len(indicators) > 0:
             for i in range(len(indicators)):
@@ -218,7 +307,7 @@ def calculate_market_sentiment(data: pd.DataFrame) -> pd.Series:
         return_score = 50 + data['daily_return'] * 1000  # Skala ke 0-100
         return_score = return_score.clip(0, 100)
         indicators.append(return_score)
-        weights.append(0.25)
+        weights.append(sentiment_weights.get('return', 0.25) if sentiment_weights else 0.25)
     
     # Kombinasikan indikator dengan weights
     if indicators:
@@ -226,8 +315,9 @@ def calculate_market_sentiment(data: pd.DataFrame) -> pd.Series:
         weights = [w/sum(weights) for w in weights]
         
         # Weighted average
+        sentiment_score = pd.Series(0, index=data.index)
         for i, indicator in enumerate(indicators):
-            sentiment_score = sentiment_score * 0 + indicators[i] * weights[i]
+            sentiment_score = sentiment_score + indicators[i] * weights[i]
             
     return sentiment_score
 
@@ -237,9 +327,10 @@ def detect_market_events(price_df: pd.DataFrame,
                         volume_col: Optional[str] = 'volume_24h',
                         date_col: str = 'timestamp',
                         window_size: int = 14,
-                        threshold_std: float = 2.0) -> pd.DataFrame:
+                        threshold_std: float = 2.0,
+                        event_thresholds: Optional[Dict[str, float]] = None) -> pd.DataFrame:
     """
-    Deteksi market events seperti pump, dump, volatilitas tinggi, dll.
+    Deteksi market events seperti pump, dump, volatilitas tinggi, dll dengan parameter kustom.
     
     Args:
         price_df: DataFrame dengan data harga
@@ -248,11 +339,28 @@ def detect_market_events(price_df: pd.DataFrame,
         date_col: Nama kolom tanggal
         window_size: Ukuran window untuk perhitungan
         threshold_std: Threshold standar deviasi untuk deteksi event
+        event_thresholds: Dictionary threshold kustom untuk berbagai event:
+            - pump: Threshold untuk event pump (default: 2.0)
+            - dump: Threshold untuk event dump (default: 2.0)
+            - volatility: Threshold untuk event volatilitas tinggi (default: 2.0)
+            - volume_spike: Threshold untuk lonjakan volume (default: 2.0)
         
     Returns:
         pd.DataFrame: DataFrame dengan informasi event
     """
-    logger.info("Detecting market events")
+    logger.info("Detecting market events with custom parameters")
+    
+    # Set default thresholds
+    thresholds = {
+        'pump': 2.0,        # Default: 2 std dari MA
+        'dump': 2.0,        # Default: 2 std dari MA
+        'volatility': 2.0,  # Default: 2 std dari volatilitas rata-rata
+        'volume_spike': 2.0 # Default: 2 std dari volume rata-rata
+    }
+    
+    # Update dengan threshold kustom jika disediakan
+    if event_thresholds:
+        thresholds.update(event_thresholds)
     
     # Pastikan DataFrame disalin
     df = price_df.copy()
@@ -273,9 +381,9 @@ def detect_market_events(price_df: pd.DataFrame,
     df['price_ma'] = df[price_col].rolling(window=window_size).mean()
     df['price_std'] = df[price_col].rolling(window=window_size).std()
     
-    # Calculate upper and lower bounds
-    df['upper_bound'] = df['price_ma'] + (threshold_std * df['price_std'])
-    df['lower_bound'] = df['price_ma'] - (threshold_std * df['price_std'])
+    # Calculate upper and lower bounds with custom thresholds
+    df['upper_bound'] = df['price_ma'] + (thresholds['pump'] * df['price_std'])
+    df['lower_bound'] = df['price_ma'] - (thresholds['dump'] * df['price_std'])
     
     # Detect pump events (price significantly above moving average)
     df['pump'] = (df[price_col] > df['upper_bound']).astype(int)
@@ -283,16 +391,16 @@ def detect_market_events(price_df: pd.DataFrame,
     # Detect dump events (price significantly below moving average)
     df['dump'] = (df[price_col] < df['lower_bound']).astype(int)
     
-    # Detect high volatility events
+    # Detect high volatility events with custom threshold
     vol_mean = df['volatility'].mean()
     vol_std = df['volatility'].std()
-    df['high_volatility'] = (df['volatility'] > vol_mean + (threshold_std * vol_std)).astype(int)
+    df['high_volatility'] = (df['volatility'] > vol_mean + (thresholds['volatility'] * vol_std)).astype(int)
     
-    # Detect volume spikes if volume data is available
+    # Detect volume spikes if volume data is available with custom threshold
     if volume_col in df.columns:
         df['volume_ma'] = df[volume_col].rolling(window=window_size).mean()
         df['volume_std'] = df[volume_col].rolling(window=window_size).std()
-        df['volume_spike'] = (df[volume_col] > df['volume_ma'] + threshold_std * df['volume_std']).astype(int)
+        df['volume_spike'] = (df[volume_col] > df['volume_ma'] + thresholds['volume_spike'] * df['volume_std']).astype(int)
     
     # Detect continuous price movements
     df['price_up'] = (df[price_col] > df[price_col].shift(1)).astype(int)

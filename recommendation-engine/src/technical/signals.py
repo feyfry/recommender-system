@@ -380,18 +380,33 @@ def generate_trading_signals(prices_df: pd.DataFrame,
         ma_long + 10
     )
     
-    # Sanity check: minimum 30 days
-    min_required_points = max(30, min_required_points)
+    # Perubahan di sini: Sesuaikan kebutuhan data berdasarkan trading style
+    # Jika periode MA jangka panjang kurang dari 100, tidak perlu data sangat panjang
+    is_short_term = ma_long <= 100
+    if is_short_term:
+        # Untuk analisis jangka pendek, kurangi kebutuhan data
+        min_required_points = min(min_required_points, 60)
+        logger.info(f"Analisis jangka pendek terdeteksi, kebutuhan data minimum disesuaikan menjadi {min_required_points}")
+    elif ma_long > 100:
+        # Sanity check: minimum 30 days untuk semua analisis
+        min_required_points = max(30, min_required_points)
     
     if len(prices_df) < min_required_points:
         logger.warning(f"Tidak cukup data untuk analisis teknikal yang akurat. Minimal {min_required_points} titik data diperlukan, hanya {len(prices_df)} tersedia.")
+        
+        # Jika terlalu sedikit data, berikan error yang lebih spesifik
+        if len(prices_df) < 20:
+            logger.info(f"Data terlalu sedikit untuk analisis teknikal dasar")
+            return {
+                "error": f"Data tidak cukup untuk analisis. Dibutuhkan minimal 20 titik data, hanya tersedia {len(prices_df)}.",
+                "action": "hold",
+                "confidence": 0.0,
+                "min_days_needed": min_required_points
+            }
+        
+        # Jika data cukup untuk analisis dasar tapi kurang dari ideal, lanjutkan dengan warning
         logger.info(f"Coba tambahkan parameter 'days' dengan nilai lebih besar (misalnya, {min_required_points + 10})")
-        return {
-            "error": f"Data tidak cukup untuk analisis akurat. Dibutuhkan minimal {min_required_points} titik data, hanya tersedia {len(prices_df)}.",
-            "action": "hold",
-            "confidence": 0.0,
-            "min_days_needed": min_required_points
-        }
+        # Di sini kita lanjutkan dengan perhitungan meskipun data kurang ideal
     
     # Use appropriate column names or defaults
     close_col = 'close'

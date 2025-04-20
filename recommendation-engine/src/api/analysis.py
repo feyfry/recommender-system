@@ -186,6 +186,7 @@ async def get_trading_signals(request: TradingSignalRequest):
             'ma_medium': 30,
             'ma_long': 60
         }
+        logger.info(f"Using short-term trading parameters (periode lebih pendek)")
     elif request.trading_style == "long_term":
         indicator_periods = {
             'rsi_period': 21,
@@ -199,6 +200,7 @@ async def get_trading_signals(request: TradingSignalRequest):
             'ma_medium': 100,
             'ma_long': 200
         }
+        logger.info(f"Using long-term trading parameters (periode lebih panjang)")
     else:  # standard
         indicator_periods = {
             'rsi_period': 14,
@@ -212,6 +214,7 @@ async def get_trading_signals(request: TradingSignalRequest):
             'ma_medium': 50,
             'ma_long': 200
         }
+        logger.info(f"Using standard trading parameters (periode default)")
     
     # Override dengan nilai kustom jika disediakan
     if request.periods:
@@ -975,7 +978,7 @@ async def get_technical_alerts(
 @router.get("/price-prediction/{project_id}")
 async def predict_future_price(
     project_id: str = Path(..., description="Project ID"),
-    days: int = Query(30, ge=1, le=365, description="Historical data days"),
+    days: int = Query(50, ge=1, le=365, description="Historical data days"),
     prediction_days: int = Query(7, ge=1, le=50, description="Days to predict"),
     interval: str = Query("1d", description="Price data interval")
 ):

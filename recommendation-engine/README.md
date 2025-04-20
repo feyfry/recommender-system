@@ -1,6 +1,6 @@
 # Recommendation System Web3 Based
 
-Sistem rekomendasi untuk proyek Web3 (cryptocurrency, token, NFT, DeFi) berbasis popularitas, tren investasi, dan analisis teknikal, membandingkan pendekatan Neural CF dan Feature-Enhanced CF.
+Sistem rekomendasi untuk proyek Web3 (cryptocurrency, token, NFT, DeFi) berbasis popularitas, tren investasi, dan analisis teknikal dengan dukungan penuh untuk periode indikator dinamis, membandingkan pendekatan Neural CF dan Feature-Enhanced CF.
 
 ## 📋 Deskripsi
 
@@ -10,7 +10,7 @@ Sistem ini menggunakan data dari CoinGecko API untuk menyediakan rekomendasi pro
 - **Tren Investasi** (perubahan harga, sentimen pasar)
 - **Interaksi Pengguna** (view, favorite, portfolio)
 - **Fitur Proyek** (DeFi, GameFi, Layer-1, dll)
-- **Analisis Teknikal** (RSI, MACD, Bollinger Bands, dll)
+- **Analisis Teknikal** (RSI, MACD, Bollinger Bands, dll) dengan periode yang dapat dikonfigurasi penuh
 - **Maturitas Proyek** (usia, aktivitas developer, engagement sosial)
 
 Sistem ini mengimplementasikan beberapa pendekatan rekomendasi:
@@ -25,17 +25,20 @@ Sistem ini mengimplementasikan beberapa pendekatan rekomendasi:
    - Neural CF untuk personalisasi berbasis deep learning
    - Model Hybrid untuk performa optimal
 
-2. **Integrasi Analisis Teknikal:**
+2. **Integrasi Analisis Teknikal dengan Periode Dinamis:**
+   - Periode indikator yang dapat dikonfigurasi untuk berbagai gaya trading (jangka pendek, standar, jangka panjang)
    - Sinyal trading (buy/sell/hold) dengan tingkat kepercayaan
    - Personalisasi berdasarkan toleransi risiko pengguna
-   - Deteksi peristiwa pasar (pump, dump, volatilitas tinggi)
+   - Deteksi peristiwa pasar (pump, dump, volatilitas tinggi) dengan threshold yang dapat disesuaikan
+   - Preset gaya trading untuk jangka pendek, standar, dan jangka panjang
 
 3. **Penanganan Cold-Start:**
    - Rekomendasi untuk pengguna baru berdasarkan minat
    - Rekomendasi berbasis fitur untuk proyek baru
 
-4. **API Service:**
+4. **API Service dengan Konfigurasi Fleksibel:**
    - Endpoint REST API untuk integrasi dengan aplikasi backend Laravel
+   - Dukungan parameter periode indikator kustom melalui API
    - Caching untuk performa yang lebih baik
    - Dokumentasi komprehensif
 
@@ -54,6 +57,7 @@ Sistem terdiri dari tiga komponen utama:
    - Collaborative Filtering
    - Matrix Builder
    - Model Training & Evaluation
+   - Technical Analysis dengan periode indikator yang dapat dikonfigurasi
 
 2. **Backend** (Laravel) - Mengelola aplikasi web dan logika bisnis
    - REST API Controllers
@@ -85,16 +89,66 @@ Model Hybrid menggabungkan kekuatan kedua pendekatan:
 - FECF untuk rekomendasi berbasis fitur dan penanganan cold-start
 - NCF untuk personalisasi mendalam dengan pengguna yang memiliki riwayat interaksi yang cukup
 
-## 📈 Analisis Teknikal
+## 📈 Analisis Teknikal dengan Periode Dinamis
 
-Komponen analisis teknikal menggunakan TA-Lib (atau implementasi berbasis pandas) untuk menghitung indikator teknikal dan menghasilkan sinyal trading:
+Komponen analisis teknikal sekarang mendukung periode indikator yang sepenuhnya dapat dikonfigurasi, memungkinkan penyesuaian untuk berbagai gaya trading:
+
+### Preset Trading Style
+
+Sistem menyediakan tiga preset gaya trading:
+
+1. **Short-Term Trading**
+   ```
+   rsi_period: 7
+   macd_fast: 8
+   macd_slow: 17
+   macd_signal: 9
+   bb_period: 10
+   stoch_k: 7
+   stoch_d: 3
+   ma_short: 10
+   ma_medium: 30
+   ma_long: 60
+   ```
+
+2. **Standard Trading** (Default)
+   ```
+   rsi_period: 14
+   macd_fast: 12
+   macd_slow: 26
+   macd_signal: 9
+   bb_period: 20
+   stoch_k: 14
+   stoch_d: 3
+   ma_short: 20
+   ma_medium: 50
+   ma_long: 200
+   ```
+
+3. **Long-Term Trading**
+   ```
+   rsi_period: 21
+   macd_fast: 19
+   macd_slow: 39
+   macd_signal: 9
+   bb_period: 30
+   stoch_k: 21
+   stoch_d: 7
+   ma_short: 50
+   ma_medium: 100
+   ma_long: 200
+   ```
+
+### Indikator Teknikal yang Didukung
+
+Semua indikator berikut mendukung periode yang dapat dikonfigurasi:
 
 - **Indikator Tren:** Moving Averages, MACD, ADX
 - **Indikator Momentum:** RSI, Stochastic, CCI
 - **Indikator Volatilitas:** Bollinger Bands, ATR
 - **Indikator Volume:** OBV, MFI, Chaikin A/D
 
-Sinyal dipersonalisasi berdasarkan toleransi risiko pengguna (rendah, menengah, tinggi).
+Sinyal dipersonalisasi berdasarkan toleransi risiko pengguna (rendah, menengah, tinggi) dan dapat disesuaikan dengan berbagai gaya trading.
 
 ## 🛠️ Instalasi
 
@@ -257,8 +311,12 @@ python main.py evaluate --cold-start
 # Menghasilkan rekomendasi untuk pengguna
 python main.py recommend --user-id user_1 --model fecf --num 10
 
-# Menghasilkan sinyal trading untuk proyek
-python main.py signals --project-id bitcoin --risk medium
+# Menghasilkan sinyal trading untuk proyek dengan berbagai opsi periode indikator
+# Menggunakan preset gaya trading
+python main.py signals --project-id bitcoin --risk medium --trading-style short_term
+
+# Menggunakan periode indikator kustom
+python main.py signals --project-id bitcoin --risk medium --rsi-period 9 --macd-fast 8 --macd-slow 17
 
 # Menjalankan server API
 python main.py api
@@ -269,6 +327,58 @@ python main.py run
 # Debugging rekomendasi untuk pengguna tertentu
 python main.py debug --user-id user_1 --model hybrid --num 20
 ```
+
+### Konfigurasi Periode Indikator Teknikal
+
+Sistem ini mendukung konfigurasi penuh dari periode indikator teknikal untuk menyesuaikan dengan berbagai gaya trading:
+
+1. **Melalui Command Line:**
+   ```bash
+   python main.py signals --project-id bitcoin --trading-style short_term
+   ```
+   
+   Atau dengan mengkonfigurasi indikator individual:
+   ```bash
+   python main.py signals --project-id bitcoin \
+     --rsi-period 7 \
+     --macd-fast 8 \
+     --macd-slow 17 \
+     --macd-signal 9 \
+     --bb-period 10 \
+     --stoch-k 7 \
+     --stoch-d 3 \
+     --ma-short 10 \
+     --ma-medium 30 \
+     --ma-long 60
+   ```
+
+2. **Melalui API:**
+   ```json
+   {
+     "project_id": "bitcoin",
+     "days": 30,
+     "interval": "1d",
+     "risk_tolerance": "medium",
+     "trading_style": "short_term",
+     "periods": {
+       "rsi_period": 7,
+       "macd_fast": 8,
+       "macd_slow": 17,
+       "macd_signal": 9,
+       "bb_period": 10,
+       "stoch_k": 7,
+       "stoch_d": 3,
+       "ma_short": 10,
+       "ma_medium": 30,
+       "ma_long": 60
+     }
+   }
+   ```
+
+3. **Preset Gaya Trading:**
+   - `short_term`: Periode lebih pendek untuk trading jangka pendek
+   - `standard`: Periode standar untuk analisis teknikal (default)
+   - `long_term`: Periode lebih panjang untuk perspektif jangka panjang
 
 ### Pipeline yang Terorganisir
 Pipeline baru yang terorganisir memiliki langkah-langkah yang ditentukan dengan jelas dan status kemajuan yang mudah dipantau:
@@ -379,19 +489,32 @@ Secara default, API akan berjalan di `http://0.0.0.0:8000`.
 
 **Response:** Array dari objek `ProjectResponse`
 
-### Endpoint Analisis Teknikal
+### Endpoint Analisis Teknikal dengan Periode Dinamis
 
 #### 1. Dapatkan Sinyal Trading
 
 **Endpoint:** `POST /analysis/trading-signals`
 
-**Request Body:**
+**Request Body dengan Dukungan Periode Dinamis:**
 ```json
 {
   "project_id": "bitcoin",
   "days": 30,
   "interval": "1d",
-  "risk_tolerance": "medium"
+  "risk_tolerance": "medium",
+  "trading_style": "short_term",
+  "periods": {
+    "rsi_period": 7,
+    "macd_fast": 8,
+    "macd_slow": 17,
+    "macd_signal": 9,
+    "bb_period": 10,
+    "stoch_k": 7,
+    "stoch_d": 3,
+    "ma_short": 10,
+    "ma_medium": 30,
+    "ma_long": 60
+  }
 }
 ```
 
@@ -403,9 +526,9 @@ Secara default, API akan berjalan di `http://0.0.0.0:8000`.
   "confidence": 0.85,
   "strong_signal": true,
   "evidence": [
-    "RSI is oversold at 28.50",
-    "MACD crossed above signal line (bullish)",
-    "Price below lower Bollinger Band (oversold)"
+    "RSI is oversold at 28.50 (periode 7)",
+    "MACD crossed above signal line (bullish) - (8/17/9)",
+    "Price below lower Bollinger Band (oversold) - (periode 10)"
   ],
   "target_price": 52500.0,
   "personalized_message": "Signal matches your balanced risk profile",
@@ -416,6 +539,18 @@ Secara default, API akan berjalan di `http://0.0.0.0:8000`.
     "macd_signal": 210.25,
     "macd_histogram": 40.5
   },
+  "indicator_periods": {
+    "rsi_period": 7,
+    "macd_fast": 8,
+    "macd_slow": 17,
+    "macd_signal": 9,
+    "bb_period": 10,
+    "stoch_k": 7,
+    "stoch_d": 3,
+    "ma_short": 10,
+    "ma_medium": 30,
+    "ma_long": 60
+  },
   "timestamp": "2025-04-19T10:30:00Z"
 }
 ```
@@ -424,13 +559,20 @@ Secara default, API akan berjalan di `http://0.0.0.0:8000`.
 
 **Endpoint:** `POST /analysis/indicators`
 
-**Request Body:**
+**Request Body dengan Periode Kustom:**
 ```json
 {
   "project_id": "bitcoin",
   "days": 30,
   "interval": "1d",
-  "indicators": ["rsi", "macd", "bollinger", "sma"]
+  "indicators": ["rsi", "macd", "bollinger", "sma"],
+  "periods": {
+    "rsi_period": 14,
+    "macd_fast": 12,
+    "macd_slow": 26,
+    "macd_signal": 9,
+    "bb_period": 20
+  }
 }
 ```
 
@@ -442,14 +584,20 @@ Secara default, API akan berjalan di `http://0.0.0.0:8000`.
     "rsi": {
       "value": 45.5,
       "signal": "neutral",
-      "description": "RSI is neutral at 45.50"
+      "description": "RSI is neutral at 45.50",
+      "period": 14
     },
     "macd": {
       "value": 250.75,
       "signal_line": 210.25,
       "histogram": 40.5,
       "signal": "bullish",
-      "description": "MACD is bullish at 250.75 (Signal: 210.25)"
+      "description": "MACD is bullish at 250.75 (Signal: 210.25)",
+      "periods": {
+        "fast": 12,
+        "slow": 26,
+        "signal": 9
+      }
     },
     "bollinger": {
       "upper": 51200.0,
@@ -457,17 +605,22 @@ Secara default, API akan berjalan di `http://0.0.0.0:8000`.
       "lower": 48800.0,
       "percent_b": 0.62,
       "signal": "neutral",
-      "description": "Price is within Bollinger Bands"
+      "description": "Price is within Bollinger Bands",
+      "period": 20
     },
     "moving_averages": {
       "values": {
-        "sma_5": 50200.0,
         "sma_20": 49500.0,
         "sma_50": 48000.0,
         "sma_200": 42000.0
       },
       "signal": "bullish",
-      "description": "Price is above 20 and 50-day moving averages (bullish trend)"
+      "description": "Price is above 20 and 50-day moving averages (bullish trend)",
+      "periods": {
+        "short": 20,
+        "medium": 50,
+        "long": 200
+      }
     }
   },
   "latest_close": 50150.0,
@@ -477,7 +630,7 @@ Secara default, API akan berjalan di `http://0.0.0.0:8000`.
 }
 ```
 
-#### 3. Deteksi Peristiwa Pasar
+#### 3. Deteksi Peristiwa Pasar dengan Threshold Kustom
 
 **Endpoint:** `GET /analysis/market-events/{project_id}`
 
@@ -485,6 +638,8 @@ Secara default, API akan berjalan di `http://0.0.0.0:8000`.
 - `project_id` (string): ID proyek
 - `days` (int, optional): Jumlah hari data historis (default: 30)
 - `interval` (string, optional): Interval data (default: "1d")
+- `window_size` (int, optional): Ukuran window untuk perhitungan (default: 14)
+- `thresholds` (object, optional): Threshold kustom untuk deteksi event
 
 **Response:**
 ```json
@@ -511,6 +666,7 @@ Secara default, API akan berjalan di `http://0.0.0.0:8000`.
 - `days` (int, optional): Jumlah hari data historis (default: 30)
 - `interval` (string, optional): Interval data (default: "1d")
 - `lookback` (int, optional): Jumlah periode untuk melihat alert (default: 5)
+- `periods` (object, optional): Periode indikator kustom
 
 **Response:**
 ```json
@@ -520,14 +676,14 @@ Secara default, API akan berjalan di `http://0.0.0.0:8000`.
     {
       "date": "2025-04-18T00:00:00Z",
       "type": "macd_cross_up",
-      "message": "MACD crossed above signal line (bullish)",
+      "message": "MACD crossed above signal line (bullish) - (12/26/9)",
       "signal": "buy",
       "strength": 0.8
     },
     {
       "date": "2025-04-17T00:00:00Z",
       "type": "rsi_oversold",
-      "message": "RSI is oversold at 28.50",
+      "message": "RSI is oversold at 28.50 (periode 14)",
       "signal": "buy",
       "strength": 0.75
     }
@@ -547,6 +703,7 @@ Secara default, API akan berjalan di `http://0.0.0.0:8000`.
 - `days` (int, optional): Jumlah hari data historis (default: 30)
 - `prediction_days` (int, optional): Jumlah hari prediksi (default: 7)
 - `interval` (string, optional): Interval data (default: "1d")
+- `periods` (object, optional): Periode indikator kustom untuk analisis
 
 **Response:**
 ```json
@@ -716,6 +873,37 @@ class RecommendationController extends Controller
         return back()->with('error', 'Failed to get recommendations');
     }
     
+    // Contoh mendapatkan sinyal trading dengan periode kustom
+    public function getTradingSignals(Request $request, $projectId)
+    {
+        $user = auth()->user();
+        $tradingStyle = $request->input('trading_style', 'standard');
+        
+        $payload = [
+            'project_id' => $projectId,
+            'days' => 30,
+            'interval' => '1d',
+            'risk_tolerance' => $user->risk_profile ?? 'medium',
+            'trading_style' => $tradingStyle
+        ];
+        
+        // Jika ada periode kustom individual
+        $customPeriods = $request->input('custom_periods');
+        if ($customPeriods) {
+            $payload['periods'] = $customPeriods;
+        }
+        
+        $response = Http::post($this->apiUrl . '/analysis/trading-signals', $payload);
+        
+        if ($response->successful()) {
+            return view('trading_signals', [
+                'signals' => $response->json()
+            ]);
+        }
+        
+        return back()->with('error', 'Failed to get trading signals');
+    }
+    
     public function recordInteraction(Request $request)
     {
         $user = auth()->user();
@@ -751,9 +939,9 @@ web3-recommendation-system/
 │   │   ├── collector.py  # Pengumpulan data API
 │   │   └── processor.py  # Pemrosesan data
 │   │
-│   ├── features/         # Feature engineering
-│   │   ├── market_features.py  # Fitur berbasis market
-│   │   └── technical_features.py  # Fitur teknikal
+│   ├── features/         # Feature engineering dengan dukungan periode dinamis
+│   │   ├── market_features.py     # Fitur berbasis market dengan periode kustom
+│   │   └── technical_features.py  # Fitur teknikal dengan periode kustom
 │   │
 │   ├── models/           # Model rekomendasi
 │   │   ├── fecf.py       # Original Feature-Enhanced CF (LightFM implementation)
@@ -762,18 +950,18 @@ web3-recommendation-system/
 │   │   ├── hybrid.py     # Model Hybrid
 │   │   └── eval.py       # Evaluasi model
 │   │
-│   ├── technical/        # Analisis teknikal
-│   │   ├── indicators.py # Indikator teknikal
-│   │   └── signals.py    # Interpretasi sinyal
+│   ├── technical/        # Analisis teknikal dengan dukungan periode dinamis
+│   │   ├── indicators.py # Indikator teknikal dengan periode kustom
+│   │   └── signals.py    # Interpretasi sinyal dengan periode kustom
 │   │
-│   └── api/              # Endpoint API
+│   └── api/              # Endpoint API dengan dukungan parameter periode dinamis
 │       ├── main.py       # Entrypoint API
 │       ├── recommend.py  # Endpoint rekomendasi
-│       └── analysis.py   # Endpoint analisis
+│       └── analysis.py   # Endpoint analisis dengan dukungan periode kustom
 │
 ├── logs/                 # File log
 ├── config.py             # Konfigurasi sistem
-├── main.py               # Entrypoint utama
+├── main.py               # Entrypoint utama dengan dukungan parameter periode kustom
 ├── requirements.txt      # Dependensi
 └── README.md             # Dokumentasi
 ```
@@ -867,6 +1055,14 @@ Laporan evaluasi disimpan di `data/models/` dalam format JSON, markdown, atau te
    curl -X POST http://localhost:8000/recommend/cache/clear
    curl -X POST http://localhost:8000/analysis/cache/clear
    ```
+
+9. **Masalah dengan Indikator Teknikal**
+   - Jika Anda mengalami hasil analisis teknikal yang tidak konsisten, coba pastikan data cukup untuk indikator yang dipilih:
+   ```bash
+   # Tingkatkan jumlah hari data yang diminta
+   python main.py signals --project-id bitcoin --days 60
+   ```
+   - Untuk periode indikator yang lebih panjang, pastikan untuk menggunakan jumlah data historis yang lebih banyak
 
 ## 📝 Lisensi
 
