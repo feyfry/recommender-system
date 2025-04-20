@@ -919,7 +919,6 @@ def run_pipeline(args):
     print(f"{'='*70}")
     
     # Tentukan langkah-langkah pipeline
-    # Hapus build_matrices karena tidak tersedia
     pipeline_steps = [
         {
             "name": "Data Collection",
