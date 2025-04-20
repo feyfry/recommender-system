@@ -658,6 +658,21 @@ class DataProcessor:
             logger.warning(f"JSON format issues: {validation_results['json_format_issues']}")
             logger.warning(f"Category mismatch issues: {validation_results['category_mismatch_issues']}")
             logger.warning(f"Null value issues: {validation_results['null_value_issues']}")
+            
+            # TAMBAHKAN KODE INI UNTUK DETAIL SEMUA MASALAH
+            if validation_results['issues_found'] > 0:
+                logger.warning("Detail semua masalah validasi:")
+                for i, issue in enumerate(validation_results["issues_details"], 1):
+                    issue_type = issue.get("issue", "Unknown issue")
+                    project_id = issue.get("id", "Unknown")
+                    logger.warning(f"  Issue #{i}: {issue_type} - Project: {project_id}")
+                    
+                    # Log detail tambahan berdasarkan jenis masalah
+                    if "primary_category doesn't match" in issue_type:
+                        logger.warning(f"    Primary: {issue.get('primary_category', 'N/A')}")
+                        logger.warning(f"    Categories: {issue.get('categories', 'N/A')}")
+                    elif "not a valid" in issue_type:
+                        logger.warning(f"    Value: {issue.get('value', 'N/A')}")
         
         return validation_results
     

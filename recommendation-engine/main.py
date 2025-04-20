@@ -567,7 +567,7 @@ def trading_signals(args):
     
     # Get parameters
     project_id = args.project_id
-    days = getattr(args, 'days', 30)
+    days = getattr(args, 'days', 50)
     risk = getattr(args, 'risk', 'medium')
     
     print(f"Generating trading signals for project '{project_id}'...")
@@ -1167,7 +1167,7 @@ Examples:
     # signals command
     signals_parser = subparsers.add_parser("signals", help="Generate trading signals for a project")
     signals_parser.add_argument("--project-id", required=True, help="Project ID")
-    signals_parser.add_argument("--days", type=int, default=30, help="Days of historical data")
+    signals_parser.add_argument("--days", type=int, default=50, help="Days of historical data")
     signals_parser.add_argument("--risk", choices=["low", "medium", "high"], default="medium", help="Risk tolerance")
     
     # api command
