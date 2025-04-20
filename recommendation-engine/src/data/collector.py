@@ -135,13 +135,11 @@ class CoinGeckoCollector:
             
             logger.info(f"Fetching page {page} with {per_page} coins")
             
-            # Perubahan: Hapus parameter sparkline=true untuk menghindari pengambilan data sparkline
             params = {
                 'vs_currency': 'usd',
                 'order': 'market_cap_desc',
                 'per_page': per_page,
                 'page': page,
-                'sparkline': 'false',  # Diubah dari 'true' menjadi 'false'
                 'price_change_percentage': '1h,24h,7d,30d'
             }
             
@@ -194,13 +192,11 @@ class CoinGeckoCollector:
         """
         logger.info(f"Fetching coins for category: {category}")
         
-        # Perubahan: Hapus parameter sparkline=true untuk menghindari pengambilan data sparkline
         params = {
             'vs_currency': 'usd',
             'order': 'market_cap_desc',
             'per_page': 250,  # Max per page
             'page': 1,
-            'sparkline': 'false',  # Diubah dari 'true' menjadi 'false'
             'price_change_percentage': '1h,24h,7d,30d',
             'category': category
         }
@@ -242,14 +238,12 @@ class CoinGeckoCollector:
         logger.info(f"Fetching details for {coin_id} {progress}")
         
         # Pastikan untuk mendapatkan market_data, yang berisi data price dan lainnya
-        # Perubahan: Hapus sparkline=true dari parameter
         params = {
             'localization': 'false',
             'tickers': 'false',
             'market_data': 'true',
             'community_data': 'true',
             'developer_data': 'true',
-            'sparkline': 'false'  # Diubah dari 'true' menjadi 'false'
         }
         
         data = self.make_request(f'coins/{coin_id}', params)
@@ -381,16 +375,8 @@ class CoinGeckoCollector:
             
             logger.info(f"Saved {len(unique_coins)} unique coins to {combined_filename}")
             
-            # Pastikan sparkline_in_7d ada
-            sparkline_count = sum(1 for coin in unique_coins if 'sparkline_in_7d' in coin and coin['sparkline_in_7d'])
-            logger.info(f"Found {sparkline_count}/{len(unique_coins)} coins with sparkline_in_7d data")
-            
             # Also save as CSV for easier analysis
             coins_df = pd.DataFrame(unique_coins)
-            if 'sparkline_in_7d' in coins_df.columns:
-                # Convert sparkline dict to string to save in CSV
-                coins_df['sparkline_in_7d'] = coins_df['sparkline_in_7d'].apply(lambda x: json.dumps(x) if isinstance(x, dict) else x)
-            
             csv_filename = os.path.join(RAW_DIR, f"combined_coins_{timestamp}.csv")
             coins_df.to_csv(csv_filename, index=False)
             logger.info(f"Saved combined coins as CSV to {csv_filename}")

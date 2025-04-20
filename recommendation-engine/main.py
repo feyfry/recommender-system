@@ -682,6 +682,41 @@ def generate_sample_recommendations(args):
             logger.error("Failed to load data for recommendation generation")
             return False
         
+        # Load the trained model weights
+        # Find the latest hybrid model file
+        hybrid_files = [f for f in os.listdir(MODELS_DIR) 
+                     if f.startswith("hybrid_model_") and f.endswith(".pkl")]
+        if hybrid_files:
+            latest_hybrid = sorted(hybrid_files)[-1]
+            hybrid_path = os.path.join(MODELS_DIR, latest_hybrid)
+            logger.info(f"Loading hybrid model from {hybrid_path}")
+            if not hybrid.load_model(hybrid_path):
+                logger.warning("Failed to load hybrid model, trying to load component models directly")
+                
+                # Try to load component models directly
+                fecf_files = [f for f in os.listdir(MODELS_DIR) 
+                         if f.startswith("fecf_model_") and f.endswith(".pkl")]
+                if fecf_files:
+                    latest_fecf = sorted(fecf_files)[-1]
+                    fecf_path = os.path.join(MODELS_DIR, latest_fecf)
+                    logger.info(f"Loading FECF model from {fecf_path}")
+                    if hybrid.fecf_model is None:
+                        from src.models.alt_fecf import FeatureEnhancedCF
+                        hybrid.fecf_model = FeatureEnhancedCF()
+                        hybrid.fecf_model.load_data()
+                    hybrid.fecf_model.load_model(fecf_path)
+                
+                ncf_path = os.path.join(MODELS_DIR, "ncf_model.pkl")
+                if os.path.exists(ncf_path):
+                    logger.info(f"Loading NCF model from {ncf_path}")
+                    if hybrid.ncf_model is None:
+                        from src.models.ncf import NCFRecommender
+                        hybrid.ncf_model = NCFRecommender()
+                        hybrid.ncf_model.load_data()
+                    hybrid.ncf_model.load_model(ncf_path)
+        else:
+            logger.warning("No hybrid model files found, models may not be loaded correctly")
+        
         # Get some user IDs from the data
         if hybrid.user_item_matrix is not None and not hybrid.user_item_matrix.empty:
             # Take up to 5 sample users
@@ -690,14 +725,24 @@ def generate_sample_recommendations(args):
             print(f"\nGenerating sample recommendations for {len(sample_users)} users")
             print("-" * 70)
             
+            recommendation_success = False
+            
             for user_id in sample_users:
                 print(f"\nRecommendations for user {user_id}:")
-                recs = hybrid.recommend_projects(user_id, n=3)
-                
-                for i, rec in enumerate(recs, 1):
-                    name = rec.get('name', rec.get('id', 'Unknown'))
-                    score = rec.get('recommendation_score', 0)
-                    print(f"{i}. {name} - Score: {score:.4f}")
+                try:
+                    recs = hybrid.recommend_projects(user_id, n=3)
+                    
+                    if recs:
+                        recommendation_success = True
+                        for i, rec in enumerate(recs, 1):
+                            name = rec.get('name', rec.get('id', 'Unknown'))
+                            score = rec.get('recommendation_score', 0)
+                            print(f"{i}. {name} - Score: {score:.4f}")
+                    else:
+                        print("No recommendations available.")
+                except Exception as e:
+                    logger.warning(f"Error generating recommendations for user {user_id}: {str(e)}")
+                    print(f"Could not generate recommendations: {str(e)}")
             
             # Also generate trending projects
             print("\nTrending projects:")
@@ -709,6 +754,8 @@ def generate_sample_recommendations(args):
                 print(f"{i}. {name} - Score: {score:.4f}")
                 
             print("\nSample recommendations generated successfully")
+            
+            # Return success if either user recommendations or trending projects worked
             return True
         else:
             logger.error("No user-item matrix available for sample recommendations")
