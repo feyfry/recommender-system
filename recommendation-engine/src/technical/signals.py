@@ -1,5 +1,5 @@
 """
-Modul untuk menghasilkan sinyal trading berdasarkan analisis teknikal (VERSI YANG DIPERBAIKI)
+Modul untuk menghasilkan sinyal trading berdasarkan analisis teknikal (VERSI YANG DIPERBARUI)
 """
 
 import os
@@ -314,19 +314,50 @@ def _calculate_stochastic_pandas(prices: pd.Series,
     return k, d
 
 
-def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGNAL_WINDOW) -> Dict[str, Any]:
+def generate_trading_signals(prices_df: pd.DataFrame, 
+                           indicator_periods: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Generate trading signals based on technical indicators
     
     Args:
         prices_df: DataFrame with price data (must have 'close' column, 
                   optionally 'high', 'low', 'volume')
-        window: Window size for indicators
+        indicator_periods: Dictionary of indicator periods:
+            - rsi_period: RSI period (default 14)
+            - macd_fast: MACD fast period (default 12)
+            - macd_slow: MACD slow period (default 26)
+            - macd_signal: MACD signal period (default 9)
+            - bb_period: Bollinger Bands period (default 20)
+            - stoch_k: Stochastic K period (default 14)
+            - stoch_d: Stochastic D period (default 3)
+            - ma_short: Short moving average period (default 20)
+            - ma_medium: Medium moving average period (default 50)
+            - ma_long: Long moving average period (default 200)
         
     Returns:
         dict: Trading signals and analysis
     """
     logger.info("Generating trading signals")
+    
+    # Default period jika tidak ada yang disediakan
+    if indicator_periods is None:
+        indicator_periods = {}
+    
+    # Ekstrak periode indikator atau gunakan default
+    rsi_period = indicator_periods.get('rsi_period', 14)
+    macd_fast = indicator_periods.get('macd_fast', 12)
+    macd_slow = indicator_periods.get('macd_slow', 26)
+    macd_signal = indicator_periods.get('macd_signal', 9)
+    bb_period = indicator_periods.get('bb_period', 20)
+    stoch_k = indicator_periods.get('stoch_k', 14)
+    stoch_d = indicator_periods.get('stoch_d', 3)
+    ma_short = indicator_periods.get('ma_short', 20)
+    ma_medium = indicator_periods.get('ma_medium', 50)
+    ma_long = indicator_periods.get('ma_long', 200)
+    
+    # Log periode indikator yang digunakan
+    logger.info(f"Indikator Periods - RSI: {rsi_period}, MACD: {macd_fast}/{macd_slow}/{macd_signal}, "
+               f"BB: {bb_period}, Stoch: {stoch_k}/{stoch_d}, MA: {ma_short}/{ma_medium}/{ma_long}")
     
     # Verify required columns
     required_columns = ['close']
@@ -339,15 +370,27 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
                 "confidence": 0.0
             }
     
-    # Pastikan minimal data cukup untuk perhitungan (setidaknya 50 data poin)
-    min_required_points = 50
+    # Pastikan minimal data cukup untuk perhitungan
+    # Hitung minimal data yang diperlukan berdasarkan indikator terlama
+    min_required_points = max(
+        3 * rsi_period,
+        macd_slow + macd_signal + 10,
+        bb_period + 10,
+        stoch_k + stoch_d + 5,
+        ma_long + 10
+    )
+    
+    # Sanity check: minimum 30 days
+    min_required_points = max(30, min_required_points)
+    
     if len(prices_df) < min_required_points:
         logger.warning(f"Tidak cukup data untuk analisis teknikal yang akurat. Minimal {min_required_points} titik data diperlukan, hanya {len(prices_df)} tersedia.")
-        logger.info(f"Coba tambahkan parameter 'days' dengan nilai lebih besar (misalnya, 60 atau 90)")
+        logger.info(f"Coba tambahkan parameter 'days' dengan nilai lebih besar (misalnya, {min_required_points + 10})")
         return {
-            "error": f"Insufficient data points for accurate analysis. Need at least {min_required_points}, got {len(prices_df)}.",
+            "error": f"Data tidak cukup untuk analisis akurat. Dibutuhkan minimal {min_required_points} titik data, hanya tersedia {len(prices_df)}.",
             "action": "hold",
-            "confidence": 0.0
+            "confidence": 0.0,
+            "min_days_needed": min_required_points
         }
     
     # Use appropriate column names or defaults
@@ -368,24 +411,28 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
     
     # Calculate indicators
     # 1. RSI
-    rsi = calculate_rsi(close_prices, window=14)
+    rsi = calculate_rsi(close_prices, window=rsi_period)
     
     # 2. MACD
-    macd, signal, histogram = calculate_macd(close_prices)
+    macd, signal, histogram = calculate_macd(close_prices, 
+                                           fast_period=macd_fast, 
+                                           slow_period=macd_slow, 
+                                           signal_period=macd_signal)
     
     # 3. Bollinger Bands
-    upper_band, middle_band, lower_band = calculate_bollinger_bands(close_prices, window=20)
+    upper_band, middle_band, lower_band = calculate_bollinger_bands(close_prices, window=bb_period)
     
     # 4. Stochastic Oscillator
-    k, d = calculate_stochastic(close_prices, high_prices, low_prices)
+    k, d = calculate_stochastic(close_prices, high_prices, low_prices, 
+                              k_period=stoch_k, d_period=stoch_d)
     
     # 5. ADX
     adx, plus_di, minus_di = calculate_adx(high_prices, low_prices, close_prices)
     
     # 6. Moving Averages
-    sma_20 = close_prices.rolling(window=20).mean()
-    sma_50 = close_prices.rolling(window=50).mean()
-    sma_200 = close_prices.rolling(window=200).mean()
+    sma_short = close_prices.rolling(window=ma_short).mean()
+    sma_medium = close_prices.rolling(window=ma_medium).mean()
+    sma_long = close_prices.rolling(window=ma_long).mean()
     
     # Log status perhitungan indikator
     for indicator_name, indicator_data in [
@@ -416,9 +463,9 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
     latest_minus_di = minus_di.iloc[-1] if not pd.isna(minus_di.iloc[-1]) else 20
     
     # Validasi nilai sma
-    latest_sma_20 = sma_20.iloc[-1] if not pd.isna(sma_20.iloc[-1]) else latest_close
-    latest_sma_50 = sma_50.iloc[-1] if not pd.isna(sma_50.iloc[-1]) else latest_close
-    latest_sma_200 = sma_200.iloc[-1] if not pd.isna(sma_200.iloc[-1]) else latest_close
+    latest_sma_short = sma_short.iloc[-1] if not pd.isna(sma_short.iloc[-1]) else latest_close
+    latest_sma_medium = sma_medium.iloc[-1] if not pd.isna(sma_medium.iloc[-1]) else latest_close
+    latest_sma_long = sma_long.iloc[-1] if not pd.isna(sma_long.iloc[-1]) else latest_close
     
     # Calculate signals
     signals = {}
@@ -428,19 +475,19 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
         signals['rsi'] = {
             'signal': 'buy',
             'strength': min(1.0, (30 - latest_rsi) / 10),
-            'description': f"RSI is oversold at {latest_rsi:.2f}"
+            'description': f"RSI oversold di level {latest_rsi:.2f} (periode {rsi_period})"
         }
     elif latest_rsi > 70:
         signals['rsi'] = {
             'signal': 'sell',
             'strength': min(1.0, (latest_rsi - 70) / 10),
-            'description': f"RSI is overbought at {latest_rsi:.2f}"
+            'description': f"RSI overbought di level {latest_rsi:.2f} (periode {rsi_period})"
         }
     else:
         signals['rsi'] = {
             'signal': 'hold',
             'strength': 0.5,
-            'description': f"RSI is neutral at {latest_rsi:.2f}"
+            'description': f"RSI netral di level {latest_rsi:.2f} (periode {rsi_period})"
         }
     
     # MACD signals - perbaiki pengecekan crossover
@@ -459,31 +506,31 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
         signals['macd'] = {
             'signal': 'buy',
             'strength': 0.8,
-            'description': "MACD crossed above signal line (bullish)"
+            'description': f"MACD memotong ke atas signal line (bullish) - ({macd_fast}/{macd_slow}/{macd_signal})"
         }
     elif macd_cross_down:
         signals['macd'] = {
             'signal': 'sell',
             'strength': 0.8,
-            'description': "MACD crossed below signal line (bearish)"
+            'description': f"MACD memotong ke bawah signal line (bearish) - ({macd_fast}/{macd_slow}/{macd_signal})"
         }
     elif latest_macd > latest_signal:
         signals['macd'] = {
             'signal': 'buy',
             'strength': 0.6,
-            'description': "MACD is above signal line (bullish)"
+            'description': f"MACD di atas signal line (bullish) - ({macd_fast}/{macd_slow}/{macd_signal})"
         }
     elif latest_macd < latest_signal:
         signals['macd'] = {
             'signal': 'sell',
             'strength': 0.6,
-            'description': "MACD is below signal line (bearish)"
+            'description': f"MACD di bawah signal line (bearish) - ({macd_fast}/{macd_slow}/{macd_signal})"
         }
     else:
         signals['macd'] = {
             'signal': 'hold',
             'strength': 0.5,
-            'description': "MACD is neutral"
+            'description': f"MACD netral - ({macd_fast}/{macd_slow}/{macd_signal})"
         }
     
     # Bollinger Bands signals
@@ -495,37 +542,37 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
             signals['bollinger'] = {
                 'signal': 'sell',
                 'strength': 0.7,
-                'description': "Price above upper Bollinger Band (overbought)"
+                'description': f"Harga di atas upper Bollinger Band (overbought) - (periode {bb_period})"
             }
         elif latest_close < latest_lower:
             signals['bollinger'] = {
                 'signal': 'buy',
                 'strength': 0.7,
-                'description': "Price below lower Bollinger Band (oversold)"
+                'description': f"Harga di bawah lower Bollinger Band (oversold) - (periode {bb_period})"
             }
         elif bb_percent > 0.8:
             signals['bollinger'] = {
                 'signal': 'sell',
                 'strength': 0.6,
-                'description': "Price near upper Bollinger Band (potential reversal)"
+                'description': f"Harga mendekati upper Bollinger Band (potensi pembalikan) - (periode {bb_period})"
             }
         elif bb_percent < 0.2:
             signals['bollinger'] = {
                 'signal': 'buy',
                 'strength': 0.6,
-                'description': "Price near lower Bollinger Band (potential reversal)"
+                'description': f"Harga mendekati lower Bollinger Band (potensi pembalikan) - (periode {bb_period})"
             }
         else:
             signals['bollinger'] = {
                 'signal': 'hold',
                 'strength': 0.5,
-                'description': "Price within Bollinger Bands (neutral)"
+                'description': f"Harga di dalam Bollinger Bands (netral) - (periode {bb_period})"
             }
     else:
         signals['bollinger'] = {
             'signal': 'hold',
             'strength': 0.5,
-            'description': "Price within Bollinger Bands (neutral)"
+            'description': f"Harga di dalam Bollinger Bands (netral) - (periode {bb_period})"
         }
     
     # Stochastic signals - perbaiki pengecekan crossover
@@ -543,31 +590,31 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
         signals['stochastic'] = {
             'signal': 'buy',
             'strength': 0.8,
-            'description': "Stochastic %K crossed above %D in oversold region (strong buy)"
+            'description': f"Stochastic %K memotong ke atas %D di zona oversold (sinyal beli kuat) - ({stoch_k}/{stoch_d})"
         }
     elif latest_k > 80 and stoch_cross_down:
         signals['stochastic'] = {
             'signal': 'sell',
             'strength': 0.8,
-            'description': "Stochastic %K crossed below %D in overbought region (strong sell)"
+            'description': f"Stochastic %K memotong ke bawah %D di zona overbought (sinyal jual kuat) - ({stoch_k}/{stoch_d})"
         }
     elif latest_k < 20:
         signals['stochastic'] = {
             'signal': 'buy',
             'strength': 0.7,
-            'description': f"Stochastic oscillator is oversold at {latest_k:.2f}"
+            'description': f"Stochastic oscillator oversold di level {latest_k:.2f} - ({stoch_k}/{stoch_d})"
         }
     elif latest_k > 80:
         signals['stochastic'] = {
             'signal': 'sell',
             'strength': 0.7,
-            'description': f"Stochastic oscillator is overbought at {latest_k:.2f}"
+            'description': f"Stochastic oscillator overbought di level {latest_k:.2f} - ({stoch_k}/{stoch_d})"
         }
     else:
         signals['stochastic'] = {
             'signal': 'hold',
             'strength': 0.5,
-            'description': "Stochastic oscillator is neutral"
+            'description': f"Stochastic oscillator netral - ({stoch_k}/{stoch_d})"
         }
     
     # ADX signals
@@ -576,74 +623,74 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
             signals['adx'] = {
                 'signal': 'buy',
                 'strength': min(1.0, latest_adx / 50),
-                'description': f"Strong trend with +DI > -DI (ADX: {latest_adx:.2f})"
+                'description': f"Tren kuat dengan +DI > -DI (ADX: {latest_adx:.2f})"
             }
         else:
             signals['adx'] = {
                 'signal': 'sell',
                 'strength': min(1.0, latest_adx / 50),
-                'description': f"Strong trend with -DI > +DI (ADX: {latest_adx:.2f})"
+                'description': f"Tren kuat dengan -DI > +DI (ADX: {latest_adx:.2f})"
             }
     else:
         signals['adx'] = {
             'signal': 'hold',
             'strength': 0.5,
-            'description': f"Weak trend (ADX: {latest_adx:.2f})"
+            'description': f"Tren lemah (ADX: {latest_adx:.2f})"
         }
     
     # Moving Average signals
     # Perbaiki pengecekan golden cross / death cross
-    valid_sma_50 = sma_50.dropna()
-    valid_sma_200 = sma_200.dropna()
+    valid_sma_medium = sma_medium.dropna()
+    valid_sma_long = sma_long.dropna()
     
     golden_cross = False
     death_cross = False
     
-    if len(valid_sma_50) >= 2 and len(valid_sma_200) >= 2:
-        golden_cross = (valid_sma_50.iloc[-1] > valid_sma_200.iloc[-1]) and (valid_sma_50.iloc[-2] <= valid_sma_200.iloc[-2])
-        death_cross = (valid_sma_50.iloc[-1] < valid_sma_200.iloc[-1]) and (valid_sma_50.iloc[-2] >= valid_sma_200.iloc[-2])
+    if len(valid_sma_medium) >= 2 and len(valid_sma_long) >= 2:
+        golden_cross = (valid_sma_medium.iloc[-1] > valid_sma_long.iloc[-1]) and (valid_sma_medium.iloc[-2] <= valid_sma_long.iloc[-2])
+        death_cross = (valid_sma_medium.iloc[-1] < valid_sma_long.iloc[-1]) and (valid_sma_medium.iloc[-2] >= valid_sma_long.iloc[-2])
     
     if golden_cross:
         signals['moving_avg'] = {
             'signal': 'buy',
             'strength': 0.9,
-            'description': "Golden Cross: 50-day MA crossed above 200-day MA (strong buy)"
+            'description': f"Golden Cross: MA {ma_medium} hari memotong di atas MA {ma_long} hari (sinyal beli kuat)"
         }
     elif death_cross:
         signals['moving_avg'] = {
             'signal': 'sell',
             'strength': 0.9,
-            'description': "Death Cross: 50-day MA crossed below 200-day MA (strong sell)"
+            'description': f"Death Cross: MA {ma_medium} hari memotong di bawah MA {ma_long} hari (sinyal jual kuat)"
         }
-    elif latest_close > latest_sma_20 and latest_sma_20 > latest_sma_50 and latest_sma_50 > latest_sma_200:
+    elif latest_close > latest_sma_short and latest_sma_short > latest_sma_medium and latest_sma_medium > latest_sma_long:
         signals['moving_avg'] = {
             'signal': 'buy',
             'strength': 0.8,
-            'description': "Price above all major moving averages (bullish trend)"
+            'description': f"Harga di atas semua moving average utama (tren bullish) - MA {ma_short}/{ma_medium}/{ma_long}"
         }
-    elif latest_close < latest_sma_20 and latest_sma_20 < latest_sma_50 and latest_sma_50 < latest_sma_200:
+    elif latest_close < latest_sma_short and latest_sma_short < latest_sma_medium and latest_sma_medium < latest_sma_long:
         signals['moving_avg'] = {
             'signal': 'sell',
             'strength': 0.8,
-            'description': "Price below all major moving averages (bearish trend)"
+            'description': f"Harga di bawah semua moving average utama (tren bearish) - MA {ma_short}/{ma_medium}/{ma_long}"
         }
-    elif latest_close > latest_sma_200:
+    elif latest_close > latest_sma_long:
         signals['moving_avg'] = {
             'signal': 'buy',
             'strength': 0.6,
-            'description': "Price above 200-day MA (long-term bullish)"
+            'description': f"Harga di atas MA {ma_long} hari (bullish jangka panjang)"
         }
-    elif latest_close < latest_sma_200:
+    elif latest_close < latest_sma_long:
         signals['moving_avg'] = {
             'signal': 'sell',
             'strength': 0.6,
-            'description': "Price below 200-day MA (long-term bearish)"
+            'description': f"Harga di bawah MA {ma_long} hari (bearish jangka panjang)"
         }
     else:
         signals['moving_avg'] = {
             'signal': 'hold',
             'strength': 0.5,
-            'description': "Moving averages are neutral"
+            'description': f"Moving average netral - MA {ma_short}/{ma_medium}/{ma_long}"
         }
     
     # Combine signals
@@ -717,6 +764,18 @@ def generate_trading_signals(prices_df: pd.DataFrame, window: int = TRADING_SIGN
             "stochastic_k": float(np.nan_to_num(latest_k)),
             "stochastic_d": float(np.nan_to_num(latest_d)),
             "adx": float(np.nan_to_num(latest_adx))
+        },
+        "indicator_periods": {
+            "rsi_period": rsi_period,
+            "macd_fast": macd_fast,
+            "macd_slow": macd_slow,
+            "macd_signal": macd_signal,
+            "bb_period": bb_period,
+            "stoch_k": stoch_k,
+            "stoch_d": stoch_d,
+            "ma_short": ma_short,
+            "ma_medium": ma_medium,
+            "ma_long": ma_long
         }
     }
     
@@ -971,16 +1030,16 @@ def personalize_signals(signals: Dict[str, Any],
         # Conservative: Higher bar for buy/sell actions
         if confidence < thresholds['low']:
             personalized['action'] = 'hold'
-            personalized['personalized_message'] = "Signal not strong enough for your conservative risk profile"
+            personalized['personalized_message'] = "Sinyal tidak cukup kuat untuk profil risiko konservatif Anda"
         else:
-            personalized['personalized_message'] = "Strong signal matches your conservative risk profile"
+            personalized['personalized_message'] = "Sinyal kuat sesuai dengan profil risiko konservatif Anda"
             
     elif risk_tolerance == 'high':
         # Aggressive: Amplify confidence for buy/sell
         if action != 'hold':
             boosted_confidence = min(1.0, confidence * 1.2)
             personalized['confidence'] = boosted_confidence
-            personalized['personalized_message'] = "Signal amplified for your aggressive risk profile"
+            personalized['personalized_message'] = "Sinyal diperkuat untuk profil risiko agresif Anda"
         else:
             # Convert weak buy/sell signals to action for aggressive profiles
             buy_signals = sum(1 for s in signals.get('evidence', []) if 'buy' in s.lower())
@@ -989,16 +1048,16 @@ def personalize_signals(signals: Dict[str, Any],
             if buy_signals > sell_signals and buy_signals > 1:
                 personalized['action'] = 'buy'
                 personalized['confidence'] = 0.5
-                personalized['personalized_message'] = "Converted to buy signal for your aggressive risk profile"
+                personalized['personalized_message'] = "Dikonversi ke sinyal beli untuk profil risiko agresif Anda"
             elif sell_signals > buy_signals and sell_signals > 1:
                 personalized['action'] = 'sell'
                 personalized['confidence'] = 0.5
-                personalized['personalized_message'] = "Converted to sell signal for your aggressive risk profile"
+                personalized['personalized_message'] = "Dikonversi ke sinyal jual untuk profil risiko agresif Anda"
             else:
-                personalized['personalized_message'] = "Holding despite your aggressive risk profile due to unclear signals"
+                personalized['personalized_message'] = "Tetap hold meskipun profil risiko Anda agresif karena sinyal tidak jelas"
                 
     else:  # medium
-        personalized['personalized_message'] = "Signal matches your balanced risk profile"
+        personalized['personalized_message'] = "Sinyal sesuai dengan profil risiko seimbang Anda"
     
     # Add risk profile info
     personalized['risk_profile'] = risk_tolerance
@@ -1108,11 +1167,61 @@ if __name__ == "__main__":
         'volume': volume
     }).set_index('date')
     
-    # Test signal generation
-    signals = generate_trading_signals(df)
+    # Test dengan berbagai periode indikator
+    indicator_periods = {
+        'rsi_period': 14,
+        'macd_fast': 12,
+        'macd_slow': 26,
+        'macd_signal': 9,
+        'bb_period': 20,
+        'stoch_k': 14,
+        'stoch_d': 3,
+        'ma_short': 20,
+        'ma_medium': 50,
+        'ma_long': 200
+    }
+    
+    # Test jangka pendek
+    print("\n=== Test Indikator Jangka Pendek ===")
+    short_term = {
+        'rsi_period': 7,
+        'macd_fast': 8,
+        'macd_slow': 17,
+        'macd_signal': 9,
+        'bb_period': 10,
+        'stoch_k': 7,
+        'stoch_d': 3,
+        'ma_short': 10,
+        'ma_medium': 30,
+        'ma_long': 60
+    }
+    
+    signals_short = generate_trading_signals(df, short_term)
+    print(f"Jangka Pendek - Action: {signals_short['action'].upper()}, Confidence: {signals_short['confidence']:.2f}")
+    
+    # Test jangka panjang
+    print("\n=== Test Indikator Jangka Panjang ===")
+    long_term = {
+        'rsi_period': 21,
+        'macd_fast': 19,
+        'macd_slow': 39,
+        'macd_signal': 9,
+        'bb_period': 30,
+        'stoch_k': 21,
+        'stoch_d': 7,
+        'ma_short': 50,
+        'ma_medium': 100,
+        'ma_long': 200
+    }
+    
+    signals_long = generate_trading_signals(df, long_term)
+    print(f"Jangka Panjang - Action: {signals_long['action'].upper()}, Confidence: {signals_long['confidence']:.2f}")
+    
+    # Test standard
+    signals = generate_trading_signals(df, indicator_periods)
     
     # Print results
-    print("\n=== Technical Analysis Signals ===")
+    print("\n=== Technical Analysis Signals (Standard) ===")
     print(f"Action: {signals['action'].upper()}")
     print(f"Confidence: {signals['confidence']:.2f}")
     
@@ -1134,12 +1243,3 @@ if __name__ == "__main__":
     print(f"Action: {personalized['action'].upper()}")
     print(f"Confidence: {personalized['confidence']:.2f}")
     print(f"Message: {personalized['personalized_message']}")
-    
-    # Test event detection
-    events = detect_market_events(df)
-    
-    print("\n=== Market Events ===")
-    print(f"Latest Event: {events['latest_event']}")
-    print("Event Counts:")
-    for event, count in events['event_counts'].items():
-        print(f"- {event}: {count}")

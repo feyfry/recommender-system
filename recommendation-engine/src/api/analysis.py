@@ -4,7 +4,7 @@ API endpoints untuk analisis teknikal proyek Web3
 
 import os
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
@@ -84,11 +84,41 @@ async def get_price_data(project_id: str, days: int = 30, interval: str = "1d") 
         raise HTTPException(status_code=500, detail=f"Error fetching price data: {str(e)}")
 
 # Pydantic models
+class IndicatorPeriods(BaseModel):
+    rsi_period: int = Field(14, ge=3, le=50, description="Periode RSI (standard: 14)")
+    macd_fast: int = Field(12, ge=5, le=50, description="Periode MACD fast EMA (standard: 12)")
+    macd_slow: int = Field(26, ge=10, le=100, description="Periode MACD slow EMA (standard: 26)")
+    macd_signal: int = Field(9, ge=3, le=50, description="Periode MACD signal line (standard: 9)")
+    bb_period: int = Field(20, ge=5, le=50, description="Periode Bollinger Bands (standard: 20)")
+    stoch_k: int = Field(14, ge=3, le=30, description="Periode Stochastic %K (standard: 14)")
+    stoch_d: int = Field(3, ge=1, le=10, description="Periode Stochastic %D (standard: 3)")
+    ma_short: int = Field(20, ge=5, le=50, description="Periode MA jangka pendek (standard: 20)")
+    ma_medium: int = Field(50, ge=20, le=100, description="Periode MA jangka menengah (standard: 50)")
+    ma_long: int = Field(200, ge=50, le=500, description="Periode MA jangka panjang (standard: 200)")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "rsi_period": 14,
+                "macd_fast": 12,
+                "macd_slow": 26,
+                "macd_signal": 9,
+                "bb_period": 20,
+                "stoch_k": 14,
+                "stoch_d": 3,
+                "ma_short": 20,
+                "ma_medium": 50,
+                "ma_long": 200
+            }
+        }
+
 class TradingSignalRequest(BaseModel):
     project_id: str
-    days: int = Field(50, ge=1, le=365)
-    interval: str = Field("1d", description="Price data interval")
-    risk_tolerance: str = Field("medium", description="User risk tolerance (low, medium, high)")
+    days: int = Field(30, ge=1, le=365, description="Jumlah hari data historis")
+    interval: str = Field("1d", description="Interval data ('1d', '1h', dsb)")
+    risk_tolerance: str = Field("medium", description="Toleransi risiko pengguna (low, medium, high)")
+    periods: Optional[IndicatorPeriods] = Field(None, description="Periode indikator teknikal")
+    trading_style: str = Field("standard", description="Gaya trading ('short_term', 'standard', 'long_term')")
 
 class IndicatorValue(BaseModel):
     value: float
@@ -105,6 +135,7 @@ class TradingSignalResponse(BaseModel):
     personalized_message: Optional[str] = None
     risk_profile: Optional[str] = None
     indicators: Dict[str, float]
+    indicator_periods: Dict[str, int]
     timestamp: datetime
 
 class TechnicalIndicatorsRequest(BaseModel):
@@ -112,6 +143,7 @@ class TechnicalIndicatorsRequest(BaseModel):
     days: int = Field(30, ge=1, le=365)
     interval: str = Field("1d", description="Price data interval")
     indicators: List[str] = ["rsi", "macd", "bollinger", "sma"]
+    periods: Optional[IndicatorPeriods] = Field(None, description="Periode indikator teknikal")
 
 class TechnicalIndicatorsResponse(BaseModel):
     project_id: str
@@ -137,12 +169,81 @@ async def get_trading_signals(request: TradingSignalRequest):
     start_time = datetime.now()
     logger.info(f"Trading signal request for {request.project_id} with days={request.days}")
     
+    # Prepare indicator periods
+    indicator_periods = {}
+    
+    # Handle trading style presets
+    if request.trading_style == "short_term":
+        indicator_periods = {
+            'rsi_period': 7,
+            'macd_fast': 8,
+            'macd_slow': 17,
+            'macd_signal': 9,
+            'bb_period': 10,
+            'stoch_k': 7,
+            'stoch_d': 3,
+            'ma_short': 10,
+            'ma_medium': 30,
+            'ma_long': 60
+        }
+    elif request.trading_style == "long_term":
+        indicator_periods = {
+            'rsi_period': 21,
+            'macd_fast': 19,
+            'macd_slow': 39,
+            'macd_signal': 9,
+            'bb_period': 30,
+            'stoch_k': 21,
+            'stoch_d': 7,
+            'ma_short': 50,
+            'ma_medium': 100,
+            'ma_long': 200
+        }
+    else:  # standard
+        indicator_periods = {
+            'rsi_period': 14,
+            'macd_fast': 12,
+            'macd_slow': 26,
+            'macd_signal': 9,
+            'bb_period': 20,
+            'stoch_k': 14,
+            'stoch_d': 3,
+            'ma_short': 20,
+            'ma_medium': 50,
+            'ma_long': 200
+        }
+    
+    # Override dengan nilai kustom jika disediakan
+    if request.periods:
+        for key, value in request.periods.dict().items():
+            indicator_periods[key] = value
+    
+    # Hitung minimal data yang diperlukan
+    min_required_days = max(
+        3 * indicator_periods['rsi_period'],
+        indicator_periods['macd_slow'] + indicator_periods['macd_signal'] + 10,
+        indicator_periods['bb_period'] + 10,
+        indicator_periods['stoch_k'] + indicator_periods['stoch_d'] + 5,
+        indicator_periods['ma_long'] + 10
+    )
+    
+    # Sanity check: minimum 30 days
+    min_required_days = max(30, min_required_days)
+    
     # Check if request has valid number of days
-    if request.days < 50:
-        logger.warning(f"Requested days {request.days} is below recommended minimum of 50. This may result in inaccurate signals.")
+    if request.days < min_required_days:
+        logger.warning(f"Requested days {request.days} is below recommended minimum of {min_required_days} for selected parameters.")
+        logger.info(f"Automatically adjusting requested days to {min_required_days}")
+        request.days = min_required_days
     
     # Check cache first
-    cache_key = f"{request.project_id}:{request.days}:{request.interval}:{request.risk_tolerance}"
+    cache_key = f"{request.project_id}:{request.days}:{request.interval}:{request.risk_tolerance}:{request.trading_style}"
+    
+    # Add indicator periods to cache key if customized
+    if request.periods:
+        periods_str = ":".join([f"{k}={v}" for k, v in request.periods.dict().items()])
+        cache_key += f":{periods_str}"
+        
     if cache_key in _signals_cache:
         cache_entry = _signals_cache[cache_key]
         
@@ -173,27 +274,35 @@ async def get_trading_signals(request: TradingSignalRequest):
         logger.info(f"Got {len(price_data)} data points for {request.project_id}")
         
         # Check for sufficient data
-        if len(price_data) < 50:
-            logger.warning(f"Insufficient data points for accurate technical analysis: {len(price_data)} < 50 recommended minimum")
+        if len(price_data) < min_required_days:
+            logger.warning(f"Insufficient data points for accurate technical analysis with selected parameters: {len(price_data)} < {min_required_days} recommended minimum")
             
             # Continue with warning but don't fail the request
             if len(price_data) < 20:
                 # However, if there's really too little data, return a proper error
                 raise HTTPException(
                     status_code=400, 
-                    detail=f"Insufficient data for technical analysis. Got {len(price_data)} points, need at least 20. Try increasing 'days' parameter."
+                    detail=f"Data tidak cukup untuk analisis teknikal. Tersedia {len(price_data)} titik data, dibutuhkan minimal 20. Coba tingkatkan parameter 'days'."
                 )
         
-        # Generate trading signals
-        signals = generate_trading_signals(price_data)
+        # Generate trading signals with custom periods
+        signals = generate_trading_signals(price_data, indicator_periods=indicator_periods)
         
         # Check if the result contains an error
         if 'error' in signals:
             logger.error(f"Error in signal generation: {signals['error']}")
-            raise HTTPException(
-                status_code=400, 
-                detail=signals['error']
-            )
+            
+            # If there's a minimum days needed hint, include it in the response
+            if 'min_days_needed' in signals:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"{signals['error']} Coba dengan parameter days={signals['min_days_needed']}."
+                )
+            else:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=signals['error']
+                )
         
         # Personalize based on risk tolerance
         personalized = personalize_signals(signals, risk_tolerance=request.risk_tolerance)
@@ -231,6 +340,7 @@ async def get_trading_signals(request: TradingSignalRequest):
             personalized_message=personalized.get('personalized_message'),
             risk_profile=personalized.get('risk_profile'),
             indicators=personalized.get('indicators', {}),
+            indicator_periods=personalized.get('indicator_periods', indicator_periods),
             timestamp=datetime.now()
         )
         
@@ -262,6 +372,11 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
     """
     start_time = datetime.now()
     logger.info(f"Technical indicators request for {request.project_id}")
+    
+    # Handle custom periods
+    indicator_periods = {}
+    if request.periods:
+        indicator_periods = request.periods.dict()
     
     try:
         # Get real price data
@@ -310,7 +425,8 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
                 indicators_result["rsi"] = {
                     "value": rsi_value,
                     "signal": rsi_signal,
-                    "description": f"RSI is {rsi_signal} at {rsi_value:.2f}"
+                    "description": f"RSI is {rsi_signal} at {rsi_value:.2f}",
+                    "period": indicator_periods.get("rsi_period", 14)
                 }
             
             # MACD
@@ -344,7 +460,12 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
                         "signal_line": signal_value,
                         "histogram": hist_value,
                         "signal": macd_signal,
-                        "description": description
+                        "description": description,
+                        "periods": {
+                            "fast": indicator_periods.get("macd_fast", 12),
+                            "slow": indicator_periods.get("macd_slow", 26),
+                            "signal": indicator_periods.get("macd_signal", 9)
+                        }
                     }
                 except (ValueError, TypeError) as e:
                     logger.warning(f"Error calculating MACD indicators: {str(e)}")
@@ -388,7 +509,8 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
                             "lower": lower,
                             "percent_b": bb_pct,
                             "signal": bb_signal,
-                            "description": description
+                            "description": description,
+                            "period": indicator_periods.get("bb_period", 20)
                         }
                 except (ValueError, TypeError) as e:
                     logger.warning(f"Error calculating Bollinger Band indicators: {str(e)}")
@@ -397,7 +519,11 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
             if "sma" in request.indicators:
                 try:
                     ma_data = {}
-                    ma_periods = [5, 10, 20, 50, 100, 200]
+                    short_period = indicator_periods.get("ma_short", 20)
+                    medium_period = indicator_periods.get("ma_medium", 50)
+                    long_period = indicator_periods.get("ma_long", 200)
+                    
+                    ma_periods = [short_period, medium_period, long_period]
                     
                     for period in ma_periods:
                         sma_key = f"sma_{period}"
@@ -411,26 +537,31 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
                     # Detect Golden/Death Cross
                     if "golden_cross" in latest_data and latest_data["golden_cross"] == 1:
                         ma_signal = "strong_bullish"
-                        description = "Golden Cross detected (50-day MA crossed above 200-day MA)"
+                        description = f"Golden Cross detected ({medium_period}-day MA crossed above {long_period}-day MA)"
                     elif "death_cross" in latest_data and latest_data["death_cross"] == 1:
                         ma_signal = "strong_bearish"
-                        description = "Death Cross detected (50-day MA crossed below 200-day MA)"
-                    elif "sma_20" in latest_data and "sma_50" in latest_data:
+                        description = f"Death Cross detected ({medium_period}-day MA crossed below {long_period}-day MA)"
+                    elif f"sma_{short_period}" in latest_data and f"sma_{medium_period}" in latest_data:
                         close = float(latest_data["close"])
-                        sma_20 = float(latest_data["sma_20"])
-                        sma_50 = float(latest_data["sma_50"])
+                        sma_short = float(latest_data[f"sma_{short_period}"])
+                        sma_medium = float(latest_data[f"sma_{medium_period}"])
                         
-                        if close > sma_20 > sma_50:
+                        if close > sma_short > sma_medium:
                             ma_signal = "bullish"
-                            description = "Price is above 20 and 50-day moving averages (bullish trend)"
-                        elif close < sma_20 < sma_50:
+                            description = f"Price is above {short_period} and {medium_period}-day moving averages (bullish trend)"
+                        elif close < sma_short < sma_medium:
                             ma_signal = "bearish"
-                            description = "Price is below 20 and 50-day moving averages (bearish trend)"
+                            description = f"Price is below {short_period} and {medium_period}-day moving averages (bearish trend)"
                     
                     indicators_result["moving_averages"] = {
                         "values": ma_data,
                         "signal": ma_signal,
-                        "description": description
+                        "description": description,
+                        "periods": {
+                            "short": short_period,
+                            "medium": medium_period,
+                            "long": long_period
+                        }
                     }
                 except (ValueError, TypeError) as e:
                     logger.warning(f"Error calculating Moving Average indicators: {str(e)}")
@@ -466,7 +597,11 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
                             "k": k_value,
                             "d": d_value,
                             "signal": stoch_signal,
-                            "description": description
+                            "description": description,
+                            "periods": {
+                                "k": indicator_periods.get("stoch_k", 14),
+                                "d": indicator_periods.get("stoch_d", 3)
+                            }
                         }
                 except (ValueError, TypeError) as e:
                     logger.warning(f"Error calculating Stochastic indicators: {str(e)}")
@@ -840,7 +975,7 @@ async def get_technical_alerts(
 @router.get("/price-prediction/{project_id}")
 async def predict_future_price(
     project_id: str = Path(..., description="Project ID"),
-    days: int = Query(50, ge=1, le=365, description="Historical data days"),
+    days: int = Query(30, ge=1, le=365, description="Historical data days"),
     prediction_days: int = Query(7, ge=1, le=50, description="Days to predict"),
     interval: str = Query("1d", description="Price data interval")
 ):

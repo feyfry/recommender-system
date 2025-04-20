@@ -567,46 +567,163 @@ def trading_signals(args):
     
     # Get parameters
     project_id = args.project_id
-    days = getattr(args, 'days', 50)
+    days = getattr(args, 'days', 30)
     risk = getattr(args, 'risk', 'medium')
     
-    print(f"Generating trading signals for project '{project_id}'...")
+    # Get trading style (short_term, standard, long_term)
+    trading_style = getattr(args, 'trading_style', 'standard')
+    
+    # Set default indicator periods based on trading style
+    if trading_style == 'short_term':
+        indicator_periods = {
+            'rsi_period': 7,
+            'macd_fast': 8,
+            'macd_slow': 17,
+            'macd_signal': 9,
+            'bb_period': 10,
+            'stoch_k': 7,
+            'stoch_d': 3,
+            'ma_short': 10,
+            'ma_medium': 30,
+            'ma_long': 60
+        }
+        logger.info(f"Using short-term trading parameters (periode lebih pendek)")
+    elif trading_style == 'long_term':
+        indicator_periods = {
+            'rsi_period': 21,
+            'macd_fast': 19,
+            'macd_slow': 39,
+            'macd_signal': 9,
+            'bb_period': 30,
+            'stoch_k': 21,
+            'stoch_d': 7,
+            'ma_short': 50,
+            'ma_medium': 100,
+            'ma_long': 200
+        }
+        logger.info(f"Using long-term trading parameters (periode lebih panjang)")
+    else:  # standard
+        indicator_periods = {
+            'rsi_period': 14,
+            'macd_fast': 12,
+            'macd_slow': 26,
+            'macd_signal': 9,
+            'bb_period': 20,
+            'stoch_k': 14,
+            'stoch_d': 3,
+            'ma_short': 20,
+            'ma_medium': 50,
+            'ma_long': 200
+        }
+        logger.info(f"Using standard trading parameters (periode default)")
+    
+    # Override dengan nilai kustom jika disediakan
+    # RSI
+    if hasattr(args, 'rsi_period') and args.rsi_period:
+        indicator_periods['rsi_period'] = args.rsi_period
+    
+    # MACD
+    if hasattr(args, 'macd_fast') and args.macd_fast:
+        indicator_periods['macd_fast'] = args.macd_fast
+    if hasattr(args, 'macd_slow') and args.macd_slow:
+        indicator_periods['macd_slow'] = args.macd_slow
+    if hasattr(args, 'macd_signal') and args.macd_signal:
+        indicator_periods['macd_signal'] = args.macd_signal
+    
+    # Bollinger Bands
+    if hasattr(args, 'bb_period') and args.bb_period:
+        indicator_periods['bb_period'] = args.bb_period
+    
+    # Stochastic
+    if hasattr(args, 'stoch_k') and args.stoch_k:
+        indicator_periods['stoch_k'] = args.stoch_k
+    if hasattr(args, 'stoch_d') and args.stoch_d:
+        indicator_periods['stoch_d'] = args.stoch_d
+        
+    # Moving Averages
+    if hasattr(args, 'ma_short') and args.ma_short:
+        indicator_periods['ma_short'] = args.ma_short
+    if hasattr(args, 'ma_medium') and args.ma_medium:
+        indicator_periods['ma_medium'] = args.ma_medium
+    if hasattr(args, 'ma_long') and args.ma_long:
+        indicator_periods['ma_long'] = args.ma_long
+    
+    # Hitung minimal data yang diperlukan berdasarkan indikator terlama
+    min_required_days = max(
+        3 * indicator_periods['rsi_period'],
+        indicator_periods['macd_slow'] + indicator_periods['macd_signal'] + 10,
+        indicator_periods['bb_period'] + 10,
+        indicator_periods['stoch_k'] + indicator_periods['stoch_d'] + 5,
+        indicator_periods['ma_long'] + 10
+    )
+    
+    # Sanity check: minimum 30 days
+    min_required_days = max(30, min_required_days)
+    
+    # Check if days is less than minimum required
+    if days < min_required_days:
+        logger.warning(f"Hari yang diminta ({days}) kurang dari jumlah minimal yang direkomendasikan ({min_required_days}) untuk parameter yang dipilih.")
+        logger.info(f"Secara otomatis menyesuaikan hari yang diminta menjadi {min_required_days}")
+        days = min_required_days
+    
+    print(f"Menghasilkan sinyal trading untuk proyek '{project_id}' dengan gaya '{trading_style}'...")
     
     try:
         # Fetch real market data instead of using synthetic data
-        print(f"Fetching real market data for {project_id}...")
+        print(f"Mengambil data pasar untuk {project_id}...")
         df = fetch_real_market_data(project_id, days=days)
         
         if df.empty:
-            logger.error(f"Failed to fetch market data for {project_id}")
-            print(f"❌ Failed to fetch market data for {project_id}")
+            logger.error(f"Gagal mengambil data pasar untuk {project_id}")
+            print(f"❌ Gagal mengambil data pasar untuk {project_id}")
+            return False
+        
+        # Log some info about the data
+        print(f"Berhasil mendapatkan {len(df)} titik data harga")
+        
+        if len(df) < min_required_days:
+            print(f"⚠️ Peringatan: Data yang tersedia ({len(df)} hari) kurang dari minimal yang direkomendasikan ({min_required_days}) untuk analisis optimal")
+        
+        # Generate trading signals
+        signals = generate_trading_signals(df, indicator_periods=indicator_periods)
+        
+        # Check if there's an error
+        if 'error' in signals:
+            logger.error(f"Error generating signals: {signals['error']}")
+            print(f"❌ Error: {signals['error']}")
+            
+            # If there's a minimum days hint, include it
+            if 'min_days_needed' in signals:
+                print(f"📊 Coba kembali dengan parameter days={signals['min_days_needed']} atau lebih besar")
+            
             return False
             
-        # Generate trading signals
-        signals = generate_trading_signals(df)
-        
         # Personalize based on risk tolerance
         personalized = personalize_signals(signals, risk_tolerance=risk)
         
         # Print results
-        print("\nTrading Signal Analysis:")
+        print("\nAnalisis Sinyal Trading:")
         print("-" * 80)
-        print(f"Action: {personalized['action'].upper()}")
+        print(f"Aksi: {personalized['action'].upper()}")
         print(f"Confidence: {personalized['confidence']:.2f}")
-        print(f"Risk Profile: {personalized['risk_profile']}")
+        print(f"Profil Risiko: {personalized['risk_profile']}")
         
         if 'target_price' in personalized:
             print(f"Target Price: ${personalized['target_price']:.2f}")
             
-        print(f"\nPersonalized Message: {personalized['personalized_message']}")
+        print(f"\nPesan Personal: {personalized['personalized_message']}")
         
-        print("\nEvidence:")
+        print("\nBukti Analisis:")
         for evidence in personalized['evidence']:
             print(f"- {evidence}")
             
-        print("\nKey Indicators:")
+        print("\nIndikator Utama:")
         for indicator, value in personalized['indicators'].items():
             print(f"- {indicator}: {value:.2f}")
+        
+        print("\nPeriode Indikator yang Digunakan:")
+        for indicator, value in indicator_periods.items():
+            print(f"- {indicator}: {value}")
         
         return True
         
@@ -1167,8 +1284,27 @@ Examples:
     # signals command
     signals_parser = subparsers.add_parser("signals", help="Generate trading signals for a project")
     signals_parser.add_argument("--project-id", required=True, help="Project ID")
-    signals_parser.add_argument("--days", type=int, default=50, help="Days of historical data")
+    signals_parser.add_argument("--days", type=int, default=30, help="Days of historical data")
     signals_parser.add_argument("--risk", choices=["low", "medium", "high"], default="medium", help="Risk tolerance")
+    # Argumen untuk gaya trading
+    signals_parser.add_argument("--trading-style", choices=["short_term", "standard", "long_term"], 
+                            default="standard", help="Trading style (affects indicator periods)")
+    # Argumen untuk periode indikator individual
+    # RSI
+    signals_parser.add_argument("--rsi-period", type=int, help="RSI period (default: 14 for standard)")
+    # MACD
+    signals_parser.add_argument("--macd-fast", type=int, help="MACD fast period (default: 12 for standard)")
+    signals_parser.add_argument("--macd-slow", type=int, help="MACD slow period (default: 26 for standard)")
+    signals_parser.add_argument("--macd-signal", type=int, help="MACD signal period (default: 9 for standard)")
+    # Bollinger Bands
+    signals_parser.add_argument("--bb-period", type=int, help="Bollinger Bands period (default: 20 for standard)")
+    # Stochastic
+    signals_parser.add_argument("--stoch-k", type=int, help="Stochastic %K period (default: 14 for standard)")
+    signals_parser.add_argument("--stoch-d", type=int, help="Stochastic %D period (default: 3 for standard)")
+    # Moving Averages
+    signals_parser.add_argument("--ma-short", type=int, help="Short-term moving average period (default: 20 for standard)")
+    signals_parser.add_argument("--ma-medium", type=int, help="Medium-term moving average period (default: 50 for standard)")
+    signals_parser.add_argument("--ma-long", type=int, help="Long-term moving average period (default: 200 for standard)")
     
     # api command
     api_parser = subparsers.add_parser("api", help="Start API server")

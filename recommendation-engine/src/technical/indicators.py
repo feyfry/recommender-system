@@ -1,5 +1,5 @@
 """
-Modul untuk menghitung indikator-indikator teknikal
+Modul untuk menghitung indikator-indikator teknikal (VERSI YANG DIPERBARUI - DENGAN PERIODE DINAMIS)
 """
 
 import os
@@ -34,16 +34,57 @@ class TechnicalIndicators:
     Class untuk menghitung indikator-indikator teknikal
     """
     
-    def __init__(self, prices_df: pd.DataFrame):
+    def __init__(self, prices_df: pd.DataFrame, indicator_periods: Optional[Dict[str, Any]] = None):
         """
-        Inisialisasi dengan DataFrame harga
+        Inisialisasi dengan DataFrame harga dan periode indikator kustom
         
         Args:
             prices_df: DataFrame dengan data harga (harus memiliki kolom 'close',
                       opsional 'high', 'low', 'volume')
+            indicator_periods: Dictionary periode indikator kustom:
+                - rsi_period: Periode RSI (default 14)
+                - macd_fast: Periode MACD fast EMA (default 12)
+                - macd_slow: Periode MACD slow EMA (default 26)
+                - macd_signal: Periode MACD signal line (default 9)
+                - bb_period: Periode Bollinger Bands (default 20)
+                - stoch_k: Periode Stochastic %K (default 14)
+                - stoch_d: Periode Stochastic %D (default 3)
+                - ma_short: Periode MA jangka pendek (default 20)
+                - ma_medium: Periode MA jangka menengah (default 50)
+                - ma_long: Periode MA jangka panjang (default 200)
+                - atr_period: Periode ATR (default 14)
+                - adx_period: Periode ADX (default 14)
+                - cci_period: Periode CCI (default 20)
+                - roc_period: Periode ROC (default 10)
+                - willr_period: Periode Williams %R (default 14)
         """
         self.prices_df = prices_df
         
+        # Set default periods jika tidak disediakan
+        self.periods = {
+            'rsi_period': 14,
+            'macd_fast': 12,
+            'macd_slow': 26,
+            'macd_signal': 9,
+            'bb_period': 20,
+            'stoch_k': 14,
+            'stoch_d': 3,
+            'ma_short': 20,
+            'ma_medium': 50,
+            'ma_long': 200,
+            'atr_period': 14,
+            'adx_period': 14, 
+            'cci_period': 20,
+            'roc_period': 10,
+            'willr_period': 14
+        }
+        
+        # Update dengan periode kustom jika disediakan
+        if indicator_periods is not None:
+            for key, value in indicator_periods.items():
+                if key in self.periods:
+                    self.periods[key] = value
+                    
         # Verify required columns
         if 'close' not in prices_df.columns:
             raise ValueError("DataFrame must have 'close' column")
@@ -54,9 +95,24 @@ class TechnicalIndicators:
         self.low_col = 'low' if 'low' in prices_df.columns else self.close_col
         self.volume_col = 'volume' if 'volume' in prices_df.columns else None
         
+        # Log informasi periode yang digunakan
+        logger.info(f"TechnicalIndicators initialized with periods: RSI={self.periods['rsi_period']}, "
+                   f"MACD={self.periods['macd_fast']}/{self.periods['macd_slow']}/{self.periods['macd_signal']}, "
+                   f"BB={self.periods['bb_period']}, Stoch={self.periods['stoch_k']}/{self.periods['stoch_d']}, "
+                   f"MA={self.periods['ma_short']}/{self.periods['ma_medium']}/{self.periods['ma_long']}")
+        
         # Check if we have enough data for calculations
-        if len(prices_df) < 30:
-            logger.warning(f"DataFrame has only {len(prices_df)} rows, which might not be sufficient for all indicators")
+        min_required_points = max(
+            3 * self.periods['rsi_period'],
+            self.periods['macd_slow'] + self.periods['macd_signal'] + 10,
+            self.periods['bb_period'] + 10,
+            self.periods['stoch_k'] + self.periods['stoch_d'] + 5,
+            self.periods['ma_long'] + 10
+        )
+        
+        if len(prices_df) < min_required_points:
+            logger.warning(f"DataFrame has only {len(prices_df)} rows, which might not be sufficient for all indicators "
+                         f"with selected periods. Minimum recommended: {min_required_points}")
     
     def add_indicators(self) -> pd.DataFrame:
         """
@@ -125,7 +181,11 @@ class TechnicalIndicators:
             pd.DataFrame: DataFrame dengan indikator tren
         """
         # Moving Averages
-        ma_periods = [5, 10, 20, 50, 100, 200]
+        ma_short = self.periods['ma_short']
+        ma_medium = self.periods['ma_medium']
+        ma_long = self.periods['ma_long']
+        
+        ma_periods = [ma_short, ma_medium, ma_long]
         
         for period in ma_periods:
             if len(df) >= period:
@@ -133,42 +193,48 @@ class TechnicalIndicators:
                 df[f'ema_{period}'] = df[self.close_col].ewm(span=period, adjust=False).mean()
         
         # MACD
-        if len(df) >= 26:
+        macd_fast = self.periods['macd_fast']
+        macd_slow = self.periods['macd_slow']
+        macd_signal = self.periods['macd_signal']
+        
+        if len(df) >= macd_slow:
             if TALIB_AVAILABLE:
                 df['macd'], df['macd_signal'], df['macd_hist'] = talib.MACD(
                     df[self.close_col].values, 
-                    fastperiod=12, 
-                    slowperiod=26, 
-                    signalperiod=9
+                    fastperiod=macd_fast, 
+                    slowperiod=macd_slow, 
+                    signalperiod=macd_signal
                 )
             else:
                 # Calculate MACD manually
-                fast_ema = df[self.close_col].ewm(span=12, adjust=False).mean()
-                slow_ema = df[self.close_col].ewm(span=26, adjust=False).mean()
+                fast_ema = df[self.close_col].ewm(span=macd_fast, adjust=False).mean()
+                slow_ema = df[self.close_col].ewm(span=macd_slow, adjust=False).mean()
                 df['macd'] = fast_ema - slow_ema
-                df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+                df['macd_signal'] = df['macd'].ewm(span=macd_signal, adjust=False).mean()
                 df['macd_hist'] = df['macd'] - df['macd_signal']
         
         # ADX (Average Directional Index)
-        if len(df) >= 14:
+        adx_period = self.periods['adx_period']
+        
+        if len(df) >= adx_period:
             if TALIB_AVAILABLE:
                 df['adx'] = talib.ADX(
                     df[self.high_col].values, 
                     df[self.low_col].values, 
                     df[self.close_col].values, 
-                    timeperiod=14
+                    timeperiod=adx_period
                 )
                 df['plus_di'] = talib.PLUS_DI(
                     df[self.high_col].values, 
                     df[self.low_col].values, 
                     df[self.close_col].values, 
-                    timeperiod=14
+                    timeperiod=adx_period
                 )
                 df['minus_di'] = talib.MINUS_DI(
                     df[self.high_col].values, 
                     df[self.low_col].values, 
                     df[self.close_col].values, 
-                    timeperiod=14
+                    timeperiod=adx_period
                 )
             else:
                 # Use simplified implementation from signals.py
@@ -179,7 +245,7 @@ class TechnicalIndicators:
                 tr3 = (df[self.low_col] - prev_close).abs()  # |Low - Previous Close|
                 
                 true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-                atr14 = true_range.rolling(window=14).mean()
+                atr14 = true_range.rolling(window=adx_period).mean()
                 
                 # 2. Directional Movement
                 high_diff = df[self.high_col] - df[self.high_col].shift(1)
@@ -189,15 +255,15 @@ class TechnicalIndicators:
                 minus_dm = low_diff.where((low_diff > high_diff) & (low_diff > 0), 0)
                 
                 # 3. Directional Indicators
-                df['plus_di'] = 100 * (plus_dm.rolling(window=14).mean() / atr14)
-                df['minus_di'] = 100 * (minus_dm.rolling(window=14).mean() / atr14)
+                df['plus_di'] = 100 * (plus_dm.rolling(window=adx_period).mean() / atr14)
+                df['minus_di'] = 100 * (minus_dm.rolling(window=adx_period).mean() / atr14)
                 
                 # 4. Directional Index
                 dx = 100 * ((df['plus_di'] - df['minus_di']).abs() / 
                            (df['plus_di'] + df['minus_di']).replace(0, np.finfo(float).eps))
                 
                 # 5. Average Directional Index
-                df['adx'] = dx.rolling(window=14).mean()
+                df['adx'] = dx.rolling(window=adx_period).mean()
         
         # Parabolic SAR
         if len(df) >= 10:
@@ -210,32 +276,32 @@ class TechnicalIndicators:
                 )
         
         # Add Moving Average Crossovers
-        if 'sma_20' in df.columns and 'sma_50' in df.columns:
-            df['sma_20_50_cross'] = np.where(
-                df['sma_20'] > df['sma_50'], 1, -1
+        if f'sma_{ma_short}' in df.columns and f'sma_{ma_medium}' in df.columns:
+            df['sma_short_medium_cross'] = np.where(
+                df[f'sma_{ma_short}'] > df[f'sma_{ma_medium}'], 1, -1
             )
             # Detect crosses
-            df['sma_20_50_cross_up'] = np.where(
-                (df['sma_20'] > df['sma_50']) & (df['sma_20'].shift(1) <= df['sma_50'].shift(1)), 
+            df['sma_short_medium_cross_up'] = np.where(
+                (df[f'sma_{ma_short}'] > df[f'sma_{ma_medium}']) & (df[f'sma_{ma_short}'].shift(1) <= df[f'sma_{ma_medium}'].shift(1)), 
                 1, 0
             )
-            df['sma_20_50_cross_down'] = np.where(
-                (df['sma_20'] < df['sma_50']) & (df['sma_20'].shift(1) >= df['sma_50'].shift(1)), 
+            df['sma_short_medium_cross_down'] = np.where(
+                (df[f'sma_{ma_short}'] < df[f'sma_{ma_medium}']) & (df[f'sma_{ma_short}'].shift(1) >= df[f'sma_{ma_medium}'].shift(1)), 
                 1, 0
             )
         
         # Add Death Cross / Golden Cross
-        if 'sma_50' in df.columns and 'sma_200' in df.columns:
-            df['sma_50_200_cross'] = np.where(
-                df['sma_50'] > df['sma_200'], 1, -1
+        if f'sma_{ma_medium}' in df.columns and f'sma_{ma_long}' in df.columns:
+            df['sma_medium_long_cross'] = np.where(
+                df[f'sma_{ma_medium}'] > df[f'sma_{ma_long}'], 1, -1
             )
             # Detect crosses
             df['golden_cross'] = np.where(
-                (df['sma_50'] > df['sma_200']) & (df['sma_50'].shift(1) <= df['sma_200'].shift(1)), 
+                (df[f'sma_{ma_medium}'] > df[f'sma_{ma_long}']) & (df[f'sma_{ma_medium}'].shift(1) <= df[f'sma_{ma_long}'].shift(1)), 
                 1, 0
             )
             df['death_cross'] = np.where(
-                (df['sma_50'] < df['sma_200']) & (df['sma_50'].shift(1) >= df['sma_200'].shift(1)), 
+                (df[f'sma_{ma_medium}'] < df[f'sma_{ma_long}']) & (df[f'sma_{ma_medium}'].shift(1) >= df[f'sma_{ma_long}'].shift(1)), 
                 1, 0
             )
         
@@ -252,83 +318,94 @@ class TechnicalIndicators:
             pd.DataFrame: DataFrame dengan indikator momentum
         """
         # RSI
-        if len(df) >= 14:
+        rsi_period = self.periods['rsi_period']
+        
+        if len(df) >= rsi_period:
             if TALIB_AVAILABLE:
-                df['rsi'] = talib.RSI(df[self.close_col].values, timeperiod=14)
+                df['rsi'] = talib.RSI(df[self.close_col].values, timeperiod=rsi_period)
             else:
                 # Calculate RSI manually
                 delta = df[self.close_col].diff()
                 gain = delta.where(delta > 0, 0)
                 loss = -delta.where(delta < 0, 0)
                 
-                avg_gain = gain.rolling(window=14).mean()
-                avg_loss = loss.rolling(window=14).mean()
+                avg_gain = gain.rolling(window=rsi_period).mean()
+                avg_loss = loss.rolling(window=rsi_period).mean()
                 
                 rs = avg_gain / avg_loss.replace(0, np.finfo(float).eps)
                 df['rsi'] = 100 - (100 / (1 + rs))
         
         # Stochastic Oscillator
-        if len(df) >= 14:
+        stoch_k = self.periods['stoch_k']
+        stoch_d = self.periods['stoch_d']
+        
+        if len(df) >= stoch_k:
             if TALIB_AVAILABLE:
                 df['stoch_k'], df['stoch_d'] = talib.STOCH(
                     df[self.high_col].values, 
                     df[self.low_col].values, 
                     df[self.close_col].values, 
-                    fastk_period=14, 
-                    slowk_period=3, 
+                    fastk_period=stoch_k, 
+                    slowk_period=stoch_d, 
                     slowk_matype=0, 
-                    slowd_period=3, 
+                    slowd_period=stoch_d, 
                     slowd_matype=0
                 )
             else:
                 # Calculate Stochastic Oscillator manually
-                low_14 = df[self.low_col].rolling(window=14).min()
-                high_14 = df[self.high_col].rolling(window=14).max()
+                low_k = df[self.low_col].rolling(window=stoch_k).min()
+                high_k = df[self.high_col].rolling(window=stoch_k).max()
                 
                 # Fast %K
-                df['stoch_k'] = 100 * ((df[self.close_col] - low_14) / 
-                                      (high_14 - low_14).replace(0, np.finfo(float).eps))
+                df['stoch_k'] = 100 * ((df[self.close_col] - low_k) / 
+                                      (high_k - low_k).replace(0, np.finfo(float).eps))
                 
                 # Slow %D (3-period SMA of %K)
-                df['stoch_d'] = df['stoch_k'].rolling(window=3).mean()
+                df['stoch_d'] = df['stoch_k'].rolling(window=stoch_d).mean()
         
         # CCI (Commodity Channel Index)
-        if len(df) >= 20:
+        cci_period = self.periods['cci_period']
+        
+        if len(df) >= cci_period:
             if TALIB_AVAILABLE:
                 df['cci'] = talib.CCI(
                     df[self.high_col].values, 
                     df[self.low_col].values, 
                     df[self.close_col].values, 
-                    timeperiod=20
+                    timeperiod=cci_period
                 )
             else:
                 # Calculate CCI manually
                 typical_price = (df[self.high_col] + df[self.low_col] + df[self.close_col]) / 3
-                mean_deviation = np.abs(typical_price - typical_price.rolling(window=20).mean()).rolling(window=20).mean()
+                mean_deviation = np.abs(typical_price - typical_price.rolling(window=cci_period).mean()).rolling(window=cci_period).mean()
                 
-                df['cci'] = (typical_price - typical_price.rolling(window=20).mean()) / (0.015 * mean_deviation.replace(0, np.finfo(float).eps))
+                df['cci'] = (typical_price - typical_price.rolling(window=cci_period).mean()) / (0.015 * mean_deviation.replace(0, np.finfo(float).eps))
         
         # ROC (Rate of Change)
-        if len(df) >= 10:
+        roc_period = self.periods['roc_period']
+        
+        if len(df) >= roc_period:
             if TALIB_AVAILABLE:
-                df['roc'] = talib.ROC(df[self.close_col].values, timeperiod=10)
+                df['roc'] = talib.ROC(df[self.close_col].values, timeperiod=roc_period)
             else:
                 # Calculate ROC manually
-                df['roc'] = (df[self.close_col] / df[self.close_col].shift(10) - 1) * 100
+                df['roc'] = (df[self.close_col] / df[self.close_col].shift(roc_period) - 1) * 100
         
         # Williams %R
-        if len(df) >= 14:
+        willr_period = self.periods['willr_period']
+        
+        if len(df) >= willr_period:
             if TALIB_AVAILABLE:
                 df['willr'] = talib.WILLR(
                     df[self.high_col].values, 
                     df[self.low_col].values, 
                     df[self.close_col].values, 
-                    timeperiod=14
+                    timeperiod=willr_period
                 )
             else:
                 # Calculate Williams %R manually
-                highest_high = df[self.high_col].rolling(window=14).max()
-                lowest_low = df[self.low_col].rolling(window=14).min()
+                highest_high = df[self.high_col].rolling(window=willr_period).max()
+                lowest_low = df[self.low_col].rolling(window=willr_period).min()
                 
                 df['willr'] = -100 * (highest_high - df[self.close_col]) / (highest_high - lowest_low).replace(0, np.finfo(float).eps)
         
@@ -345,19 +422,21 @@ class TechnicalIndicators:
             pd.DataFrame: DataFrame dengan indikator volatilitas
         """
         # Bollinger Bands
-        if len(df) >= 20:
+        bb_period = self.periods['bb_period']
+        
+        if len(df) >= bb_period:
             if TALIB_AVAILABLE:
                 df['bb_upper'], df['bb_middle'], df['bb_lower'] = talib.BBANDS(
                     df[self.close_col].values, 
-                    timeperiod=20, 
+                    timeperiod=bb_period, 
                     nbdevup=2, 
                     nbdevdn=2, 
                     matype=0
                 )
             else:
                 # Calculate Bollinger Bands manually
-                df['bb_middle'] = df[self.close_col].rolling(window=20).mean()
-                df['bb_std'] = df[self.close_col].rolling(window=20).std()
+                df['bb_middle'] = df[self.close_col].rolling(window=bb_period).mean()
+                df['bb_std'] = df[self.close_col].rolling(window=bb_period).std()
                 
                 df['bb_upper'] = df['bb_middle'] + (2 * df['bb_std'])
                 df['bb_lower'] = df['bb_middle'] - (2 * df['bb_std'])
@@ -366,13 +445,15 @@ class TechnicalIndicators:
             df['bb_pct_b'] = (df[self.close_col] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower']).replace(0, np.finfo(float).eps)
         
         # ATR (Average True Range)
-        if len(df) >= 14:
+        atr_period = self.periods['atr_period']
+        
+        if len(df) >= atr_period:
             if TALIB_AVAILABLE:
                 df['atr'] = talib.ATR(
                     df[self.high_col].values, 
                     df[self.low_col].values, 
                     df[self.close_col].values, 
-                    timeperiod=14
+                    timeperiod=atr_period
                 )
             else:
                 # Calculate ATR manually
@@ -382,18 +463,18 @@ class TechnicalIndicators:
                 tr3 = (df[self.low_col] - prev_close).abs()  # |Low - Previous Close|
                 
                 true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-                df['atr'] = true_range.rolling(window=14).mean()
+                df['atr'] = true_range.rolling(window=atr_period).mean()
             
             # Calculate ATR ratio (ATR/Price) as a volatility measure
             df['atr_ratio'] = df['atr'] / df[self.close_col]
         
         # Historical Volatility
-        if len(df) >= 20:
+        if len(df) >= bb_period:  # Gunakan BB period untuk konsistensi
             # Calculate daily returns
             df['daily_returns'] = df[self.close_col].pct_change()
             
             # Calculate 20-day rolling standard deviation of returns
-            df['historical_volatility'] = df['daily_returns'].rolling(window=20).std() * np.sqrt(252)  # Annualized
+            df[f'historical_volatility_{bb_period}d'] = df['daily_returns'].rolling(window=bb_period).std() * np.sqrt(252)  # Annualized
         
         return df
     
@@ -431,21 +512,26 @@ class TechnicalIndicators:
             ).cumsum()
         
         # Volume Moving Averages
-        df['volume_sma_5'] = df[self.volume_col].rolling(window=5).mean()
-        df['volume_sma_20'] = df[self.volume_col].rolling(window=20).mean()
+        ma_short = self.periods['ma_short']
+        ma_medium = self.periods['ma_medium']
+        
+        df[f'volume_sma_{ma_short}'] = df[self.volume_col].rolling(window=ma_short).mean()
+        df[f'volume_sma_{ma_medium}'] = df[self.volume_col].rolling(window=ma_medium).mean()
         
         # Volume Ratio (current volume to average volume)
-        df['volume_ratio'] = df[self.volume_col] / df['volume_sma_20']
+        df['volume_ratio'] = df[self.volume_col] / df[f'volume_sma_{ma_medium}']
         
         # Money Flow Index (MFI)
-        if len(df) >= 14:
+        mfi_period = self.periods['rsi_period']  # Gunakan RSI period untuk MFI
+        
+        if len(df) >= mfi_period:
             if TALIB_AVAILABLE:
                 df['mfi'] = talib.MFI(
                     df[self.high_col].values, 
                     df[self.low_col].values, 
                     df[self.close_col].values, 
                     df[self.volume_col].values, 
-                    timeperiod=14
+                    timeperiod=mfi_period
                 )
             else:
                 # Calculate MFI manually
@@ -455,8 +541,8 @@ class TechnicalIndicators:
                 positive_flow = money_flow.where(typical_price > typical_price.shift(1), 0)
                 negative_flow = money_flow.where(typical_price < typical_price.shift(1), 0)
                 
-                positive_flow_sum = positive_flow.rolling(window=14).sum()
-                negative_flow_sum = negative_flow.rolling(window=14).sum()
+                positive_flow_sum = positive_flow.rolling(window=mfi_period).sum()
+                negative_flow_sum = negative_flow.rolling(window=mfi_period).sum()
                 
                 money_ratio = positive_flow_sum / negative_flow_sum.replace(0, np.finfo(float).eps)
                 df['mfi'] = 100 - (100 / (1 + money_ratio))
@@ -515,10 +601,11 @@ class TechnicalIndicators:
             )
         
         # Moving Average Signals
-        if 'sma_20' in df.columns and 'sma_50' in df.columns:
+        ma_short = self.periods['ma_short']
+        if f'sma_{ma_short}' in df.columns:
             df['ma_signal'] = np.where(
-                df[self.close_col] > df['sma_20'], 'buy',
-                np.where(df[self.close_col] < df['sma_20'], 'sell', 'hold')
+                df[self.close_col] > df[f'sma_{ma_short}'], 'buy',
+                np.where(df[self.close_col] < df[f'sma_{ma_short}'], 'sell', 'hold')
             )
         
         # Stochastic Signals
@@ -599,7 +686,7 @@ class TechnicalIndicators:
                     alerts.append({
                         'date': date,
                         'type': 'rsi_oversold',
-                        'message': f"RSI is oversold at {row['rsi']:.2f}",
+                        'message': f"RSI oversold pada level {row['rsi']:.2f} (periode {self.periods['rsi_period']})",
                         'signal': 'buy',
                         'strength': min(1.0, (30 - row['rsi']) / 15)
                     })
@@ -607,7 +694,7 @@ class TechnicalIndicators:
                     alerts.append({
                         'date': date,
                         'type': 'rsi_overbought',
-                        'message': f"RSI is overbought at {row['rsi']:.2f}",
+                        'message': f"RSI overbought pada level {row['rsi']:.2f} (periode {self.periods['rsi_period']})",
                         'signal': 'sell',
                         'strength': min(1.0, (row['rsi'] - 70) / 15)
                     })
@@ -617,7 +704,7 @@ class TechnicalIndicators:
                 alerts.append({
                     'date': date,
                     'type': 'macd_cross_up',
-                    'message': "MACD crossed above signal line (bullish)",
+                    'message': f"MACD memotong ke atas signal line (bullish) - ({self.periods['macd_fast']}/{self.periods['macd_slow']}/{self.periods['macd_signal']})",
                     'signal': 'buy',
                     'strength': 0.8
                 })
@@ -625,7 +712,7 @@ class TechnicalIndicators:
                 alerts.append({
                     'date': date,
                     'type': 'macd_cross_down',
-                    'message': "MACD crossed below signal line (bearish)",
+                    'message': f"MACD memotong ke bawah signal line (bearish) - ({self.periods['macd_fast']}/{self.periods['macd_slow']}/{self.periods['macd_signal']})",
                     'signal': 'sell',
                     'strength': 0.8
                 })
@@ -636,7 +723,7 @@ class TechnicalIndicators:
                     alerts.append({
                         'date': date,
                         'type': 'bb_upper_breach',
-                        'message': "Price broke above upper Bollinger Band (potential reversal or continuation)",
+                        'message': f"Harga menembus di atas upper Bollinger Band (potensi pembalikan/lanjutan) - periode {self.periods['bb_period']}",
                         'signal': 'sell',
                         'strength': 0.7
                     })
@@ -644,7 +731,7 @@ class TechnicalIndicators:
                     alerts.append({
                         'date': date,
                         'type': 'bb_lower_breach',
-                        'message': "Price broke below lower Bollinger Band (potential reversal or continuation)",
+                        'message': f"Harga menembus di bawah lower Bollinger Band (potensi pembalikan/lanjutan) - periode {self.periods['bb_period']}",
                         'signal': 'buy',
                         'strength': 0.7
                     })
@@ -654,7 +741,7 @@ class TechnicalIndicators:
                 alerts.append({
                     'date': date,
                     'type': 'golden_cross',
-                    'message': "Golden Cross: 50-day MA crossed above 200-day MA (bullish)",
+                    'message': f"Golden Cross: MA {self.periods['ma_medium']} hari memotong di atas MA {self.periods['ma_long']} hari (bullish)",
                     'signal': 'buy',
                     'strength': 0.9
                 })
@@ -662,32 +749,42 @@ class TechnicalIndicators:
                 alerts.append({
                     'date': date,
                     'type': 'death_cross',
-                    'message': "Death Cross: 50-day MA crossed below 200-day MA (bearish)",
+                    'message': f"Death Cross: MA {self.periods['ma_medium']} hari memotong di bawah MA {self.periods['ma_long']} hari (bearish)",
                     'signal': 'sell',
                     'strength': 0.9
                 })
             
             # Price crossing MA
-            if 'sma_20' in row:
-                price_cross_up = (row[self.close_col] > row['sma_20']) and (df.iloc[df.index.get_loc(idx)-1][self.close_col] <= df.iloc[df.index.get_loc(idx)-1]['sma_20'])
-                price_cross_down = (row[self.close_col] < row['sma_20']) and (df.iloc[df.index.get_loc(idx)-1][self.close_col] >= df.iloc[df.index.get_loc(idx)-1]['sma_20'])
-                
-                if price_cross_up:
-                    alerts.append({
-                        'date': date,
-                        'type': 'price_cross_ma_up',
-                        'message': "Price crossed above 20-day moving average (bullish)",
-                        'signal': 'buy',
-                        'strength': 0.7
-                    })
-                elif price_cross_down:
-                    alerts.append({
-                        'date': date,
-                        'type': 'price_cross_ma_down',
-                        'message': "Price crossed below 20-day moving average (bearish)",
-                        'signal': 'sell',
-                        'strength': 0.7
-                    })
+            ma_short = self.periods['ma_short']
+            sma_key = f'sma_{ma_short}'
+            if sma_key in row:
+                try:
+                    prev_idx = df.index.get_loc(idx) - 1
+                    if prev_idx >= 0:  # Ensure we're not at the first row
+                        prev_close = df.iloc[prev_idx][self.close_col]
+                        prev_ma = df.iloc[prev_idx][sma_key]
+                        
+                        price_cross_up = (row[self.close_col] > row[sma_key]) and (prev_close <= prev_ma)
+                        price_cross_down = (row[self.close_col] < row[sma_key]) and (prev_close >= prev_ma)
+                        
+                        if price_cross_up:
+                            alerts.append({
+                                'date': date,
+                                'type': 'price_cross_ma_up',
+                                'message': f"Harga memotong ke atas MA {ma_short} hari (bullish)",
+                                'signal': 'buy',
+                                'strength': 0.7
+                            })
+                        elif price_cross_down:
+                            alerts.append({
+                                'date': date,
+                                'type': 'price_cross_ma_down',
+                                'message': f"Harga memotong ke bawah MA {ma_short} hari (bearish)",
+                                'signal': 'sell',
+                                'strength': 0.7
+                            })
+                except:
+                    pass  # Skip if we can't determine the index
             
             # Strong trend (ADX > 25)
             if 'adx' in row and 'plus_di' in row and 'minus_di' in row and row['adx'] > 25:
@@ -695,7 +792,7 @@ class TechnicalIndicators:
                     alerts.append({
                         'date': date,
                         'type': 'strong_uptrend',
-                        'message': f"Strong uptrend detected (ADX: {row['adx']:.2f})",
+                        'message': f"Tren naik kuat terdeteksi (ADX: {row['adx']:.2f})",
                         'signal': 'buy',
                         'strength': min(1.0, row['adx'] / 50)
                     })
@@ -703,7 +800,7 @@ class TechnicalIndicators:
                     alerts.append({
                         'date': date,
                         'type': 'strong_downtrend',
-                        'message': f"Strong downtrend detected (ADX: {row['adx']:.2f})",
+                        'message': f"Tren turun kuat terdeteksi (ADX: {row['adx']:.2f})",
                         'signal': 'sell',
                         'strength': min(1.0, row['adx'] / 50)
                     })
@@ -732,17 +829,62 @@ if __name__ == "__main__":
         'volume': volume
     }, index=dates)
     
-    # Create technical indicators
-    ti = TechnicalIndicators(df)
-    df_with_indicators = ti.add_indicators()
+    # Test dengan periode standar
+    print("\n=== Indikator dengan periode standar ===")
+    ti_standard = TechnicalIndicators(df)
+    df_standard = ti_standard.add_indicators()
+    print(f"Indikator standar berhasil ditambahkan: {len(df_standard.columns)} kolom")
+    
+    # Test dengan periode jangka pendek
+    print("\n=== Indikator dengan periode jangka pendek ===")
+    short_term_periods = {
+        'rsi_period': 7,
+        'macd_fast': 8,
+        'macd_slow': 17,
+        'macd_signal': 9,
+        'bb_period': 10,
+        'stoch_k': 7,
+        'stoch_d': 3,
+        'ma_short': 10,
+        'ma_medium': 30,
+        'ma_long': 60
+    }
+    ti_short = TechnicalIndicators(df, short_term_periods)
+    df_short = ti_short.add_indicators()
+    print(f"Indikator jangka pendek berhasil ditambahkan: {len(df_short.columns)} kolom")
+    
+    # Test dengan periode jangka panjang
+    print("\n=== Indikator dengan periode jangka panjang ===")
+    long_term_periods = {
+        'rsi_period': 21,
+        'macd_fast': 19,
+        'macd_slow': 39,
+        'macd_signal': 9,
+        'bb_period': 30,
+        'stoch_k': 21,
+        'stoch_d': 7,
+        'ma_short': 50,
+        'ma_medium': 100,
+        'ma_long': 200
+    }
+    ti_long = TechnicalIndicators(df, long_term_periods)
+    df_long = ti_long.add_indicators()
+    print(f"Indikator jangka panjang berhasil ditambahkan: {len(df_long.columns)} kolom")
     
     # Show some indicators
-    print("\nTechnical Indicators Sample:")
-    print(df_with_indicators[['close', 'rsi', 'macd', 'bb_upper', 'bb_lower', 'overall_signal']].tail())
+    print("\nContoh Indikator:")
+    for period_type, df_indicators in [("Standard", df_standard), ("Short-term", df_short), ("Long-term", df_long)]:
+        print(f"\n{period_type}:")
+        last_row = df_indicators.iloc[-1]
+        print(f"RSI: {last_row.get('rsi', 'N/A'):.2f}")
+        print(f"MACD: {last_row.get('macd', 'N/A'):.2f}")
+        print(f"MACD Signal: {last_row.get('macd_signal', 'N/A') if isinstance(last_row.get('macd_signal'), str) else float(last_row.get('macd_signal', 0)):.2f}")
+        print(f"Bollinger %B: {last_row.get('bb_pct_b', 'N/A'):.2f}")
+        print(f"Overall Signal: {last_row.get('overall_signal', 'N/A')}")
     
     # Generate alerts
-    alerts = ti.generate_alerts(lookback_period=5)
+    alerts = ti_standard.generate_alerts(lookback_period=5)
     
-    print("\nRecent Alerts:")
+    print("\nAlert Terdeteksi:")
     for alert in alerts:
-        print(f"{alert['date']}: {alert['message']} ({alert['signal'].upper()} - Strength: {alert['strength']:.2f})")
+        print(f"{alert['date']}: {alert['message']} ({alert['signal'].upper()} - Kekuatan: {alert['strength']:.2f})")
