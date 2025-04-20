@@ -865,9 +865,10 @@ class NCFRecommender:
         return prediction
     
     def recommend_for_user(self, user_id: str, n: int = 10, 
-                         exclude_known: bool = True) -> List[Tuple[str, float]]:
+                     exclude_known: bool = True) -> List[Tuple[str, float]]:
         """
-        Generate recommendations for a user
+        Generate recommendations for a user with score normalization
+        and diversity promotion
         
         Args:
             user_id: User ID
@@ -892,6 +893,16 @@ class NCFRecommender:
             if user_id in self.user_item_matrix.index:
                 user_interactions = self.user_item_matrix.loc[user_id]
                 known_items = set(user_interactions[user_interactions > 0].index)
+        
+        # Get category information for diversity tracking
+        category_counts = {}
+        try:
+            if self.projects_df is not None and 'primary_category' in self.projects_df.columns:
+                # Map item_id to category for easier lookup
+                item_to_category = dict(zip(self.projects_df['id'], self.projects_df['primary_category']))
+        except Exception as e:
+            logger.warning(f"Error getting category information: {str(e)}")
+            item_to_category = {}
         
         # Get potential items to recommend
         candidate_items = [item for item in self.items if item not in known_items]
@@ -928,8 +939,78 @@ class NCFRecommender:
         # Sort by prediction score
         predictions.sort(key=lambda x: x[1], reverse=True)
         
-        # Return top-n
-        return predictions[:n]
+        # If we have less recommendations than requested, return what we have
+        if len(predictions) <= n:
+            return predictions
+        
+        # NORMALISASI & DIVERSITY ENHANCEMENT
+        # Taking more candidates than needed to ensure variety
+        top_candidates = predictions[:min(len(predictions), n*3)]
+        
+        # 1. Score Normalization - distribute scores more evenly
+        min_score = min([score for _, score in top_candidates])
+        max_score = max([score for _, score in top_candidates])
+        score_range = max(0.001, max_score - min_score)  # Avoid division by zero
+        
+        # Apply normalization
+        normalized_predictions = []
+        for item_id, score in top_candidates:
+            # Standard min-max normalization
+            norm_score = (score - min_score) / score_range
+            normalized_predictions.append((item_id, norm_score))
+        
+        # 2. Diversity Enhancement
+        if item_to_category:
+            # First select top few items normally
+            top_k = n // 3  # Select 1/3 of items by raw score
+            final_predictions = normalized_predictions[:top_k]
+            
+            # Track categories already included
+            selected_categories = {
+                item_to_category.get(item_id, 'unknown')
+                for item_id, _ in final_predictions
+            }
+            
+            # Select remaining items with diversity boost
+            remaining_candidates = normalized_predictions[top_k:]
+            
+            # Order by score but boost items from new categories
+            while len(final_predictions) < n and remaining_candidates:
+                next_item = None
+                best_score = -1
+                
+                for idx, (item_id, score) in enumerate(remaining_candidates):
+                    item_category = item_to_category.get(item_id, 'unknown')
+                    
+                    # Apply diversity boost for new categories
+                    diversity_boost = 0.1 if item_category not in selected_categories else 0
+                    adjusted_score = score + diversity_boost
+                    
+                    if adjusted_score > best_score:
+                        best_score = adjusted_score
+                        next_item = (idx, item_id, score, item_category)
+                
+                if next_item:
+                    idx, item_id, original_score, category = next_item
+                    final_predictions.append((item_id, original_score))
+                    selected_categories.add(category)
+                    remaining_candidates.pop(idx)
+                else:
+                    break
+            
+            # Add any remaining needed items by score
+            if len(final_predictions) < n:
+                for item_id, score in remaining_candidates:
+                    final_predictions.append((item_id, score))
+                    if len(final_predictions) >= n:
+                        break
+            
+            # Re-sort the final list by score
+            final_predictions.sort(key=lambda x: x[1], reverse=True)
+            return final_predictions[:n]
+        else:
+            # If no category information, just return top normalized predictions
+            return normalized_predictions[:n]
     
     def recommend_projects(self, user_id: str, n: int = 10) -> List[Dict[str, Any]]:
         """

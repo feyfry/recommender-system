@@ -340,9 +340,10 @@ class FeatureEnhancedCF:
         return True
     
     def recommend_for_user(self, user_id: str, n: int = 10, 
-                     exclude_known: bool = True) -> List[Tuple[str, float]]:
+                 exclude_known: bool = True) -> List[Tuple[str, float]]:
         """
         Generate recommendations for a user with improved debugging
+        and score normalization
         
         Args:
             user_id: User ID
@@ -400,13 +401,38 @@ class FeatureEnhancedCF:
         # Sort by score
         scores.sort(key=lambda x: x[1], reverse=True)
         
-        # Return top n with logging
+        # No scores generated
         if not scores:
             logger.warning(f"No recommendations generated for user {user_id}")
-        else:
-            logger.debug(f"Generated {len(scores)} candidates for user {user_id}")
+            return []
             
-        return scores[:n]
+        logger.debug(f"Generated {len(scores)} candidates for user {user_id}")
+        
+        # NORMALISASI: Map the raw scores to a 0-1 range
+        top_scores = scores[:n*3]  # Take 3x needed to ensure sufficient variety
+        
+        # Find min and max scores for normalization
+        min_score = min([s for _, s in top_scores])
+        max_score = max([s for _, s in top_scores])
+        score_range = max(0.001, max_score - min_score)  # Avoid division by zero
+        
+        # Apply min-max normalization and sigmoid transformation
+        normalized_scores = []
+        for item_id, raw_score in top_scores:
+            # Min-max normalization to 0-1 scale
+            norm_score = (raw_score - min_score) / score_range
+            
+            # Apply sigmoid-like transformation to enhance differences between scores
+            # This creates better separation between good and great recommendations
+            sigmoid_score = 1.0 / (1.0 + np.exp(-5 * (norm_score - 0.5)))
+            
+            normalized_scores.append((item_id, sigmoid_score))
+        
+        # Re-sort with normalized scores
+        normalized_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        # Return top n with normalized scores
+        return normalized_scores[:n]
     
     def _get_cold_start_recommendations(self, n: int = 10) -> List[Tuple[str, float]]:
         """

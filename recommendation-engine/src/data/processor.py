@@ -8,7 +8,7 @@ import json
 import logging
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional, Any, Union
 import sys
 
@@ -1104,7 +1104,7 @@ class DataProcessor:
     
     def _create_synthetic_interactions(self, projects_df: pd.DataFrame, n_users: int = 500) -> pd.DataFrame:
         """
-        Buat interaksi user sintetis berdasarkan persona
+        Buat interaksi user sintetis berdasarkan persona dengan peningkatan realisme
         
         Args:
             projects_df: DataFrame proyek
@@ -1120,41 +1120,94 @@ class DataProcessor:
         
         interactions = []
         personas = list(USER_PERSONAS.keys())
+        persona_weights = [0.25, 0.20, 0.30, 0.15, 0.10]  # Distribusi persona lebih realistis
         
-        # Generate users dengan pola konsisten
+        # Ekstrak semua kategori unik untuk eksplorasi pengguna
+        all_categories = projects_df['primary_category'].dropna().unique().tolist()
+        
+        # Generate users dengan pola yang lebih realistis
         for user_id in range(1, n_users + 1):
-            # Assign persona ke user
-            user_persona = personas[user_id % len(personas)]
+            # Assign persona ke user dengan distribusi probabilistik (lebih realistis)
+            user_persona = rng.choice(personas, p=persona_weights)
             persona_data = USER_PERSONAS[user_persona]
             
-            # Tentukan jumlah interaksi berdasarkan level aktivitas
-            activity_level = rng.choice(['low', 'medium', 'high'], p=[0.2, 0.5, 0.3])
+            # Buat profil interaksi pengguna yang lebih realistis
+            activity_level_probs = [0.3, 0.5, 0.2]  # [low, medium, high]
             
+            # Add slight randomization to activity probabilities
+            activity_level_probs = np.array(activity_level_probs) + rng.normal(0, 0.05, 3)
+            activity_level_probs = np.clip(activity_level_probs, 0.1, 0.7)  # Batas untuk menghindari probabilitas negatif
+            activity_level_probs = activity_level_probs / activity_level_probs.sum()  # Normalisasi
+            
+            activity_level = rng.choice(['low', 'medium', 'high'], p=activity_level_probs)
+            
+            # Variasi rentang interaksi dengan distribusi lebih natural
             if activity_level == 'low':
-                n_interactions = rng.integers(3, 10)
+                n_interactions = int(max(1, rng.normal(7, 2)))  # Mean=7, SD=2, minimum 1
             elif activity_level == 'medium':
-                n_interactions = rng.integers(10, 25)
+                n_interactions = int(max(5, rng.normal(18, 5)))  # Mean=18, SD=5, minimum 5
             else:  # high
-                n_interactions = rng.integers(25, 50)
+                n_interactions = int(max(15, rng.normal(35, 10)))  # Mean=35, SD=10, minimum 15
             
             # Filter proyek berdasarkan kategori preferensi
             preferred_categories = persona_data['categories']
-            category_weights = persona_data['weights']
+            
+            # Modifikasi bobot kategori dengan noise
+            category_weights = np.array(persona_data['weights'])
+            noise = rng.normal(0, 0.05, len(category_weights))  # Random noise
+            category_weights = category_weights + noise
+            category_weights = np.clip(category_weights, 0.05, 0.8)  # Batasi range
+            category_weights = category_weights / category_weights.sum()  # Normalisasi
+            
+            # Simulasi perubahan preferensi user seiring waktu (evolving preferences)
+            preference_drift = rng.uniform(0.01, 0.1) if activity_level == 'high' else 0
+                
+            # Eksplorasi - set initial probability
+            exploration_probability = rng.uniform(0.1, 0.3)  # 10-30% peluang eksplorasi
             
             # Untuk setiap interaksi, pilih proyek berdasarkan preferensi
-            for _ in range(n_interactions):
-                # Pilih kategori berdasarkan preferensi
-                selected_category = rng.choice(preferred_categories, p=category_weights)
+            for interaction_idx in range(n_interactions):
+                # Simulasi evolving preferences - sedikit ubah bobot preferensi seiring waktu
+                if preference_drift > 0 and interaction_idx > 0 and interaction_idx % 5 == 0:
+                    drift_noise = rng.normal(0, preference_drift, len(category_weights))
+                    category_weights = category_weights + drift_noise
+                    category_weights = np.clip(category_weights, 0.05, 0.8)
+                    category_weights = category_weights / category_weights.sum()
+                
+                # Occasional exploration - pengguna kadang mencoba kategori baru
+                if rng.random() < exploration_probability:
+                    # Pilih kategori random (eksplorasi)
+                    excluded_categories = set(preferred_categories)
+                    exploration_categories = [c for c in all_categories if c not in excluded_categories]
+                    
+                    if exploration_categories:
+                        selected_category = rng.choice(exploration_categories)
+                        # Kurangi peluang eksplorasi setelah digunakan (habituation)
+                        exploration_probability *= 0.9
+                    else:
+                        # Fallback jika tidak ada kategori lain
+                        selected_category = rng.choice(preferred_categories, p=category_weights)
+                else:
+                    # Pilih kategori berdasarkan preferensi (exploitation)
+                    selected_category = rng.choice(preferred_categories, p=category_weights)
                 
                 # Filter proyek berdasarkan kategori
                 category_projects = projects_df[projects_df['primary_category'] == selected_category]
                 
-                if category_projects.empty:
-                    # Fallback ke semua proyek jika tidak ada match
-                    category_projects = projects_df
+                if len(category_projects) < 5:  # Jika terlalu sedikit proyek ditemukan
+                    # Perluas ke kategori serupa atau semua proyek jika perlu
+                    if category_projects.empty:
+                        category_projects = projects_df
+                    else:
+                        # Menambahkan beberapa proyek random untuk variasi
+                        additional_projects = projects_df.sample(min(20, len(projects_df)))
+                        category_projects = pd.concat([category_projects, additional_projects])
+                        category_projects = category_projects.drop_duplicates(subset=['id'])
                 
                 # Pilih proyek dengan weight berdasarkan popularitas dan tren
-                weights = category_projects['popularity_score'] * category_projects['trend_score']
+                # Menambahkan sedikit noise untuk menghindari rich-get-richer secara berlebihan
+                weights = category_projects['popularity_score'] * (category_projects['trend_score'] + rng.uniform(0, 10, len(category_projects)))
+                weights = weights + 1  # Untuk memastikan tidak ada yang 0
                 weights = weights / weights.sum()
                 
                 # Pilih proyek dengan probability berdasarkan weights
@@ -1165,34 +1218,49 @@ class DataProcessor:
                     # Fallback jika ada masalah dengan weights
                     selected_project = category_projects.sample(1).iloc[0]
                 
-                # Tentukan tipe interaksi berdasarkan persona
+                # Tentukan tipe interaksi - tambahkan noise untuk variasi
+                # Buat probabilitas interaksi dasar
                 if user_persona == 'defi_enthusiast':
-                    interaction_probs = [0.3, 0.3, 0.3, 0.1]  # view, favorite, portfolio_add, research
+                    base_probs = [0.3, 0.3, 0.3, 0.1]  # view, favorite, portfolio_add, research
                 elif user_persona == 'nft_collector':
-                    interaction_probs = [0.3, 0.4, 0.2, 0.1]
+                    base_probs = [0.3, 0.4, 0.2, 0.1]
                 elif user_persona == 'trader':
-                    interaction_probs = [0.2, 0.2, 0.4, 0.2]
+                    base_probs = [0.2, 0.2, 0.4, 0.2]
                 elif user_persona == 'conservative_investor':
-                    interaction_probs = [0.4, 0.2, 0.3, 0.1]
+                    base_probs = [0.4, 0.2, 0.3, 0.1]
                 elif user_persona == 'risk_taker':
-                    interaction_probs = [0.3, 0.3, 0.3, 0.1]
+                    base_probs = [0.3, 0.3, 0.3, 0.1]
                 else:
-                    interaction_probs = [0.4, 0.3, 0.2, 0.1]
+                    base_probs = [0.4, 0.3, 0.2, 0.1]
+                
+                # Tambahkan noise ke probabilitas interaksi
+                interaction_probs = np.array(base_probs) + rng.normal(0, 0.05, 4)
+                interaction_probs = np.clip(interaction_probs, 0.05, 0.7)  # Batas untuk menghindari probabilitas tidak valid
+                interaction_probs = interaction_probs / interaction_probs.sum()  # Normalisasi
                 
                 interaction_type = rng.choice(
                     ['view', 'favorite', 'portfolio_add', 'research'],
                     p=interaction_probs
                 )
                 
-                # Set interaction weight based on interaction type
+                # Tentukan bobot interaksi dengan distribusi yang lebih realistis
                 if interaction_type == 'view':
-                    weight = rng.integers(1, 3)
+                    # View biasanya paling ringan dengan sedikit variasi
+                    weight = max(1, min(5, int(rng.normal(1.5, 0.5))))
                 elif interaction_type == 'favorite':
-                    weight = rng.integers(3, 5)
+                    # Favorite memiliki bobot medium
+                    weight = max(1, min(5, int(rng.normal(3.0, 0.7))))
                 elif interaction_type == 'portfolio_add':
-                    weight = rng.integers(4, 6)
+                    # Portfolio add memiliki bobot tinggi dengan variasi
+                    weight = max(1, min(6, int(rng.normal(4.0, 0.8))))
                 else:  # research
-                    weight = rng.integers(2, 4)
+                    # Research memiliki bobot medium-high
+                    weight = max(1, min(5, int(rng.normal(2.5, 0.6))))
+                
+                # Timestamp realistis - distribusi acak dalam 30 hari terakhir
+                days_ago = int(rng.integers(0, 30))
+                random_seconds = int(rng.integers(0, 86400))  # Detik dalam sehari
+                interaction_time = datetime.now() - timedelta(days=days_ago, seconds=random_seconds)
                 
                 # Tambahkan ke interaksi
                 interactions.append({
@@ -1200,11 +1268,14 @@ class DataProcessor:
                     'project_id': selected_project['id'],
                     'interaction_type': interaction_type,
                     'weight': weight,
-                    'timestamp': datetime.now().isoformat()
+                    'timestamp': interaction_time.isoformat()
                 })
         
         # Buat DataFrame
         interactions_df = pd.DataFrame(interactions)
+        
+        # Sortir berdasarkan timestamp untuk simulasi aliran interaksi yang natural
+        interactions_df = interactions_df.sort_values('timestamp')
         
         return interactions_df
     

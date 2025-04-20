@@ -277,9 +277,10 @@ class HybridRecommender:
         return fecf_trained or ncf_trained
     
     def recommend_for_user(self, user_id: str, n: int = 10, 
-                         exclude_known: bool = True) -> List[Tuple[str, float]]:
+                     exclude_known: bool = True) -> List[Tuple[str, float]]:
         """
-        Generate recommendations for a user using hybrid approach
+        Generate recommendations for a user using hybrid approach with adaptive weighting
+        and score normalization
         
         Args:
             user_id: User ID
@@ -291,16 +292,46 @@ class HybridRecommender:
         """
         # Check if user exists in the data
         known_user = (self.user_item_matrix is not None and 
-                     user_id in self.user_item_matrix.index)
+                    user_id in self.user_item_matrix.index)
         
         # Handle cold-start case
         if not known_user:
             logger.info(f"User {user_id} is a cold-start user")
             return self._get_cold_start_recommendations(user_id, n)
         
+        # Count user interactions to determine user maturity
+        user_interaction_count = 0
+        if self.user_item_matrix is not None and user_id in self.user_item_matrix.index:
+            user_interactions = self.user_item_matrix.loc[user_id]
+            user_interaction_count = (user_interactions > 0).sum()
+        
+        # Adaptive weighting based on user interaction count
+        # New users (few interactions) rely more on content-based (FECF)
+        # Mature users (many interactions) rely more on collaborative filtering (NCF)
+        interaction_threshold_low = self.params.get('interaction_threshold_low', 5)
+        interaction_threshold_high = self.params.get('interaction_threshold_high', 20)
+        
+        if user_interaction_count <= interaction_threshold_low:
+            # New user - rely more on FECF
+            fecf_weight = 0.8
+            ncf_weight = 0.2
+            logger.debug(f"User {user_id} has few interactions ({user_interaction_count}), using FECF-heavy weights")
+        elif user_interaction_count >= interaction_threshold_high:
+            # Mature user - rely more on NCF
+            fecf_weight = 0.3
+            ncf_weight = 0.7
+            logger.debug(f"User {user_id} is a mature user ({user_interaction_count} interactions), using NCF-heavy weights")
+        else:
+            # In-between user - gradual transition
+            # Linear interpolation between low and high thresholds
+            maturity_factor = (user_interaction_count - interaction_threshold_low) / (interaction_threshold_high - interaction_threshold_low)
+            fecf_weight = 0.8 - (0.5 * maturity_factor)  # 0.8 -> 0.3
+            ncf_weight = 0.2 + (0.5 * maturity_factor)   # 0.2 -> 0.7
+            logger.debug(f"User {user_id} has {user_interaction_count} interactions, using interpolated weights: FECF={fecf_weight:.2f}, NCF={ncf_weight:.2f}")
+        
         # Get recommendations from component models
-        fecf_recs = self.fecf_model.recommend_for_user(user_id, n=n, exclude_known=exclude_known)
-        ncf_recs = self.ncf_model.recommend_for_user(user_id, n=n, exclude_known=exclude_known)
+        fecf_recs = self.fecf_model.recommend_for_user(user_id, n=max(n*2, 50), exclude_known=exclude_known)
+        ncf_recs = self.ncf_model.recommend_for_user(user_id, n=max(n*2, 50), exclude_known=exclude_known)
         
         # Convert to dictionaries for easier handling
         fecf_scores = {item_id: score for item_id, score in fecf_recs}
@@ -309,18 +340,41 @@ class HybridRecommender:
         # Get all unique items
         all_items = set(fecf_scores.keys()) | set(ncf_scores.keys())
         
-        # Combine scores with weights from config
-        fecf_weight = self.params.get('fecf_weight', 0.5)
-        ncf_weight = self.params.get('ncf_weight', 0.5)
+        # Find min and max scores for each model for normalization
+        fecf_min = min(fecf_scores.values()) if fecf_scores else 0
+        fecf_max = max(fecf_scores.values()) if fecf_scores else 1
+        fecf_range = max(0.001, fecf_max - fecf_min)  # Avoid division by zero
         
-        # Calculate weighted scores
+        ncf_min = min(ncf_scores.values()) if ncf_scores else 0
+        ncf_max = max(ncf_scores.values()) if ncf_scores else 1
+        ncf_range = max(0.001, ncf_max - ncf_min)  # Avoid division by zero
+        
+        # Calculate weighted scores with normalization
         weighted_scores = []
         for item_id in all_items:
-            fecf_score = fecf_scores.get(item_id, 0)
-            ncf_score = ncf_scores.get(item_id, 0)
+            # Get scores, defaulting to min score if missing
+            fecf_raw_score = fecf_scores.get(item_id, fecf_min)
+            ncf_raw_score = ncf_scores.get(item_id, ncf_min)
             
-            # Apply weights
-            weighted_score = (fecf_score * fecf_weight) + (ncf_score * ncf_weight)
+            # Normalize scores to 0-1 range
+            fecf_normalized = (fecf_raw_score - fecf_min) / fecf_range
+            ncf_normalized = (ncf_raw_score - ncf_min) / ncf_range
+            
+            # Apply weighted combination of normalized scores
+            weighted_score = (fecf_normalized * fecf_weight) + (ncf_normalized * ncf_weight)
+            
+            # Diversity boost - slightly boost items from the model with lower weight
+            # This encourages diversity in recommendations
+            diversity_factor = self.params.get('diversity_factor', 0.1)
+            if fecf_weight < ncf_weight and fecf_normalized > 0.8:
+                # Boost high-scoring FECF items when NCF dominates
+                diversity_boost = diversity_factor * (1.0 - ncf_weight) * fecf_normalized
+                weighted_score += diversity_boost
+            elif ncf_weight < fecf_weight and ncf_normalized > 0.8:
+                # Boost high-scoring NCF items when FECF dominates
+                diversity_boost = diversity_factor * (1.0 - fecf_weight) * ncf_normalized
+                weighted_score += diversity_boost
+            
             weighted_scores.append((item_id, weighted_score))
         
         # Sort by weighted score
@@ -349,16 +403,34 @@ class HybridRecommender:
     
     def recommend_projects(self, user_id: str, n: int = 10) -> List[Dict[str, Any]]:
         """
-        Generate project recommendations with full details
+        Generate project recommendations with full details and model metadata
         
         Args:
             user_id: User ID
             n: Number of recommendations
             
         Returns:
-            list: List of project dictionaries with recommendation scores
+            list: List of project dictionaries with recommendation scores and model sources
         """
-        # Get recommendations as (project_id, score) tuples
+        # Check if this is a cold-start user
+        is_cold_start = False
+        if self.user_item_matrix is not None:
+            is_cold_start = user_id not in self.user_item_matrix.index
+            
+        # Get user interaction count for context
+        user_interaction_count = 0
+        if not is_cold_start and self.user_item_matrix is not None:
+            user_interactions = self.user_item_matrix.loc[user_id]
+            user_interaction_count = (user_interactions > 0).sum()
+        
+        # Get FECF and NCF recommendations separately for analysis
+        fecf_recs = self.fecf_model.recommend_for_user(user_id, n=n*2)
+        fecf_dict = {item_id: score for item_id, score in fecf_recs}
+        
+        ncf_recs = self.ncf_model.recommend_for_user(user_id, n=n*2)
+        ncf_dict = {item_id: score for item_id, score in ncf_recs}
+        
+        # Get recommendations as (project_id, score) tuples from the hybrid model
         recommendations = self.recommend_for_user(user_id, n)
         
         # Convert to detailed project dictionaries
@@ -375,8 +447,47 @@ class HybridRecommender:
                 # Add recommendation score
                 project_dict['recommendation_score'] = float(score)
                 
+                # Add model source information
+                fecf_score = fecf_dict.get(project_id, 0)
+                ncf_score = ncf_dict.get(project_id, 0)
+                
+                # Determine primary influence based on component scores
+                fecf_influence = 0
+                ncf_influence = 0
+                
+                if fecf_score > 0 or ncf_score > 0:
+                    total = fecf_score + ncf_score
+                    if total > 0:
+                        fecf_influence = fecf_score / total
+                        ncf_influence = ncf_score / total
+                
+                # Add model contribution information
+                project_dict['model_metadata'] = {
+                    'fecf_score': float(fecf_score),
+                    'ncf_score': float(ncf_score),
+                    'fecf_influence': float(fecf_influence),
+                    'ncf_influence': float(ncf_influence),
+                    'primary_source': 'fecf' if fecf_influence >= ncf_influence else 'ncf'
+                }
+                
                 # Add to results
                 detailed_recommendations.append(project_dict)
+        
+        # Add overall recommendation metadata
+        recommendation_metadata = {
+            'user_id': user_id,
+            'is_cold_start': is_cold_start,
+            'interaction_count': user_interaction_count,
+            'model_weights': {
+                'fecf': self.params.get('fecf_weight', 0.5),
+                'ncf': self.params.get('ncf_weight', 0.5)
+            },
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Add metadata to the first recommendation if any
+        if detailed_recommendations:
+            detailed_recommendations[0]['recommendation_metadata'] = recommendation_metadata
         
         return detailed_recommendations
     
