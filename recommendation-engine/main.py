@@ -1183,6 +1183,28 @@ Examples:
     
     # run command
     run_parser = subparsers.add_parser("run", help="Run complete pipeline")
+    run_parser.add_argument("--skip-collection", action="store_true", 
+                        help="Skip data collection step (use existing data)")
+    run_parser.add_argument("--skip-processing", action="store_true",
+                        help="Skip data processing step (use existing processed data)") 
+    run_parser.add_argument("--skip-training", action="store_true",
+                        help="Skip model training (use existing trained models)")
+    run_parser.add_argument("--skip-recommendations", action="store_true",
+                        help="Skip generating sample recommendations")
+    run_parser.add_argument("--skip-analysis", action="store_true",
+                        help="Skip result analysis step")
+    run_parser.add_argument("--data-limit", type=int, default=500,
+                        help="Number of coins to collect (default: 500)")
+    run_parser.add_argument("--detail-limit", type=int, default=100,
+                        help="Number of coins to get detailed data (default: 100)")
+    run_parser.add_argument("--users", type=int, default=500,
+                        help="Number of synthetic users to generate (default: 500)")
+    run_parser.add_argument("--models", choices=['all', 'fecf', 'ncf', 'hybrid'],
+                        default='all', help="Which models to train (default: all)")
+    run_parser.add_argument("--evaluate", action="store_true",
+                        help="Run evaluation after training")
+    run_parser.add_argument("--debug", action="store_true",
+                        help="Enable debug logging")
     
     # Parse arguments
     args = parser.parse_args()
