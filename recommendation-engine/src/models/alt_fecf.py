@@ -227,7 +227,7 @@ class FeatureEnhancedCF:
                 content_similarity = cosine_similarity(self._item_features)
                 
                 # Combine collaborative and content similarities
-                alpha = 0.7  # Weight for collaborative filtering
+                alpha = 0.6  # Weight for collaborative filtering
                 self.item_similarity_matrix = (
                     alpha * self.item_similarity_matrix + 
                     (1 - alpha) * content_similarity
@@ -436,7 +436,7 @@ class FeatureEnhancedCF:
     
     def _get_cold_start_recommendations(self, n: int = 10) -> List[Tuple[str, float]]:
         """
-        Get recommendations for cold-start users
+        Get recommendations for cold-start users with improved category diversity
         
         Args:
             n: Number of recommendations
@@ -444,12 +444,106 @@ class FeatureEnhancedCF:
         Returns:
             list: List of (project_id, score) tuples
         """
-        # Return popular items
+        # PERBAIKAN: Implementasi keragaman kategori
+        if 'primary_category' in self.projects_df.columns:
+            # Dapatkan jumlah masing-masing kategori
+            category_counts = self.projects_df['primary_category'].value_counts()
+            
+            # Identifikasi kategori utama (dengan minimal 3 proyek)
+            major_categories = category_counts[category_counts >= 3].index.tolist()
+            
+            # Tentukan berapa proyek per kategori untuk diambil
+            projects_per_category = max(1, n // len(major_categories))
+            
+            # Kumpulkan beberapa proyek teratas dari setiap kategori
+            diversified_recommendations = []
+            
+            for category in major_categories:
+                # Ambil proyek-proyek dari kategori ini
+                category_projects = self.projects_df[self.projects_df['primary_category'] == category]
+                
+                # Urutkan berdasarkan popularitas jika tersedia
+                if 'popularity_score' in category_projects.columns:
+                    category_projects = category_projects.sort_values('popularity_score', ascending=False)
+                
+                # Ambil beberapa proyek teratas dari kategori ini
+                top_category_projects = category_projects.head(projects_per_category)
+                
+                # Tambahkan ke daftar rekomendasi
+                for _, project in top_category_projects.iterrows():
+                    score = project.get('popularity_score', 0.8)  # Gunakan popularitas atau default 0.8
+                    diversified_recommendations.append((project['id'], float(score)))
+            
+            # Pastikan kita memiliki cukup rekomendasi
+            if len(diversified_recommendations) >= n:
+                # Urutkan berdasarkan skor
+                diversified_recommendations.sort(key=lambda x: x[1], reverse=True)
+                return diversified_recommendations[:n]
+        
+        # Fallback ke pendekatan popularitas sederhana
         if 'popularity_score' in self.projects_df.columns:
+            # PERBAIKAN: Hitung faktor diversifikasi kategori
+            if 'primary_category' in self.projects_df.columns:
+                # Hitung penalti untuk kategori yang terlalu umum
+                category_counts = self.projects_df['primary_category'].value_counts()
+                max_count = category_counts.max()
+                
+                # Buat salinan DataFrame untuk dimodifikasi
+                df_with_adjusted_scores = self.projects_df.copy()
+                
+                # Hitung skor yang disesuaikan berdasarkan kategori
+                def adjust_score_by_category(row):
+                    category = row['primary_category']
+                    count = category_counts.get(category, 0)
+                    popularity = row.get('popularity_score', 0)
+                    
+                    # Penalti kecil untuk kategori yang terlalu umum
+                    penalty = 0.1 * (count / max_count) if max_count > 0 else 0
+                    
+                    # Kurangi penalti dari skor popularitas
+                    return popularity * (1 - penalty)
+                
+                # Terapkan penyesuaian skor
+                df_with_adjusted_scores['adjusted_score'] = df_with_adjusted_scores.apply(
+                    adjust_score_by_category, axis=1
+                )
+                
+                # Urutkan berdasarkan skor yang disesuaikan
+                popular = df_with_adjusted_scores.sort_values('adjusted_score', ascending=False).head(n*2)
+                
+                # Hitung berapa maksimal per kategori
+                max_per_category = max(2, n // 3)
+                selected = []
+                category_counts_selected = {}
+                
+                # Pilih dengan mempertimbangkan batasan per kategori
+                for _, row in popular.iterrows():
+                    category = row['primary_category']
+                    current_count = category_counts_selected.get(category, 0)
+                    
+                    if current_count < max_per_category:
+                        selected.append((row['id'], float(row['adjusted_score'])))
+                        category_counts_selected[category] = current_count + 1
+                    
+                    if len(selected) >= n:
+                        break
+                
+                # Jika masih belum cukup, tambahkan proyek populer
+                if len(selected) < n:
+                    remaining = [
+                        (row['id'], float(row['popularity_score']))
+                        for _, row in popular.iterrows() 
+                        if row['id'] not in [item[0] for item in selected]
+                    ]
+                    selected.extend(remaining[:n - len(selected)])
+                
+                return selected
+            
+            # Fallback sederhana - ambil dari popularity_score
             popular = self.projects_df.sort_values('popularity_score', ascending=False).head(n)
-            return [(row['id'], row['popularity_score']) for _, row in popular.iterrows()]
+            return [(row['id'], float(row['popularity_score'])) for _, row in popular.iterrows()]
         else:
-            # Return random items
+            # Return random items dengan skor default
             projects = self.projects_df.sample(n=min(n, len(self.projects_df)))
             return [(row['id'], 1.0) for _, row in projects.iterrows()]
     
@@ -617,10 +711,11 @@ class FeatureEnhancedCF:
         return similar_projects
     
     def get_cold_start_recommendations(self, 
-                                 user_interests: Optional[List[str]] = None,
-                                 n: int = 10) -> List[Dict[str, Any]]:
+                               user_interests: Optional[List[str]] = None,
+                               n: int = 10) -> List[Dict[str, Any]]:
         """
-        Get recommendations for cold-start users based on interests
+        Get recommendations for cold-start users based on interests with improved
+        diversity and category balancing
         
         Args:
             user_interests: List of categories/interests
@@ -636,33 +731,86 @@ class FeatureEnhancedCF:
                 self.projects_df['primary_category'].isin(user_interests)
             ]
             
-            # If no projects match the interests, use all projects
-            if len(filtered_projects) < n:
-                filtered_projects = self.projects_df
+            # If not enough projects match the interests, include some popular projects 
+            # from other categories to ensure diversity
+            if len(filtered_projects) < n * 1.5:
+                # Get popular projects not in the filtered categories
+                other_popular = self.projects_df[
+                    ~self.projects_df['primary_category'].isin(user_interests)
+                ].sort_values('popularity_score', ascending=False).head(n)
+                
+                # Combine with filtered projects, prioritizing user interests
+                filtered_projects = pd.concat([filtered_projects, other_popular])
         else:
-            # Use popularity for cold-start
-            filtered_projects = self.projects_df
+            # PERBAIKAN: Pendekatan kategori yang lebih seimbang
+            category_counts = self.projects_df['primary_category'].value_counts()
+            major_categories = category_counts[category_counts >= 3].index.tolist()
+            
+            # Ambil beberapa proyek teratas dari setiap kategori utama
+            balanced_projects = []
+            projects_per_category = max(2, (n*2) // len(major_categories))
+            
+            for category in major_categories:
+                # Ambil proyek dari kategori ini
+                category_projects = self.projects_df[self.projects_df['primary_category'] == category]
+                
+                # Urutkan berdasarkan popularitas jika tersedia
+                if 'popularity_score' in category_projects.columns:
+                    category_projects = category_projects.sort_values('popularity_score', ascending=False)
+                
+                # Ambil proyek teratas dari kategori ini
+                top_category_projects = category_projects.head(projects_per_category)
+                balanced_projects.append(top_category_projects)
+            
+            # Gabungkan semua pilihan kategori
+            if balanced_projects:
+                filtered_projects = pd.concat(balanced_projects)
+            else:
+                # Gunakan semua proyek jika tidak ada kategori utama
+                filtered_projects = self.projects_df
         
-        # Sort by popularity and trend scores
+        # Sort by popularity and trend scores with a balance between them
         if 'popularity_score' in filtered_projects.columns and 'trend_score' in filtered_projects.columns:
-            # Combine popularity and trend for ranking
+            # PERBAIKAN: Perhitungan skor yang lebih seimbang
+            # Gunakan kombinasi skor popularitas dan tren dengan bobot yang lebih seimbang
             filtered_projects['combined_score'] = (
-                filtered_projects['popularity_score'] * 0.7 + 
-                filtered_projects['trend_score'] * 0.3
+                filtered_projects['popularity_score'] * 0.6 + 
+                filtered_projects['trend_score'] * 0.4
             )
             
-            # Sort by combined score
-            recommendations = filtered_projects.sort_values('combined_score', ascending=False).head(n)
+            # PERBAIKAN: Implementasi penalti kategori
+            # Hitung jumlah per kategori
+            category_counts = filtered_projects['primary_category'].value_counts()
+            
+            # Hitung faktor penalti kategori (semakin umum = penalti lebih tinggi)
+            max_count = category_counts.max()
+            category_penalty = {}
+            for category, count in category_counts.items():
+                # Penalti meningkat saat kategori menjadi lebih umum
+                # Skala 0 (kategori langka) hingga 0.15 (kategori paling umum)
+                if max_count > 1:  # Hindari pembagian dengan nol
+                    category_penalty[category] = 0.15 * (count / max_count)
+                else:
+                    category_penalty[category] = 0
+            
+            # Terapkan penalti kategori untuk meningkatkan keragaman
+            filtered_projects['diversity_adjusted_score'] = filtered_projects.apply(
+                lambda row: row['combined_score'] * (1 - category_penalty.get(row['primary_category'], 0)),
+                axis=1
+            )
+            
+            # Urutkan berdasarkan skor yang disesuaikan
+            recommendations = filtered_projects.sort_values('diversity_adjusted_score', ascending=False).head(n)
             
             # Create list of dictionaries with recommendation scores
             result = []
             for _, project in recommendations.iterrows():
                 project_dict = project.to_dict()
-                project_dict['recommendation_score'] = float(project_dict.get('combined_score', 0))
+                project_dict['recommendation_score'] = float(project_dict.get('diversity_adjusted_score', 0))
                 
                 # Ensure critical fields are available (even if null)
                 required_fields = ['id', 'name', 'symbol', 'image', 'price_usd', 'market_cap', 
-                                'volume_24h', 'price_change_24h', 'price_change_7d',
+                                'volume_24h', 'price_change_24h', 'price_change_7d', 
                                 'popularity_score', 'trend_score', 'primary_category', 'chain']
                 
                 for field in required_fields:
@@ -681,24 +829,11 @@ class FeatureEnhancedCF:
                             project_dict[field] = None
                 
                 result.append(project_dict)
-                
+                    
             return result
         else:
-            # Just return top n projects with minimal fields if no scores available
-            projects = filtered_projects.head(n)
-            result = []
-            
-            for _, project in projects.iterrows():
-                project_dict = project.to_dict()
-                project_dict['recommendation_score'] = 0.5  # Default neutral score
-                
-                # Ensure image field exists
-                if 'image' not in project_dict:
-                    project_dict['image'] = None
-                    
-                result.append(project_dict)
-                
-            return result
+            # Fallback to simpler approach if scores not available
+            return filtered_projects.head(n).to_dict('records')
     
     def get_trending_projects(self, n: int = 10) -> List[Dict[str, Any]]:
         """

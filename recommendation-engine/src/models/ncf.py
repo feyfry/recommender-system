@@ -867,7 +867,7 @@ class NCFRecommender:
     def recommend_for_user(self, user_id: str, n: int = 10, 
                      exclude_known: bool = True) -> List[Tuple[str, float]]:
         """
-        Generate recommendations for a user with score normalization
+        Generate recommendations for a user with improved score normalization
         and diversity promotion
         
         Args:
@@ -943,69 +943,100 @@ class NCFRecommender:
         if len(predictions) <= n:
             return predictions
         
-        # NORMALISASI & DIVERSITY ENHANCEMENT
+        # PERBAIKAN: Normalisasi & Peningkatan Keragaman
         # Taking more candidates than needed to ensure variety
         top_candidates = predictions[:min(len(predictions), n*3)]
         
-        # 1. Score Normalization - distribute scores more evenly
+        # 1. Score Normalization - dengan peningkatan keseragaman skor
         min_score = min([score for _, score in top_candidates])
         max_score = max([score for _, score in top_candidates])
         score_range = max(0.001, max_score - min_score)  # Avoid division by zero
         
+        # Sigmoid normalization untuk distribusi skor yang lebih baik
+        def sigmoid_normalize(raw_score, min_score, max_score, score_range):
+            # First normalize to 0-1 range
+            norm_score = (raw_score - min_score) / score_range
+            # Then apply sigmoid to create smoother distribution
+            # Centered at 0.5 with scaled steepness
+            return 1.0 / (1.0 + np.exp(-6 * (norm_score - 0.5)))
+        
         # Apply normalization
         normalized_predictions = []
         for item_id, score in top_candidates:
-            # Standard min-max normalization
-            norm_score = (score - min_score) / score_range
+            # Apply improved sigmoid normalization
+            norm_score = sigmoid_normalize(score, min_score, max_score, score_range)
             normalized_predictions.append((item_id, norm_score))
         
-        # 2. Diversity Enhancement
+        # 2. Category-Based Diversity Enhancement
         if item_to_category:
-            # First select top few items normally
-            top_k = n // 3  # Select 1/3 of items by raw score
-            final_predictions = normalized_predictions[:top_k]
+            # Identify most common categories in top predictions
+            top_k = min(n, len(normalized_predictions))
+            top_categories = {}
+            for item_id, _ in normalized_predictions[:top_k]:
+                category = item_to_category.get(item_id, 'unknown')
+                top_categories[category] = top_categories.get(category, 0) + 1
             
-            # Track categories already included
-            selected_categories = {
-                item_to_category.get(item_id, 'unknown')
-                for item_id, _ in final_predictions
-            }
+            # Calculate maximum number allowed per category (33% of total recommendations or at least 2)
+            max_per_category = max(2, n // 3)
             
-            # Select remaining items with diversity boost
-            remaining_candidates = normalized_predictions[top_k:]
+            # Track categories already selected
+            selected_categories = {}
             
-            # Order by score but boost items from new categories
+            # First select a small number of top items by raw score
+            initial_count = max(1, n // 5)  # 20% of recommendations by raw score
+            final_predictions = normalized_predictions[:initial_count]
+            
+            # Update category counts for initial selections
+            for item_id, _ in final_predictions:
+                category = item_to_category.get(item_id, 'unknown')
+                selected_categories[category] = selected_categories.get(category, 0) + 1
+            
+            # Select remaining items with diversity enhancement
+            remaining_candidates = normalized_predictions[initial_count:]
+            
             while len(final_predictions) < n and remaining_candidates:
                 next_item = None
                 best_score = -1
                 
                 for idx, (item_id, score) in enumerate(remaining_candidates):
-                    item_category = item_to_category.get(item_id, 'unknown')
+                    category = item_to_category.get(item_id, 'unknown')
+                    category_count = selected_categories.get(category, 0)
                     
-                    # Apply diversity boost for new categories
-                    diversity_boost = 0.1 if item_category not in selected_categories else 0
-                    adjusted_score = score + diversity_boost
+                    # Skip if we've reached the max for this category
+                    if category_count >= max_per_category:
+                        # Apply severe penalty
+                        adjusted_score = score - 0.5  # Substantial penalty
+                    else:
+                        # Diversity boost: larger boost for less represented categories
+                        diversity_factor = 1.0 - (category_count / max_per_category if max_per_category > 0 else 0)
+                        # Scale diversity boost by category popularity (less common = higher boost)
+                        category_popularity = top_categories.get(category, 0) / top_k if top_k > 0 else 0
+                        diversity_boost = 0.2 * diversity_factor * (1 - category_popularity)
+                        adjusted_score = score + diversity_boost
                     
                     if adjusted_score > best_score:
+                        next_item = (idx, item_id, score, category)
                         best_score = adjusted_score
-                        next_item = (idx, item_id, score, item_category)
                 
-                if next_item:
+                if next_item and best_score > 0:
                     idx, item_id, original_score, category = next_item
                     final_predictions.append((item_id, original_score))
-                    selected_categories.add(category)
+                    selected_categories[category] = selected_categories.get(category, 0) + 1
                     remaining_candidates.pop(idx)
                 else:
+                    # If no suitable items found with positive scores, break
                     break
             
-            # Add any remaining needed items by score
+            # If we don't have enough recommendations, add highest scored remaining items
             if len(final_predictions) < n:
-                for item_id, score in remaining_candidates:
-                    final_predictions.append((item_id, score))
+                remaining_sorted = sorted(remaining_candidates, key=lambda x: x[1], reverse=True)
+                for item_id, score in remaining_sorted:
                     if len(final_predictions) >= n:
                         break
+                    if item_id not in [i[0] for i in final_predictions]:
+                        final_predictions.append((item_id, score))
             
-            # Re-sort the final list by score
+            # Sort final recommendations by score
             final_predictions.sort(key=lambda x: x[1], reverse=True)
             return final_predictions[:n]
         else:

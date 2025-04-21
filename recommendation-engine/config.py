@@ -66,7 +66,7 @@ HYBRID_PARAMS = {
     "fecf_weight": 0.5,           # Default weight - akan disesuaikan dinamis di hybrid.py
     "interaction_threshold_low": 5,   # Di bawah ini mengandalkan FECF
     "interaction_threshold_high": 20, # Di atas ini mengandalkan NCF
-    "diversity_factor": 0.1,      # Faktor untuk meningkatkan keragaman rekomendasi
+    "diversity_factor": 0.2,      # Faktor untuk meningkatkan keragaman rekomendasi
     "cold_start_fecf_weight": 0.9  # Bobot FECF untuk pengguna cold-start
 }
 
