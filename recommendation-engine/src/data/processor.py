@@ -815,8 +815,8 @@ class DataProcessor:
         
     def _extract_primary_category_improved(self, row) -> str:
         """
-        Extract primary category with an improved algorithm that prioritizes 
-        the first category and then uses mapping if needed
+        Extract primary category with an improved algorithm that better handles
+        case sensitivity, partial matching, and prioritization
         
         Args:
             row: Row from DataFrame 
@@ -828,42 +828,57 @@ class DataProcessor:
         query_category = row.get('query_category')
         
         # Handle empty categories
-        if not categories:
-            # Fallback to query_category if available
-            if query_category and query_category != 'unknown' and query_category != 'top':
+        if not categories or not any(isinstance(cat, str) and cat.strip() for cat in categories):
+            # Fallback to query_category if available and not generic
+            if query_category and query_category.lower() not in ['unknown', 'top']:
                 # Check if the query_category matches any of our category mappings
                 for category, aliases in self.category_mappings.items():
-                    if query_category.lower() in aliases:
+                    if query_category.lower() in [alias.lower() for alias in aliases]:
                         return category
-                return query_category
+                return query_category.lower()
             return 'unknown'
         
+        # Convert all categories to lowercase for better matching
+        normalized_categories = [cat.lower() for cat in categories if isinstance(cat, str) and cat]
+        
         # APPROACH 1: Use first category (most important) if available
-        if categories and isinstance(categories[0], str):
-            first_category = categories[0].lower()
+        if normalized_categories:
+            first_category = normalized_categories[0]
             
-            # Check if first category is in our mappings
+            # Check if first category is in our mappings (case-insensitive)
             for category_key, aliases in self.category_mappings.items():
-                if first_category in aliases or any(alias == first_category for alias in aliases):
+                lower_aliases = [alias.lower() for alias in aliases]
+                if first_category in lower_aliases:
+                    return category_key
+                    
+            # Check for partial matches in a more robust way
+            for category_key, aliases in self.category_mappings.items():
+                lower_aliases = [alias.lower() for alias in aliases]
+                # Check if the category is contained within any alias or vice versa
+                if any(first_category in alias or alias in first_category for alias in lower_aliases):
                     return category_key
                     
             # Special handling for ecosystem categories
             for ecosystem in self.ecosystem_categories:
-                if ecosystem in first_category:
+                ecosystem_lower = ecosystem.lower()
+                if ecosystem_lower in first_category or first_category in ecosystem_lower:
                     base_ecosystem = ecosystem.split('-')[0] if '-ecosystem' in ecosystem else ecosystem
-                    return base_ecosystem
+                    return base_ecosystem.lower()
                     
             # Return first category as-is if no mapping found
             return first_category
         
-        # APPROACH 2: Fallback to priority-based matching for all categories
-        normalized_categories = [cat.lower() for cat in categories if cat]
-        
-        # First check for direct matches in category_mappings
+        # APPROACH 2: Check all categories against our mappings
         matched_categories = []
         for category_key, aliases in self.category_mappings.items():
+            lower_aliases = [alias.lower() for alias in aliases]
             for normalized_cat in normalized_categories:
-                if normalized_cat in aliases or any(alias == normalized_cat for alias in aliases):
+                # Direct match
+                if normalized_cat in lower_aliases:
+                    matched_categories.append(category_key)
+                    break
+                # Partial match (more relaxed)
+                if any(normalized_cat in alias or alias in normalized_cat for alias in lower_aliases):
                     matched_categories.append(category_key)
                     break
         
@@ -877,12 +892,12 @@ class DataProcessor:
             return matched_categories[0]
         
         # APPROACH 3: Fallback to query_category if available
-        if query_category and query_category != 'unknown' and query_category != 'top':
-            return query_category
-            
+        if query_category and query_category.lower() not in ['unknown', 'top']:
+            return query_category.lower()
+                
         # APPROACH 4: Last resort - return the first raw category or unknown
-        if categories and isinstance(categories[0], str):
-            return categories[0].lower()
+        if normalized_categories:
+            return normalized_categories[0]
         
         return 'unknown'
     
@@ -923,133 +938,239 @@ class DataProcessor:
     
     def _calculate_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Hitung metrik seperti popularitas, tren, aktivitas developer, dll.
+        Calculate metrics with improved normalization and more robust handling of outliers
         
         Args:
-            df: DataFrame proyek
+            df: DataFrame with project data
             
         Returns:
-            pd.DataFrame: DataFrame dengan metrik tambahan
+            pd.DataFrame: DataFrame with additional metrics
         """
         logger.info("Calculating additional metrics")
         
-        # Buat salinan untuk dimodifikasi
+        # Create a copy to avoid modifying the original
         result_df = df.copy()
         
-        # 1. Enhanced Popularity Score (based on market cap, volume, and social metrics)
-        # Gunakan log untuk mengatasi perbedaan skala yang besar
-        market_cap = np.log1p(result_df['market_cap'].fillna(0)) / 30
-        volume = np.log1p(result_df['total_volume'].fillna(0)) / 25
+        # Helper function for winsorization to handle extreme values
+        def winsorize(s, low=0.01, high=0.99):
+            """Winsorize a series to limit extreme values"""
+            q_low = s.quantile(low)
+            q_high = s.quantile(high)
+            return s.clip(lower=q_low, upper=q_high)
         
-        # Social metrics dengan pembobotan
-        reddit = np.log1p(result_df['reddit_subscribers'].fillna(0)) / 15
-        twitter = np.log1p(result_df['twitter_followers'].fillna(0)) / 15
-        github = np.log1p(result_df['github_stars'].fillna(0)) / 10
+        # Ensure numeric columns are properly handled
+        for col in ['market_cap', 'total_volume', 'reddit_subscribers', 'twitter_followers', 'github_stars']:
+            if col in result_df.columns:
+                result_df[col] = pd.to_numeric(result_df[col], errors='coerce').fillna(0)
         
-        # Combined popularity score
+        # 1. Enhanced Popularity Score - with outlier handling
+        # Winsorize metrics to handle outliers before log transformation
+        market_cap = winsorize(result_df['market_cap'].fillna(0))
+        volume = winsorize(result_df['total_volume'].fillna(0))
+        reddit = winsorize(result_df['reddit_subscribers'].fillna(0))
+        twitter = winsorize(result_df['twitter_followers'].fillna(0))
+        github = winsorize(result_df['github_stars'].fillna(0))
+        
+        # Apply logarithmic transformation with careful handling of zeros
+        # Use log1p to handle zeros gracefully and scale appropriately
+        log_market_cap = np.log1p(market_cap) / np.log(1e12)  # Scale relative to $1T
+        log_volume = np.log1p(volume) / np.log(1e10)  # Scale relative to $10B
+        log_reddit = np.log1p(reddit) / np.log(1e6)  # Scale relative to 1M subscribers
+        log_twitter = np.log1p(twitter) / np.log(1e6)  # Scale relative to 1M followers
+        log_github = np.log1p(github) / np.log(1e5)  # Scale relative to 100K stars
+        
+        # Weight components with more balanced weights
         popularity_score = (
-            0.35 * market_cap + 
-            0.25 * volume + 
-            0.15 * reddit + 
-            0.15 * twitter +
-            0.10 * github
+            0.35 * log_market_cap + 
+            0.25 * log_volume + 
+            0.15 * log_reddit + 
+            0.15 * log_twitter +
+            0.10 * log_github
         )
         
-        # Scale to 0-100
-        result_df['popularity_score'] = popularity_score * 100
+        # Scale to 0-100 using percentile ranking for more uniform distribution
+        # This avoids extreme concentration at the high end
+        popularity_score_ranked = popularity_score.rank(pct=True) * 100
+        result_df['popularity_score'] = popularity_score_ranked
         
-        # 2. Trend Score
+        # 2. Trend Score - More balanced approach with time decay and outlier handling
+        # Get price changes with better handling of missing values
         price_24h = result_df['price_change_percentage_24h'].fillna(0) / 100
-        price_24h = price_24h.clip(-1, 1)  # Clip extreme values
-        
-        # Get 7d and 30d changes if available
         price_7d = result_df['price_change_percentage_7d_in_currency'].fillna(0) / 100
-        price_7d = price_7d.clip(-1, 1)
-        
         price_30d = result_df['price_change_percentage_30d_in_currency'].fillna(0) / 100
-        price_30d = price_30d.clip(-1, 1)
         
-        # Weighted trend score dengan decay (recent changes more important)
+        # Apply sigmoid transformation to handle extreme values 
+        def sigmoid_transform(x, scale=5):
+            return 2 / (1 + np.exp(-scale * x)) - 1
+        
+        # Transform price changes with sigmoid to limit extreme values
+        price_24h_transformed = sigmoid_transform(price_24h)
+        price_7d_transformed = sigmoid_transform(price_7d)
+        price_30d_transformed = sigmoid_transform(price_30d)
+        
+        # Apply time-decay weightings (recent changes matter more)
         trend_score = (
-            0.6 * price_24h + 
-            0.3 * price_7d + 
-            0.1 * price_30d
+            0.5 * price_24h_transformed + 
+            0.3 * price_7d_transformed + 
+            0.2 * price_30d_transformed
         )
         
         # Scale to 0-100 with 50 as neutral
         result_df['trend_score'] = 50 + (trend_score * 50)
         
-        # 3. Developer Activity Score
-        if all(col in result_df.columns for col in ['github_stars', 'github_forks']):
-            github_stats = np.log1p(result_df['github_stars']) + np.log1p(result_df['github_forks'])
-            max_stats = github_stats.quantile(0.95)
+        # 3. Developer Activity Score - Improved calculation with more meaningful metrics
+        if all(col in result_df.columns for col in ['github_stars', 'github_forks', 'github_subscribers']):
+            # Create a composite score of all GitHub metrics
+            github_stats = (
+                np.log1p(result_df['github_stars']) * 0.5 + 
+                np.log1p(result_df['github_forks']) * 0.3 +
+                np.log1p(result_df['github_subscribers']) * 0.2
+            )
             
-            if max_stats > 0:
-                dev_score = (github_stats / max_stats).clip(0, 1)
-                result_df['developer_activity_score'] = (dev_score * 100).clip(0, 100)
+            # Scale relative to the top projects, but avoid making the scale too concentrated
+            # Use 90th percentile instead of max to avoid outlier influence
+            ref_value = github_stats.quantile(0.9)
+            
+            if ref_value > 0:
+                # Use a more gradual scaling function for better distribution
+                dev_score = np.tanh(github_stats / ref_value * 2) * 100
+                result_df['developer_activity_score'] = dev_score.clip(0, 100)
             else:
                 result_df['developer_activity_score'] = 0
         else:
             result_df['developer_activity_score'] = 0
         
-        # 4. Social Engagement Score (ratio of followers to market cap)
+        # 4. Social Engagement Score - Improved calculation with better normalization
         if 'market_cap' in result_df.columns and result_df['market_cap'].max() > 0:
+            # Calculate social following
             social_sum = result_df['reddit_subscribers'] + result_df['twitter_followers']
+            
+            # Calculate market cap in millions with minimum threshold to avoid division by zero
             market_cap_millions = result_df['market_cap'] / 1_000_000
+            market_cap_millions = market_cap_millions.clip(lower=0.01)  # Minimum threshold
             
-            # Avoid division by zero
-            market_cap_norm = market_cap_millions.replace(0, np.nan)
+            # Calculate ratio of social following to market cap (followers per $M)
+            engagement_ratio = social_sum / market_cap_millions
             
-            # Calculate engagement ratio
-            engagement_ratio = social_sum / market_cap_norm
+            # Handle zero and extreme values
+            engagement_ratio = winsorize(engagement_ratio)
             
-            # Fill NaN values with median
-            median_ratio = engagement_ratio.median()
-            engagement_ratio = engagement_ratio.fillna(median_ratio)
+            # Apply logarithmic scaling for better distribution
+            engagement_log = np.log1p(engagement_ratio) 
             
-            # Apply log and normalize
-            engagement_score = np.log1p(engagement_ratio)
-            max_score = engagement_score.quantile(0.95)  # Gunakan percentile 95 untuk menghindari outlier
-            engagement_score = engagement_score / max_score
+            # Scale using percentile ranking for more uniform distribution
+            engagement_ranked = engagement_log.rank(pct=True)
             
             # Scale to 0-100
-            result_df['social_engagement_score'] = (engagement_score * 100).clip(0, 100)
+            result_df['social_engagement_score'] = engagement_ranked * 100
         else:
             result_df['social_engagement_score'] = 50
         
-        # 5. Description Length (NEW) - Panjang deskripsi sebagai indikator kualitas dokumentasi
+        # 5. Description Length - Better normalization
         if 'description' in result_df.columns:
-            result_df['description_length'] = result_df['description'].fillna('').apply(len)
-            # Normalize to 0-100 scale
-            max_length = result_df['description_length'].quantile(0.95)  # 95th percentile to avoid outliers
-            if max_length > 0:
-                result_df['description_length'] = (result_df['description_length'] / max_length * 100).clip(0, 100)
+            # Calculate raw character count of description
+            result_df['description_length_raw'] = result_df['description'].fillna('').apply(len)
+            
+            # Use rank-based normalization for more uniform distribution
+            if result_df['description_length_raw'].max() > 0:
+                result_df['description_length'] = result_df['description_length_raw'].rank(pct=True) * 100
+            else:
+                result_df['description_length'] = 0
+                
+            # Drop the raw column as it's no longer needed
+            result_df = result_df.drop(columns=['description_length_raw'])
         else:
             result_df['description_length'] = 0
-            
-        # 6. Age Days (NEW) - Usia proyek dalam hari
+        
+        # 6. Age Days - More accurate calculation with better date handling
         if 'genesis_date' in result_df.columns:
             today = pd.Timestamp.now().date()
-            result_df['age_days'] = result_df['genesis_date'].apply(
-                lambda x: (today - pd.to_datetime(x).date()).days if pd.notna(x) else 0
+            # Convert to datetime more robustly
+            result_df['genesis_date_parsed'] = pd.to_datetime(
+                result_df['genesis_date'], errors='coerce'
             )
+            
+            # Calculate age in days with safer date subtraction
+            result_df['age_days'] = result_df['genesis_date_parsed'].apply(
+                lambda x: (today - x.date()).days if pd.notna(x) else 0
+            )
+            
+            # Clean up temporary column
+            result_df = result_df.drop(columns=['genesis_date_parsed'])
         else:
             result_df['age_days'] = 0
-            
-        # 7. Maturity Score (NEW) - Kombinasi dari usia, aktivitas developer, dan engagement sosial
-        # Proyek yang lebih tua, dengan aktivitas developer tinggi dan engagement sosial yang baik 
-        # dianggap lebih matang
-        age_score = np.log1p(result_df['age_days']) / np.log1p(result_df['age_days'].quantile(0.95))
-        age_score = age_score.fillna(0).clip(0, 1)
         
+        # 7. Maturity Score - Improved calculation with more balanced components
+        # Logarithmic transformation of age for better scaling of old vs. new projects
+        if result_df['age_days'].max() > 0:
+            age_log = np.log1p(result_df['age_days'])
+            # Use rank-based normalization
+            age_score = age_log.rank(pct=True)
+        else:
+            age_score = 0
+        
+        # Get normalized component scores
         dev_score = result_df['developer_activity_score'] / 100
         social_score = result_df['social_engagement_score'] / 100
+        desc_score = result_df['description_length'] / 100
         
-        # Weighted maturity score
-        maturity_score = (0.4 * age_score + 0.4 * dev_score + 0.2 * social_score)
+        # Calculate maturity score with more balanced weights
+        maturity_score = (
+            0.3 * age_score + 
+            0.3 * dev_score + 
+            0.2 * social_score +
+            0.2 * desc_score
+        )
+        
+        # Scale to 0-100
         result_df['maturity_score'] = (maturity_score * 100).clip(0, 100)
         
         return result_df
+    
+    def _calculate_category_similarity(self, category1: str, category2: str) -> float:
+        """
+        Calculate similarity between two categories for exploration and expansion
+        
+        Args:
+            category1: First category
+            category2: Second category
+            
+        Returns:
+            float: Similarity score between 0 and 1
+        """
+        if category1 == category2:
+            return 1.0
+        
+        # Check if categories are in the same group in our mappings
+        for _, aliases in self.category_mappings.items():
+            lower_aliases = [alias.lower() for alias in aliases]
+            if category1.lower() in lower_aliases and category2.lower() in lower_aliases:
+                return 0.8
+        
+        # Check ecosystem categories
+        if (any(category1.lower() in eco.lower() for eco in self.ecosystem_categories) and 
+            any(category2.lower() in eco.lower() for eco in self.ecosystem_categories)):
+            return 0.7
+        
+        # Check if one category contains the other
+        if category1.lower() in category2.lower() or category2.lower() in category1.lower():
+            return 0.6
+        
+        # Calculate overlap in words
+        words1 = set(category1.lower().replace('-', ' ').split())
+        words2 = set(category2.lower().replace('-', ' ').split())
+        
+        if not words1 or not words2:
+            return 0.0
+        
+        # Jaccard similarity
+        intersection = len(words1.intersection(words2))
+        union = len(words1.union(words2))
+        
+        if union == 0:
+            return 0.0
+        
+        return intersection / union
     
     def _create_features(self, projects_df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -1104,178 +1225,471 @@ class DataProcessor:
     
     def _create_synthetic_interactions(self, projects_df: pd.DataFrame, n_users: int = 500) -> pd.DataFrame:
         """
-        Buat interaksi user sintetis berdasarkan persona dengan peningkatan realisme
+        Create synthetic user interactions with increased realism and variability
         
         Args:
-            projects_df: DataFrame proyek
-            n_users: Jumlah user sintetis yang dibuat
+            projects_df: DataFrame of projects
+            n_users: Number of synthetic users to create
             
         Returns:
-            pd.DataFrame: DataFrame interaksi user
+            pd.DataFrame: DataFrame of user interactions
         """
         logger.info(f"Creating synthetic interactions for {n_users} users")
         
-        # Create RNG instance with seed for reproducibility
-        rng = np.random.default_rng(42)
+        # Create RNG instance with base seed but add more variability
+        base_seed = 42
+        rng = np.random.default_rng(base_seed)
         
         interactions = []
         personas = list(USER_PERSONAS.keys())
-        persona_weights = [0.25, 0.20, 0.30, 0.15, 0.10]  # Distribusi persona lebih realistis
         
-        # Ekstrak semua kategori unik untuk eksplorasi pengguna
-        all_categories = projects_df['primary_category'].dropna().unique().tolist()
+        # Add more variability to persona distribution
+        # Slightly randomize the persona weights for more realistic distribution
+        persona_base_weights = [0.25, 0.20, 0.30, 0.15, 0.10]  # Base distribution
+        persona_weights = np.array(persona_base_weights) + rng.normal(0, 0.03, len(persona_base_weights))
+        persona_weights = np.clip(persona_weights, 0.05, 0.4)  # Clip to reasonable range
+        persona_weights = persona_weights / persona_weights.sum()  # Normalize
         
-        # Generate users dengan pola yang lebih realistis
+        # Extract all categories and their frequencies for more realistic exploration
+        all_categories = projects_df['primary_category'].dropna().tolist()
+        category_freq = pd.Series(all_categories).value_counts(normalize=True).to_dict()
+        unique_categories = list(category_freq.keys())
+        
+        # Generate users with more realistic patterns
         for user_id in range(1, n_users + 1):
-            # Assign persona ke user dengan distribusi probabilistik (lebih realistis)
-            user_persona = rng.choice(personas, p=persona_weights)
+            # Use a user-specific seed for more variability between users
+            user_seed = base_seed + user_id
+            user_rng = np.random.default_rng(user_seed)
+            
+            # Assign persona with weighted randomness
+            user_persona = user_rng.choice(personas, p=persona_weights)
             persona_data = USER_PERSONAS[user_persona]
             
-            # Buat profil interaksi pengguna yang lebih realistis
-            activity_level_probs = [0.3, 0.5, 0.2]  # [low, medium, high]
+            # Create more realistic activity profiles with less deterministic thresholds
+            # More granular activity levels
+            activity_level_probs = [0.25, 0.30, 0.25, 0.15, 0.05]  # Base probabilities
             
             # Add slight randomization to activity probabilities
-            activity_level_probs = np.array(activity_level_probs) + rng.normal(0, 0.05, 3)
-            activity_level_probs = np.clip(activity_level_probs, 0.1, 0.7)  # Batas untuk menghindari probabilitas negatif
-            activity_level_probs = activity_level_probs / activity_level_probs.sum()  # Normalisasi
+            activity_level_probs = np.array(activity_level_probs) + user_rng.normal(0, 0.03, 5)
+            activity_level_probs = np.clip(activity_level_probs, 0.05, 0.5)
+            activity_level_probs = activity_level_probs / activity_level_probs.sum()
             
-            activity_level = rng.choice(['low', 'medium', 'high'], p=activity_level_probs)
+            activity_level = user_rng.choice(
+                ['very_low', 'low', 'medium', 'high', 'very_high'], 
+                p=activity_level_probs
+            )
             
-            # Variasi rentang interaksi dengan distribusi lebih natural
-            if activity_level == 'low':
-                n_interactions = int(max(1, rng.normal(7, 2)))  # Mean=7, SD=2, minimum 1
+            # More organic distribution of interaction counts based on activity level
+            if activity_level == 'very_low':
+                # Very casual users with minimal interaction (1-5)
+                n_interactions = max(1, int(user_rng.normal(3, 1.5)))
+            elif activity_level == 'low':
+                # Occasional users (4-12)
+                n_interactions = max(4, min(12, int(user_rng.normal(8, 2.5))))
             elif activity_level == 'medium':
-                n_interactions = int(max(5, rng.normal(18, 5)))  # Mean=18, SD=5, minimum 5
-            else:  # high
-                n_interactions = int(max(15, rng.normal(35, 10)))  # Mean=35, SD=10, minimum 15
+                # Average users (10-25)
+                n_interactions = max(10, min(25, int(user_rng.normal(18, 4))))
+            elif activity_level == 'high':
+                # Active users (20-40)
+                n_interactions = max(20, min(40, int(user_rng.normal(30, 6))))
+            else:  # very_high
+                # Power users (35-70)
+                n_interactions = max(35, min(70, int(user_rng.normal(50, 10))))
             
-            # Filter proyek berdasarkan kategori preferensi
+            # More variability in user preferences
             preferred_categories = persona_data['categories']
             
-            # Modifikasi bobot kategori dengan noise
-            category_weights = np.array(persona_data['weights'])
-            noise = rng.normal(0, 0.05, len(category_weights))  # Random noise
-            category_weights = category_weights + noise
-            category_weights = np.clip(category_weights, 0.05, 0.8)  # Batasi range
-            category_weights = category_weights / category_weights.sum()  # Normalisasi
+            # Calculate more varied weights with noise
+            raw_weights = np.array(persona_data['weights'])
             
-            # Simulasi perubahan preferensi user seiring waktu (evolving preferences)
-            preference_drift = rng.uniform(0.01, 0.1) if activity_level == 'high' else 0
-                
-            # Eksplorasi - set initial probability
-            exploration_probability = rng.uniform(0.1, 0.3)  # 10-30% peluang eksplorasi
+            # Add significant noise for more realistic preference distribution
+            noise_magnitude = user_rng.uniform(0.05, 0.15)  # Variable noise level by user
+            noise = user_rng.normal(0, noise_magnitude, len(raw_weights))
+            category_weights = raw_weights + noise
             
-            # Untuk setiap interaksi, pilih proyek berdasarkan preferensi
-            for interaction_idx in range(n_interactions):
-                # Simulasi evolving preferences - sedikit ubah bobot preferensi seiring waktu
-                if preference_drift > 0 and interaction_idx > 0 and interaction_idx % 5 == 0:
-                    drift_noise = rng.normal(0, preference_drift, len(category_weights))
-                    category_weights = category_weights + drift_noise
-                    category_weights = np.clip(category_weights, 0.05, 0.8)
-                    category_weights = category_weights / category_weights.sum()
+            # Ensure weights are positive and normalized
+            category_weights = np.clip(category_weights, 0.05, 0.9)
+            category_weights = category_weights / category_weights.sum()
+            
+            # Add category exploration beyond persona
+            # Some users explore widely, others stay in comfort zone
+            curiosity_factor = user_rng.beta(2, 5)  # Beta distribution favoring lower values
+            base_exploration_prob = max(0.05, min(0.4, curiosity_factor))
+            
+            # Vary exploration over time
+            exploration_probability = base_exploration_prob
+            exploration_decay = user_rng.uniform(0.7, 0.95)  # How quickly novelty seeking declines
+            
+            # Popularity bias - Some users focus more on popular projects
+            popularity_bias = user_rng.beta(3, 2)  # Beta distribution favoring higher values
+            
+            # Time distribution for interactions
+            # Some users do everything in one session, others spread out
+            session_clustering = user_rng.choice([
+                'single_session',      # All in one go
+                'few_sessions',        # 2-3 sessions
+                'regular_sessions',    # Regular pattern
+                'random_spread'        # Completely random
+            ], p=[0.2, 0.3, 0.3, 0.2])
+            
+            max_days_ago = 30  # Maximum days in the past
+            
+            # Generate session timestamps based on pattern
+            timestamps = []
+            if session_clustering == 'single_session':
+                # All interactions happen within a short timeframe
+                base_days_ago = int(user_rng.integers(0, max_days_ago))
+                session_minutes = int(user_rng.integers(1, 60))  # Up to 1 hour session
+                for _ in range(n_interactions):
+                    minutes_offset = int(user_rng.integers(0, session_minutes))
+                    timestamps.append(
+                        datetime.now() - timedelta(days=int(base_days_ago), minutes=int(minutes_offset))
+                    )
+            elif session_clustering == 'few_sessions':
+                # 2-3 distinct sessions
+                num_sessions = user_rng.integers(2, 4)
+                session_days = sorted(user_rng.choice(range(max_days_ago), size=num_sessions, replace=False))
+                interactions_per_session = []
                 
-                # Occasional exploration - pengguna kadang mencoba kategori baru
-                if rng.random() < exploration_probability:
-                    # Pilih kategori random (eksplorasi)
-                    excluded_categories = set(preferred_categories)
-                    exploration_categories = [c for c in all_categories if c not in excluded_categories]
-                    
-                    if exploration_categories:
-                        selected_category = rng.choice(exploration_categories)
-                        # Kurangi peluang eksplorasi setelah digunakan (habituation)
-                        exploration_probability *= 0.9
+                # Distribusi interaksi yang lebih aman
+                remaining = n_interactions
+                sessions_left = num_sessions
+                
+                for i in range(num_sessions):
+                    if i == num_sessions - 1:
+                        # Sesi terakhir dapat semua sisa interaksi
+                        interactions_per_session.append(remaining)
                     else:
-                        # Fallback jika tidak ada kategori lain
-                        selected_category = rng.choice(preferred_categories, p=category_weights)
-                else:
-                    # Pilih kategori berdasarkan preferensi (exploitation)
-                    selected_category = rng.choice(preferred_categories, p=category_weights)
+                        # Pastikan setiap sesi mendapat minimal 1 interaksi
+                        # dan maksimal sejumlah yang masih tersisa dibagi sesi yang tersisa
+                        max_for_session = remaining - (sessions_left - 1)  # Sisakan minimal 1 untuk tiap sesi
+                        if max_for_session > 1:
+                            count = user_rng.integers(1, max_for_session)
+                        else:
+                            count = 1
+                            
+                        interactions_per_session.append(count)
+                        remaining -= count
+                        sessions_left -= 1
                 
-                # Filter proyek berdasarkan kategori
+                # Create timestamps for each session
+                for day, count in zip(session_days, interactions_per_session):
+                    for _ in range(count):
+                        minutes_offset = int(user_rng.integers(0, 60))
+                        timestamps.append(
+                            datetime.now() - timedelta(days=int(day), minutes=int(minutes_offset))
+                        )
+            elif session_clustering == 'regular_sessions':
+                # Regular pattern (e.g., weekly)
+                interval = user_rng.integers(1, 7)  # Days between sessions
+                base_day = user_rng.integers(0, interval)
+                
+                for i in range(n_interactions):
+                    day = base_day + (i // 3) * interval  # ~3 interactions per session
+                    if day > max_days_ago:
+                        day = day % max_days_ago
+                    minutes_offset = int(user_rng.integers(0, 60))
+                    timestamps.append(
+                        datetime.now() - timedelta(days=int(day), minutes=int(minutes_offset))
+                    )
+            else:  # random_spread
+                # Completely random distribution
+                for _ in range(n_interactions):
+                    days_ago = int(user_rng.integers(0, max_days_ago))
+                    random_seconds = int(user_rng.integers(0, 86400))  # Seconds in a day
+                    timestamps.append(
+                        datetime.now() - timedelta(days=int(days_ago), seconds=int(random_seconds))
+                    )
+            
+            # More realistic project selection that varies with user and time
+            selected_projects = []
+            
+            # For each interaction, select project with more realistic behavior
+            for interaction_idx in range(n_interactions):
+                # Time-varying exploration probability
+                if interaction_idx > 0 and interaction_idx % 3 == 0:
+                    # Periodically adjust exploration probability
+                    if user_rng.random() < 0.3:  # 30% chance to change exploration behavior
+                        exploration_probability = max(0.01, min(0.5, 
+                                                            exploration_probability + user_rng.normal(0, 0.1)))
+                
+                # Occasional exploration - users sometimes venture outside normal preferences
+                if user_rng.random() < exploration_probability:
+                    # Exploration gets more focused over time
+                    if interaction_idx > n_interactions // 2 and user_rng.random() < 0.7:
+                        # Later exploration is more related to existing preferences
+                        excluded_categories = set(preferred_categories)
+                        related_categories = [c for c in unique_categories 
+                                        if c not in excluded_categories and
+                                        any(self._calculate_category_similarity(c, pc) > 0.3 
+                                            for pc in preferred_categories)]
+                        
+                        if related_categories:
+                            selected_category = user_rng.choice(related_categories)
+                        else:
+                            # Fall back to weighted random selection if no related categories
+                            weights = [category_freq.get(c, 0.001) for c in unique_categories 
+                                    if c not in excluded_categories]
+                            if weights and sum(weights) > 0:
+                                weights = np.array(weights) / sum(weights)
+                                selected_category = user_rng.choice(
+                                    [c for c in unique_categories if c not in excluded_categories],
+                                    p=weights
+                                )
+                            else:
+                                # Last resort - pick from all categories
+                                selected_category = user_rng.choice(unique_categories)
+                    else:
+                        # Earlier exploration is more random, but influenced by overall popularity
+                        weights = [category_freq.get(c, 0.001) for c in unique_categories]
+                        weights = np.array(weights) / sum(weights)
+                        selected_category = user_rng.choice(unique_categories, p=weights)
+                    
+                    # Exploration becomes less frequent over time
+                    exploration_probability *= exploration_decay
+                else:
+                    # Normal selection based on preferences
+                    current_weights = category_weights.copy()
+                    
+                    # Add recency bias - users tend to interact more with recent categories
+                    if interaction_idx > 0 and selected_projects and user_rng.random() < 0.3:
+                        recent_categories = []
+                        for proj in selected_projects[-3:]:
+                            if proj in projects_df['id'].values:
+                                proj_row = projects_df[projects_df['id'] == proj]
+                                if not proj_row.empty and 'primary_category' in proj_row.columns:
+                                    cat = proj_row['primary_category'].iloc[0]
+                                    if not pd.isna(cat):
+                                        recent_categories.append(cat)
+                        
+                        for recent_cat in recent_categories:
+                            if recent_cat in preferred_categories:
+                                idx = preferred_categories.index(recent_cat)
+                                current_weights[idx] *= user_rng.uniform(1.1, 1.5)  # Boost recent categories
+                        
+                        # Re-normalize weights
+                        if sum(current_weights) > 0:
+                            current_weights = current_weights / current_weights.sum()
+                    
+                    # Select category based on current weights
+                    selected_category = user_rng.choice(preferred_categories, p=current_weights)
+                
+                # Filter projects by selected category
                 category_projects = projects_df[projects_df['primary_category'] == selected_category]
                 
-                if len(category_projects) < 5:  # Jika terlalu sedikit proyek ditemukan
-                    # Perluas ke kategori serupa atau semua proyek jika perlu
-                    if category_projects.empty:
-                        category_projects = projects_df
+                # If too few projects found, expand search intelligently
+                if len(category_projects) < 5:
+                    if not category_projects.empty:
+                        # Try to find related categories
+                        related_categories = [
+                            cat for cat in unique_categories 
+                            if self._calculate_category_similarity(cat, selected_category) > 0.5
+                        ]
+                        
+                        if related_categories:
+                            # Add projects from related categories
+                            related_projects = projects_df[
+                                projects_df['primary_category'].isin(related_categories)
+                            ]
+                            category_projects = pd.concat([category_projects, related_projects])
+                            category_projects = category_projects.drop_duplicates(subset=['id'])
+                        else:
+                            # Add some popular projects as fallback
+                            popular_projects = projects_df.sort_values('popularity_score', ascending=False).head(20)
+                            category_projects = pd.concat([category_projects, popular_projects])
+                            category_projects = category_projects.drop_duplicates(subset=['id'])
                     else:
-                        # Menambahkan beberapa proyek random untuk variasi
-                        additional_projects = projects_df.sample(min(20, len(projects_df)))
-                        category_projects = pd.concat([category_projects, additional_projects])
-                        category_projects = category_projects.drop_duplicates(subset=['id'])
+                        # Just use popular projects as complete fallback
+                        category_projects = projects_df.sort_values('popularity_score', ascending=False).head(20)
                 
-                # Pilih proyek dengan weight berdasarkan popularitas dan tren
-                # Menambahkan sedikit noise untuk menghindari rich-get-richer secara berlebihan
-                weights = category_projects['popularity_score'] * (category_projects['trend_score'] + rng.uniform(0, 10, len(category_projects)))
-                weights = weights + 1  # Untuk memastikan tidak ada yang 0
-                weights = weights / weights.sum()
+                # More realistic project selection weights based on user behavior
+                pop_weight = 1.0 + popularity_bias  # Higher means more influenced by popularity
+                trend_weight = 1.0 - popularity_bias * 0.5  # Less trendy if popularity focused
                 
-                # Pilih proyek dengan probability berdasarkan weights
+                # Avoid repeating recently selected projects
+                # Create a penalty for recently selected projects
+                recency_penalty = {}
+                for idx, proj_id in enumerate(reversed(selected_projects)):
+                    # More recent = higher penalty
+                    recency_penalty[proj_id] = max(0, 1.0 - (idx * 0.2))  # Decay with recency
+                
+                # Calculate weights for project selection
+                weights = []
+                project_ids = []
+                
+                for _, row in category_projects.iterrows():
+                    project_id = row['id']
+                    project_ids.append(project_id)
+                    
+                    # Base score from popularity and trend
+                    pop_score = row.get('popularity_score', 50)
+                    trend_score = row.get('trend_score', 50)
+                    
+                    # Normalized scores (0-1)
+                    norm_pop = pop_score / 100.0 if pop_score <= 100 else 1.0
+                    norm_trend = trend_score / 100.0 if trend_score <= 100 else 1.0
+                    
+                    # Final weighted score with randomization
+                    score = (
+                        (norm_pop ** pop_weight) * 
+                        (norm_trend ** trend_weight) * 
+                        (1.0 + user_rng.uniform(-0.2, 0.2))  # Add noise
+                    )
+                    
+                    # Apply recency penalty to avoid repetition
+                    penalty = recency_penalty.get(project_id, 0.0)
+                    if penalty > 0:
+                        score *= (1.0 - penalty)
+                    
+                    weights.append(max(0.01, score))  # Ensure minimum weight
+                
+                # Select project with probability based on weights
                 try:
-                    selected_index = rng.choice(category_projects.index, p=weights)
-                    selected_project = category_projects.loc[selected_index]
-                except:
-                    # Fallback jika ada masalah dengan weights
-                    selected_project = category_projects.sample(1).iloc[0]
+                    if weights and project_ids:
+                        weights = np.array(weights)
+                        weights = weights / weights.sum()
+                        selected_index = user_rng.choice(len(weights), p=weights)
+                        selected_project = project_ids[selected_index]
+                        selected_projects.append(selected_project)
+                    else:
+                        # Fallback if issue with weights or no projects
+                        if category_projects.empty:
+                            all_ids = projects_df['id'].tolist()
+                            if all_ids:
+                                selected_project = user_rng.choice(all_ids)
+                                selected_projects.append(selected_project)
+                                continue  # Skip to next interaction
+                            else:
+                                continue  # Skip if no projects available
+                        else:
+                            selected_project = category_projects['id'].iloc[0]
+                            selected_projects.append(selected_project)
+                except Exception as e:
+                    # Fallback if any issue with selection
+                    logger.debug(f"Error selecting project: {e}")
+                    if category_projects.empty:
+                        continue
+                    selected_project = category_projects['id'].iloc[0]
+                    selected_projects.append(selected_project)
                 
-                # Tentukan tipe interaksi - tambahkan noise untuk variasi
-                # Buat probabilitas interaksi dasar
+                # Determine interaction type based on user persona and project characteristics
                 if user_persona == 'defi_enthusiast':
-                    base_probs = [0.3, 0.3, 0.3, 0.1]  # view, favorite, portfolio_add, research
+                    interaction_type_probs = {
+                        'view': 0.3, 'favorite': 0.2, 'portfolio_add': 0.4, 'research': 0.1
+                    }
                 elif user_persona == 'nft_collector':
-                    base_probs = [0.3, 0.4, 0.2, 0.1]
+                    interaction_type_probs = {
+                        'view': 0.3, 'favorite': 0.45, 'portfolio_add': 0.15, 'research': 0.1
+                    }
                 elif user_persona == 'trader':
-                    base_probs = [0.2, 0.2, 0.4, 0.2]
+                    interaction_type_probs = {
+                        'view': 0.2, 'favorite': 0.15, 'portfolio_add': 0.45, 'research': 0.2
+                    }
                 elif user_persona == 'conservative_investor':
-                    base_probs = [0.4, 0.2, 0.3, 0.1]
+                    interaction_type_probs = {
+                        'view': 0.35, 'favorite': 0.15, 'portfolio_add': 0.3, 'research': 0.2
+                    }
                 elif user_persona == 'risk_taker':
-                    base_probs = [0.3, 0.3, 0.3, 0.1]
+                    interaction_type_probs = {
+                        'view': 0.3, 'favorite': 0.3, 'portfolio_add': 0.3, 'research': 0.1
+                    }
                 else:
-                    base_probs = [0.4, 0.3, 0.2, 0.1]
+                    interaction_type_probs = {
+                        'view': 0.4, 'favorite': 0.3, 'portfolio_add': 0.2, 'research': 0.1
+                    }
                 
-                # Tambahkan noise ke probabilitas interaksi
-                interaction_probs = np.array(base_probs) + rng.normal(0, 0.05, 4)
-                interaction_probs = np.clip(interaction_probs, 0.05, 0.7)  # Batas untuk menghindari probabilitas tidak valid
-                interaction_probs = interaction_probs / interaction_probs.sum()  # Normalisasi
+                # Add project-specific factors
+                try:
+                    project_row = projects_df[projects_df['id'] == selected_project].iloc[0]
+                    project_popularity = project_row.get('popularity_score', 50) / 100.0
+                    project_trend = project_row.get('trend_score', 50) / 100.0
+                    project_maturity = project_row.get('maturity_score', 50) / 100.0
+                    
+                    # Adjust probabilities based on project characteristics
+                    if project_popularity > 0.7:  # Very popular projects
+                        # More likely to add popular projects to portfolio
+                        interaction_type_probs['portfolio_add'] *= 1.3
+                        interaction_type_probs['favorite'] *= 1.2
+                    
+                    if project_trend > 0.7:  # Trending projects
+                        # Trendy projects get more favorites
+                        interaction_type_probs['favorite'] *= 1.4
+                    
+                    if project_maturity > 0.7:  # Mature projects
+                        # Mature projects more likely to be researched and added to portfolio
+                        interaction_type_probs['research'] *= 1.5
+                        interaction_type_probs['portfolio_add'] *= 1.2
+                    elif project_maturity < 0.3:  # Immature projects
+                        # New projects more likely to just be viewed
+                        interaction_type_probs['view'] *= 1.3
+                    
+                    # Normalize probabilities
+                    total = sum(interaction_type_probs.values())
+                    interaction_type_probs = {k: v/total for k, v in interaction_type_probs.items()}
+                except Exception as e:
+                    # Fallback if project not found or missing fields
+                    logger.debug(f"Error adjusting interaction probs: {e}")
                 
-                interaction_type = rng.choice(
-                    ['view', 'favorite', 'portfolio_add', 'research'],
-                    p=interaction_probs
-                )
+                # Convert to list format for random choice
+                interaction_types = list(interaction_type_probs.keys())
+                interaction_probs = list(interaction_type_probs.values())
                 
-                # Tentukan bobot interaksi dengan distribusi yang lebih realistis
+                # Select interaction type
+                interaction_type = user_rng.choice(interaction_types, p=interaction_probs)
+                
+                # Determine interaction weight with more realistic distribution
                 if interaction_type == 'view':
-                    # View biasanya paling ringan dengan sedikit variasi
-                    weight = max(1, min(5, int(rng.normal(1.5, 0.5))))
+                    # Views have lower weights - some quick, some longer
+                    if user_rng.random() < 0.7:  # 70% quick views
+                        weight = max(1, min(3, int(user_rng.exponential(1.0))))
+                    else:  # 30% longer views
+                        weight = max(1, min(5, int(user_rng.normal(2.5, 1.0))))
                 elif interaction_type == 'favorite':
-                    # Favorite memiliki bobot medium
-                    weight = max(1, min(5, int(rng.normal(3.0, 0.7))))
+                    # Favorites have medium weights with some variance
+                    weight = max(1, min(5, int(user_rng.normal(3.0, 0.8))))
                 elif interaction_type == 'portfolio_add':
-                    # Portfolio add memiliki bobot tinggi dengan variasi
-                    weight = max(1, min(6, int(rng.normal(4.0, 0.8))))
+                    # Portfolio adds have higher weights with some being very high
+                    if user_rng.random() < 0.8:  # 80% regular adds
+                        weight = max(1, min(5, int(user_rng.normal(3.5, 0.7))))
+                    else:  # 20% high conviction adds
+                        weight = max(1, min(7, int(user_rng.normal(5.0, 1.0))))
                 else:  # research
-                    # Research memiliki bobot medium-high
-                    weight = max(1, min(5, int(rng.normal(2.5, 0.6))))
+                    # Research has varied weights depending on depth
+                    depth = user_rng.choice(['shallow', 'medium', 'deep'], p=[0.3, 0.5, 0.2])
+                    if depth == 'shallow':
+                        weight = max(1, min(3, int(user_rng.normal(2.0, 0.5))))
+                    elif depth == 'medium':
+                        weight = max(1, min(4, int(user_rng.normal(3.0, 0.7))))
+                    else:  # deep
+                        weight = max(1, min(6, int(user_rng.normal(4.5, 1.0))))
                 
-                # Timestamp realistis - distribusi acak dalam 30 hari terakhir
-                days_ago = int(rng.integers(0, 30))
-                random_seconds = int(rng.integers(0, 86400))  # Detik dalam sehari
-                interaction_time = datetime.now() - timedelta(days=days_ago, seconds=random_seconds)
+                # Get timestamp for this interaction
+                if interaction_idx < len(timestamps):
+                    interaction_time = timestamps[interaction_idx]
+                else:
+                    # Fallback if not enough timestamps
+                    days_ago = int(user_rng.integers(0, max_days_ago))
+                    random_seconds = int(user_rng.integers(0, 86400))
+                    interaction_time = datetime.now() - timedelta(days=int(days_ago), seconds=int(random_seconds))
                 
-                # Tambahkan ke interaksi
+                # Add to interactions
                 interactions.append({
                     'user_id': f"user_{user_id}",
-                    'project_id': selected_project['id'],
+                    'project_id': selected_project,
                     'interaction_type': interaction_type,
                     'weight': weight,
                     'timestamp': interaction_time.isoformat()
                 })
-        
-        # Buat DataFrame
+            
+        # Create DataFrame and sort by timestamp
         interactions_df = pd.DataFrame(interactions)
         
-        # Sortir berdasarkan timestamp untuk simulasi aliran interaksi yang natural
-        interactions_df = interactions_df.sort_values('timestamp')
+        if not interactions_df.empty:
+            # Convert timestamp to datetime for sorting
+            interactions_df['timestamp'] = pd.to_datetime(interactions_df['timestamp'])
+            interactions_df = interactions_df.sort_values('timestamp')
+            # Convert back to string format
+            interactions_df['timestamp'] = interactions_df['timestamp'].dt.strftime('%Y-%m-%dT%H:%M:%S')
         
         return interactions_df
     
