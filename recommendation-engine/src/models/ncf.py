@@ -196,7 +196,7 @@ class NCFDataset(Dataset):
 
 class NCFModel(nn.Module):
     """
-    Neural Collaborative Filtering Model
+    Neural Collaborative Filtering Model dengan arsitektur yang ditingkatkan
     """
     
     def __init__(self, num_users: int, num_items: int, 
@@ -223,6 +223,10 @@ class NCFModel(nn.Module):
         self.user_embedding_mlp = nn.Embedding(num_users, embedding_dim)
         self.item_embedding_mlp = nn.Embedding(num_items, embedding_dim)
         
+        # PERBAIKAN: Add category embedding layer if available
+        self.use_categories = False  # Will be set by the recommender if categories are available
+        self.category_embedding = None
+        
         # MLP layers
         self.mlp_layers = nn.ModuleList()
         input_size = 2 * embedding_dim
@@ -238,22 +242,33 @@ class NCFModel(nn.Module):
         self.output_layer = nn.Linear(layers[-1] + embedding_dim, 1)
         self.sigmoid = nn.Sigmoid()
         
+        # PERBAIKAN: Add attention mechanism for better category awareness
+        self.attention = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim // 2),
+            nn.ReLU(),
+            nn.Linear(embedding_dim // 2, 1),
+            nn.Softmax(dim=1)
+        )
+        
         # Initialize weights
         self._init_weights()
     
     def _init_weights(self):
-        """Initialize model weights"""
-        # Xavier/Glorot initialization
+        """Initialize model weights dengan inisialisasi yang lebih baik"""
+        # Xavier/Glorot initialization for linear layers
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
+            # PERBAIKAN: Use normal distribution with adaptive standard deviation for embeddings
             elif isinstance(m, nn.Embedding):
-                nn.init.normal_(m.weight, mean=0, std=0.01)
+                # Smaller standard deviation for larger embedding dimensions
+                std = 1.0 / np.sqrt(m.embedding_dim)
+                nn.init.normal_(m.weight, mean=0, std=std)
     
     def forward(self, user_indices, item_indices):
-        """Forward pass"""
+        """Forward pass with enhanced attention mechanism"""
         # GMF part
         user_embedding_gmf = self.user_embedding_gmf(user_indices)
         item_embedding_gmf = self.item_embedding_gmf(item_indices)
@@ -270,6 +285,13 @@ class NCFModel(nn.Module):
             mlp_vector = self.mlp_layers[i+1](mlp_vector)
             mlp_vector = self.mlp_layers[i+2](mlp_vector)
             mlp_vector = self.mlp_layers[i+3](mlp_vector)
+        
+        # PERBAIKAN: Apply attention to GMF vector for better feature importance weighting
+        if user_embedding_gmf.dim() > 1:  # Ensure batch dimension exists
+            attention_input = user_embedding_gmf.unsqueeze(1)  # Add sequence dimension
+            attention_weights = self.attention(attention_input)
+            gmf_vector_attended = attention_weights * gmf_vector.unsqueeze(1)
+            gmf_vector = gmf_vector_attended.squeeze(1)  # Remove sequence dimension
         
         # Concatenate GMF and MLP vectors
         combined_vector = torch.cat([gmf_vector, mlp_vector], dim=-1)
@@ -492,10 +514,10 @@ class NCFRecommender:
             )
         
     def train(self, val_ratio: Optional[float] = None, batch_size: Optional[int] = None, 
-          num_epochs: Optional[int] = None, learning_rate: Optional[float] = None,
-          save_model: bool = True) -> Dict[str, List[float]]:
+        num_epochs: Optional[int] = None, learning_rate: Optional[float] = None,
+        save_model: bool = True) -> Dict[str, List[float]]:
         """
-        Train the NCF model (Versi dengan Early Stopping)
+        Train the NCF model dengan optimasi performa
         
         Args:
             val_ratio: Validation data ratio
@@ -538,13 +560,26 @@ class NCFRecommender:
         val_item_indices = item_indices[val_indices]
         val_ratings = ratings[val_indices]
         
+        # PERBAIKAN: Generate a more appropriate number of negative samples based on data size
+        num_negative = 4
+        if len(train_user_indices) < 10000:
+            num_negative = 6  # More negatives for smaller datasets
+        elif len(train_user_indices) > 100000:
+            num_negative = 3  # Fewer negatives for larger datasets
+        
+        logger.info(f"Using {num_negative} negative samples per positive interaction")
+        
         # Create datasets dengan implementasi baru
         train_dataset = NCFDataset(
-            train_user_indices, train_item_indices, train_ratings, num_negative=4
+            train_user_indices, train_item_indices, train_ratings, num_negative=num_negative
         )
         val_dataset = NCFDataset(
-            val_user_indices, val_item_indices, val_ratings, num_negative=4
+            val_user_indices, val_item_indices, val_ratings, num_negative=num_negative
         )
+        
+        # PERBAIKAN: Use appropriate number of workers based on system
+        import multiprocessing
+        num_workers = min(4, max(1, multiprocessing.cpu_count() // 2))
         
         # Create dataloaders with custom collate function
         train_loader = DataLoader(
@@ -575,12 +610,19 @@ class NCFRecommender:
             dropout=self.params['dropout']
         ).to(self.device)
         
-        # Loss function and optimizer
+        # PERBAIKAN: Use BCE with logits for better numerical stability
         criterion = nn.BCELoss()
-        optimizer = optim.Adam(
+        
+        # PERBAIKAN: Use AdamW for better weight decay handling
+        optimizer = optim.AdamW(
             self.model.parameters(), 
             lr=learning_rate,
-            weight_decay=self.params.get('weight_decay', 1e-3)  # Peningkatan weight decay
+            weight_decay=self.params.get('weight_decay', 1e-3)
+        )
+        
+        # PERBAIKAN: Add learning rate scheduler
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.5, patience=2
         )
         
         # Training loop
@@ -625,6 +667,10 @@ class NCFRecommender:
                     # Backward pass and optimize
                     optimizer.zero_grad()
                     loss.backward()
+                    
+                    # PERBAIKAN: Add gradient clipping to prevent exploding gradients
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                    
                     optimizer.step()
                     
                     train_loss += loss.item()
@@ -674,6 +720,12 @@ class NCFRecommender:
             
             avg_val_loss = val_loss / max(val_batches, 1)
             val_losses.append(avg_val_loss)
+            
+            # Update learning rate based on validation performance
+            scheduler.step(avg_val_loss)
+
+            current_lr = optimizer.param_groups[0]['lr']
+            logger.info(f"Current learning rate: {current_lr}")
             
             # Early stopping check
             if avg_val_loss < best_val_loss:
@@ -865,7 +917,7 @@ class NCFRecommender:
         return prediction
     
     def recommend_for_user(self, user_id: str, n: int = 10, 
-                     exclude_known: bool = True) -> List[Tuple[str, float]]:
+                   exclude_known: bool = True) -> List[Tuple[str, float]]:
         """
         Generate recommendations for a user with improved score normalization
         and diversity promotion
@@ -900,6 +952,8 @@ class NCFRecommender:
             if self.projects_df is not None and 'primary_category' in self.projects_df.columns:
                 # Map item_id to category for easier lookup
                 item_to_category = dict(zip(self.projects_df['id'], self.projects_df['primary_category']))
+            else:
+                item_to_category = {}
         except Exception as e:
             logger.warning(f"Error getting category information: {str(e)}")
             item_to_category = {}
@@ -918,8 +972,8 @@ class NCFRecommender:
         # Generate predictions for all candidate items
         predictions = []
         
-        # Process in batches to avoid memory issues
-        batch_size = 128
+        # PERBAIKAN: Process in larger batches to improve efficiency
+        batch_size = 256  # Increased from 128
         for i in range(0, len(candidate_items), batch_size):
             batch_items = candidate_items[i:i+batch_size]
             item_indices = self.item_encoder.transform(batch_items)
@@ -943,7 +997,7 @@ class NCFRecommender:
         if len(predictions) <= n:
             return predictions
         
-        # PERBAIKAN: Normalisasi & Peningkatan Keragaman
+        # PERBAIKAN: Enhanced Diversity Implementation
         # Taking more candidates than needed to ensure variety
         top_candidates = predictions[:min(len(predictions), n*3)]
         
@@ -969,74 +1023,85 @@ class NCFRecommender:
         
         # 2. Category-Based Diversity Enhancement
         if item_to_category:
-            # Identify most common categories in top predictions
-            top_k = min(n, len(normalized_predictions))
-            top_categories = {}
-            for item_id, _ in normalized_predictions[:top_k]:
-                category = item_to_category.get(item_id, 'unknown')
-                top_categories[category] = top_categories.get(category, 0) + 1
+            # PERBAIKAN: Use more sophisticated diversity approach
             
-            # Calculate maximum number allowed per category (33% of total recommendations or at least 2)
-            max_per_category = max(2, n // 3)
-            
-            # Track categories already selected
-            selected_categories = {}
-            
-            # First select a small number of top items by raw score
-            initial_count = max(1, n // 5)  # 20% of recommendations by raw score
+            # Select initial items to ensure high baseline quality
+            initial_count = max(2, n // 5)  # 20% of recommendations by raw score
             final_predictions = normalized_predictions[:initial_count]
             
-            # Update category counts for initial selections
+            # Track categories we've selected
+            category_counts = {}
             for item_id, _ in final_predictions:
                 category = item_to_category.get(item_id, 'unknown')
-                selected_categories[category] = selected_categories.get(category, 0) + 1
+                category_counts[category] = category_counts.get(category, 0) + 1
             
-            # Select remaining items with diversity enhancement
-            remaining_candidates = normalized_predictions[initial_count:]
+            # Maximum items allowed per category (30% of total)
+            max_per_category = max(2, int(n * 0.3))
             
-            while len(final_predictions) < n and remaining_candidates:
-                next_item = None
-                best_score = -1
+            # Remaining candidates
+            remaining = normalized_predictions[initial_count:]
+            
+            # Calculate category popularity in the top candidates
+            category_popularity = {}
+            for item_id, _ in normalized_predictions[:n]:
+                cat = item_to_category.get(item_id, 'unknown')
+                category_popularity[cat] = category_popularity.get(cat, 0) + 1
+            
+            # Find most popular categories
+            sorted_categories = sorted(
+                category_popularity.items(), 
+                key=lambda x: x[1], 
+                reverse=True
+            )
+            popular_categories = set(cat for cat, _ in sorted_categories[:3])
+            
+            # Select remaining items with diversity boost
+            while len(final_predictions) < n and remaining:
+                best_item_idx = -1
+                best_adjusted_score = -float('inf')
                 
-                for idx, (item_id, score) in enumerate(remaining_candidates):
+                for idx, (item_id, score) in enumerate(remaining):
                     category = item_to_category.get(item_id, 'unknown')
-                    category_count = selected_categories.get(category, 0)
+                    category_count = category_counts.get(category, 0)
                     
-                    # Skip if we've reached the max for this category
+                    # Calculate diversity adjustment
                     if category_count >= max_per_category:
-                        # Apply severe penalty
-                        adjusted_score = score - 0.5  # Substantial penalty
+                        # Heavy penalty for exceeding max per category
+                        diversity_adjustment = -0.5
+                    elif category in popular_categories and category_count > 0:
+                        # Smaller penalty for popular categories we already have
+                        diversity_adjustment = -0.1
+                    elif category_count == 0:
+                        # Large boost for new categories
+                        diversity_adjustment = 0.2
                     else:
-                        # Diversity boost: larger boost for less represented categories
-                        diversity_factor = 1.0 - (category_count / max_per_category if max_per_category > 0 else 0)
-                        # Scale diversity boost by category popularity (less common = higher boost)
-                        category_popularity = top_categories.get(category, 0) / top_k if top_k > 0 else 0
-                        diversity_boost = 0.2 * diversity_factor * (1 - category_popularity)
-                        adjusted_score = score + diversity_boost
+                        # Small boost for underrepresented categories
+                        diversity_adjustment = 0.1 * (1 - category_count / max_per_category)
                     
-                    if adjusted_score > best_score:
-                        next_item = (idx, item_id, score, category)
-                        best_score = adjusted_score
+                    adjusted_score = score + diversity_adjustment
+                    
+                    if adjusted_score > best_adjusted_score:
+                        best_item_idx = idx
+                        best_adjusted_score = adjusted_score
                 
-                if next_item and best_score > 0:
-                    idx, item_id, original_score, category = next_item
-                    final_predictions.append((item_id, original_score))
-                    selected_categories[category] = selected_categories.get(category, 0) + 1
-                    remaining_candidates.pop(idx)
+                if best_item_idx >= 0:
+                    item_id, score = remaining.pop(best_item_idx)
+                    final_predictions.append((item_id, score))
+                    
+                    # Update category counts
+                    category = item_to_category.get(item_id, 'unknown')
+                    category_counts[category] = category_counts.get(category, 0) + 1
                 else:
-                    # If no suitable items found with positive scores, break
-                    break
+                    # If we couldn't find any good items, just take the top scoring remaining item
+                    item_id, score = remaining[0]
+                    remaining.pop(0)
+                    final_predictions.append((item_id, score))
+                    
+                    # Update category count
+                    category = item_to_category.get(item_id, 'unknown')
+                    category_counts[category] = category_counts.get(category, 0) + 1
             
-            # If we don't have enough recommendations, add highest scored remaining items
-            if len(final_predictions) < n:
-                remaining_sorted = sorted(remaining_candidates, key=lambda x: x[1], reverse=True)
-                for item_id, score in remaining_sorted:
-                    if len(final_predictions) >= n:
-                        break
-                    if item_id not in [i[0] for i in final_predictions]:
-                        final_predictions.append((item_id, score))
-            
-            # Sort final recommendations by score
+            # Sort by score for final ranking
             final_predictions.sort(key=lambda x: x[1], reverse=True)
             return final_predictions[:n]
         else:

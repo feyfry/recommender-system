@@ -150,7 +150,7 @@ class FeatureEnhancedCF:
     
     def _create_item_features(self) -> csr_matrix:
         """
-        Create item features matrix from features dataframe
+        Create item features matrix from features dataframe with enhanced weighting
         
         Returns:
             csr_matrix: Item features matrix
@@ -196,7 +196,7 @@ class FeatureEnhancedCF:
     
     def train(self, save_model: bool = True) -> Dict[str, float]:
         """
-        Train the Feature-Enhanced CF model using SVD
+        Train the Feature-Enhanced CF model using SVD with enhanced content features
         
         Args:
             save_model: Whether to save the model after training
@@ -221,13 +221,15 @@ class FeatureEnhancedCF:
             # Compute item-item similarity matrix using item factors
             self.item_similarity_matrix = cosine_similarity(item_factors)
             
-            # Optionally enhance with content features
+            # PERBAIKAN: Enhance with content features with increased weighting
             if self._item_features is not None:
-                logger.info("Enhancing with content features")
+                logger.info("Enhancing with content features (increased weight)")
                 content_similarity = cosine_similarity(self._item_features)
                 
-                # Combine collaborative and content similarities
-                alpha = 0.6  # Weight for collaborative filtering
+                # PERBAIKAN: Reduce alpha to give more weight to content features
+                # Change from 0.6 (60% collaborative, 40% content) to 0.5 (50-50 split)
+                alpha = 0.5  # Reduced from 0.6 to give content features more influence
+                
                 self.item_similarity_matrix = (
                     alpha * self.item_similarity_matrix + 
                     (1 - alpha) * content_similarity
@@ -342,8 +344,8 @@ class FeatureEnhancedCF:
     def recommend_for_user(self, user_id: str, n: int = 10, 
                  exclude_known: bool = True) -> List[Tuple[str, float]]:
         """
-        Generate recommendations for a user with improved debugging
-        and score normalization
+        Generate recommendations for a user with improved debugging,
+        score normalization and diversity enhancements
         
         Args:
             user_id: User ID
@@ -363,12 +365,16 @@ class FeatureEnhancedCF:
             return self._get_cold_start_recommendations(n)
             
         # Get user's ratings
-        user_ratings = self.user_item_matrix.loc[user_id]
+        user_ratings = self.user_item_matrix.loc[user_id].copy()  # Make explicit copy
+        
+        # PERBAIKAN: Selalu dapatkan positive_indices
+        # Dapatkan semua item dengan rating positif
+        positive_indices = user_ratings.index[user_ratings > 0].tolist()
         
         # Get known items to exclude
         known_items = set()
         if exclude_known:
-            known_items = set(user_ratings[user_ratings > 0].index)
+            known_items = set(positive_indices)
             logger.debug(f"User {user_id} has {len(known_items)} known items to exclude")
             
         # Get all items
@@ -388,13 +394,16 @@ class FeatureEnhancedCF:
             
             # Calculate weighted sum of similarities with user's rated items
             score = 0
-            for rated_item, rating in user_ratings[user_ratings > 0].items():
+            
+            # PERBAIKAN: Gunakan metode yang lebih aman untuk item positif
+            for rated_item in positive_indices:
                 if rated_item not in self._item_mapping:
                     continue
                     
                 rated_idx = self._item_mapping[rated_item]
+                rating_value = float(user_ratings[rated_item])  # Explicit conversion
                 similarity = self.item_similarity_matrix[item_idx, rated_idx]
-                score += similarity * rating
+                score += similarity * rating_value
                 
             scores.append((item_id, score))
             
@@ -727,58 +736,31 @@ class FeatureEnhancedCF:
         # Filter projects by categories if interests are provided
         if user_interests and 'primary_category' in self.projects_df.columns:
             # Filter projects by category
-            filtered_projects = self.projects_df[
-                self.projects_df['primary_category'].isin(user_interests)
-            ]
+            mask = self.projects_df['primary_category'].isin(user_interests)
+            filtered_projects = self.projects_df[mask].copy()  # Make an explicit copy
             
             # If not enough projects match the interests, include some popular projects 
             # from other categories to ensure diversity
             if len(filtered_projects) < n * 1.5:
                 # Get popular projects not in the filtered categories
-                other_popular = self.projects_df[
-                    ~self.projects_df['primary_category'].isin(user_interests)
-                ].sort_values('popularity_score', ascending=False).head(n)
+                other_mask = ~self.projects_df['primary_category'].isin(user_interests)
+                other_popular = self.projects_df[other_mask].sort_values('popularity_score', ascending=False).head(n).copy()
                 
                 # Combine with filtered projects, prioritizing user interests
                 filtered_projects = pd.concat([filtered_projects, other_popular])
         else:
-            # PERBAIKAN: Pendekatan kategori yang lebih seimbang
-            category_counts = self.projects_df['primary_category'].value_counts()
-            major_categories = category_counts[category_counts >= 3].index.tolist()
-            
-            # Ambil beberapa proyek teratas dari setiap kategori utama
-            balanced_projects = []
-            projects_per_category = max(2, (n*2) // len(major_categories))
-            
-            for category in major_categories:
-                # Ambil proyek dari kategori ini
-                category_projects = self.projects_df[self.projects_df['primary_category'] == category]
-                
-                # Urutkan berdasarkan popularitas jika tersedia
-                if 'popularity_score' in category_projects.columns:
-                    category_projects = category_projects.sort_values('popularity_score', ascending=False)
-                
-                # Ambil proyek teratas dari kategori ini
-                top_category_projects = category_projects.head(projects_per_category)
-                balanced_projects.append(top_category_projects)
-            
-            # Gabungkan semua pilihan kategori
-            if balanced_projects:
-                filtered_projects = pd.concat(balanced_projects)
-            else:
-                # Gunakan semua proyek jika tidak ada kategori utama
-                filtered_projects = self.projects_df
+            # PERBAIKAN: Buat salinan DataFrame untuk menghindari SettingWithCopyWarning
+            filtered_projects = self.projects_df.copy()
         
-        # Sort by popularity and trend scores with a balance between them
+        # Sort by popularity and trend scores
         if 'popularity_score' in filtered_projects.columns and 'trend_score' in filtered_projects.columns:
-            # PERBAIKAN: Perhitungan skor yang lebih seimbang
-            # Gunakan kombinasi skor popularitas dan tren dengan bobot yang lebih seimbang
-            filtered_projects['combined_score'] = (
+            # PERBAIKAN: Gunakan .loc untuk menghindari SettingWithCopyWarning
+            filtered_projects.loc[:, 'combined_score'] = (
                 filtered_projects['popularity_score'] * 0.6 + 
                 filtered_projects['trend_score'] * 0.4
             )
             
-            # PERBAIKAN: Implementasi penalti kategori
+            # PERBAIKAN: Implementasi penalti kategori dengan .loc
             # Hitung jumlah per kategori
             category_counts = filtered_projects['primary_category'].value_counts()
             
@@ -794,7 +776,7 @@ class FeatureEnhancedCF:
                     category_penalty[category] = 0
             
             # Terapkan penalti kategori untuk meningkatkan keragaman
-            filtered_projects['diversity_adjusted_score'] = filtered_projects.apply(
+            filtered_projects.loc[:, 'diversity_adjusted_score'] = filtered_projects.apply(
                 lambda row: row['combined_score'] * (1 - category_penalty.get(row['primary_category'], 0)),
                 axis=1
             )

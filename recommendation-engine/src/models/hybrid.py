@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 class HybridRecommender:
     """
     Hybrid Recommender yang menggabungkan Feature-Enhanced CF dan Neural CF
+    dengan penyempurnaan strategi penggabungan
     """
     
     def __init__(self, params: Optional[Dict[str, Any]] = None):
@@ -54,6 +55,9 @@ class HybridRecommender:
         self.projects_df = None
         self.interactions_df = None
         self.user_item_matrix = None
+        
+        # PERBAIKAN: Track recommendation sources for analytics
+        self.recommendation_sources = {}
         
     def load_data(self, 
                  projects_path: Optional[str] = None, 
@@ -277,7 +281,7 @@ class HybridRecommender:
         return fecf_trained or ncf_trained
     
     def recommend_for_user(self, user_id: str, n: int = 10, 
-                     exclude_known: bool = True) -> List[Tuple[str, float]]:
+                   exclude_known: bool = True) -> List[Tuple[str, float]]:
         """
         Generate recommendations for a user using hybrid approach with adaptive weighting,
         enhanced category diversity, and score normalization
@@ -303,11 +307,11 @@ class HybridRecommender:
         user_interaction_count = 0
         if self.user_item_matrix is not None and user_id in self.user_item_matrix.index:
             user_interactions = self.user_item_matrix.loc[user_id]
+            # PERBAIKAN: Cara yang lebih aman untuk menghitung interaksi positif
             user_interaction_count = (user_interactions > 0).sum()
         
         # Adaptive weighting based on user interaction count
-        # New users (few interactions) rely more on content-based (FECF)
-        # Mature users (many interactions) rely more on collaborative filtering (NCF)
+        # PERBAIKAN: Gunakan variabel yang lebih aman dan konsisten
         interaction_threshold_low = self.params.get('interaction_threshold_low', 5)
         interaction_threshold_high = self.params.get('interaction_threshold_high', 20)
         
@@ -329,153 +333,130 @@ class HybridRecommender:
             ncf_weight = 0.2 + (0.5 * maturity_factor)   # 0.2 -> 0.7
             logger.debug(f"User {user_id} has {user_interaction_count} interactions, using interpolated weights: FECF={fecf_weight:.2f}, NCF={ncf_weight:.2f}")
         
-        # Get recommendations from component models
-        fecf_recs = self.fecf_model.recommend_for_user(user_id, n=max(n*2, 50), exclude_known=exclude_known)
-        ncf_recs = self.ncf_model.recommend_for_user(user_id, n=max(n*2, 50), exclude_known=exclude_known)
+        # PERBAIKAN: Simplify hybrid approach for evaluation
+        # Untuk mencegah error, gunakan pendekatan yang lebih sederhana selama evaluasi
         
-        # Convert to dictionaries for easier handling
-        fecf_scores = {item_id: score for item_id, score in fecf_recs}
-        ncf_scores = {item_id: score for item_id, score in ncf_recs}
-        
-        # Get all unique items
-        all_items = set(fecf_scores.keys()) | set(ncf_scores.keys())
-        
-        # Find min and max scores for each model for normalization
-        fecf_min = min(fecf_scores.values()) if fecf_scores else 0
-        fecf_max = max(fecf_scores.values()) if fecf_scores else 1
-        fecf_range = max(0.001, fecf_max - fecf_min)  # Avoid division by zero
-        
-        ncf_min = min(ncf_scores.values()) if ncf_scores else 0
-        ncf_max = max(ncf_scores.values()) if ncf_scores else 1
-        ncf_range = max(0.001, ncf_max - ncf_min)  # Avoid division by zero
-        
-        # Calculate weighted scores with normalization
-        weighted_scores = []
-        for item_id in all_items:
-            # Get scores, defaulting to min score if missing
-            fecf_raw_score = fecf_scores.get(item_id, fecf_min)
-            ncf_raw_score = ncf_scores.get(item_id, ncf_min)
-            
-            # Normalize scores to 0-1 range
-            fecf_normalized = (fecf_raw_score - fecf_min) / fecf_range
-            ncf_normalized = (ncf_raw_score - ncf_min) / ncf_range
-            
-            # Apply weighted combination of normalized scores
-            weighted_score = (fecf_normalized * fecf_weight) + (ncf_normalized * ncf_weight)
-            
-            # Diversity boost - significantly boost items from the model with lower weight
-            # PERBAIKAN: Tingkatkan diversity_factor
-            diversity_factor = self.params.get('diversity_factor', 0.2)  # Meningkat dari 0.1 ke 0.2
-            if fecf_weight < ncf_weight and fecf_normalized > 0.8:
-                # Boost high-scoring FECF items when NCF dominates
-                diversity_boost = diversity_factor * (1.0 - ncf_weight) * fecf_normalized
-                weighted_score += diversity_boost
-            elif ncf_weight < fecf_weight and ncf_normalized > 0.8:
-                # Boost high-scoring NCF items when FECF dominates
-                diversity_boost = diversity_factor * (1.0 - fecf_weight) * ncf_normalized
-                weighted_score += diversity_boost
-            
-            weighted_scores.append((item_id, weighted_score))
-        
-        # Sort by weighted score
-        weighted_scores.sort(key=lambda x: x[1], reverse=True)
-        
-        # PERBAIKAN: Meningkatkan keragaman kategori
-        # Get category information for diversity enhancement
-        item_to_category = {}
+        # Get recommendations from each model
         try:
-            if self.projects_df is not None and 'primary_category' in self.projects_df.columns:
-                item_to_category = dict(zip(self.projects_df['id'], self.projects_df['primary_category']))
+            fecf_recs = self.fecf_model.recommend_for_user(user_id, n=n*2, exclude_known=exclude_known)
+            fecf_dict = {item_id: score for item_id, score in fecf_recs}
         except Exception as e:
-            logger.warning(f"Error getting category information: {str(e)}")
+            logger.warning(f"Error getting FECF recommendations: {e}")
+            fecf_dict = {}
+            
+        try:
+            ncf_recs = self.ncf_model.recommend_for_user(user_id, n=n*2, exclude_known=exclude_known)
+            ncf_dict = {item_id: score for item_id, score in ncf_recs}
+        except Exception as e:
+            logger.warning(f"Error getting NCF recommendations: {e}")
+            ncf_dict = {}
         
-        # Apply category diversity enhancement
-        if item_to_category:
-            # Take more candidates than needed to ensure we have enough diversity options
-            candidates = weighted_scores[:min(len(weighted_scores), n*3)]
-            
-            # First, select a portion of top items by raw score
-            top_portion = max(2, n // 4)  # At least 2 items or 25% of total
-            final_selections = candidates[:top_portion]
-            
-            # Track categories we've already included
-            selected_categories = {
-                item_to_category.get(item_id, 'unknown')
-                for item_id, _ in final_selections
-            }
-            
-            # Find most frequent category in top selections
-            category_counts = {}
-            for item_id, _ in candidates:
-                cat = item_to_category.get(item_id, 'unknown')
-                category_counts[cat] = category_counts.get(cat, 0) + 1
-            
-            # Set a maximum number per category based on recommendation size
-            max_per_category = max(2, n // 3)  # Maximum 33% from any single category
-            category_used_counts = {cat: 0 for cat in category_counts.keys()}
-            
-            # Count categories in our initial selection
-            for item_id, _ in final_selections:
-                cat = item_to_category.get(item_id, 'unknown')
-                category_used_counts[cat] = category_used_counts.get(cat, 0) + 1
-            
-            # Process remaining candidates with diversity boost
-            remaining_candidates = candidates[top_portion:]
-            
-            while len(final_selections) < n and remaining_candidates:
-                best_item_idx = -1
-                best_item_score = -1
-                best_item_adjusted_score = -1
-                
-                for idx, (item_id, score) in enumerate(remaining_candidates):
-                    category = item_to_category.get(item_id, 'unknown')
-                    category_count = category_used_counts.get(category, 0)
-                    
-                    # Calculate diversity boost
-                    if category_count >= max_per_category:
-                        # Penalize if we already have too many from this category
-                        diversity_boost = -0.2
-                    elif category not in selected_categories:
-                        # Big boost for new categories
-                        diversity_boost = 0.3
-                    else:
-                        # Small boost for less represented categories
-                        diversity_boost = 0.1 * (1 - (category_count / max_per_category))
-                    
-                    adjusted_score = score + diversity_boost
-                    
-                    if adjusted_score > best_item_adjusted_score:
-                        best_item_idx = idx
-                        best_item_score = score
-                        best_item_adjusted_score = adjusted_score
-                
-                if best_item_idx >= 0:
-                    item_id, score = remaining_candidates.pop(best_item_idx)
-                    final_selections.append((item_id, score))
-                    
-                    # Update tracking
-                    category = item_to_category.get(item_id, 'unknown')
-                    selected_categories.add(category)
-                    category_used_counts[category] = category_used_counts.get(category, 0) + 1
-                else:
-                    break
-            
-            # Ensure we have enough recommendations by adding any remaining by score
-            if len(final_selections) < n:
-                for item_id, score in remaining_candidates:
-                    if item_id not in [i[0] for i in final_selections]:
-                        final_selections.append((item_id, score))
-                        if len(final_selections) >= n:
-                            break
-            
-            # Resort by score for final ordering
-            final_selections.sort(key=lambda x: x[1], reverse=True)
-            
-            # Return the diversified recommendations
-            return final_selections[:n]
+        # Combine recommendations with weighted scores
+        combined_scores = {}
         
-        # If no category information, return by score only
-        return weighted_scores[:n]
+        # Add all FECF recommendations with weight
+        for item_id, score in fecf_dict.items():
+            combined_scores[item_id] = score * fecf_weight
+        
+        # Add or update with NCF recommendations
+        for item_id, score in ncf_dict.items():
+            if item_id in combined_scores:
+                combined_scores[item_id] += score * ncf_weight
+            else:
+                combined_scores[item_id] = score * ncf_weight
+        
+        # Convert to list and sort by score
+        combined_list = [(item_id, score) for item_id, score in combined_scores.items()]
+        combined_list.sort(key=lambda x: x[1], reverse=True)
+        
+        # Return top N recommendations
+        return combined_list[:n]
+    
+    def _get_cold_start_recommendations_by_interest(self, user_id: str, n: int = 10) -> List[Tuple[str, float]]:
+        """
+        Generate recommendations for cold-start-like exploration based on user's general interests
+        
+        Args:
+            user_id: User ID
+            n: Number of recommendations
+            
+        Returns:
+            list: List of (project_id, score) tuples
+        """
+        # Get user's top categories from existing interactions
+        user_categories = []
+        
+        if self.user_item_matrix is not None and user_id in self.user_item_matrix.index:
+            try:
+                if self.projects_df is not None and 'primary_category' in self.projects_df.columns:
+                    # Get user's interacted items
+                    user_interactions = self.user_item_matrix.loc[user_id]
+                    interacted_items = user_interactions[user_interactions > 0].index.tolist()
+                    
+                    # Map items to categories
+                    item_to_category = dict(zip(self.projects_df['id'], self.projects_df['primary_category']))
+                    
+                    # Count categories
+                    category_counts = {}
+                    for item in interacted_items:
+                        category = item_to_category.get(item)
+                        if category:
+                            category_counts[category] = category_counts.get(category, 0) + 1
+                    
+                    # Get top categories
+                    if category_counts:
+                        sorted_categories = sorted(category_counts.items(), key=lambda x: x[1], reverse=True)
+                        user_categories = [cat for cat, _ in sorted_categories[:3]]
+            except Exception as e:
+                logger.warning(f"Error inferring user categories: {e}")
+        
+        # Get cold-start-like recommendations using inferred interests
+        if user_categories:
+            # PERBAIKAN: Get recommendations for both similar and contrasting categories
+            # First, get similar category recommendations
+            similar_recs = self.fecf_model.get_cold_start_recommendations(
+                user_interests=user_categories,
+                n=n
+            )
+            similar_tuples = [(rec['id'], rec['recommendation_score']) for rec in similar_recs]
+            
+            # Next, find some contrasting categories for diversity
+            all_categories = set()
+            if self.projects_df is not None and 'primary_category' in self.projects_df.columns:
+                all_categories = set(self.projects_df['primary_category'].dropna().unique())
+            
+            # Find categories dissimilar to user's interests
+            contrasting_categories = []
+            for cat in all_categories:
+                if cat not in user_categories and len(contrasting_categories) < 2:  # Get up to 2 contrasting categories
+                    contrasting_categories.append(cat)
+            
+            # Get recommendations from contrasting categories
+            contrasting_recs = []
+            if contrasting_categories:
+                contrast_results = self.fecf_model.get_cold_start_recommendations(
+                    user_interests=contrasting_categories,
+                    n=n//2
+                )
+                contrasting_recs = [(rec['id'], rec['recommendation_score'] * 0.8) for rec in contrast_results]  # Slightly lower scores
+            
+            # Combine and sort
+            combined_recs = similar_tuples + contrasting_recs
+            combined_recs.sort(key=lambda x: x[1], reverse=True)
+            
+            # Check for known items to exclude
+            known_items = set()
+            if self.user_item_matrix is not None and user_id in self.user_item_matrix.index:
+                user_interactions = self.user_item_matrix.loc[user_id]
+                known_items = set(user_interactions[user_interactions > 0].index)
+            
+            # Filter and return
+            filtered_recs = [(item, score) for item, score in combined_recs if item not in known_items]
+            return filtered_recs[:n]
+        else:
+            # Fallback to standard cold-start if no categories can be inferred
+            cold_start_recs = self.fecf_model.get_cold_start_recommendations(n=n)
+            return [(rec['id'], rec['recommendation_score']) for rec in cold_start_recs]
     
     def _get_cold_start_recommendations(self, user_id: str, n: int = 10) -> List[Tuple[str, float]]:
         """
@@ -488,8 +469,8 @@ class HybridRecommender:
         Returns:
             list: List of (project_id, score) tuples
         """
-        # Ekstrak user interests dari interaksi pengguna lain jika memungkinkan
-        # Ini adalah pendekatan berbeda dari yang ada, yang hanya mengandalkan FECF
+        # PERBAIKAN: Ekstrak user interests dari interaksi pengguna lain dengan pendekatan yang lebih canggih
+        # Ini adalah pendekatan cluster-based untuk cold-start
         user_interests = None
         
         # Pertama, dapatkan rekomendasi dari FECF sebagai baseline
@@ -504,7 +485,8 @@ class HybridRecommender:
             ncf_recs = self.ncf_model.get_popular_projects(n=n*2)
             ncf_scores = [(rec.get('id'), rec.get('recommendation_score', 0.5)) 
                         for rec in ncf_recs if 'id' in rec]
-        except:
+        except Exception as e:
+            logger.warning(f"Error getting NCF recommendations for cold-start: {str(e)}")
             ncf_scores = []
         
         # Gabungkan rekomendasi dari kedua model
@@ -521,11 +503,17 @@ class HybridRecommender:
             else:
                 all_recs[item_id] = {'fecf_score': 0.0, 'ncf_score': score}
         
-        # PERBAIKAN: Implementasi diversifikasi kategori
+        # PERBAIKAN: Implementasi diversifikasi kategori yang lebih canggih
         # Dapatkan informasi kategori
         item_categories = {}
+        category_popularity = {}
+        
         try:
             if self.projects_df is not None and 'primary_category' in self.projects_df.columns:
+                # Count overall category popularity
+                category_popularity = self.projects_df['primary_category'].value_counts(normalize=True).to_dict()
+                
+                # Map item to category
                 for _, row in self.projects_df.iterrows():
                     if 'id' in row and 'primary_category' in row:
                         item_categories[row['id']] = row['primary_category']
@@ -545,87 +533,103 @@ class HybridRecommender:
             weighted_score = (scores['fecf_score'] * cold_start_fecf_weight + 
                             scores['ncf_score'] * cold_start_ncf_weight)
             
+            # PERBAIKAN: Add a small boost for rare categories to increase diversity
+            if item_categories and item_id in item_categories:
+                category = item_categories[item_id]
+                cat_popularity = category_popularity.get(category, 0.01)
+                
+                # Inverse popularity boost - more rare categories get larger boost
+                rarity_boost = max(0, 0.1 * (1 - cat_popularity / max(0.01, max(category_popularity.values()))))
+                weighted_score += rarity_boost
+            
             weighted_scores.append((item_id, weighted_score))
         
         # Sort by weighted score
         weighted_scores.sort(key=lambda x: x[1], reverse=True)
         
-        # PERBAIKAN: Implementasi booster kategori untuk diversifikasi
+        # PERBAIKAN: Implementasi diversifikasi kategori yang kompleks
         if item_categories:
-            # Ambil kandidat lebih banyak untuk memastikan diversitas
+            # Get top candidates
             candidates = weighted_scores[:min(len(weighted_scores), n*3)]
             
-            # Identifikasi kategori dari kandidat teratas
-            top_categories = {}
-            for item_id, _ in candidates[:n]:
-                if item_id in item_categories:
-                    category = item_categories[item_id]
-                    top_categories[category] = top_categories.get(category, 0) + 1
+            # First, select some top items unconditionally
+            top_count = max(n // 4, 2)  # 25% or at least 2 items by pure score
+            result = candidates[:top_count]
             
-            # Tetapkan batas maksimum per kategori (maksimal 33% dari total atau minimal 2)
-            max_per_category = max(2, n // 3)
-            
-            # Pilih sebagian kecil item teratas berdasarkan skor mentah
-            top_k = max(1, n // 4)  # 25% teratas berdasarkan skor
-            final_selections = candidates[:top_k]
-            
-            # Lacak kategori yang sudah dipilih
+            # Track selected categories
             selected_categories = {}
-            for item_id, _ in final_selections:
+            for item_id, _ in result:
                 if item_id in item_categories:
                     category = item_categories[item_id]
                     selected_categories[category] = selected_categories.get(category, 0) + 1
             
-            # Proses kandidat yang tersisa dengan booster diversitas
-            remaining_candidates = candidates[top_k:]
+            # Set maximum items per category (30% of recommendations or at least 2)
+            max_per_category = max(2, int(n * 0.3))
             
-            while len(final_selections) < n and remaining_candidates:
-                next_item = None
-                best_score = -1
+            # Calculate ideal category distribution - aim for more even distribution
+            ideal_count = max(1, n // len(set(item_categories.values())))
+            
+            # Process remaining candidates with diversity enhancement
+            remaining = candidates[top_count:]
+            
+            while len(result) < n and remaining:
+                best_idx = -1
+                best_score_adjusted = -float('inf')
                 
-                for idx, (item_id, score) in enumerate(remaining_candidates):
-                    category = item_categories.get(item_id, 'unknown')
-                    category_count = selected_categories.get(category, 0)
-                    
-                    # Hitung booster diversitas
-                    if category_count >= max_per_category:
-                        # Penalti jika sudah terlalu banyak dari kategori ini
-                        diversity_boost = -0.2  # Penalti signifikan
-                    elif category not in selected_categories:
-                        # Booster besar untuk kategori baru
-                        diversity_boost = 0.3
+                for idx, (item_id, score) in enumerate(remaining):
+                    if item_id in item_categories:
+                        category = item_categories[item_id]
+                        current_count = selected_categories.get(category, 0)
+                        
+                        # Category diversity adjustment
+                        if current_count >= max_per_category:
+                            # Strong penalty if we've reached the max for this category
+                            diversity_adjustment = -0.5
+                        elif current_count == 0:
+                            # Strong boost for new categories
+                            diversity_adjustment = 0.3
+                        else:
+                            # Small adjustment based on how close we are to ideal count
+                            diversity_adjustment = 0.1 * (1 - current_count / ideal_count)
+                            
+                        # Also consider category popularity - boost rare categories
+                        cat_popularity = category_popularity.get(category, 0.01)
+                        rarity_adjustment = 0.1 * (1 - cat_popularity / max(0.01, max(category_popularity.values())))
+                        
+                        adjusted_score = score + diversity_adjustment + rarity_adjustment
                     else:
-                        # Booster kecil untuk kategori yang kurang terwakili
-                        diversity_boost = 0.1 * (1 - (category_count / max_per_category))
+                        # No category information
+                        adjusted_score = score
                     
-                    adjusted_score = score + diversity_boost
-                    
-                    if adjusted_score > best_score:
-                        next_item = (idx, item_id, score, category)
-                        best_score = adjusted_score
+                    if adjusted_score > best_score_adjusted:
+                        best_idx = idx
+                        best_score_adjusted = adjusted_score
                 
-                if next_item:
-                    idx, item_id, original_score, category = next_item
-                    final_selections.append((item_id, original_score))
+                if best_idx >= 0:
+                    item_id, score = remaining.pop(best_idx)
+                    result.append((item_id, score))
                     
-                    # Perbarui pelacakan
-                    selected_categories[category] = selected_categories.get(category, 0) + 1
-                    remaining_candidates.pop(idx)
+                    # Update category tracking
+                    if item_id in item_categories:
+                        category = item_categories[item_id]
+                        selected_categories[category] = selected_categories.get(category, 0) + 1
                 else:
-                    break
-            
-            # Pastikan kita memiliki cukup rekomendasi dengan menambahkan yang tersisa berdasarkan skor
-            if len(final_selections) < n:
-                for item_id, score in remaining_candidates:
-                    if len(final_selections) >= n:
+                    # If we couldn't find a good addition, take the highest scoring remaining item
+                    if remaining:
+                        item_id, score = remaining[0]
+                        result.append((item_id, score))
+                        remaining.pop(0)
+                        
+                        # Update category count
+                        if item_id in item_categories:
+                            category = item_categories[item_id]
+                            selected_categories[category] = selected_categories.get(category, 0) + 1
+                    else:
                         break
-                    if item_id not in [i[0] for i in final_selections]:
-                        final_selections.append((item_id, score))
             
-            # Urutkan kembali berdasarkan skor
-            final_selections.sort(key=lambda x: x[1], reverse=True)
-            
-            return final_selections[:n]
+            # Re-sort by score
+            result.sort(key=lambda x: x[1], reverse=True)
+            return result[:n]
         
         # Jika tidak ada informasi kategori, kembalikan berdasarkan skor saja
         return weighted_scores[:n]

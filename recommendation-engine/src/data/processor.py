@@ -979,12 +979,13 @@ class DataProcessor:
         log_twitter = np.log1p(twitter) / np.log(1e6)  # Scale relative to 1M followers
         log_github = np.log1p(github) / np.log(1e5)  # Scale relative to 100K stars
         
-        # Weight components with more balanced weights
+        # PERBAIKAN: Weight components with more balanced weights that favor engagement metrics
+        # Increase weight of social and developer activity metrics
         popularity_score = (
-            0.35 * log_market_cap + 
-            0.25 * log_volume + 
-            0.15 * log_reddit + 
-            0.15 * log_twitter +
+            0.30 * log_market_cap +  # Reduced from 0.35
+            0.20 * log_volume +      # Reduced from 0.25
+            0.20 * log_reddit +      # Increased from 0.15
+            0.20 * log_twitter +     # Increased from 0.15
             0.10 * log_github
         )
         
@@ -1008,11 +1009,11 @@ class DataProcessor:
         price_7d_transformed = sigmoid_transform(price_7d)
         price_30d_transformed = sigmoid_transform(price_30d)
         
-        # Apply time-decay weightings (recent changes matter more)
+        # PERBAIKAN: Meningkatkan pengaruh perubahan jangka pendek untuk lebih aktual
         trend_score = (
-            0.5 * price_24h_transformed + 
-            0.3 * price_7d_transformed + 
-            0.2 * price_30d_transformed
+            0.55 * price_24h_transformed +  # Increased from 0.5
+            0.30 * price_7d_transformed +   # Same
+            0.15 * price_30d_transformed    # Reduced from 0.2
         )
         
         # Scale to 0-100 with 50 as neutral
@@ -1114,12 +1115,13 @@ class DataProcessor:
         social_score = result_df['social_engagement_score'] / 100
         desc_score = result_df['description_length'] / 100
         
-        # Calculate maturity score with more balanced weights
+        # PERBAIKAN: Calculate maturity score with more balanced weights
+        # Give higher weight to developer activity as it's a better indicator of project health
         maturity_score = (
-            0.3 * age_score + 
-            0.3 * dev_score + 
-            0.2 * social_score +
-            0.2 * desc_score
+            0.25 * age_score +        # Reduced from 0.3
+            0.35 * dev_score +        # Increased from 0.3
+            0.25 * social_score +     # Increased from 0.2
+            0.15 * desc_score         # Reduced from 0.2
         )
         
         # Scale to 0-100
@@ -1243,10 +1245,43 @@ class DataProcessor:
         interactions = []
         personas = list(USER_PERSONAS.keys())
         
+        # PERBAIKAN: Gunakan bobot dinamis berdasarkan jumlah persona
+        # Jika jumlah persona berubah, bobot akan otomatis menyesuaikan
+        num_personas = len(personas)
+        
+        # Generate base weights that sum to 1 with slightly higher weight to first few personas
+        if num_personas <= 5:
+            persona_base_weights = [0.25, 0.20, 0.30, 0.15, 0.10][:num_personas]  # Original distribution for 5 personas
+            # Atur ulang jika terlalu pendek
+            if len(persona_base_weights) < num_personas:
+                remaining = num_personas - len(persona_base_weights)
+                # Distribusikan bobot yang tersisa secara merata
+                additional_weights = [0.10 / remaining] * remaining
+                persona_base_weights.extend(additional_weights)
+        else:
+            # Distribusi untuk lebih dari 5 persona
+            # Beri bobot lebih pada 3 persona pertama (original) dan distribusikan sisanya
+            core_weights = [0.20, 0.15, 0.20]  # 55% untuk 3 persona utama
+            remaining_weight = 0.45  # 45% untuk persona lainnya
+            remaining_count = num_personas - 3
+            tail_weights = [remaining_weight / remaining_count] * remaining_count
+            persona_base_weights = core_weights + tail_weights
+        
+        # Pastikan bobot sesuai dengan jumlah persona
+        persona_base_weights = persona_base_weights[:num_personas]
+        if len(persona_base_weights) < num_personas:
+            # Jika masih kurang, tambahkan bobot default
+            persona_base_weights.extend([0.05] * (num_personas - len(persona_base_weights)))
+        
+        # Normalisasi untuk memastikan jumlahnya 1
+        persona_base_weights = np.array(persona_base_weights)
+        persona_base_weights = persona_base_weights / persona_base_weights.sum()
+        
+        logger.info(f"Using {num_personas} personas with normalized weights: {persona_base_weights}")
+        
         # Add more variability to persona distribution
         # Slightly randomize the persona weights for more realistic distribution
-        persona_base_weights = [0.25, 0.20, 0.30, 0.15, 0.10]  # Base distribution
-        persona_weights = np.array(persona_base_weights) + rng.normal(0, 0.03, len(persona_base_weights))
+        persona_weights = persona_base_weights + rng.normal(0, 0.03, len(persona_base_weights))
         persona_weights = np.clip(persona_weights, 0.05, 0.4)  # Clip to reasonable range
         persona_weights = persona_weights / persona_weights.sum()  # Normalize
         
@@ -1263,7 +1298,16 @@ class DataProcessor:
             
             # Assign persona with weighted randomness
             user_persona = user_rng.choice(personas, p=persona_weights)
+            
+            # PERBAIKAN: Tambahkan penanganan error jika persona tidak ditemukan
+            if user_persona not in USER_PERSONAS:
+                logger.warning(f"Persona {user_persona} not found in USER_PERSONAS, using default")
+                # Gunakan persona pertama sebagai fallback
+                user_persona = personas[0]
+                
             persona_data = USER_PERSONAS[user_persona]
+            
+            # Sisanya sama seperti implementasi sebelumnya
             
             # Create more realistic activity profiles with less deterministic thresholds
             # More granular activity levels
@@ -1572,6 +1616,7 @@ class DataProcessor:
                     selected_project = category_projects['id'].iloc[0]
                     selected_projects.append(selected_project)
                 
+                # PERBAIKAN: Tambahkan dukungan untuk persona baru
                 # Determine interaction type based on user persona and project characteristics
                 if user_persona == 'defi_enthusiast':
                     interaction_type_probs = {
@@ -1592,6 +1637,18 @@ class DataProcessor:
                 elif user_persona == 'risk_taker':
                     interaction_type_probs = {
                         'view': 0.3, 'favorite': 0.3, 'portfolio_add': 0.3, 'research': 0.1
+                    }
+                elif user_persona == 'tech_enthusiast':
+                    interaction_type_probs = {
+                        'view': 0.25, 'favorite': 0.2, 'portfolio_add': 0.2, 'research': 0.35
+                    }
+                elif user_persona == 'yield_farmer':
+                    interaction_type_probs = {
+                        'view': 0.2, 'favorite': 0.15, 'portfolio_add': 0.5, 'research': 0.15
+                    }
+                elif user_persona == 'metaverse_builder':
+                    interaction_type_probs = {
+                        'view': 0.3, 'favorite': 0.4, 'portfolio_add': 0.2, 'research': 0.1
                     }
                 else:
                     interaction_type_probs = {

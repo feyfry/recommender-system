@@ -35,7 +35,13 @@ CATEGORIES = [
     "gaming",
     "meme-token",
     "stablecoins",
-    "metaverse"
+    "metaverse",
+    "layer-2",
+    "liquid-staking",
+    "artificial-intelligence",
+    "fan-token",
+    "move-to-earn",
+    "real-world-assets-rwa"
 ]
 
 # Parameter model rekomendasi
@@ -44,11 +50,11 @@ NCF_PARAMS = {
     "embedding_dim": 64,
     "layers": [128, 64, 32, 16],
     "learning_rate": 0.001,
-    "batch_size": 256,
-    "epochs": 20,
+    "batch_size": 128,
+    "epochs": 30,
     "val_ratio": 0.2,
-    "dropout": 0.2,
-    "weight_decay": 1e-4
+    "dropout": 0.3,
+    "weight_decay": 2e-4
 }
 
 # - Feature-Enhanced CF (LightFM)
@@ -57,7 +63,8 @@ FECF_PARAMS = {
     "learning_rate": 0.05,
     "loss": "warp",
     "max_sampled": 10,
-    "epochs": 20
+    "epochs": 25,
+    "content_alpha": 0.5     # Balance between CF and content (0.5 = 50-50 split)
 }
 
 # - Hybrid Model
@@ -66,8 +73,17 @@ HYBRID_PARAMS = {
     "fecf_weight": 0.5,           # Default weight - akan disesuaikan dinamis di hybrid.py
     "interaction_threshold_low": 5,   # Di bawah ini mengandalkan FECF
     "interaction_threshold_high": 20, # Di atas ini mengandalkan NCF
-    "diversity_factor": 0.2,      # Faktor untuk meningkatkan keragaman rekomendasi
-    "cold_start_fecf_weight": 0.9  # Bobot FECF untuk pengguna cold-start
+    "diversity_factor": 0.25,      # Faktor untuk meningkatkan keragaman rekomendasi
+    "cold_start_fecf_weight": 0.9,  # Bobot FECF untuk pengguna cold-start
+    "explore_ratio": 0.25             # Proporsi rekomendasi untuk eksplorasi (berbasis konten)
+}
+
+# Konfigurasi kategori untuk meningkatkan keragaman
+CATEGORY_CONFIG = {
+    "max_per_category": 0.3,         # Maksimum 30% rekomendasi dari satu kategori
+    "prioritize_diverse": True,      # Prioritaskan keragaman kategori
+    "boost_underrepresented": 0.2,   # Boost 0.2 untuk kategori yang kurang terwakili
+    "penalty_overrepresented": -0.3  # Penalti 0.3 untuk kategori yang terlalu dominan
 }
 
 # Keputusan investasi
@@ -80,31 +96,71 @@ EVAL_K_VALUES = [5, 10, 20]
 EVAL_TEST_RATIO = 0.2
 EVAL_RANDOM_SEED = 42
 
-# Persona pengguna untuk sintetis data
+# Pengaturan evaluasi tambahan
+EVAL_CONFIG = {
+    "extended_metrics": True,     # Hitung metrik evaluasi tambahan
+    "evaluate_diversity": True,   # Evaluasi keragaman rekomendasi
+    "evaluate_novelty": True,     # Evaluasi kebaruan rekomendasi
+    "min_interactions": 5,        # Minimal interaksi untuk inklusi dalam evaluasi
+    "cold_start_threshold": 2,    # Jumlah maksimum interaksi untuk pengguna cold-start
+    "category_awareness": True    # Mempertimbangkan kategori dalam evaluasi
+}
+
+# Persona pengguna yang lebih beragam untuk sintetis data
 USER_PERSONAS = {
     "defi_enthusiast": {
-        "categories": ["defi", "layer-1", "stablecoin"],
-        "weights": [0.6, 0.3, 0.1]
+        "categories": ["defi", "layer-1", "stablecoin", "liquid-staking"],
+        "weights": [0.5, 0.2, 0.2, 0.1]
     },
     "nft_collector": {
-        "categories": ["nft", "gaming", "metaverse"],
-        "weights": [0.7, 0.2, 0.1]
+        "categories": ["nft", "gaming", "metaverse", "layer-1"],
+        "weights": [0.6, 0.2, 0.1, 0.1]
     },
     "trader": {
-        "categories": ["layer-1", "defi", "meme-token"],
-        "weights": [0.5, 0.3, 0.2]
+        "categories": ["layer-1", "defi", "meme-token", "stablecoin"],
+        "weights": [0.4, 0.3, 0.2, 0.1]
     },
     "conservative_investor": {
-        "categories": ["layer-1", "stablecoin", "smart-contract-platform"],
-        "weights": [0.4, 0.4, 0.2]
+        "categories": ["layer-1", "stablecoin", "smart-contract-platform", "rwa"],
+        "weights": [0.3, 0.3, 0.2, 0.2]
     },
     "risk_taker": {
-        "categories": ["meme-token", "gaming", "nft"],
-        "weights": [0.5, 0.3, 0.2]
+        "categories": ["meme-token", "gaming", "nft", "defi"],
+        "weights": [0.4, 0.3, 0.2, 0.1]
+    },
+    "tech_enthusiast": {
+        "categories": ["ai", "layer-2", "privacy", "layer-1"],
+        "weights": [0.4, 0.3, 0.2, 0.1]
+    },
+    "yield_farmer": {
+        "categories": ["liquid-staking", "defi", "yield", "stablecoin"],
+        "weights": [0.4, 0.3, 0.2, 0.1]
+    },
+    "metaverse_builder": {
+        "categories": ["metaverse", "gaming", "nft", "layer-1"],
+        "weights": [0.5, 0.3, 0.1, 0.1]
     }
+}
+
+# PERBAIKAN: Konfigurasi diversifikasi untuk interaksi sintetis
+INTERACTION_DIVERSITY = {
+    "enable_exploration": True,   # Aktifkan eksplorasi di luar kategori utama
+    "exploration_rate": 0.2,      # 20% eksplorasi kategori
+    "novelty_bias": 0.3,          # Preferensi untuk proyek baru/berbeda
+    "temporal_variance": True,    # Variasi preferensi seiring waktu
+    "negative_feedback": True     # Simulasi feedback negatif secara acak
 }
 
 # API settings
 API_HOST = "0.0.0.0"
 API_PORT = 8000
-API_CACHE_TTL = 3600  # 1 jam dalam detik
+API_CACHE_TTL = 300  # 5 menit dalam detik
+
+# Pengaturan performa
+PERFORMANCE_CONFIG = {
+    "use_parallel": True,      # Gunakan pemrosesan paralel jika mungkin
+    "batch_size": 128,         # Ukuran batch untuk pemrosesan data besar
+    "cache_recommendations": True,  # Cache rekomendasi untuk performa
+    "cache_ttl": 300,         # TTL cache (5 menit)
+    "optimize_cold_start": True     # Optimasi khusus untuk Cold-Start
+}
