@@ -50,8 +50,8 @@ NCF_PARAMS = {
     "embedding_dim": 64,
     "layers": [128, 64, 32, 16],
     "learning_rate": 0.001,
-    "batch_size": 128,
-    "epochs": 30,
+    "batch_size": 256,
+    "epochs": 25,
     "val_ratio": 0.2,
     "dropout": 0.3,
     "weight_decay": 2e-4

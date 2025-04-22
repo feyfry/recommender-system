@@ -721,12 +721,12 @@ class DataProcessor:
     
     def _clean_project_data(self, projects_df: pd.DataFrame, trending_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
         """
-        Bersihkan dan standarisasi data proyek dengan peningkatan penanganan kategori
+        Bersihkan dan standarisasi data proyek dengan peningkatan penanganan kategori dan nilai null
         
         Args:
             projects_df: DataFrame proyek yang akan dibersihkan
             trending_df: DataFrame proyek trending (opsional)
-            
+                
         Returns:
             pd.DataFrame: DataFrame proyek yang sudah dibersihkan
         """
@@ -740,22 +740,23 @@ class DataProcessor:
             logger.info("Removing sparkline_in_7d column")
             df = df.drop(columns=['sparkline_in_7d'])
         
-        # Tangani nilai NaN
+        # Tangani nilai NaN dengan nilai default
         df['market_cap'] = df['market_cap'].fillna(0)
         df['total_volume'] = df['total_volume'].fillna(0)
         df['current_price'] = df['current_price'].fillna(0)
         
         # Pastikan kolom numerical ada
         for col in ['price_change_percentage_24h', 'price_change_percentage_7d_in_currency', 
-                'price_change_percentage_30d_in_currency', 'price_change_percentage_1h_in_currency']:
+                    'price_change_percentage_30d_in_currency', 'price_change_percentage_1h_in_currency']:
             if col in df.columns:
                 df[col] = df[col].fillna(0)
             else:
                 df[col] = 0
         
-        # Tangani kolom sosial
+        # Tangani kolom sosial dengan nilai default
         for col in ['reddit_subscribers', 'twitter_followers', 'github_stars', 
-                'github_subscribers', 'github_forks']:
+                'github_subscribers', 'github_forks', 'telegram_channel_user_count', 
+                'discord_members', 'facebook_likes']:
             if col in df.columns:
                 df[col] = df[col].fillna(0).astype(int)
             else:
@@ -773,7 +774,7 @@ class DataProcessor:
             df['platforms'] = df['platforms'].fillna({})
         else:
             df['platforms'] = [{} for _ in range(len(df))]
-                
+                    
         # Tangani kolom categories dengan cara yang lebih aman
         if 'categories' in df.columns:
             def clean_categories(x):
@@ -788,13 +789,16 @@ class DataProcessor:
                     except:
                         return []
                 return []
-                
+                    
             df['categories'] = df['categories'].apply(clean_categories)
         else:
             df['categories'] = [[] for _ in range(len(df))]
         
-        # Ekstrak primary_category dengan algoritma yang diperbaiki
-        df['primary_category'] = df.apply(self._extract_primary_category_improved, axis=1)
+        # Ekstrak multiple primary_categories dengan algoritma yang diperbaiki
+        df['primary_categories'] = df.apply(self._extract_primary_category_improved, axis=1)
+        
+        # Tambahkan primary_category (untuk kompatibilitas dengan kode yang ada)
+        df['primary_category'] = df['primary_categories'].apply(lambda x: x[0] if x else 'unknown')
         
         # Ekstrak chain
         df['chain'] = df.apply(lambda row: self._extract_primary_chain(row['platforms']), axis=1)
@@ -802,27 +806,64 @@ class DataProcessor:
         # Hitung skor popularitas dan tren
         df = self._calculate_metrics(df)
         
+        # Pastikan kolom deskripsi ada dengan nilai default
+        if 'description' not in df.columns:
+            df['description'] = ''
+        else:
+            df['description'] = df['description'].fillna('')
+        
+        # Pastikan kolom tanggal ada dengan nilai default
+        if 'genesis_date' not in df.columns:
+            df['genesis_date'] = None
+        else:
+            df['genesis_date'] = pd.to_datetime(df['genesis_date'], errors='coerce')
+        
+        # Pastikan nilai default untuk kolom binary/boolean
+        if 'is_trending' not in df.columns:
+            df['is_trending'] = 0
+        
         # Tambahkan skor trending jika ada data trending
         if trending_df is not None and not trending_df.empty:
             trending_ids = trending_df['id'].tolist() if 'id' in trending_df.columns else []
             df['is_trending'] = df['id'].apply(lambda x: 1 if x in trending_ids else 0)
             # Boost trend score untuk koin trending
             df.loc[df['is_trending'] == 1, 'trend_score'] += 30
-        else:
-            df['is_trending'] = 0
+        
+        # Pastikan semua kolom yang dibutuhkan tersedia
+        required_columns = [
+            'id', 'name', 'symbol', 'primary_category', 'primary_categories',
+            'image', 'price_usd', 'market_cap', 'volume_24h'
+        ]
+        
+        # Konversi nama kolom untuk konsistensi API
+        if 'current_price' in df.columns and 'price_usd' not in df.columns:
+            df['price_usd'] = df['current_price']
+        
+        if 'total_volume' in df.columns and 'volume_24h' not in df.columns:
+            df['volume_24h'] = df['total_volume']
+        
+        # Tambahkan nilai default untuk kolom yang kosong
+        for col in required_columns:
+            if col not in df.columns:
+                if col in ['primary_categories']:
+                    df[col] = df['primary_category'].apply(lambda x: [x])
+                elif col in ['market_cap', 'price_usd', 'volume_24h']:
+                    df[col] = 0
+                else:
+                    df[col] = 'unknown'
         
         return df
         
-    def _extract_primary_category_improved(self, row) -> str:
+    def _extract_primary_category_improved(self, row) -> List[str]:
         """
-        Extract primary category with an improved algorithm that better handles
-        case sensitivity, partial matching, and prioritization
+        Extract multiple primary categories dengan algoritma yang ditingkatkan
+        untuk menghasilkan 1-3 kategori utama
         
         Args:
             row: Row from DataFrame 
             
         Returns:
-            str: Normalized primary category
+            list: List of normalized primary categories (1-3)
         """
         categories = row.get('categories', [])
         query_category = row.get('query_category')
@@ -834,72 +875,97 @@ class DataProcessor:
                 # Check if the query_category matches any of our category mappings
                 for category, aliases in self.category_mappings.items():
                     if query_category.lower() in [alias.lower() for alias in aliases]:
-                        return category
-                return query_category.lower()
-            return 'unknown'
+                        return [category]
+                return [query_category.lower()]
+            return ['unknown']
         
         # Convert all categories to lowercase for better matching
         normalized_categories = [cat.lower() for cat in categories if isinstance(cat, str) and cat]
         
-        # APPROACH 1: Use first category (most important) if available
-        if normalized_categories:
-            first_category = normalized_categories[0]
+        if not normalized_categories:
+            return ['unknown']
+        
+        # Matched categories with priority ranking
+        matched_categories = []
+        
+        # APPROACH 1: Use first three categories (most important) if available
+        for first_category in normalized_categories[:3]:
+            category_matched = False
             
-            # Check if first category is in our mappings (case-insensitive)
+            # Check if category is in our mappings (case-insensitive)
             for category_key, aliases in self.category_mappings.items():
                 lower_aliases = [alias.lower() for alias in aliases]
                 if first_category in lower_aliases:
-                    return category_key
-                    
-            # Check for partial matches in a more robust way
-            for category_key, aliases in self.category_mappings.items():
-                lower_aliases = [alias.lower() for alias in aliases]
-                # Check if the category is contained within any alias or vice versa
-                if any(first_category in alias or alias in first_category for alias in lower_aliases):
-                    return category_key
-                    
-            # Special handling for ecosystem categories
-            for ecosystem in self.ecosystem_categories:
-                ecosystem_lower = ecosystem.lower()
-                if ecosystem_lower in first_category or first_category in ecosystem_lower:
-                    base_ecosystem = ecosystem.split('-')[0] if '-ecosystem' in ecosystem else ecosystem
-                    return base_ecosystem.lower()
-                    
-            # Return first category as-is if no mapping found
-            return first_category
-        
-        # APPROACH 2: Check all categories against our mappings
-        matched_categories = []
-        for category_key, aliases in self.category_mappings.items():
-            lower_aliases = [alias.lower() for alias in aliases]
-            for normalized_cat in normalized_categories:
-                # Direct match
-                if normalized_cat in lower_aliases:
                     matched_categories.append(category_key)
+                    category_matched = True
                     break
-                # Partial match (more relaxed)
-                if any(normalized_cat in alias or alias in normalized_cat for alias in lower_aliases):
-                    matched_categories.append(category_key)
-                    break
-        
-        # If we have matches, use priority to select the best one
-        if matched_categories:
-            # Find which category has highest priority
-            for priority_cat in self.category_priority:
-                if priority_cat in matched_categories:
-                    return priority_cat
-            # If not in priority list, just return the first match
-            return matched_categories[0]
-        
-        # APPROACH 3: Fallback to query_category if available
-        if query_category and query_category.lower() not in ['unknown', 'top']:
-            return query_category.lower()
+                    
+            # Check for partial matches if no exact match
+            if not category_matched:
+                for category_key, aliases in self.category_mappings.items():
+                    lower_aliases = [alias.lower() for alias in aliases]
+                    # Check if the category is contained within any alias or vice versa
+                    if any(first_category in alias or alias in first_category for alias in lower_aliases):
+                        matched_categories.append(category_key)
+                        category_matched = True
+                        break
                 
-        # APPROACH 4: Last resort - return the first raw category or unknown
-        if normalized_categories:
-            return normalized_categories[0]
+            # Special handling for ecosystem categories if still no match
+            if not category_matched:
+                for ecosystem in self.ecosystem_categories:
+                    ecosystem_lower = ecosystem.lower()
+                    if ecosystem_lower in first_category or first_category in ecosystem_lower:
+                        base_ecosystem = ecosystem.split('-')[0] if '-ecosystem' in ecosystem else ecosystem
+                        matched_categories.append(base_ecosystem.lower())
+                        category_matched = True
+                        break
+                        
+            # If still no mapping found, use raw category
+            if not category_matched:
+                matched_categories.append(first_category)
+
+        # APPROACH 2: Find additional categories with priority ordering
+        all_matched_categories = set(matched_categories)  # Track all categories already matched
+        remaining_slots = max(0, 3 - len(matched_categories))
         
-        return 'unknown'
+        if remaining_slots > 0:
+            for category_key, aliases in self.category_mappings.items():
+                if len(matched_categories) >= 3:
+                    break
+                    
+                if category_key in all_matched_categories:
+                    continue
+                    
+                lower_aliases = [alias.lower() for alias in aliases]
+                for normalized_cat in normalized_categories:
+                    # Skip if already matched
+                    if normalized_cat in all_matched_categories:
+                        continue
+                        
+                    # Direct or partial match
+                    if normalized_cat in lower_aliases or any(normalized_cat in alias or alias in normalized_cat for alias in lower_aliases):
+                        matched_categories.append(category_key)
+                        all_matched_categories.add(category_key)
+                        break
+            
+        # APPROACH 3: Fallback to query_category if still need more categories
+        if len(matched_categories) == 0 and query_category and query_category.lower() not in ['unknown', 'top']:
+            matched_categories.append(query_category.lower())
+                    
+        # APPROACH 4: Last resort - use first raw categories 
+        if len(matched_categories) == 0 and normalized_categories:
+            matched_categories = normalized_categories[:min(3, len(normalized_categories))]
+        
+        # If still empty, use unknown
+        if len(matched_categories) == 0:
+            matched_categories = ['unknown']
+            
+        # Prioritize categories based on priority list
+        priority_dict = {cat: idx for idx, cat in enumerate(self.category_priority)}
+        matched_categories.sort(key=lambda x: priority_dict.get(x, 999))
+        
+        # Limit to max 3 categories
+        return matched_categories[:3]
     
     def _extract_primary_chain(self, platforms: Dict[str, str]) -> str:
         """
@@ -959,7 +1025,8 @@ class DataProcessor:
             return s.clip(lower=q_low, upper=q_high)
         
         # Ensure numeric columns are properly handled
-        for col in ['market_cap', 'total_volume', 'reddit_subscribers', 'twitter_followers', 'github_stars']:
+        for col in ['market_cap', 'total_volume', 'reddit_subscribers', 'twitter_followers', 
+                'github_stars', 'telegram_channel_user_count', 'discord_members']:
             if col in result_df.columns:
                 result_df[col] = pd.to_numeric(result_df[col], errors='coerce').fillna(0)
         
@@ -971,6 +1038,10 @@ class DataProcessor:
         twitter = winsorize(result_df['twitter_followers'].fillna(0))
         github = winsorize(result_df['github_stars'].fillna(0))
         
+        # Tambahkan metrics sosial media baru jika tersedia
+        telegram = winsorize(result_df['telegram_channel_user_count'].fillna(0)) if 'telegram_channel_user_count' in result_df.columns else 0
+        discord = winsorize(result_df['discord_members'].fillna(0)) if 'discord_members' in result_df.columns else 0
+        
         # Apply logarithmic transformation with careful handling of zeros
         # Use log1p to handle zeros gracefully and scale appropriately
         log_market_cap = np.log1p(market_cap) / np.log(1e12)  # Scale relative to $1T
@@ -979,18 +1050,44 @@ class DataProcessor:
         log_twitter = np.log1p(twitter) / np.log(1e6)  # Scale relative to 1M followers
         log_github = np.log1p(github) / np.log(1e5)  # Scale relative to 100K stars
         
-        # PERBAIKAN: Weight components with more balanced weights that favor engagement metrics
-        # Increase weight of social and developer activity metrics
+        # Log transform untuk metrics sosial baru
+        log_telegram = np.log1p(telegram) / np.log(1e5) if not isinstance(telegram, int) else 0
+        log_discord = np.log1p(discord) / np.log(1e5) if not isinstance(discord, int) else 0
+        
+        # Bobot seimbang dengan penambahan metrik sosial baru
+        total_social_weight = 0.40  # Total bobot untuk semua metrik sosial
+        
+        # Hitung bobot individual untuk metrik sosial berdasarkan ketersediaan
+        available_social_metrics = 0
+        for metric in [log_reddit, log_twitter, log_telegram, log_discord]:
+            if not isinstance(metric, int) or metric > 0:
+                available_social_metrics += 1
+        
+        # Jika tidak ada metrik sosial, gunakan bobot default
+        if available_social_metrics == 0:
+            social_weights = {"reddit": 0, "twitter": 0, "telegram": 0, "discord": 0}
+        else:
+            # Distribusikan bobot secara merata di antara metrik sosial yang tersedia
+            weight_per_metric = total_social_weight / available_social_metrics
+            social_weights = {
+                "reddit": weight_per_metric if not isinstance(log_reddit, int) or log_reddit > 0 else 0,
+                "twitter": weight_per_metric if not isinstance(log_twitter, int) or log_twitter > 0 else 0,
+                "telegram": weight_per_metric if not isinstance(log_telegram, int) or log_telegram > 0 else 0,
+                "discord": weight_per_metric if not isinstance(log_discord, int) or log_discord > 0 else 0
+            }
+        
+        # Hitung popularity score dengan metrik sosial baru
         popularity_score = (
-            0.30 * log_market_cap +  # Reduced from 0.35
-            0.20 * log_volume +      # Reduced from 0.25
-            0.20 * log_reddit +      # Increased from 0.15
-            0.20 * log_twitter +     # Increased from 0.15
-            0.10 * log_github
+            0.30 * log_market_cap +  # Fundamental ekonomi
+            0.20 * log_volume +      # Aktivitas trading
+            social_weights["reddit"] * log_reddit +
+            social_weights["twitter"] * log_twitter +
+            social_weights["telegram"] * log_telegram +
+            social_weights["discord"] * log_discord +
+            0.10 * log_github        # Aktivitas developer
         )
         
         # Scale to 0-100 using percentile ranking for more uniform distribution
-        # This avoids extreme concentration at the high end
         popularity_score_ranked = popularity_score.rank(pct=True) * 100
         result_df['popularity_score'] = popularity_score_ranked
         
@@ -1009,7 +1106,7 @@ class DataProcessor:
         price_7d_transformed = sigmoid_transform(price_7d)
         price_30d_transformed = sigmoid_transform(price_30d)
         
-        # PERBAIKAN: Meningkatkan pengaruh perubahan jangka pendek untuk lebih aktual
+        # Meningkatkan pengaruh perubahan jangka pendek untuk lebih aktual
         trend_score = (
             0.55 * price_24h_transformed +  # Increased from 0.5
             0.30 * price_7d_transformed +   # Same
@@ -1043,8 +1140,14 @@ class DataProcessor:
         
         # 4. Social Engagement Score - Improved calculation with better normalization
         if 'market_cap' in result_df.columns and result_df['market_cap'].max() > 0:
-            # Calculate social following
+            # Calculate social following with all available social metrics
             social_sum = result_df['reddit_subscribers'] + result_df['twitter_followers']
+            
+            # Tambahkan metrics baru jika tersedia
+            if 'telegram_channel_user_count' in result_df.columns:
+                social_sum += result_df['telegram_channel_user_count']
+            if 'discord_members' in result_df.columns:
+                social_sum += result_df['discord_members']
             
             # Calculate market cap in millions with minimum threshold to avoid division by zero
             market_cap_millions = result_df['market_cap'] / 1_000_000
@@ -1069,19 +1172,28 @@ class DataProcessor:
         
         # 5. Description Length - Better normalization
         if 'description' in result_df.columns:
-            # Calculate raw character count of description
+            # Calculate raw character count of description without normalization as requested
             result_df['description_length_raw'] = result_df['description'].fillna('').apply(len)
             
-            # Use rank-based normalization for more uniform distribution
-            if result_df['description_length_raw'].max() > 0:
-                result_df['description_length'] = result_df['description_length_raw'].rank(pct=True) * 100
-            else:
-                result_df['description_length'] = 0
-                
-            # Drop the raw column as it's no longer needed
-            result_df = result_df.drop(columns=['description_length_raw'])
+            # Hitung parameter deskripsi tambahan
+            # Jumlah kata (untuk konten yang lebih bermakna)
+            result_df['description_word_count'] = result_df['description'].fillna('').apply(lambda x: len(x.split()))
+            
+            # Panjang rata-rata kata (kompleksitas konten)
+            def avg_word_length(desc):
+                words = desc.split()
+                if not words:
+                    return 0
+                return sum(len(word) for word in words) / len(words)
+            
+            result_df['description_avg_word_length'] = result_df['description'].fillna('').apply(avg_word_length)
+            
+            # Simpan panjang deskripsi asli tanpa normalisasi
+            result_df['description_length'] = result_df['description_length_raw']
         else:
             result_df['description_length'] = 0
+            result_df['description_word_count'] = 0
+            result_df['description_avg_word_length'] = 0
         
         # 6. Age Days - More accurate calculation with better date handling
         if 'genesis_date' in result_df.columns:
@@ -1113,10 +1225,14 @@ class DataProcessor:
         # Get normalized component scores
         dev_score = result_df['developer_activity_score'] / 100
         social_score = result_df['social_engagement_score'] / 100
-        desc_score = result_df['description_length'] / 100
         
-        # PERBAIKAN: Calculate maturity score with more balanced weights
-        # Give higher weight to developer activity as it's a better indicator of project health
+        # Use description word count instead of length
+        if result_df['description_word_count'].max() > 0:
+            desc_score = result_df['description_word_count'].rank(pct=True) / 100
+        else:
+            desc_score = 0
+        
+        # Calculate maturity score with more balanced weights
         maturity_score = (
             0.25 * age_score +        # Reduced from 0.3
             0.35 * dev_score +        # Increased from 0.3
@@ -1227,7 +1343,7 @@ class DataProcessor:
     
     def _create_synthetic_interactions(self, projects_df: pd.DataFrame, n_users: int = 500) -> pd.DataFrame:
         """
-        Create synthetic user interactions with increased realism and variability
+        Create synthetic user interactions with significantly increased randomness and realism
         
         Args:
             projects_df: DataFrame of projects
@@ -1238,177 +1354,265 @@ class DataProcessor:
         """
         logger.info(f"Creating synthetic interactions for {n_users} users")
         
-        # Create RNG instance with base seed but add more variability
-        base_seed = 42
-        rng = np.random.default_rng(base_seed)
+        # Create RNG instance with multiple seeds for greater variability
+        base_seeds = [42, 123, 789, 234, 567]  # Multiple base seeds
+        rng = np.random.default_rng(np.random.choice(base_seeds))
         
         interactions = []
         personas = list(USER_PERSONAS.keys())
         
-        # PERBAIKAN: Gunakan bobot dinamis berdasarkan jumlah persona
-        # Jika jumlah persona berubah, bobot akan otomatis menyesuaikan
+        # Generate dynamic persona weights that change for each batch of users
+        # This creates more variation in user distribution
         num_personas = len(personas)
+        persona_distributions = []
         
-        # Generate base weights that sum to 1 with slightly higher weight to first few personas
-        if num_personas <= 5:
-            persona_base_weights = [0.25, 0.20, 0.30, 0.15, 0.10][:num_personas]  # Original distribution for 5 personas
-            # Atur ulang jika terlalu pendek
-            if len(persona_base_weights) < num_personas:
-                remaining = num_personas - len(persona_base_weights)
-                # Distribusikan bobot yang tersisa secara merata
-                additional_weights = [0.10 / remaining] * remaining
-                persona_base_weights.extend(additional_weights)
-        else:
-            # Distribusi untuk lebih dari 5 persona
-            # Beri bobot lebih pada 3 persona pertama (original) dan distribusikan sisanya
-            core_weights = [0.20, 0.15, 0.20]  # 55% untuk 3 persona utama
-            remaining_weight = 0.45  # 45% untuk persona lainnya
-            remaining_count = num_personas - 3
-            tail_weights = [remaining_weight / remaining_count] * remaining_count
-            persona_base_weights = core_weights + tail_weights
+        # Create multiple persona distributions for different user batches
+        num_batches = 5  # Divide users into batches with different distributions
+        for i in range(num_batches):
+            # Create unique distribution for each batch
+            batch_seed = rng.integers(1000, 10000)
+            batch_rng = np.random.default_rng(batch_seed)
+            
+            # Generate more varied weights
+            weights = batch_rng.random(size=num_personas)
+            weights = weights / weights.sum()  # Normalize
+            
+            # Add some skew to make certain personas more common in each batch
+            skew_factor = batch_rng.integers(0, num_personas)
+            weights[skew_factor] *= batch_rng.uniform(1.5, 2.5)
+            weights = weights / weights.sum()  # Re-normalize
+            
+            persona_distributions.append(weights)
         
-        # Pastikan bobot sesuai dengan jumlah persona
-        persona_base_weights = persona_base_weights[:num_personas]
-        if len(persona_base_weights) < num_personas:
-            # Jika masih kurang, tambahkan bobot default
-            persona_base_weights.extend([0.05] * (num_personas - len(persona_base_weights)))
-        
-        # Normalisasi untuk memastikan jumlahnya 1
-        persona_base_weights = np.array(persona_base_weights)
-        persona_base_weights = persona_base_weights / persona_base_weights.sum()
-        
-        logger.info(f"Using {num_personas} personas with normalized weights: {persona_base_weights}")
-        
-        # Add more variability to persona distribution
-        # Slightly randomize the persona weights for more realistic distribution
-        persona_weights = persona_base_weights + rng.normal(0, 0.03, len(persona_base_weights))
-        persona_weights = np.clip(persona_weights, 0.05, 0.4)  # Clip to reasonable range
-        persona_weights = persona_weights / persona_weights.sum()  # Normalize
+        logger.info(f"Created {len(persona_distributions)} different persona distributions for user batches")
         
         # Extract all categories and their frequencies for more realistic exploration
         all_categories = projects_df['primary_category'].dropna().tolist()
         category_freq = pd.Series(all_categories).value_counts(normalize=True).to_dict()
         unique_categories = list(category_freq.keys())
         
-        # Generate users with more realistic patterns
-        for user_id in range(1, n_users + 1):
-            # Use a user-specific seed for more variability between users
-            user_seed = base_seed + user_id
+        # Define multiple user activity profiles with significantly different patterns
+        activity_profiles = {
+            'very_casual': {
+                'interaction_count_range': (1, 5),
+                'session_patterns': ['single_session'],
+                'exploration_rate': (0.05, 0.15),
+                'popularity_bias': (0.7, 0.9),
+                'category_focus': (0.8, 0.95),
+                'weight_boost': (0.8, 1.2),
+                'probs': 0.20  # 20% of users are very casual
+            },
+            'casual': {
+                'interaction_count_range': (5, 15),
+                'session_patterns': ['single_session', 'few_sessions'],
+                'exploration_rate': (0.1, 0.25),
+                'popularity_bias': (0.6, 0.8),
+                'category_focus': (0.7, 0.9),
+                'weight_boost': (0.9, 1.3),
+                'probs': 0.30  # 30% of users are casual
+            },
+            'regular': {
+                'interaction_count_range': (15, 40),
+                'session_patterns': ['few_sessions', 'regular_sessions'],
+                'exploration_rate': (0.2, 0.35),
+                'popularity_bias': (0.5, 0.7),
+                'category_focus': (0.6, 0.8),
+                'weight_boost': (1.0, 1.5),
+                'probs': 0.25  # 25% of users are regular
+            },
+            'active': {
+                'interaction_count_range': (40, 80),
+                'session_patterns': ['regular_sessions', 'random_spread'],
+                'exploration_rate': (0.3, 0.45),
+                'popularity_bias': (0.4, 0.6),
+                'category_focus': (0.5, 0.7),
+                'weight_boost': (1.2, 1.8),
+                'probs': 0.15  # 15% of users are active
+            },
+            'power_user': {
+                'interaction_count_range': (80, 150),
+                'session_patterns': ['random_spread', 'regular_sessions'],
+                'exploration_rate': (0.4, 0.6),
+                'popularity_bias': (0.3, 0.5),
+                'category_focus': (0.4, 0.6),
+                'weight_boost': (1.5, 2.2),
+                'probs': 0.10  # 10% of users are power users
+            }
+        }
+        
+        # Calculate activity profile probabilities
+        activity_types = list(activity_profiles.keys())
+        activity_probs = [activity_profiles[t]['probs'] for t in activity_types]
+        
+        # Generate users with much greater randomness and significantly different patterns
+        for user_idx in range(1, n_users + 1):
+            # Truly unique seed per user for maximum variation
+            user_seed = rng.integers(10000, 1000000) + user_idx
             user_rng = np.random.default_rng(user_seed)
             
-            # Assign persona with weighted randomness
-            user_persona = user_rng.choice(personas, p=persona_weights)
+            # Determine which batch this user belongs to
+            batch_idx = user_idx % num_batches
             
-            # PERBAIKAN: Tambahkan penanganan error jika persona tidak ditemukan
+            # Assign persona with more varied weights per batch 
+            user_persona = user_rng.choice(personas, p=persona_distributions[batch_idx])
+            
+            # Error handling for missing persona
             if user_persona not in USER_PERSONAS:
                 logger.warning(f"Persona {user_persona} not found in USER_PERSONAS, using default")
-                # Gunakan persona pertama sebagai fallback
                 user_persona = personas[0]
                 
             persona_data = USER_PERSONAS[user_persona]
             
-            # Sisanya sama seperti implementasi sebelumnya
+            # Select user activity profile with probability weighting
+            activity_type = user_rng.choice(activity_types, p=activity_probs)
+            activity_profile = activity_profiles[activity_type]
             
-            # Create more realistic activity profiles with less deterministic thresholds
-            # More granular activity levels
-            activity_level_probs = [0.25, 0.30, 0.25, 0.15, 0.05]  # Base probabilities
+            # Generate interaction count with extreme variability
+            # Use different distributions based on activity type
+            if activity_type == 'power_user':
+                # Power users follow a different distribution - sometimes have extreme numbers
+                if user_rng.random() < 0.2:  # 20% chance of super-user
+                    n_interactions = user_rng.integers(150, 300)
+                else:
+                    n_interactions = user_rng.integers(*activity_profile['interaction_count_range'])
+            else:
+                # Normal distribution centered in the range
+                min_count, max_count = activity_profile['interaction_count_range']
+                mean = (min_count + max_count) / 2
+                std = (max_count - min_count) / 4
+                n_interactions = max(min_count, min(max_count, int(user_rng.normal(mean, std))))
             
-            # Add slight randomization to activity probabilities
-            activity_level_probs = np.array(activity_level_probs) + user_rng.normal(0, 0.03, 5)
-            activity_level_probs = np.clip(activity_level_probs, 0.05, 0.5)
-            activity_level_probs = activity_level_probs / activity_level_probs.sum()
-            
-            activity_level = user_rng.choice(
-                ['very_low', 'low', 'medium', 'high', 'very_high'], 
-                p=activity_level_probs
-            )
-            
-            # More organic distribution of interaction counts based on activity level
-            if activity_level == 'very_low':
-                # Very casual users with minimal interaction (1-5)
-                n_interactions = max(1, int(user_rng.normal(3, 1.5)))
-            elif activity_level == 'low':
-                # Occasional users (4-12)
-                n_interactions = max(4, min(12, int(user_rng.normal(8, 2.5))))
-            elif activity_level == 'medium':
-                # Average users (10-25)
-                n_interactions = max(10, min(25, int(user_rng.normal(18, 4))))
-            elif activity_level == 'high':
-                # Active users (20-40)
-                n_interactions = max(20, min(40, int(user_rng.normal(30, 6))))
-            else:  # very_high
-                # Power users (35-70)
-                n_interactions = max(35, min(70, int(user_rng.normal(50, 10))))
-            
-            # More variability in user preferences
+            # More varied preferences based on persona with added randomness
             preferred_categories = persona_data['categories']
             
-            # Calculate more varied weights with noise
+            # Calculate significantly more varied weights with dynamic noise level
             raw_weights = np.array(persona_data['weights'])
-            
-            # Add significant noise for more realistic preference distribution
-            noise_magnitude = user_rng.uniform(0.05, 0.15)  # Variable noise level by user
+            noise_magnitude = user_rng.uniform(0.1, 0.3)  # Much higher noise range
             noise = user_rng.normal(0, noise_magnitude, len(raw_weights))
+            
+            # Add chance for completely inverted preferences (extremely different user pattern)
+            if user_rng.random() < 0.05:  # 5% chance
+                raw_weights = 1 - raw_weights  # Invert preferences
+                logger.debug(f"User {user_idx} has inverted category preferences")
+            
+            # Apply noise to create highly variable preferences
             category_weights = raw_weights + noise
             
             # Ensure weights are positive and normalized
-            category_weights = np.clip(category_weights, 0.05, 0.9)
+            category_weights = np.clip(category_weights, 0.05, 0.95)
             category_weights = category_weights / category_weights.sum()
             
-            # Add category exploration beyond persona
-            # Some users explore widely, others stay in comfort zone
-            curiosity_factor = user_rng.beta(2, 5)  # Beta distribution favoring lower values
-            base_exploration_prob = max(0.05, min(0.4, curiosity_factor))
+            # ENHANCEMENT: Add secondary categories preferences with varying weights
+            # Randomly select 1-3 additional categories user might be interested in
+            available_categories = [c for c in unique_categories if c not in preferred_categories]
+            if available_categories:
+                num_extra = min(user_rng.integers(1, 4), len(available_categories))
+                extra_categories = user_rng.choice(available_categories, size=num_extra, replace=False)
+                
+                # Create new arrays with extra capacity
+                new_preferred = preferred_categories.copy()
+                new_weights = category_weights.copy()
+                
+                # Add extra categories and weights
+                for extra_cat in extra_categories:
+                    new_preferred.append(extra_cat)
+                    new_weights = np.append(new_weights, user_rng.uniform(0.1, 0.3))
+                
+                # Update the original arrays
+                preferred_categories = new_preferred
+                category_weights = new_weights / new_weights.sum()  # Re-normalize
             
-            # Vary exploration over time
+            # Select exploration parameters from profile ranges
+            min_explore, max_explore = activity_profile['exploration_rate']
+            base_exploration_prob = user_rng.uniform(min_explore, max_explore)
+            
+            # MAJOR ENHANCEMENT: More variable exploration decay patterns
+            # Different types of explorers:
+            explorer_type = user_rng.choice([
+                'consistent',      # Maintains exploration level
+                'quick_decay',     # Rapidly loses interest in exploration
+                'slow_decay',      # Gradually loses interest
+                'fluctuating',     # Interest comes and goes
+                'increasing'       # Becomes more exploratory over time
+            ])
+            
+            exploration_decay = user_rng.uniform(0.7, 0.95)  # Base rate
             exploration_probability = base_exploration_prob
-            exploration_decay = user_rng.uniform(0.7, 0.95)  # How quickly novelty seeking declines
             
-            # Popularity bias - Some users focus more on popular projects
-            popularity_bias = user_rng.beta(3, 2)  # Beta distribution favoring higher values
+            # Popularity bias - Extreme variation
+            min_pop, max_pop = activity_profile['popularity_bias']
+            popularity_bias = user_rng.beta(5 * min_pop, 5 * (1-max_pop))  # Using beta for more varied distribution
             
-            # Time distribution for interactions
-            # Some users do everything in one session, others spread out
-            session_clustering = user_rng.choice([
-                'single_session',      # All in one go
-                'few_sessions',        # 2-3 sessions
-                'regular_sessions',    # Regular pattern
-                'random_spread'        # Completely random
-            ], p=[0.2, 0.3, 0.3, 0.2])
+            # Time distribution for interactions - More varied patterns
+            session_patterns = activity_profile['session_patterns']
+            session_clustering = user_rng.choice(session_patterns)
             
-            max_days_ago = 30  # Maximum days in the past
+            # Add special patterns for more variation
+            if user_rng.random() < 0.1:  # 10% chance of special pattern
+                special_patterns = [
+                    'binge_and_break',      # Activity in bursts with long breaks
+                    'weekend_only',         # Active only on specific days
+                    'gradually_increasing', # Starts slow, becomes more active
+                    'gradually_decreasing'  # Starts active, loses interest
+                ]
+                session_clustering = user_rng.choice(special_patterns)
             
-            # Generate session timestamps based on pattern
+            max_days_ago = 30 + user_rng.integers(0, 60)  # Much more variety in history length
+            
+            # Generate session timestamps based on pattern with extreme variability
             timestamps = []
             if session_clustering == 'single_session':
-                # All interactions happen within a short timeframe
+                # All at once with more variation in exact timing
                 base_days_ago = int(user_rng.integers(0, max_days_ago))
-                session_minutes = int(user_rng.integers(1, 60))  # Up to 1 hour session
+                session_minutes = int(user_rng.integers(1, 120))  # Up to 2 hour sessions
+                
                 for _ in range(n_interactions):
                     minutes_offset = int(user_rng.integers(0, session_minutes))
+                    seconds_offset = int(user_rng.integers(0, 60))
+                    
                     timestamps.append(
-                        datetime.now() - timedelta(days=int(base_days_ago), minutes=int(minutes_offset))
+                        datetime.now() - timedelta(
+                            days=int(base_days_ago), 
+                            minutes=int(minutes_offset),
+                            seconds=int(seconds_offset)
+                        )
                     )
             elif session_clustering == 'few_sessions':
-                # 2-3 distinct sessions
-                num_sessions = user_rng.integers(2, 4)
-                session_days = sorted(user_rng.choice(range(max_days_ago), size=num_sessions, replace=False))
-                interactions_per_session = []
+                # 2-5 distinct sessions with highly variable spacing
+                num_sessions = user_rng.integers(2, 6)
                 
-                # Distribusi interaksi yang lebih aman
+                # Create session days with clustering (not evenly distributed)
+                if user_rng.random() < 0.5:
+                    # Clustered sessions (e.g., consecutive days)
+                    first_day = user_rng.integers(0, max_days_ago - num_sessions)
+                    session_days = [first_day + i for i in range(num_sessions)]
+                    
+                    # Add some randomness to consecutive days
+                    for i in range(len(session_days)):
+                        if user_rng.random() < 0.3:  # 30% chance of gap
+                            session_days[i] += user_rng.integers(1, 3)
+                else:
+                    # Randomly distributed sessions
+                    session_days = sorted(user_rng.choice(range(max_days_ago), size=num_sessions, replace=False))
+                
+                # Distribute interactions
+                interactions_per_session = []
                 remaining = n_interactions
                 sessions_left = num_sessions
                 
                 for i in range(num_sessions):
                     if i == num_sessions - 1:
-                        # Sesi terakhir dapat semua sisa interaksi
                         interactions_per_session.append(remaining)
                     else:
-                        # Pastikan setiap sesi mendapat minimal 1 interaksi
-                        # dan maksimal sejumlah yang masih tersisa dibagi sesi yang tersisa
-                        max_for_session = remaining - (sessions_left - 1)  # Sisakan minimal 1 untuk tiap sesi
-                        if max_for_session > 1:
-                            count = user_rng.integers(1, max_for_session)
+                        # Highly variable session sizes
+                        if remaining > sessions_left:
+                            # Either very small or very large portion
+                            if user_rng.random() < 0.5:
+                                count = max(1, int(user_rng.beta(1, 5) * remaining))
+                            else:
+                                count = max(1, int(user_rng.beta(5, 1) * remaining))
+                                
+                            count = min(count, remaining - (sessions_left - 1))
                         else:
                             count = 1
                             
@@ -1416,109 +1620,467 @@ class DataProcessor:
                         remaining -= count
                         sessions_left -= 1
                 
-                # Create timestamps for each session
+                # Create timestamps for each session with much more time variation
                 for day, count in zip(session_days, interactions_per_session):
-                    for _ in range(count):
-                        minutes_offset = int(user_rng.integers(0, 60))
-                        timestamps.append(
-                            datetime.now() - timedelta(days=int(day), minutes=int(minutes_offset))
-                        )
+                    # Each session has its own timing pattern
+                    if user_rng.random() < 0.7:  # 70% chance of concentrated session
+                        session_duration = user_rng.integers(10, 120)  # 10-120 minute session
+                        # Generate timestamps within the session duration
+                        for _ in range(count):
+                            minutes_offset = user_rng.integers(0, session_duration)
+                            seconds_offset = user_rng.integers(0, 60)
+                            timestamps.append(
+                                datetime.now() - timedelta(
+                                    days=int(day), 
+                                    minutes=int(minutes_offset),
+                                    seconds=int(seconds_offset)
+                                )
+                            )
+                    else:  # 30% chance of spread throughout day
+                        # Spread across entire day
+                        for _ in range(count):
+                            minutes_offset = user_rng.integers(0, 1440)  # Full day in minutes
+                            timestamps.append(
+                                datetime.now() - timedelta(
+                                    days=int(day), 
+                                    minutes=int(minutes_offset)
+                                )
+                            )
             elif session_clustering == 'regular_sessions':
-                # Regular pattern (e.g., weekly)
-                interval = user_rng.integers(1, 7)  # Days between sessions
-                base_day = user_rng.integers(0, interval)
+                # Regular but not perfectly consistent pattern
+                # Base interval with noise
+                base_interval = user_rng.integers(1, 7)  # Days between sessions
+                noise_factor = user_rng.uniform(0.2, 0.8)  # How much to vary from regular pattern
                 
-                for i in range(n_interactions):
-                    day = base_day + (i // 3) * interval  # ~3 interactions per session
-                    if day > max_days_ago:
-                        day = day % max_days_ago
-                    minutes_offset = int(user_rng.integers(0, 60))
+                # Starting point
+                base_day = user_rng.integers(0, base_interval)
+                
+                # Number of sessions needed
+                items_per_session = user_rng.integers(2, 6)  # Items per session
+                num_sessions_needed = (n_interactions + items_per_session - 1) // items_per_session
+                
+                # Generate timestamps for each session
+                for session_idx in range(num_sessions_needed):
+                    # Calculate day with noise
+                    noise = user_rng.normal(0, base_interval * noise_factor)
+                    day = base_day + (session_idx * base_interval) + int(noise)
+                    day = max(0, min(max_days_ago, day))  # Keep within range
+                    
+                    # Items in this session
+                    items_this_session = min(items_per_session, n_interactions - (session_idx * items_per_session))
+                    
+                    # Generate timestamps within session (either concentrated or spread)
+                    if user_rng.random() < 0.8:  # 80% chance of concentrated session
+                        session_duration = user_rng.integers(10, 90)  # 10-90 minute session
+                        for _ in range(items_this_session):
+                            minutes_offset = user_rng.integers(0, session_duration)
+                            seconds_offset = user_rng.integers(0, 60)
+                            timestamps.append(
+                                datetime.now() - timedelta(
+                                    days=int(day), 
+                                    minutes=int(minutes_offset),
+                                    seconds=int(seconds_offset)
+                                )
+                            )
+                    else:  # 20% chance of spread throughout day
+                        for _ in range(items_this_session):
+                            minutes_offset = user_rng.integers(0, 1440)  # Full day
+                            timestamps.append(
+                                datetime.now() - timedelta(days=int(day), minutes=int(minutes_offset))
+                            )
+            elif session_clustering == 'binge_and_break':
+                # Activity comes in intense bursts with long breaks
+                num_binges = max(1, user_rng.integers(1, 4))  # Pastikan minimal 1 binge
+                items_per_binge = max(1, n_interactions // num_binges)  # Pastikan minimal 1 item per binge
+                remaining = n_interactions - (items_per_binge * num_binges)
+                
+                # Generate binge periods (clusters of days)
+                binge_periods = []
+                available_days = list(range(max_days_ago))
+                
+                for _ in range(num_binges):
+                    if not available_days:
+                        break
+                        
+                    # Pick a starting day for this binge
+                    binge_start = user_rng.choice(available_days)
+                    # Binge lasts 1-3 days
+                    binge_length = user_rng.integers(1, 4)
+                    
+                    binge_days = [binge_start]
+                    # Add consecutive days if available
+                    for i in range(1, binge_length):
+                        next_day = binge_start - i
+                        if next_day in available_days:
+                            binge_days.append(next_day)
+                    
+                    binge_periods.append(binge_days)
+                    
+                    # Remove these days (and nearby days) from available pool
+                    buffer = user_rng.integers(3, 10)  # Days between binges
+                    days_to_remove = []
+                    for day in binge_days:
+                        for i in range(-buffer, buffer+1):
+                            if day + i in available_days:
+                                days_to_remove.append(day + i)
+                    
+                    for day in days_to_remove:
+                        if day in available_days:
+                            available_days.remove(day)
+                
+                # Distribute interactions across binge periods
+                remaining_interactions = n_interactions
+                
+                for binge_idx, binge_days in enumerate(binge_periods):
+                    if not binge_days:  # Skip if no days in this binge period
+                        continue
+                        
+                    # How many interactions in this binge
+                    if binge_idx == len(binge_periods) - 1:
+                        # Last binge gets all remaining
+                        binge_items = remaining_interactions
+                    else:
+                        binge_items = min(items_per_binge + user_rng.integers(-2, 3), remaining_interactions)
+                    
+                    remaining_interactions -= binge_items
+                    
+                    # Distribute across days in the binge
+                    items_per_day = []
+                    for _ in range(len(binge_days)-1):
+                        # PERBAIKAN: Pastikan binge_items > 1 sebelum memanggil integers
+                        if binge_items <= 1:
+                            day_items = 1
+                        else:
+                            day_items = user_rng.integers(1, binge_items)
+                        items_per_day.append(day_items)
+                        binge_items -= day_items
+                        if binge_items < 1:
+                            binge_items = 0
+                            break
+                    
+                    # Pastikan nilai tidak negatif
+                    binge_items = max(0, binge_items)
+                    items_per_day.append(binge_items)  # Last day gets remainder
+                    
+                    # Create timestamps - skip days dengan 0 interactions
+                    for day, count in zip(binge_days, items_per_day):
+                        if count <= 0:
+                            continue
+                            
+                        # High concentration during binge periods
+                        session_duration = user_rng.integers(30, 120)  # 30-120 minute session
+                        for _ in range(count):
+                            minutes_offset = user_rng.integers(0, session_duration)
+                            seconds_offset = user_rng.integers(0, 60)
+                            timestamps.append(
+                                datetime.now() - timedelta(
+                                    days=int(day), 
+                                    minutes=int(minutes_offset),
+                                    seconds=int(seconds_offset)
+                                )
+                            )
+                
+                # Sort timestamps
+                timestamps.sort(reverse=True)
+                
+            elif session_clustering == 'weekend_only':
+                # Activity concentrated on weekends
+                # Generate a calendar of weekend days
+                weekends = []
+                for day in range(max_days_ago):
+                    day_of_week = (datetime.now() - timedelta(days=day)).weekday()
+                    if day_of_week >= 5:  # 5,6 = Saturday, Sunday
+                        weekends.append(day)
+                
+                if not weekends:
+                    # Fallback if no weekends in range
+                    weekends = list(range(min(7, max_days_ago)))
+                
+                # Distribute interactions across weekends
+                items_per_weekend = []
+                remaining = n_interactions
+                
+                for i in range(len(weekends) - 1):
+                    count = user_rng.integers(1, max(2, remaining // 2))
+                    items_per_weekend.append(count)
+                    remaining -= count
+                
+                items_per_weekend.append(remaining)  # Last weekend gets remainder
+                
+                # Create timestamps
+                for day, count in zip(weekends, items_per_weekend):
+                    # Weekend sessions can be longer
+                    session_duration = user_rng.integers(30, 240)  # 30min-4hr sessions
+                    for _ in range(count):
+                        minutes_offset = user_rng.integers(0, session_duration)
+                        seconds_offset = user_rng.integers(0, 60)
+                        timestamps.append(
+                            datetime.now() - timedelta(
+                                days=int(day), 
+                                minutes=int(minutes_offset),
+                                seconds=int(seconds_offset)
+                            )
+                        )
+                        
+            elif session_clustering == 'gradually_increasing':
+                # Activity increases over time
+                available_days = list(range(max_days_ago))
+                # Weight more recent days higher
+                weights = [day+1 for day in range(len(available_days))]  # More recent = higher weight
+                weights = np.array(weights) / sum(weights)  # Normalize
+                
+                # Select days with weighted probability
+                session_days = []
+                for _ in range(n_interactions):
+                    day = user_rng.choice(available_days, p=weights)
+                    session_days.append(day)
+                
+                # Create timestamps
+                for day in session_days:
+                    minutes_offset = user_rng.integers(0, 1440)  # Full day
                     timestamps.append(
                         datetime.now() - timedelta(days=int(day), minutes=int(minutes_offset))
                     )
+                    
+            elif session_clustering == 'gradually_decreasing':
+                # Activity decreases over time
+                available_days = list(range(max_days_ago))
+                # Weight older days higher
+                weights = [max_days_ago - day for day in range(len(available_days))]
+                weights = np.array(weights) / sum(weights)  # Normalize
+                
+                # Select days with weighted probability
+                session_days = []
+                for _ in range(n_interactions):
+                    day = user_rng.choice(available_days, p=weights)
+                    session_days.append(day)
+                
+                # Create timestamps
+                for day in session_days:
+                    minutes_offset = user_rng.integers(0, 1440)  # Full day
+                    timestamps.append(
+                        datetime.now() - timedelta(days=int(day), minutes=int(minutes_offset))
+                    )
+                    
             else:  # random_spread
-                # Completely random distribution
+                # Completely random distribution with extreme variability
                 for _ in range(n_interactions):
                     days_ago = int(user_rng.integers(0, max_days_ago))
-                    random_seconds = int(user_rng.integers(0, 86400))  # Seconds in a day
+                    random_time = int(user_rng.integers(0, 86400))  # Seconds in a day
                     timestamps.append(
-                        datetime.now() - timedelta(days=int(days_ago), seconds=int(random_seconds))
+                        datetime.now() - timedelta(days=int(days_ago), seconds=int(random_time))
                     )
             
-            # More realistic project selection that varies with user and time
+            # Generate highly variable project selection patterns
             selected_projects = []
             
-            # For each interaction, select project with more realistic behavior
-            for interaction_idx in range(n_interactions):
-                # Time-varying exploration probability
-                if interaction_idx > 0 and interaction_idx % 3 == 0:
-                    # Periodically adjust exploration probability
-                    if user_rng.random() < 0.3:  # 30% chance to change exploration behavior
-                        exploration_probability = max(0.01, min(0.5, 
-                                                            exploration_probability + user_rng.normal(0, 0.1)))
+            # ENHANCEMENT: Different interest patterns
+            interest_pattern = user_rng.choice([
+                'stable',           # Consistent interests
+                'explorer',         # High variety, exploring many categories
+                'deep_diver',       # Focuses intensely on a few categories
+                'trend_follower',   # Prefers trending projects
+                'contrarian',       # Avoids popular projects
+                'fad_chaser'        # Interest shifts dramatically over time
+            ])
+            
+            # Extract category information for diversity tracking
+            item_to_category = {}
+            
+            if 'primary_category' in projects_df.columns:
+                item_to_category = dict(zip(projects_df['id'], projects_df['primary_category']))
                 
-                # Occasional exploration - users sometimes venture outside normal preferences
-                if user_rng.random() < exploration_probability:
-                    # Exploration gets more focused over time
-                    if interaction_idx > n_interactions // 2 and user_rng.random() < 0.7:
-                        # Later exploration is more related to existing preferences
-                        excluded_categories = set(preferred_categories)
-                        related_categories = [c for c in unique_categories 
-                                        if c not in excluded_categories and
-                                        any(self._calculate_category_similarity(c, pc) > 0.3 
-                                            for pc in preferred_categories)]
-                        
-                        if related_categories:
-                            selected_category = user_rng.choice(related_categories)
-                        else:
-                            # Fall back to weighted random selection if no related categories
-                            weights = [category_freq.get(c, 0.001) for c in unique_categories 
-                                    if c not in excluded_categories]
-                            if weights and sum(weights) > 0:
-                                weights = np.array(weights) / sum(weights)
-                                selected_category = user_rng.choice(
-                                    [c for c in unique_categories if c not in excluded_categories],
-                                    p=weights
-                                )
-                            else:
-                                # Last resort - pick from all categories
-                                selected_category = user_rng.choice(unique_categories)
-                    else:
-                        # Earlier exploration is more random, but influenced by overall popularity
-                        weights = [category_freq.get(c, 0.001) for c in unique_categories]
-                        weights = np.array(weights) / sum(weights)
-                        selected_category = user_rng.choice(unique_categories, p=weights)
+            # For fad_chaser, generate category shift points
+            category_shifts = []
+            if interest_pattern == 'fad_chaser':
+                # Divide interactions into 2-4 phases with different category focus
+                num_phases = user_rng.integers(2, 5)
+                shift_points = sorted(user_rng.choice(
+                    range(1, n_interactions), 
+                    size=min(num_phases-1, n_interactions-1),
+                    replace=False
+                ))
+                category_shifts = shift_points
+                
+                # For each phase, select a different primary category
+                phase_categories = {}
+                for i in range(num_phases):
+                    phase_categories[i] = user_rng.choice(preferred_categories)
                     
-                    # Exploration becomes less frequent over time
-                    exploration_probability *= exploration_decay
+                logger.debug(f"User {user_idx} is a fad_chaser with {num_phases} phases at points {shift_points}")
+            
+            # Pattern-specific adjustments
+            if interest_pattern == 'contrarian':
+                # Invert popularity bias - prefer unpopular projects
+                popularity_bias = 1 - popularity_bias
+                
+            elif interest_pattern == 'explorer':
+                # Boost exploration probability
+                exploration_probability *= 2
+                exploration_probability = min(0.8, exploration_probability)  # Cap at 80%
+                
+            elif interest_pattern == 'deep_diver':
+                # Reduce exploration, focus on fewer categories
+                exploration_probability /= 2
+                # Use only top 1-2 categories
+                if len(preferred_categories) > 2:
+                    top_categories = preferred_categories[:user_rng.integers(1, 3)]
+                    category_weights = category_weights[:len(top_categories)]
+                    # Normalize weights
+                    category_weights = category_weights / category_weights.sum()
+                    preferred_categories = top_categories
+            
+            # Initialize variables for tracking category history
+            category_history = []  # Keep track of recently selected categories
+            category_counts = {}   # Track overall category counts
+            
+            # For each interaction, select project with HIGHLY variable behavior
+            for interaction_idx in range(n_interactions):
+                # Update category focus for fad_chaser at shift points
+                if interest_pattern == 'fad_chaser' and interaction_idx in category_shifts:
+                    phase = category_shifts.index(interaction_idx) + 1
+                    logger.debug(f"User {user_idx} shifting to phase {phase} category: {phase_categories[phase]}")
+                    
+                    # Dramatically shift category focus
+                    if phase_categories[phase] in preferred_categories:
+                        idx = preferred_categories.index(phase_categories[phase])
+                        # Boost this category's weight
+                        temp_weights = category_weights.copy()
+                        temp_weights[idx] *= 5  # Massive boost to new focus
+                        category_weights = temp_weights / temp_weights.sum()
+                
+                # Variable exploration probability based on pattern and point in session
+                current_exploration_prob = exploration_probability
+                
+                # Explorer pattern has dynamic exploration that can increase or decrease
+                if interest_pattern == 'explorer':
+                    if user_rng.random() < 0.4:  # 40% chance of change
+                        exploration_probability = min(0.8, exploration_probability * user_rng.uniform(0.8, 1.2))
+                
+                # Fluctuating explorer type has periodic changes
+                if explorer_type == 'fluctuating' and interaction_idx % 5 == 0:
+                    # Every 5 interactions, dramatically change exploration rate
+                    exploration_probability = user_rng.uniform(0.1, 0.6)
+                    
+                # Increasing explorer becomes more exploratory over time
+                elif explorer_type == 'increasing':
+                    exploration_probability = min(0.8, base_exploration_prob + (interaction_idx / n_interactions) * 0.4)
+                
+                # Determine if this interaction will be exploratory
+                is_exploratory = user_rng.random() < current_exploration_prob
+                
+                # ENHANCEMENT: Time-dependent exploration (more exploration early, more focus late)
+                if not is_exploratory and interaction_idx < n_interactions // 3:
+                    # More likely to explore early
+                    is_exploratory = user_rng.random() < 0.3
+                elif is_exploratory and interaction_idx > 2 * n_interactions // 3:
+                    # More likely to focus late
+                    is_exploratory = user_rng.random() < 0.3
+                
+                if is_exploratory:
+                    # Exploration mode - venture beyond normal preferences
+                    # Different types of exploration
+                    explore_type = user_rng.choice([
+                        'random',           # Completely random category
+                        'adjacent',         # Related to interests
+                        'trending',         # Focus on trending
+                        'contrarian',       # Focus on non-popular
+                        'novelty'           # Focus on categories not yet explored
+                    ])
+                    
+                    if explore_type == 'random':
+                        # Completely random category
+                        selected_category = user_rng.choice(unique_categories)
+                        
+                    elif explore_type == 'adjacent':
+                        # Find categories related to current interests
+                        if category_history and user_rng.random() < 0.7:
+                            # Base on recent history
+                            recent_cat = user_rng.choice(category_history[:5]) if len(category_history) >= 5 else category_history[-1]
+                            
+                            # Find similar categories
+                            similarities = []
+                            for cat in unique_categories:
+                                if cat != recent_cat:
+                                    sim_score = self._calculate_category_similarity(cat, recent_cat)
+                                    similarities.append((cat, sim_score))
+                            
+                            # Sort by similarity and take top
+                            similarities.sort(key=lambda x: x[1], reverse=True)
+                            top_similar = [cat for cat, _ in similarities[:5]]
+                            
+                            if top_similar:
+                                selected_category = user_rng.choice(top_similar)
+                            else:
+                                selected_category = user_rng.choice(unique_categories)
+                        else:
+                            # Base on overall preferences
+                            selected_category = user_rng.choice(preferred_categories)
+                            
+                    elif explore_type == 'trending':
+                        # Focus on trending categories
+                        trend_field = 'trend_score' if 'trend_score' in projects_df.columns else 'popularity_score'
+                        if trend_field in projects_df.columns:
+                            # Get top trending categories
+                            top_trending = projects_df.sort_values(trend_field, ascending=False).head(50)
+                            trending_cats = top_trending['primary_category'].dropna().unique().tolist()
+                            
+                            if trending_cats:
+                                selected_category = user_rng.choice(trending_cats)
+                            else:
+                                selected_category = user_rng.choice(unique_categories)
+                        else:
+                            selected_category = user_rng.choice(unique_categories)
+                            
+                    elif explore_type == 'contrarian':
+                        # Focus on less popular categories
+                        # Invert category frequency to favor rare categories
+                        inv_freq = {cat: 1/(freq + 0.01) for cat, freq in category_freq.items()}
+                        # Normalize
+                        total = sum(inv_freq.values())
+                        inv_freq = {cat: freq/total for cat, freq in inv_freq.items()}
+                        
+                        # Convert to list for random choice
+                        cats, weights = zip(*inv_freq.items())
+                        selected_category = user_rng.choice(cats, p=weights)
+                        
+                    else:  # novelty
+                        # Focus on categories not yet explored
+                        explored_cats = set(category_history)
+                        unexplored = [cat for cat in unique_categories if cat not in explored_cats]
+                        
+                        if unexplored:
+                            selected_category = user_rng.choice(unexplored)
+                        else:
+                            # All categories explored, choose random
+                            selected_category = user_rng.choice(unique_categories)
+                    
+                    # Update exploration probability
+                    if explorer_type != 'consistent' and explorer_type != 'increasing':
+                        exploration_probability *= exploration_decay
                 else:
                     # Normal selection based on preferences
-                    current_weights = category_weights.copy()
-                    
-                    # Add recency bias - users tend to interact more with recent categories
-                    if interaction_idx > 0 and selected_projects and user_rng.random() < 0.3:
-                        recent_categories = []
-                        for proj in selected_projects[-3:]:
-                            if proj in projects_df['id'].values:
-                                proj_row = projects_df[projects_df['id'] == proj]
-                                if not proj_row.empty and 'primary_category' in proj_row.columns:
-                                    cat = proj_row['primary_category'].iloc[0]
-                                    if not pd.isna(cat):
-                                        recent_categories.append(cat)
-                        
-                        for recent_cat in recent_categories:
-                            if recent_cat in preferred_categories:
-                                idx = preferred_categories.index(recent_cat)
-                                current_weights[idx] *= user_rng.uniform(1.1, 1.5)  # Boost recent categories
-                        
-                        # Re-normalize weights
-                        if sum(current_weights) > 0:
-                            current_weights = current_weights / current_weights.sum()
-                    
-                    # Select category based on current weights
-                    selected_category = user_rng.choice(preferred_categories, p=current_weights)
+                    # For deep divers, heavily favor most recent category
+                    if interest_pattern == 'deep_diver' and category_history:
+                        last_cat = category_history[-1]
+                        if last_cat in preferred_categories and user_rng.random() < 0.7:
+                            selected_category = last_cat
+                        else:
+                            # Select from preferences with probability weighting
+                            selected_category = user_rng.choice(preferred_categories, p=category_weights)
+                    else:
+                        # Standard selection with weights
+                        selected_category = user_rng.choice(preferred_categories, p=category_weights)
                 
-                # Filter projects by selected category
+                # Update category history
+                category_history.insert(0, selected_category)
+                if len(category_history) > 10:  # Keep only most recent 10
+                    category_history.pop()
+                    
+                # Update category counts
+                category_counts[selected_category] = category_counts.get(selected_category, 0) + 1
+                
+                # Filter projects by selected category with high variability in selection
                 category_projects = projects_df[projects_df['primary_category'] == selected_category]
                 
                 # If too few projects found, expand search intelligently
@@ -1546,16 +2108,26 @@ class DataProcessor:
                         # Just use popular projects as complete fallback
                         category_projects = projects_df.sort_values('popularity_score', ascending=False).head(20)
                 
-                # More realistic project selection weights based on user behavior
-                pop_weight = 1.0 + popularity_bias  # Higher means more influenced by popularity
-                trend_weight = 1.0 - popularity_bias * 0.5  # Less trendy if popularity focused
+                # Project selection weights with extreme variability
+                if interest_pattern == 'trend_follower':
+                    # Trend followers prefer recent rising projects
+                    pop_weight = 0.3  # Lower emphasis on pure popularity
+                    trend_weight = 1.7  # Higher emphasis on trend
+                elif interest_pattern == 'contrarian':
+                    # Contrarians avoid popular projects
+                    pop_weight = -1.0  # Negative weight to popularity
+                    trend_weight = 0.5  # Moderate interest in trends
+                else:
+                    # Default weights with high variability
+                    pop_weight = user_rng.uniform(0.5, 1.5) * popularity_bias
+                    trend_weight = user_rng.uniform(0.5, 1.5) * (1 - popularity_bias * 0.5)
                 
                 # Avoid repeating recently selected projects
                 # Create a penalty for recently selected projects
                 recency_penalty = {}
                 for idx, proj_id in enumerate(reversed(selected_projects)):
                     # More recent = higher penalty
-                    recency_penalty[proj_id] = max(0, 1.0 - (idx * 0.2))  # Decay with recency
+                    recency_penalty[proj_id] = max(0, 1.0 - (idx * 0.2))
                 
                 # Calculate weights for project selection
                 weights = []
@@ -1573,11 +2145,11 @@ class DataProcessor:
                     norm_pop = pop_score / 100.0 if pop_score <= 100 else 1.0
                     norm_trend = trend_score / 100.0 if trend_score <= 100 else 1.0
                     
-                    # Final weighted score with randomization
+                    # Final weighted score with extremely high randomization
                     score = (
                         (norm_pop ** pop_weight) * 
                         (norm_trend ** trend_weight) * 
-                        (1.0 + user_rng.uniform(-0.2, 0.2))  # Add noise
+                        (1.0 + user_rng.uniform(-0.5, 0.5))  # Massive noise component
                     )
                     
                     # Apply recency penalty to avoid repetition
@@ -1616,8 +2188,8 @@ class DataProcessor:
                     selected_project = category_projects['id'].iloc[0]
                     selected_projects.append(selected_project)
                 
-                # PERBAIKAN: Tambahkan dukungan untuk persona baru
-                # Determine interaction type based on user persona and project characteristics
+                # ENHANCEMENT: Generate highly variable interaction types based on user persona and project
+                # Determine interaction type with extreme variability based on user persona and project characteristics
                 if user_persona == 'defi_enthusiast':
                     interaction_type_probs = {
                         'view': 0.3, 'favorite': 0.2, 'portfolio_add': 0.4, 'research': 0.1
@@ -1655,30 +2227,53 @@ class DataProcessor:
                         'view': 0.4, 'favorite': 0.3, 'portfolio_add': 0.2, 'research': 0.1
                     }
                 
-                # Add project-specific factors
+                # Add massive random variation to base probabilities
+                for interaction_type in interaction_type_probs:
+                    interaction_type_probs[interaction_type] *= user_rng.uniform(0.5, 1.5)
+                
+                # Normalize probabilities
+                total = sum(interaction_type_probs.values())
+                interaction_type_probs = {k: v/total for k, v in interaction_type_probs.items()}
+                
+                # Add project-specific factors with extreme variability
                 try:
                     project_row = projects_df[projects_df['id'] == selected_project].iloc[0]
                     project_popularity = project_row.get('popularity_score', 50) / 100.0
                     project_trend = project_row.get('trend_score', 50) / 100.0
                     project_maturity = project_row.get('maturity_score', 50) / 100.0
                     
-                    # Adjust probabilities based on project characteristics
-                    if project_popularity > 0.7:  # Very popular projects
+                    # Add extreme variation to project characteristic impact
+                    pop_impact = user_rng.uniform(0.8, 1.8)
+                    trend_impact = user_rng.uniform(0.8, 1.8)
+                    maturity_impact = user_rng.uniform(0.8, 1.8)
+                    
+                    # Adjust probabilities based on project characteristics with high variability
+                    if project_popularity > 0.6:  # Very popular projects
                         # More likely to add popular projects to portfolio
-                        interaction_type_probs['portfolio_add'] *= 1.3
-                        interaction_type_probs['favorite'] *= 1.2
+                        interaction_type_probs['portfolio_add'] *= 1.0 + (pop_impact * 0.4)
+                        interaction_type_probs['favorite'] *= 1.0 + (pop_impact * 0.3)
                     
-                    if project_trend > 0.7:  # Trending projects
-                        # Trendy projects get more favorites
-                        interaction_type_probs['favorite'] *= 1.4
+                    if project_trend > 0.6:  # Strongly trending projects
+                        # Trending projects get more favorites and portfolio adds
+                        interaction_type_probs['favorite'] *= 1.0 + (trend_impact * 0.5)
+                        interaction_type_probs['portfolio_add'] *= 1.0 + (trend_impact * 0.3)
                     
-                    if project_maturity > 0.7:  # Mature projects
+                    if project_maturity > 0.7:  # Very mature projects
                         # Mature projects more likely to be researched and added to portfolio
-                        interaction_type_probs['research'] *= 1.5
-                        interaction_type_probs['portfolio_add'] *= 1.2
+                        interaction_type_probs['research'] *= 1.0 + (maturity_impact * 0.5)
+                        interaction_type_probs['portfolio_add'] *= 1.0 + (maturity_impact * 0.2)
                     elif project_maturity < 0.3:  # Immature projects
                         # New projects more likely to just be viewed
-                        interaction_type_probs['view'] *= 1.3
+                        interaction_type_probs['view'] *= 1.0 + (maturity_impact * 0.4)
+                    
+                    # ENHANCEMENT: Pattern-specific adjustments
+                    if interest_pattern == 'deep_diver':
+                        # Deep divers do more research
+                        interaction_type_probs['research'] *= 1.5
+                    elif interest_pattern == 'trend_follower':
+                        # Trend followers favorite and portfolio more
+                        interaction_type_probs['favorite'] *= 1.3
+                        interaction_type_probs['portfolio_add'] *= 1.3
                     
                     # Normalize probabilities
                     total = sum(interaction_type_probs.values())
@@ -1694,31 +2289,66 @@ class DataProcessor:
                 # Select interaction type
                 interaction_type = user_rng.choice(interaction_types, p=interaction_probs)
                 
-                # Determine interaction weight with more realistic distribution
+                # ENHANCEMENT: Determine interaction weight with extreme variability
+                # Add activity profile boost
+                weight_min, weight_max = activity_profile['weight_boost']
+                boost_factor = user_rng.uniform(weight_min, weight_max)
+                
                 if interaction_type == 'view':
-                    # Views have lower weights - some quick, some longer
-                    if user_rng.random() < 0.7:  # 70% quick views
-                        weight = max(1, min(3, int(user_rng.exponential(1.0))))
-                    else:  # 30% longer views
-                        weight = max(1, min(5, int(user_rng.normal(2.5, 1.0))))
+                    # Views have lower weights with high variability
+                    weight_distribution = user_rng.choice(['exponential', 'normal', 'uniform'])
+                    
+                    if weight_distribution == 'exponential':
+                        # Mostly low values, occasional high
+                        weight = max(1, min(5, int(user_rng.exponential(1.2 * boost_factor))))
+                    elif weight_distribution == 'normal':
+                        # Centered distribution
+                        weight = max(1, min(5, int(user_rng.normal(2.0 * boost_factor, 1.2))))
+                    else:  # uniform
+                        # Evenly distributed
+                        weight = user_rng.integers(1, max(2, int(4 * boost_factor)))
+                        
                 elif interaction_type == 'favorite':
-                    # Favorites have medium weights with some variance
-                    weight = max(1, min(5, int(user_rng.normal(3.0, 0.8))))
+                    # Favorites have medium weights with high variance
+                    if user_rng.random() < 0.3:  # 30% chance of special weight 
+                        # Either very low or very high
+                        if user_rng.random() < 0.5:
+                            weight = 1  # Very casual favorite
+                        else:
+                            weight = max(1, min(7, int(user_rng.normal(5.0 * boost_factor, 1.0))))  # Very strong favorite
+                    else:
+                        # Normal distribution with high variance
+                        weight = max(1, min(5, int(user_rng.normal(3.0 * boost_factor, 1.5))))
+                        
                 elif interaction_type == 'portfolio_add':
-                    # Portfolio adds have higher weights with some being very high
-                    if user_rng.random() < 0.8:  # 80% regular adds
-                        weight = max(1, min(5, int(user_rng.normal(3.5, 0.7))))
-                    else:  # 20% high conviction adds
-                        weight = max(1, min(7, int(user_rng.normal(5.0, 1.0))))
+                    # Portfolio adds have higher weights with extreme variability
+                    if user_rng.random() < 0.15:  # 15% chance of very low conviction
+                        weight = 1
+                    elif user_rng.random() < 0.25:  # 25% chance of extremely high conviction
+                        weight = max(1, min(10, int(user_rng.normal(6.0 * boost_factor, 2.0))))
+                    else:  # 60% normal range
+                        weight = max(1, min(7, int(user_rng.normal(3.5 * boost_factor, 1.5))))
+                        
                 else:  # research
-                    # Research has varied weights depending on depth
-                    depth = user_rng.choice(['shallow', 'medium', 'deep'], p=[0.3, 0.5, 0.2])
-                    if depth == 'shallow':
-                        weight = max(1, min(3, int(user_rng.normal(2.0, 0.5))))
+                    # Research has varied weights depending on depth and user pattern
+                    depth = user_rng.choice(['very_shallow', 'shallow', 'medium', 'deep', 'very_deep'], 
+                                        p=[0.1, 0.25, 0.4, 0.2, 0.05])  # Very uneven distribution
+                    
+                    if depth == 'very_shallow':
+                        weight = 1
+                    elif depth == 'shallow':
+                        weight = max(1, min(3, int(user_rng.normal(1.8 * boost_factor, 0.8))))
                     elif depth == 'medium':
-                        weight = max(1, min(4, int(user_rng.normal(3.0, 0.7))))
-                    else:  # deep
-                        weight = max(1, min(6, int(user_rng.normal(4.5, 1.0))))
+                        weight = max(1, min(5, int(user_rng.normal(3.0 * boost_factor, 1.0))))
+                    elif depth == 'deep':
+                        weight = max(1, min(7, int(user_rng.normal(4.5 * boost_factor, 1.2))))
+                    else:  # very_deep - thorough research
+                        weight = max(1, min(10, int(user_rng.normal(6.0 * boost_factor, 1.5))))
+                    
+                    # Pattern-specific adjustments
+                    if interest_pattern == 'deep_diver':
+                        # Deep divers go deeper in research
+                        weight = min(10, int(weight * 1.5))
                 
                 # Get timestamp for this interaction
                 if interaction_idx < len(timestamps):
@@ -1731,7 +2361,7 @@ class DataProcessor:
                 
                 # Add to interactions
                 interactions.append({
-                    'user_id': f"user_{user_id}",
+                    'user_id': f"user_{user_idx}",
                     'project_id': selected_project,
                     'interaction_type': interaction_type,
                     'weight': weight,
@@ -1795,9 +2425,9 @@ class DataProcessor:
         return json_str
     
     def _save_processed_data(self, projects_df: pd.DataFrame, interactions_df: pd.DataFrame, 
-                    features_df: pd.DataFrame) -> None:
+                        features_df: pd.DataFrame) -> None:
         """
-        Save processed data with improved JSON handling
+        Save processed data dengan penyempurnaan penanganan JSON dan kolom multiple categories
         
         Args:
             projects_df: DataFrame of projects
@@ -1861,6 +2491,34 @@ class DataProcessor:
                     return json.dumps([], ensure_ascii=False)
             
             projects_df_csv['categories'] = projects_df_csv['categories'].apply(process_categories)
+        
+        # Handle primary_categories
+        if 'primary_categories' in projects_df_csv.columns:
+            def process_primary_categories(x):
+                if isinstance(x, list):
+                    return json.dumps(x, ensure_ascii=False)
+                elif x is None or (isinstance(x, float) and np.isnan(x)):
+                    return json.dumps(['unknown'], ensure_ascii=False)
+                else:
+                    try:
+                        if isinstance(x, str):
+                            cleaned = self.clean_json_string(x)
+                            return json.dumps(json.loads(cleaned), ensure_ascii=False)
+                    except:
+                        pass
+                    return json.dumps(['unknown'], ensure_ascii=False)
+            
+            projects_df_csv['primary_categories'] = projects_df_csv['primary_categories'].apply(process_primary_categories)
+        
+        # Ensure all required fields are not null
+        for field in ['name', 'symbol', 'primary_category', 'chain']:
+            if field in projects_df_csv.columns:
+                projects_df_csv[field] = projects_df_csv[field].fillna('unknown')
+        
+        # Ensure numeric fields are not null
+        for field in ['market_cap', 'price_usd', 'volume_24h', 'popularity_score', 'trend_score']:
+            if field in projects_df_csv.columns:
+                projects_df_csv[field] = projects_df_csv[field].fillna(0)
         
         # Save with timestamp
         projects_df_csv.to_csv(projects_path, index=False, quoting=1)  # Use quoting=1 to quote strings only

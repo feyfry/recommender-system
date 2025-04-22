@@ -224,7 +224,7 @@ class CoinGeckoCollector:
     
     def fetch_coin_details(self, coin_id: str, index: int = 0, total: int = 0) -> Optional[Dict]:
         """
-        Fetch detailed info for a specific coin
+        Mengambil informasi detail untuk koin tertentu dengan penanganan data sosial yang lebih baik
         
         Args:
             coin_id: CoinGecko coin ID
@@ -237,7 +237,7 @@ class CoinGeckoCollector:
         progress = f"({index}/{total})" if total > 0 else ""
         logger.info(f"Fetching details for {coin_id} {progress}")
         
-        # Pastikan untuk mendapatkan market_data, yang berisi data price dan lainnya
+        # Pastikan untuk mendapatkan market_data, community_data dan developer_data
         params = {
             'localization': 'false',
             'tickers': 'false',
@@ -249,6 +249,29 @@ class CoinGeckoCollector:
         data = self.make_request(f'coins/{coin_id}', params)
         
         if data:
+            # Perbaikan: Pastikan semua data sosial tersedia atau diberi nilai default
+            if 'community_data' not in data or data['community_data'] is None:
+                data['community_data'] = {}
+            
+            # Pastikan semua field sosial tersedia dengan nilai default
+            social_fields = [
+                'twitter_followers', 'reddit_subscribers', 'telegram_channel_user_count',
+                'facebook_likes', 'discord_members'
+            ]
+            
+            for field in social_fields:
+                if field not in data['community_data']:
+                    data['community_data'][field] = 0
+                
+            # Developer data
+            if 'developer_data' not in data or data['developer_data'] is None:
+                data['developer_data'] = {}
+                
+            dev_fields = ['stars', 'forks', 'subscribers', 'total_issues', 'pull_requests_merged']
+            for field in dev_fields:
+                if field not in data['developer_data']:
+                    data['developer_data'][field] = 0
+                    
             # Save to file
             filename = os.path.join(RAW_DIR, f"coin_details_{coin_id}.json")
             
