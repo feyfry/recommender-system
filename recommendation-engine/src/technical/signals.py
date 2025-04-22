@@ -517,29 +517,28 @@ def generate_trading_signals(prices_df: pd.DataFrame,
         macd_cross_up = (valid_macd.iloc[-1] > valid_signal.iloc[-1]) and (valid_macd.iloc[-2] <= valid_signal.iloc[-2])
         macd_cross_down = (valid_macd.iloc[-1] < valid_signal.iloc[-1]) and (valid_macd.iloc[-2] >= valid_signal.iloc[-2])
     
-    # MACD signals
     if macd_cross_up:
         signals['macd'] = {
             'signal': 'buy',
-            'strength': CONFIDENCE_THRESHOLD + 0.1,  # Menggunakan CONFIDENCE_THRESHOLD sebagai dasar
+            'strength': 0.8,
             'description': f"MACD memotong ke atas signal line (bullish) - ({macd_fast}/{macd_slow}/{macd_signal})"
         }
     elif macd_cross_down:
         signals['macd'] = {
             'signal': 'sell',
-            'strength': CONFIDENCE_THRESHOLD + 0.1,  # Menggunakan CONFIDENCE_THRESHOLD sebagai dasar
+            'strength': 0.8,
             'description': f"MACD memotong ke bawah signal line (bearish) - ({macd_fast}/{macd_slow}/{macd_signal})"
         }
     elif latest_macd > latest_signal:
         signals['macd'] = {
             'signal': 'buy',
-            'strength': CONFIDENCE_THRESHOLD - 0.1,  # Sinyal lebih lemah, kurangi threshold
+            'strength': 0.6,
             'description': f"MACD di atas signal line (bullish) - ({macd_fast}/{macd_slow}/{macd_signal})"
         }
     elif latest_macd < latest_signal:
         signals['macd'] = {
             'signal': 'sell',
-            'strength': CONFIDENCE_THRESHOLD - 0.1,  # Sinyal lebih lemah, kurangi threshold
+            'strength': 0.6,
             'description': f"MACD di bawah signal line (bearish) - ({macd_fast}/{macd_slow}/{macd_signal})"
         }
     else:
@@ -548,9 +547,6 @@ def generate_trading_signals(prices_df: pd.DataFrame,
             'strength': 0.5,
             'description': f"MACD netral - ({macd_fast}/{macd_slow}/{macd_signal})"
         }
-
-    # Bollinger Bands signals
-    base_strength = CONFIDENCE_THRESHOLD
     
     # Bollinger Bands signals
     # Cek apakah nilai Bollinger Bands valid
@@ -560,25 +556,25 @@ def generate_trading_signals(prices_df: pd.DataFrame,
         if latest_close > latest_upper:
             signals['bollinger'] = {
                 'signal': 'sell',
-                'strength': base_strength,
+                'strength': 0.7,
                 'description': f"Harga di atas upper Bollinger Band (overbought) - (periode {bb_period})"
             }
         elif latest_close < latest_lower:
             signals['bollinger'] = {
                 'signal': 'buy',
-                'strength': base_strength,
+                'strength': 0.7,
                 'description': f"Harga di bawah lower Bollinger Band (oversold) - (periode {bb_period})"
             }
         elif bb_percent > 0.8:
             signals['bollinger'] = {
                 'signal': 'sell',
-                'strength': base_strength - 0.1,
+                'strength': 0.6,
                 'description': f"Harga mendekati upper Bollinger Band (potensi pembalikan) - (periode {bb_period})"
             }
         elif bb_percent < 0.2:
             signals['bollinger'] = {
                 'signal': 'buy',
-                'strength': base_strength - 0.1,
+                'strength': 0.6,
                 'description': f"Harga mendekati lower Bollinger Band (potensi pembalikan) - (periode {bb_period})"
             }
         else:
@@ -600,10 +596,6 @@ def generate_trading_signals(prices_df: pd.DataFrame,
     
     stoch_cross_up = False
     stoch_cross_down = False
-
-    # Stochastic signals dengan strengths dinamis
-    strong_signal_strength = CONFIDENCE_THRESHOLD + 0.1
-    normal_signal_strength = CONFIDENCE_THRESHOLD
     
     if len(valid_k) >= 2 and len(valid_d) >= 2:
         stoch_cross_up = (valid_k.iloc[-1] > valid_d.iloc[-1]) and (valid_k.iloc[-2] <= valid_d.iloc[-2])
@@ -612,25 +604,25 @@ def generate_trading_signals(prices_df: pd.DataFrame,
     if latest_k < 20 and stoch_cross_up:
         signals['stochastic'] = {
             'signal': 'buy',
-            'strength': strong_signal_strength,
+            'strength': 0.8,
             'description': f"Stochastic %K memotong ke atas %D di zona oversold (sinyal beli kuat) - ({stoch_k}/{stoch_d})"
         }
     elif latest_k > 80 and stoch_cross_down:
         signals['stochastic'] = {
             'signal': 'sell',
-            'strength': strong_signal_strength,
+            'strength': 0.8,
             'description': f"Stochastic %K memotong ke bawah %D di zona overbought (sinyal jual kuat) - ({stoch_k}/{stoch_d})"
         }
     elif latest_k < 20:
         signals['stochastic'] = {
             'signal': 'buy',
-            'strength': normal_signal_strength,
+            'strength': 0.7,
             'description': f"Stochastic oscillator oversold di level {latest_k:.2f} - ({stoch_k}/{stoch_d})"
         }
     elif latest_k > 80:
         signals['stochastic'] = {
             'signal': 'sell',
-            'strength': normal_signal_strength,
+            'strength': 0.7,
             'description': f"Stochastic oscillator overbought di level {latest_k:.2f} - ({stoch_k}/{stoch_d})"
         }
     else:
@@ -751,14 +743,16 @@ def generate_trading_signals(prices_df: pd.DataFrame,
     target_price = None
 
     if 'high' in prices_df.columns and 'low' in prices_df.columns:
-        atr = calculate_atr(high_prices, low_prices, close_prices, window=TRADING_SIGNAL_WINDOW)
-        latest_atr = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else (latest_close * 0.02)
+        atr = calculate_atr(high_prices, low_prices, close_prices)
+        latest_atr = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else (latest_close * 0.02)  # Default to 2% of price
         
         if action == "buy":
             # Target price for buying: current price + 2*ATR
+            # Use abs() to ensure positive ATR value
             target_price = latest_close + (2 * abs(latest_atr))
         elif action == "sell":
             # Target price for selling: current price - 2*ATR
+            # Use abs() to ensure positive ATR value
             target_price = latest_close - (2 * abs(latest_atr))
     
     # Check if confidence meets threshold
@@ -1035,14 +1029,11 @@ def personalize_signals(signals: Dict[str, Any],
         personalized['risk_profile'] = risk_tolerance
         return personalized
     
-    # Gunakan CONFIDENCE_THRESHOLD sebagai baseline
-    base_threshold = CONFIDENCE_THRESHOLD
-    
     # Default confidence threshold for different risk profiles
     thresholds = {
-        'low': base_threshold + 0.2,      # Conservative, needs strong signals
-        'medium': base_threshold,          # Balanced
-        'high': base_threshold - 0.2       # Aggressive, acts on weaker signals
+        'low': 0.8,    # Conservative, needs strong signals
+        'medium': 0.6,  # Balanced
+        'high': 0.4     # Aggressive, acts on weaker signals
     }
     
     # Apply risk tolerance to confidence
@@ -1061,9 +1052,7 @@ def personalize_signals(signals: Dict[str, Any],
     elif risk_tolerance == 'high':
         # Aggressive: Amplify confidence for buy/sell
         if action != 'hold':
-            # Gunakan faktor boost dinamis berdasarkan CONFIDENCE_THRESHOLD
-            boost_factor = 1.0 + (1.0 - base_threshold) * 0.5
-            boosted_confidence = min(1.0, confidence * boost_factor)
+            boosted_confidence = min(1.0, confidence * 1.2)
             personalized['confidence'] = boosted_confidence
             personalized['personalized_message'] = "Sinyal diperkuat untuk profil risiko agresif Anda"
         else:
@@ -1073,11 +1062,11 @@ def personalize_signals(signals: Dict[str, Any],
             
             if buy_signals > sell_signals and buy_signals > 1:
                 personalized['action'] = 'buy'
-                personalized['confidence'] = thresholds['high']  # Gunakan threshold risiko tinggi
+                personalized['confidence'] = 0.5
                 personalized['personalized_message'] = "Dikonversi ke sinyal beli untuk profil risiko agresif Anda"
             elif sell_signals > buy_signals and sell_signals > 1:
                 personalized['action'] = 'sell'
-                personalized['confidence'] = thresholds['high']  # Gunakan threshold risiko tinggi
+                personalized['confidence'] = 0.5
                 personalized['personalized_message'] = "Dikonversi ke sinyal jual untuk profil risiko agresif Anda"
             else:
                 personalized['personalized_message'] = "Tetap hold meskipun profil risiko Anda agresif karena sinyal tidak jelas"
@@ -1092,7 +1081,7 @@ def personalize_signals(signals: Dict[str, Any],
 
 
 def detect_market_events(prices_df: pd.DataFrame, 
-                        window: int = TRADING_SIGNAL_WINDOW,
+                        window: int = 20, 
                         threshold: float = 2.0) -> Dict[str, Any]:
     """
     Detect market events such as pumps, dumps, high volatility, etc.
@@ -1133,13 +1122,10 @@ def detect_market_events(prices_df: pd.DataFrame,
     # Calculate moving average and standard deviation
     ma = close_prices.rolling(window=window).mean()
     std = close_prices.rolling(window=window).std()
-
-    # Semakin tinggi CONFIDENCE_THRESHOLD, semakin ketat deteksi event
-    adjusted_threshold = threshold * (1 + (CONFIDENCE_THRESHOLD - 0.5))
     
     # Calculate upper and lower bounds
-    upper_bound = ma + (adjusted_threshold * std)
-    lower_bound = ma - (adjusted_threshold * std)
+    upper_bound = ma + (threshold * std)
+    lower_bound = ma - (threshold * std)
     
     # Detect events (pastikan data cukup untuk perhitungan)
     valid_data = ~(close_prices.isna() | ma.isna() | std.isna() | returns.isna())
