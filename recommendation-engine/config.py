@@ -96,16 +96,6 @@ EVAL_K_VALUES = [5, 10, 20]
 EVAL_TEST_RATIO = 0.2
 EVAL_RANDOM_SEED = 42
 
-# Pengaturan evaluasi tambahan
-EVAL_CONFIG = {
-    "extended_metrics": True,     # Hitung metrik evaluasi tambahan
-    "evaluate_diversity": True,   # Evaluasi keragaman rekomendasi
-    "evaluate_novelty": True,     # Evaluasi kebaruan rekomendasi
-    "min_interactions": 5,        # Minimal interaksi untuk inklusi dalam evaluasi
-    "cold_start_threshold": 2,    # Jumlah maksimum interaksi untuk pengguna cold-start
-    "category_awareness": True    # Mempertimbangkan kategori dalam evaluasi
-}
-
 # Persona pengguna yang lebih beragam untuk sintetis data
 USER_PERSONAS = {
     "defi_enthusiast": {
@@ -142,7 +132,7 @@ USER_PERSONAS = {
     }
 }
 
-# PERBAIKAN: Konfigurasi diversifikasi untuk interaksi sintetis
+# Konfigurasi diversifikasi untuk interaksi sintetis
 INTERACTION_DIVERSITY = {
     "enable_exploration": True,   # Aktifkan eksplorasi di luar kategori utama
     "exploration_rate": 0.2,      # 20% eksplorasi kategori
@@ -155,12 +145,3 @@ INTERACTION_DIVERSITY = {
 API_HOST = "0.0.0.0"
 API_PORT = 8000
 API_CACHE_TTL = 300  # 5 menit dalam detik
-
-# Pengaturan performa
-PERFORMANCE_CONFIG = {
-    "use_parallel": True,      # Gunakan pemrosesan paralel jika mungkin
-    "batch_size": 128,         # Ukuran batch untuk pemrosesan data besar
-    "cache_recommendations": True,  # Cache rekomendasi untuk performa
-    "cache_ttl": 300,         # TTL cache (5 menit)
-    "optimize_cold_start": True     # Optimasi khusus untuk Cold-Start
-}

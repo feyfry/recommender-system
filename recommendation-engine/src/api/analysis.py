@@ -19,6 +19,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from src.technical.indicators import TechnicalIndicators
 from src.technical.signals import generate_trading_signals, personalize_signals, detect_market_events
 from src.data.collector import fetch_real_market_data
+from config import CONFIDENCE_THRESHOLD
 
 # Setup router
 router = APIRouter(
@@ -316,6 +317,10 @@ async def get_trading_signals(request: TradingSignalRequest):
                 if pd.isna(value):
                     logger.warning(f"NaN value detected for indicator {key}, replacing with 0.0")
                     personalized['indicators'][key] = 0.0
+
+        # Cek confidence terhadap threshold yang bisa dikonfigurasikan
+        is_strong_signal = personalized.get('confidence', 0) >= CONFIDENCE_THRESHOLD
+        personalized['strong_signal'] = is_strong_signal
                     
         # Sanitize target_price if it's NaN
         if 'target_price' in personalized and pd.isna(personalized['target_price']):
