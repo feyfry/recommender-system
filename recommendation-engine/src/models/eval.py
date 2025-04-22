@@ -578,15 +578,15 @@ def evaluate_all_models(models: Dict[str, Any],
 def evaluate_cold_start(model: Any,
                        model_name: str,
                        user_item_matrix: pd.DataFrame,
-                       cold_start_users: int = 20,
+                       cold_start_users: int = 100,  # Meningkatkan dari 20 ke 100
                        test_ratio: float = 0.5,
                        k_values: List[int] = EVAL_K_VALUES) -> Dict[str, Any]:
     """
-    Evaluate model performance on cold-start users
+    Evaluate model performance on cold-start users dengan metodologi yang lebih ketat
     """
     logger.info(f"Evaluating {model_name} on cold-start scenario")
     
-    # PERBAIKAN: Verifikasi model sebelum evaluasi
+    # Verifikasi model sebelum evaluasi
     if hasattr(model, 'model') and model.model is None:
         logger.error(f"Model {model_name} not trained or loaded")
         return {
@@ -597,32 +597,67 @@ def evaluate_cold_start(model: Any,
             "error": "model_not_loaded"
         }
     
-    # Find users with sufficient interactions
+    # Find users with sufficient interactions - MENINGKATKAN THRESHOLD
     user_counts = (user_item_matrix > 0).sum(axis=1)
-    eligible_users = user_counts[user_counts >= 10].index.tolist()
+    # Minimal 15 interaksi untuk evaluasi cold-start yang lebih ketat
+    eligible_users = user_counts[user_counts >= 15].index.tolist()
     
     if not eligible_users or len(eligible_users) < cold_start_users:
-        logger.warning("Not enough users for cold-start evaluation")
-        return {"error": "insufficient_users"}
+        logger.warning(f"Not enough users for cold-start evaluation. Found {len(eligible_users)} eligible users")
+        if len(eligible_users) < 50:  # Minimal 50 pengguna
+            return {"error": "insufficient_users"}
+        cold_start_users = min(len(eligible_users), cold_start_users)
     
-    # Create RNG instance
-    rng = np.random.default_rng(EVAL_RANDOM_SEED)
+    # Create RNG instance with more varied seed
+    seed = int(time.time()) % 10000  # Menggunakan seed dinamis
+    rng = np.random.default_rng(seed)
 
-    # Sample users for cold-start simulation
-    cold_start_user_ids = rng.choice(
-        eligible_users, 
-        size=cold_start_users, 
-        replace=False
-    ).tolist()
+    # Sample users for cold-start simulation dengan stratifikasi
+    # Stratifikasi berdasarkan jumlah interaksi untuk menghindari bias
+    user_strata = []
+    strata_ranges = [(15, 20), (21, 30), (31, 50), (51, 100), (101, float('inf'))]
+    
+    for low, high in strata_ranges:
+        strata_users = user_counts[(user_counts >= low) & (user_counts < high)].index.tolist()
+        if strata_users:
+            user_strata.append(strata_users)
+    
+    # Ambil pengguna dari setiap strata secara proporsional
+    cold_start_user_ids = []
+    users_per_strata = max(cold_start_users // len(user_strata), 1)
+    
+    for strata in user_strata:
+        sample_size = min(users_per_strata, len(strata))
+        sampled_users = rng.choice(strata, size=sample_size, replace=False).tolist()
+        cold_start_user_ids.extend(sampled_users)
+    
+    # Tambahkan pengguna acak jika belum cukup
+    if len(cold_start_user_ids) < cold_start_users:
+        remaining = cold_start_users - len(cold_start_user_ids)
+        remaining_users = [u for u in eligible_users if u not in cold_start_user_ids]
+        if remaining_users:
+            additional_users = rng.choice(remaining_users, size=min(remaining, len(remaining_users)), replace=False).tolist()
+            cold_start_user_ids.extend(additional_users)
+    
+    # Batasi ke jumlah yang diminta
+    cold_start_user_ids = cold_start_user_ids[:cold_start_users]
+    logger.info(f"Selected {len(cold_start_user_ids)} users for cold-start evaluation")
 
-    # Prepare test interactions (hold out some interactions for testing)
+    # Prepare test interactions dengan lebih banyak validasi
     test_interactions = {}
     for user_id in cold_start_user_ids:
         user_items = user_item_matrix.loc[user_id]
         positive_items = user_items[user_items > 0].index.tolist()
         
+        # Memastikan setidaknya 5 item untuk testing
+        if len(positive_items) < 10:  # Minimal 10 item total
+            logger.debug(f"User {user_id} has too few items ({len(positive_items)}), skipping")
+            continue
+            
         # Split into visible and test
-        test_size = max(int(len(positive_items) * test_ratio), 2)
+        test_size = max(min(int(len(positive_items) * test_ratio), len(positive_items) - 5), 5)
+        # Pastikan setidaknya 5 item untuk test dan 5 item untuk train
+        
         test_items = rng.choice(
             positive_items, 
             size=test_size, 
@@ -630,18 +665,24 @@ def evaluate_cold_start(model: Any,
         ).tolist()
         test_interactions[user_id] = test_items
     
+    if len(test_interactions) < 10:
+        logger.warning(f"Not enough valid users for cold-start evaluation after filtering: {len(test_interactions)}")
+        return {"error": "insufficient_valid_users", "users_found": len(test_interactions)}
+    
     # Evaluate model on cold-start users
     cold_start_results = evaluate_model(
         model_name=f"cold_start_{model_name}",
         recommender=model,
-        test_users=cold_start_user_ids,
+        test_users=list(test_interactions.keys()),
         test_interactions=test_interactions,
-        k_values=k_values
+        k_values=k_values,
+        debug=True  # Aktifkan debug untuk analisis lebih mendalam
     )
     
     # Add cold-start specific info
     cold_start_results['scenario'] = 'cold_start'
-    cold_start_results['num_cold_start_users'] = cold_start_users
+    cold_start_results['num_cold_start_users'] = len(test_interactions)
+    cold_start_results['avg_test_items'] = sum(len(items) for items in test_interactions.values()) / len(test_interactions)
     
     return cold_start_results
 

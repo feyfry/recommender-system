@@ -1271,6 +1271,8 @@ Examples:
     evaluate_parser.add_argument("--cold-start", action="store_true", help="Evaluate cold-start scenarios")
     evaluate_parser.add_argument("--format", choices=["text", "markdown", "html"], default="markdown", help="Output format")
     evaluate_parser.add_argument("--debug", action="store_true", help="Enable detailed debug logging")
+    evaluate_parser.add_argument("--cold-start-users", type=int, default=100, help="Number of users for cold-start evaluation (default: 100)")
+    evaluate_parser.add_argument("--cold-start-ratio", type=float, default=0.5, help="Ratio of interactions to hide for cold-start evaluation (default: 0.5)")
     
     # recommend command
     recommend_parser = subparsers.add_parser("recommend", help="Generate recommendations for a user")

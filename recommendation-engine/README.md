@@ -296,7 +296,7 @@ Project ini menyediakan CLI komprehensif untuk semua fungsi utama:
 
 ```bash
 # Mengumpulkan data dari CoinGecko
-python main.py collect --limit 500 --detail-limit 100
+python main.py collect --limit 500 --detail-limit 500
 # tambahkan param --rate-limit 3 jika ingin menghindari rate limit lebih panjang
 
 # Memproses data yang dikumpulkan

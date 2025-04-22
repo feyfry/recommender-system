@@ -270,7 +270,7 @@ def get_cache_key(request: RecommendationRequest) -> str:
 
 def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Clean project data to handle NaN values
+    Clean project data dan memetakan field untuk kompatibilitas API
     
     Args:
         project_dict: Project data dictionary
@@ -286,6 +286,14 @@ def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
             result[key] = None
         else:
             result[key] = value
+    
+    # Mapping kolom untuk kompatibilitas API
+    # current_price -> price_usd, total_volume -> volume_24h
+    if 'current_price' in result and 'price_usd' not in result:
+        result['price_usd'] = result['current_price']
+        
+    if 'total_volume' in result and 'volume_24h' not in result:
+        result['volume_24h'] = result['total_volume']
     
     return result
 
@@ -374,12 +382,12 @@ async def recommend_projects(request: RecommendationRequest):
                     id=clean_rec.get('id'),
                     name=clean_rec.get('name'),
                     symbol=clean_rec.get('symbol'),
-                    image=clean_rec.get('image'),  # Using image field
-                    price_usd=clean_rec.get('price_usd'),
+                    image=clean_rec.get('image'),  # Tetap gunakan field image
+                    price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),  # Ambil dari current_price jika price_usd tidak ada
                     price_change_24h=clean_rec.get('price_change_24h'),
-                    price_change_7d=clean_rec.get('price_change_7d'),
+                    price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
                     market_cap=clean_rec.get('market_cap'),
-                    volume_24h=clean_rec.get('volume_24h'),
+                    volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),  # Ambil dari total_volume jika volume_24h tidak ada
                     popularity_score=clean_rec.get('popularity_score'),
                     trend_score=clean_rec.get('trend_score'),
                     category=clean_rec.get('primary_category', clean_rec.get('category')),
@@ -436,12 +444,12 @@ async def get_trending_projects(
                     id=clean_rec.get('id'),
                     name=clean_rec.get('name'),
                     symbol=clean_rec.get('symbol'),
-                    image=clean_rec.get('image'),  # Using image field
-                    price_usd=clean_rec.get('price_usd'),
+                    image=clean_rec.get('image'),  # Tetap gunakan field image
+                    price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),  # Ambil dari current_price jika price_usd tidak ada
                     price_change_24h=clean_rec.get('price_change_24h'),
-                    price_change_7d=clean_rec.get('price_change_7d'),
+                    price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
                     market_cap=clean_rec.get('market_cap'),
-                    volume_24h=clean_rec.get('volume_24h'),
+                    volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),  # Ambil dari total_volume jika volume_24h tidak ada
                     popularity_score=clean_rec.get('popularity_score'),
                     trend_score=clean_rec.get('trend_score'),
                     category=clean_rec.get('primary_category', clean_rec.get('category')),
@@ -481,12 +489,12 @@ async def get_popular_projects(
                     id=clean_rec.get('id'),
                     name=clean_rec.get('name'),
                     symbol=clean_rec.get('symbol'),
-                    image=clean_rec.get('image'),  # Using image field
-                    price_usd=clean_rec.get('price_usd'),
+                    image=clean_rec.get('image'),  # Tetap gunakan field image
+                    price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),  # Ambil dari current_price jika price_usd tidak ada
                     price_change_24h=clean_rec.get('price_change_24h'),
-                    price_change_7d=clean_rec.get('price_change_7d'),
+                    price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
                     market_cap=clean_rec.get('market_cap'),
-                    volume_24h=clean_rec.get('volume_24h'),
+                    volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),  # Ambil dari total_volume jika volume_24h tidak ada
                     popularity_score=clean_rec.get('popularity_score'),
                     trend_score=clean_rec.get('trend_score'),
                     category=clean_rec.get('primary_category', clean_rec.get('category')),
@@ -532,17 +540,17 @@ async def get_similar_projects(
                     id=clean_rec.get('id'),
                     name=clean_rec.get('name'),
                     symbol=clean_rec.get('symbol'),
-                    image=clean_rec.get('image'),  # Using image field
-                    price_usd=clean_rec.get('price_usd'),
+                    image=clean_rec.get('image'),  # Tetap gunakan field image
+                    price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),  # Ambil dari current_price jika price_usd tidak ada
                     price_change_24h=clean_rec.get('price_change_24h'),
-                    price_change_7d=clean_rec.get('price_change_7d'),
+                    price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
                     market_cap=clean_rec.get('market_cap'),
-                    volume_24h=clean_rec.get('volume_24h'),
+                    volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),  # Ambil dari total_volume jika volume_24h tidak ada
                     popularity_score=clean_rec.get('popularity_score'),
                     trend_score=clean_rec.get('trend_score'),
                     category=clean_rec.get('primary_category', clean_rec.get('category')),
                     chain=clean_rec.get('chain'),
-                    recommendation_score=clean_rec.get('similarity_score', 0.5)
+                    recommendation_score=clean_rec.get('recommendation_score', 0.5)
                 )
             )
             

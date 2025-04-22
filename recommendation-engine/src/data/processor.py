@@ -721,7 +721,7 @@ class DataProcessor:
     
     def _clean_project_data(self, projects_df: pd.DataFrame, trending_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
         """
-        Bersihkan dan standarisasi data proyek dengan peningkatan penanganan kategori dan nilai null
+        Bersihkan dan standarisasi data proyek dengan penghapusan kolom redundan
         
         Args:
             projects_df: DataFrame proyek yang akan dibersihkan
@@ -753,10 +753,9 @@ class DataProcessor:
             else:
                 df[col] = 0
         
-        # Tangani kolom sosial dengan nilai default
-        for col in ['reddit_subscribers', 'twitter_followers', 'github_stars', 
-                'github_subscribers', 'github_forks', 'telegram_channel_user_count', 
-                'discord_members', 'facebook_likes']:
+        # Tangani kolom sosial dengan nilai default - HAPUS reddit_subscribers dan discord_members
+        for col in ['twitter_followers', 'github_stars', 
+                'github_subscribers', 'github_forks', 'telegram_channel_user_count']:
             if col in df.columns:
                 df[col] = df[col].fillna(0).astype(int)
             else:
@@ -794,11 +793,8 @@ class DataProcessor:
         else:
             df['categories'] = [[] for _ in range(len(df))]
         
-        # Ekstrak multiple primary_categories dengan algoritma yang diperbaiki
-        df['primary_categories'] = df.apply(self._extract_primary_category_improved, axis=1)
-        
-        # Tambahkan primary_category (untuk kompatibilitas dengan kode yang ada)
-        df['primary_category'] = df['primary_categories'].apply(lambda x: x[0] if x else 'unknown')
+        # Ekstrak primary_category (satu kolom saja, tidak perlu primary_categories)
+        df['primary_category'] = df.apply(self._extract_primary_category_improved, axis=1)
         
         # Ekstrak chain
         df['chain'] = df.apply(lambda row: self._extract_primary_chain(row['platforms']), axis=1)
@@ -831,39 +827,29 @@ class DataProcessor:
         
         # Pastikan semua kolom yang dibutuhkan tersedia
         required_columns = [
-            'id', 'name', 'symbol', 'primary_category', 'primary_categories',
-            'image', 'price_usd', 'market_cap', 'volume_24h'
+            'id', 'name', 'symbol', 'primary_category',
+            'image', 'current_price', 'market_cap', 'total_volume'
         ]
-        
-        # Konversi nama kolom untuk konsistensi API
-        if 'current_price' in df.columns and 'price_usd' not in df.columns:
-            df['price_usd'] = df['current_price']
-        
-        if 'total_volume' in df.columns and 'volume_24h' not in df.columns:
-            df['volume_24h'] = df['total_volume']
         
         # Tambahkan nilai default untuk kolom yang kosong
         for col in required_columns:
             if col not in df.columns:
-                if col in ['primary_categories']:
-                    df[col] = df['primary_category'].apply(lambda x: [x])
-                elif col in ['market_cap', 'price_usd', 'volume_24h']:
+                if col in ['market_cap', 'current_price', 'total_volume']:
                     df[col] = 0
                 else:
                     df[col] = 'unknown'
         
         return df
         
-    def _extract_primary_category_improved(self, row) -> List[str]:
+    def _extract_primary_category_improved(self, row) -> str:
         """
-        Extract multiple primary categories dengan algoritma yang ditingkatkan
-        untuk menghasilkan 1-3 kategori utama
+        Extract primary category yang disimpan sebagai string JSON untuk multiple kategori
         
         Args:
             row: Row from DataFrame 
             
         Returns:
-            list: List of normalized primary categories (1-3)
+            str: Primary category string, bisa berisi multiple kategori dalam format JSON
         """
         categories = row.get('categories', [])
         query_category = row.get('query_category')
@@ -875,15 +861,15 @@ class DataProcessor:
                 # Check if the query_category matches any of our category mappings
                 for category, aliases in self.category_mappings.items():
                     if query_category.lower() in [alias.lower() for alias in aliases]:
-                        return [category]
-                return [query_category.lower()]
-            return ['unknown']
+                        return category
+                return query_category.lower()
+            return 'unknown'
         
         # Convert all categories to lowercase for better matching
         normalized_categories = [cat.lower() for cat in categories if isinstance(cat, str) and cat]
         
         if not normalized_categories:
-            return ['unknown']
+            return 'unknown'
         
         # Matched categories with priority ranking
         matched_categories = []
@@ -965,7 +951,13 @@ class DataProcessor:
         matched_categories.sort(key=lambda x: priority_dict.get(x, 999))
         
         # Limit to max 3 categories
-        return matched_categories[:3]
+        top_categories = matched_categories[:3]
+        
+        # Return sebagai string JSON untuk multiple kategori atau string biasa untuk kategori tunggal
+        if len(top_categories) == 1:
+            return top_categories[0]
+        else:
+            return json.dumps(top_categories)
     
     def _extract_primary_chain(self, platforms: Dict[str, str]) -> str:
         """
@@ -1004,7 +996,7 @@ class DataProcessor:
     
     def _calculate_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Calculate metrics with improved normalization and more robust handling of outliers
+        Calculate metrics dengan penghapusan metrics yang tidak perlu
         
         Args:
             df: DataFrame with project data
@@ -1025,8 +1017,8 @@ class DataProcessor:
             return s.clip(lower=q_low, upper=q_high)
         
         # Ensure numeric columns are properly handled
-        for col in ['market_cap', 'total_volume', 'reddit_subscribers', 'twitter_followers', 
-                'github_stars', 'telegram_channel_user_count', 'discord_members']:
+        for col in ['market_cap', 'total_volume', 'twitter_followers', 
+                'github_stars', 'telegram_channel_user_count']:
             if col in result_df.columns:
                 result_df[col] = pd.to_numeric(result_df[col], errors='coerce').fillna(0)
         
@@ -1034,56 +1026,48 @@ class DataProcessor:
         # Winsorize metrics to handle outliers before log transformation
         market_cap = winsorize(result_df['market_cap'].fillna(0))
         volume = winsorize(result_df['total_volume'].fillna(0))
-        reddit = winsorize(result_df['reddit_subscribers'].fillna(0))
         twitter = winsorize(result_df['twitter_followers'].fillna(0))
         github = winsorize(result_df['github_stars'].fillna(0))
         
-        # Tambahkan metrics sosial media baru jika tersedia
+        # Tambahkan metrics sosial media telegram
         telegram = winsorize(result_df['telegram_channel_user_count'].fillna(0)) if 'telegram_channel_user_count' in result_df.columns else 0
-        discord = winsorize(result_df['discord_members'].fillna(0)) if 'discord_members' in result_df.columns else 0
         
         # Apply logarithmic transformation with careful handling of zeros
         # Use log1p to handle zeros gracefully and scale appropriately
         log_market_cap = np.log1p(market_cap) / np.log(1e12)  # Scale relative to $1T
         log_volume = np.log1p(volume) / np.log(1e10)  # Scale relative to $10B
-        log_reddit = np.log1p(reddit) / np.log(1e6)  # Scale relative to 1M subscribers
         log_twitter = np.log1p(twitter) / np.log(1e6)  # Scale relative to 1M followers
         log_github = np.log1p(github) / np.log(1e5)  # Scale relative to 100K stars
         
-        # Log transform untuk metrics sosial baru
+        # Log transform untuk metrics sosial telegram
         log_telegram = np.log1p(telegram) / np.log(1e5) if not isinstance(telegram, int) else 0
-        log_discord = np.log1p(discord) / np.log(1e5) if not isinstance(discord, int) else 0
         
-        # Bobot seimbang dengan penambahan metrik sosial baru
+        # Bobot seimbang dengan penambahan metrik sosial
         total_social_weight = 0.40  # Total bobot untuk semua metrik sosial
         
         # Hitung bobot individual untuk metrik sosial berdasarkan ketersediaan
         available_social_metrics = 0
-        for metric in [log_reddit, log_twitter, log_telegram, log_discord]:
+        for metric in [log_twitter, log_telegram]:
             if not isinstance(metric, int) or metric > 0:
                 available_social_metrics += 1
         
         # Jika tidak ada metrik sosial, gunakan bobot default
         if available_social_metrics == 0:
-            social_weights = {"reddit": 0, "twitter": 0, "telegram": 0, "discord": 0}
+            social_weights = {"twitter": 0, "telegram": 0}
         else:
             # Distribusikan bobot secara merata di antara metrik sosial yang tersedia
             weight_per_metric = total_social_weight / available_social_metrics
             social_weights = {
-                "reddit": weight_per_metric if not isinstance(log_reddit, int) or log_reddit > 0 else 0,
                 "twitter": weight_per_metric if not isinstance(log_twitter, int) or log_twitter > 0 else 0,
-                "telegram": weight_per_metric if not isinstance(log_telegram, int) or log_telegram > 0 else 0,
-                "discord": weight_per_metric if not isinstance(log_discord, int) or log_discord > 0 else 0
+                "telegram": weight_per_metric if not isinstance(log_telegram, int) or log_telegram > 0 else 0
             }
         
-        # Hitung popularity score dengan metrik sosial baru
+        # Hitung popularity score dengan metrik sosial
         popularity_score = (
             0.30 * log_market_cap +  # Fundamental ekonomi
             0.20 * log_volume +      # Aktivitas trading
-            social_weights["reddit"] * log_reddit +
             social_weights["twitter"] * log_twitter +
             social_weights["telegram"] * log_telegram +
-            social_weights["discord"] * log_discord +
             0.10 * log_github        # Aktivitas developer
         )
         
@@ -1141,13 +1125,11 @@ class DataProcessor:
         # 4. Social Engagement Score - Improved calculation with better normalization
         if 'market_cap' in result_df.columns and result_df['market_cap'].max() > 0:
             # Calculate social following with all available social metrics
-            social_sum = result_df['reddit_subscribers'] + result_df['twitter_followers']
+            social_sum = result_df['twitter_followers']
             
-            # Tambahkan metrics baru jika tersedia
+            # Tambahkan metrics telegram jika tersedia
             if 'telegram_channel_user_count' in result_df.columns:
                 social_sum += result_df['telegram_channel_user_count']
-            if 'discord_members' in result_df.columns:
-                social_sum += result_df['discord_members']
             
             # Calculate market cap in millions with minimum threshold to avoid division by zero
             market_cap_millions = result_df['market_cap'] / 1_000_000
@@ -1170,30 +1152,12 @@ class DataProcessor:
         else:
             result_df['social_engagement_score'] = 50
         
-        # 5. Description Length - Better normalization
+        # 5. Description Length - Hanya satu metrik
         if 'description' in result_df.columns:
-            # Calculate raw character count of description without normalization as requested
-            result_df['description_length_raw'] = result_df['description'].fillna('').apply(len)
-            
-            # Hitung parameter deskripsi tambahan
-            # Jumlah kata (untuk konten yang lebih bermakna)
-            result_df['description_word_count'] = result_df['description'].fillna('').apply(lambda x: len(x.split()))
-            
-            # Panjang rata-rata kata (kompleksitas konten)
-            def avg_word_length(desc):
-                words = desc.split()
-                if not words:
-                    return 0
-                return sum(len(word) for word in words) / len(words)
-            
-            result_df['description_avg_word_length'] = result_df['description'].fillna('').apply(avg_word_length)
-            
-            # Simpan panjang deskripsi asli tanpa normalisasi
-            result_df['description_length'] = result_df['description_length_raw']
+            # Hanya simpan panjang deskripsi
+            result_df['description_length'] = result_df['description'].fillna('').apply(len)
         else:
             result_df['description_length'] = 0
-            result_df['description_word_count'] = 0
-            result_df['description_avg_word_length'] = 0
         
         # 6. Age Days - More accurate calculation with better date handling
         if 'genesis_date' in result_df.columns:
@@ -1226,9 +1190,9 @@ class DataProcessor:
         dev_score = result_df['developer_activity_score'] / 100
         social_score = result_df['social_engagement_score'] / 100
         
-        # Use description word count instead of length
-        if result_df['description_word_count'].max() > 0:
-            desc_score = result_df['description_word_count'].rank(pct=True) / 100
+        # Use description length for desc_score
+        if result_df['description_length'].max() > 0:
+            desc_score = result_df['description_length'].rank(pct=True) / 100
         else:
             desc_score = 0
         
@@ -1558,318 +1522,9 @@ class DataProcessor:
                 session_clustering = user_rng.choice(special_patterns)
             
             max_days_ago = 30 + user_rng.integers(0, 60)  # Much more variety in history length
-            
-            # Generate session timestamps based on pattern with extreme variability
-            timestamps = []
-            if session_clustering == 'single_session':
-                # All at once with more variation in exact timing
-                base_days_ago = int(user_rng.integers(0, max_days_ago))
-                session_minutes = int(user_rng.integers(1, 120))  # Up to 2 hour sessions
-                
-                for _ in range(n_interactions):
-                    minutes_offset = int(user_rng.integers(0, session_minutes))
-                    seconds_offset = int(user_rng.integers(0, 60))
-                    
-                    timestamps.append(
-                        datetime.now() - timedelta(
-                            days=int(base_days_ago), 
-                            minutes=int(minutes_offset),
-                            seconds=int(seconds_offset)
-                        )
-                    )
-            elif session_clustering == 'few_sessions':
-                # 2-5 distinct sessions with highly variable spacing
-                num_sessions = user_rng.integers(2, 6)
-                
-                # Create session days with clustering (not evenly distributed)
-                if user_rng.random() < 0.5:
-                    # Clustered sessions (e.g., consecutive days)
-                    first_day = user_rng.integers(0, max_days_ago - num_sessions)
-                    session_days = [first_day + i for i in range(num_sessions)]
-                    
-                    # Add some randomness to consecutive days
-                    for i in range(len(session_days)):
-                        if user_rng.random() < 0.3:  # 30% chance of gap
-                            session_days[i] += user_rng.integers(1, 3)
-                else:
-                    # Randomly distributed sessions
-                    session_days = sorted(user_rng.choice(range(max_days_ago), size=num_sessions, replace=False))
-                
-                # Distribute interactions
-                interactions_per_session = []
-                remaining = n_interactions
-                sessions_left = num_sessions
-                
-                for i in range(num_sessions):
-                    if i == num_sessions - 1:
-                        interactions_per_session.append(remaining)
-                    else:
-                        # Highly variable session sizes
-                        if remaining > sessions_left:
-                            # Either very small or very large portion
-                            if user_rng.random() < 0.5:
-                                count = max(1, int(user_rng.beta(1, 5) * remaining))
-                            else:
-                                count = max(1, int(user_rng.beta(5, 1) * remaining))
-                                
-                            count = min(count, remaining - (sessions_left - 1))
-                        else:
-                            count = 1
-                            
-                        interactions_per_session.append(count)
-                        remaining -= count
-                        sessions_left -= 1
-                
-                # Create timestamps for each session with much more time variation
-                for day, count in zip(session_days, interactions_per_session):
-                    # Each session has its own timing pattern
-                    if user_rng.random() < 0.7:  # 70% chance of concentrated session
-                        session_duration = user_rng.integers(10, 120)  # 10-120 minute session
-                        # Generate timestamps within the session duration
-                        for _ in range(count):
-                            minutes_offset = user_rng.integers(0, session_duration)
-                            seconds_offset = user_rng.integers(0, 60)
-                            timestamps.append(
-                                datetime.now() - timedelta(
-                                    days=int(day), 
-                                    minutes=int(minutes_offset),
-                                    seconds=int(seconds_offset)
-                                )
-                            )
-                    else:  # 30% chance of spread throughout day
-                        # Spread across entire day
-                        for _ in range(count):
-                            minutes_offset = user_rng.integers(0, 1440)  # Full day in minutes
-                            timestamps.append(
-                                datetime.now() - timedelta(
-                                    days=int(day), 
-                                    minutes=int(minutes_offset)
-                                )
-                            )
-            elif session_clustering == 'regular_sessions':
-                # Regular but not perfectly consistent pattern
-                # Base interval with noise
-                base_interval = user_rng.integers(1, 7)  # Days between sessions
-                noise_factor = user_rng.uniform(0.2, 0.8)  # How much to vary from regular pattern
-                
-                # Starting point
-                base_day = user_rng.integers(0, base_interval)
-                
-                # Number of sessions needed
-                items_per_session = user_rng.integers(2, 6)  # Items per session
-                num_sessions_needed = (n_interactions + items_per_session - 1) // items_per_session
-                
-                # Generate timestamps for each session
-                for session_idx in range(num_sessions_needed):
-                    # Calculate day with noise
-                    noise = user_rng.normal(0, base_interval * noise_factor)
-                    day = base_day + (session_idx * base_interval) + int(noise)
-                    day = max(0, min(max_days_ago, day))  # Keep within range
-                    
-                    # Items in this session
-                    items_this_session = min(items_per_session, n_interactions - (session_idx * items_per_session))
-                    
-                    # Generate timestamps within session (either concentrated or spread)
-                    if user_rng.random() < 0.8:  # 80% chance of concentrated session
-                        session_duration = user_rng.integers(10, 90)  # 10-90 minute session
-                        for _ in range(items_this_session):
-                            minutes_offset = user_rng.integers(0, session_duration)
-                            seconds_offset = user_rng.integers(0, 60)
-                            timestamps.append(
-                                datetime.now() - timedelta(
-                                    days=int(day), 
-                                    minutes=int(minutes_offset),
-                                    seconds=int(seconds_offset)
-                                )
-                            )
-                    else:  # 20% chance of spread throughout day
-                        for _ in range(items_this_session):
-                            minutes_offset = user_rng.integers(0, 1440)  # Full day
-                            timestamps.append(
-                                datetime.now() - timedelta(days=int(day), minutes=int(minutes_offset))
-                            )
-            elif session_clustering == 'binge_and_break':
-                # Activity comes in intense bursts with long breaks
-                num_binges = max(1, user_rng.integers(1, 4))  # Pastikan minimal 1 binge
-                items_per_binge = max(1, n_interactions // num_binges)  # Pastikan minimal 1 item per binge
-                remaining = n_interactions - (items_per_binge * num_binges)
-                
-                # Generate binge periods (clusters of days)
-                binge_periods = []
-                available_days = list(range(max_days_ago))
-                
-                for _ in range(num_binges):
-                    if not available_days:
-                        break
-                        
-                    # Pick a starting day for this binge
-                    binge_start = user_rng.choice(available_days)
-                    # Binge lasts 1-3 days
-                    binge_length = user_rng.integers(1, 4)
-                    
-                    binge_days = [binge_start]
-                    # Add consecutive days if available
-                    for i in range(1, binge_length):
-                        next_day = binge_start - i
-                        if next_day in available_days:
-                            binge_days.append(next_day)
-                    
-                    binge_periods.append(binge_days)
-                    
-                    # Remove these days (and nearby days) from available pool
-                    buffer = user_rng.integers(3, 10)  # Days between binges
-                    days_to_remove = []
-                    for day in binge_days:
-                        for i in range(-buffer, buffer+1):
-                            if day + i in available_days:
-                                days_to_remove.append(day + i)
-                    
-                    for day in days_to_remove:
-                        if day in available_days:
-                            available_days.remove(day)
-                
-                # Distribute interactions across binge periods
-                remaining_interactions = n_interactions
-                
-                for binge_idx, binge_days in enumerate(binge_periods):
-                    if not binge_days:  # Skip if no days in this binge period
-                        continue
-                        
-                    # How many interactions in this binge
-                    if binge_idx == len(binge_periods) - 1:
-                        # Last binge gets all remaining
-                        binge_items = remaining_interactions
-                    else:
-                        binge_items = min(items_per_binge + user_rng.integers(-2, 3), remaining_interactions)
-                    
-                    remaining_interactions -= binge_items
-                    
-                    # Distribute across days in the binge
-                    items_per_day = []
-                    for _ in range(len(binge_days)-1):
-                        # PERBAIKAN: Pastikan binge_items > 1 sebelum memanggil integers
-                        if binge_items <= 1:
-                            day_items = 1
-                        else:
-                            day_items = user_rng.integers(1, binge_items)
-                        items_per_day.append(day_items)
-                        binge_items -= day_items
-                        if binge_items < 1:
-                            binge_items = 0
-                            break
-                    
-                    # Pastikan nilai tidak negatif
-                    binge_items = max(0, binge_items)
-                    items_per_day.append(binge_items)  # Last day gets remainder
-                    
-                    # Create timestamps - skip days dengan 0 interactions
-                    for day, count in zip(binge_days, items_per_day):
-                        if count <= 0:
-                            continue
-                            
-                        # High concentration during binge periods
-                        session_duration = user_rng.integers(30, 120)  # 30-120 minute session
-                        for _ in range(count):
-                            minutes_offset = user_rng.integers(0, session_duration)
-                            seconds_offset = user_rng.integers(0, 60)
-                            timestamps.append(
-                                datetime.now() - timedelta(
-                                    days=int(day), 
-                                    minutes=int(minutes_offset),
-                                    seconds=int(seconds_offset)
-                                )
-                            )
-                
-                # Sort timestamps
-                timestamps.sort(reverse=True)
-                
-            elif session_clustering == 'weekend_only':
-                # Activity concentrated on weekends
-                # Generate a calendar of weekend days
-                weekends = []
-                for day in range(max_days_ago):
-                    day_of_week = (datetime.now() - timedelta(days=day)).weekday()
-                    if day_of_week >= 5:  # 5,6 = Saturday, Sunday
-                        weekends.append(day)
-                
-                if not weekends:
-                    # Fallback if no weekends in range
-                    weekends = list(range(min(7, max_days_ago)))
-                
-                # Distribute interactions across weekends
-                items_per_weekend = []
-                remaining = n_interactions
-                
-                for i in range(len(weekends) - 1):
-                    count = user_rng.integers(1, max(2, remaining // 2))
-                    items_per_weekend.append(count)
-                    remaining -= count
-                
-                items_per_weekend.append(remaining)  # Last weekend gets remainder
-                
-                # Create timestamps
-                for day, count in zip(weekends, items_per_weekend):
-                    # Weekend sessions can be longer
-                    session_duration = user_rng.integers(30, 240)  # 30min-4hr sessions
-                    for _ in range(count):
-                        minutes_offset = user_rng.integers(0, session_duration)
-                        seconds_offset = user_rng.integers(0, 60)
-                        timestamps.append(
-                            datetime.now() - timedelta(
-                                days=int(day), 
-                                minutes=int(minutes_offset),
-                                seconds=int(seconds_offset)
-                            )
-                        )
-                        
-            elif session_clustering == 'gradually_increasing':
-                # Activity increases over time
-                available_days = list(range(max_days_ago))
-                # Weight more recent days higher
-                weights = [day+1 for day in range(len(available_days))]  # More recent = higher weight
-                weights = np.array(weights) / sum(weights)  # Normalize
-                
-                # Select days with weighted probability
-                session_days = []
-                for _ in range(n_interactions):
-                    day = user_rng.choice(available_days, p=weights)
-                    session_days.append(day)
-                
-                # Create timestamps
-                for day in session_days:
-                    minutes_offset = user_rng.integers(0, 1440)  # Full day
-                    timestamps.append(
-                        datetime.now() - timedelta(days=int(day), minutes=int(minutes_offset))
-                    )
-                    
-            elif session_clustering == 'gradually_decreasing':
-                # Activity decreases over time
-                available_days = list(range(max_days_ago))
-                # Weight older days higher
-                weights = [max_days_ago - day for day in range(len(available_days))]
-                weights = np.array(weights) / sum(weights)  # Normalize
-                
-                # Select days with weighted probability
-                session_days = []
-                for _ in range(n_interactions):
-                    day = user_rng.choice(available_days, p=weights)
-                    session_days.append(day)
-                
-                # Create timestamps
-                for day in session_days:
-                    minutes_offset = user_rng.integers(0, 1440)  # Full day
-                    timestamps.append(
-                        datetime.now() - timedelta(days=int(day), minutes=int(minutes_offset))
-                    )
-                    
-            else:  # random_spread
-                # Completely random distribution with extreme variability
-                for _ in range(n_interactions):
-                    days_ago = int(user_rng.integers(0, max_days_ago))
-                    random_time = int(user_rng.integers(0, 86400))  # Seconds in a day
-                    timestamps.append(
-                        datetime.now() - timedelta(days=int(days_ago), seconds=int(random_time))
-                    )
+
+            # Metode baru untuk menghasilkan timestamp yang lebih realistis
+            timestamps = self.generate_realistic_timestamps(n_interactions, max_days_ago)
             
             # Generate highly variable project selection patterns
             selected_projects = []
@@ -2380,6 +2035,186 @@ class DataProcessor:
         
         return interactions_df
     
+    def generate_realistic_timestamps(self, n_interactions: int, max_days_ago: int = 60) -> List[datetime]:
+        """Menghasilkan timestamp yang lebih realistis dengan pola natural"""
+        
+        # Pola interaksi yang realistis:
+        # 1. Beberapa interaksi awal saat pengguna mencoba platform
+        # 2. Periode tidak aktif
+        # 3. Masa penggunaan aktif dengan frekuensi yang berbeda-beda
+        
+        seed = int(datetime.now().timestamp() * 1000)  # Use current time as seed
+        rng = np.random.default_rng(seed)  # Initialize with seed
+
+        now = datetime.now()
+        timestamps = []
+        
+        # Tentukan tipe pola pengguna
+        user_pattern = rng.choice([
+            'casual',       # Jarang, tidak teratur
+            'regular',      # Teratur tapi tidak sering
+            'active',       # Aktif, hampir setiap hari
+            'bursty',       # Aktif dalam periode singkat
+            'declining',    # Aktif di awal, menurun
+            'increasing',   # Semakin aktif seiring waktu
+            'weekend',      # Aktif di akhir pekan
+            'workday'       # Aktif di hari kerja
+        ], p=[0.25, 0.25, 0.15, 0.1, 0.1, 0.05, 0.05, 0.05])
+        
+        # Berapa hari dalam rentang waktu
+        active_days = min(max_days_ago, max(7, int(rng.gamma(shape=3.0, scale=max_days_ago/10))))
+        
+        # Hari mana yang aktif, berdasarkan pola
+        if user_pattern == 'casual':
+            # 10-20% hari aktif, tersebar acak
+            active_day_count = int(active_days * rng.uniform(0.1, 0.2))
+            active_day_indices = sorted(rng.choice(range(active_days), size=active_day_count, replace=False))
+        elif user_pattern == 'regular':
+            # 20-40% hari aktif, tersebar lebih merata
+            active_day_count = int(active_days * rng.uniform(0.2, 0.4))
+            active_day_indices = sorted(rng.choice(range(active_days), size=active_day_count, replace=False))
+        elif user_pattern == 'active':
+            # 40-70% hari aktif
+            active_day_count = int(active_days * rng.uniform(0.4, 0.7))
+            active_day_indices = sorted(rng.choice(range(active_days), size=active_day_count, replace=False))
+        elif user_pattern == 'bursty':
+            # Aktif dalam 1-3 periode singkat
+            burst_count = rng.randint(1, 4)
+            active_day_indices = []
+            for _ in range(burst_count):
+                burst_center = rng.randint(0, active_days)
+                burst_length = rng.randint(1, 5)
+                for day in range(max(0, burst_center - burst_length), min(active_days, burst_center + burst_length)):
+                    active_day_indices.append(day)
+            active_day_indices = sorted(set(active_day_indices))
+        elif user_pattern == 'declining':
+            # Lebih aktif di awal, menurun
+            active_day_count = int(active_days * rng.uniform(0.3, 0.5))
+            weights = np.linspace(1.0, 0.1, active_days)
+            active_day_indices = sorted(rng.choice(
+                range(active_days), 
+                size=active_day_count, 
+                replace=False, 
+                p=weights/weights.sum()
+            ))
+        elif user_pattern == 'increasing':
+            # Lebih aktif di akhir
+            active_day_count = int(active_days * rng.uniform(0.3, 0.5))
+            weights = np.linspace(0.1, 1.0, active_days)
+            active_day_indices = sorted(rng.choice(
+                range(active_days), 
+                size=active_day_count, 
+                replace=False, 
+                p=weights/weights.sum()
+            ))
+        elif user_pattern == 'weekend':
+            # Aktif di akhir pekan
+            active_day_indices = []
+            for day in range(active_days):
+                # Simulate weekend (assume day 0 is today, and today is arbitrary)
+                is_weekend = (now - timedelta(days=day)).weekday() >= 5
+                if is_weekend or rng.random() < 0.15:  # 15% chance of activity on weekdays
+                    active_day_indices.append(day)
+        else:  # workday
+            # Aktif di hari kerja
+            active_day_indices = []
+            for day in range(active_days):
+                # Simulate workday
+                is_workday = (now - timedelta(days=day)).weekday() < 5
+                if is_workday or rng.random() < 0.15:  # 15% chance of activity on weekends
+                    active_day_indices.append(day)
+        
+        # Distribusikan interaksi ke hari-hari aktif dengan variasi yang realistis
+        interactions_per_day = [0] * active_days
+        remaining = n_interactions
+        
+        # Alokasikan minimal 1 interaksi per hari aktif
+        for day in active_day_indices:
+            interactions_per_day[day] = 1
+            remaining -= 1
+        
+        # Alokasikan sisa interaksi dengan distribusi yang wajar
+        if remaining > 0 and active_day_indices:
+            # Variasi dalam intensitas per hari
+            activity_intensity = rng.choice(['low', 'medium', 'high', 'mixed'])
+            
+            if activity_intensity == 'low':
+                # 1-3 interaksi per hari aktif
+                max_per_day = 3
+            elif activity_intensity == 'medium':
+                # 1-7 interaksi per hari aktif
+                max_per_day = 7
+            elif activity_intensity == 'high':
+                # 1-12 interaksi per hari aktif
+                max_per_day = 12
+            else:  # mixed
+                # Variasi tinggi, beberapa hari sangat aktif
+                max_per_day = 20
+            
+            # Distribusikan dengan bias pada hari-hari tertentu
+            while remaining > 0 and sum(1 for d in interactions_per_day if d < max_per_day) > 0:
+                # Pilih hari aktif secara acak, prioritaskan yang sudah memiliki aktivitas
+                weights = [
+                    (d + 1) if i in active_day_indices and d < max_per_day else 0 
+                    for i, d in enumerate(interactions_per_day)
+                ]
+                
+                if sum(weights) == 0:
+                    break
+                    
+                day_idx = rng.choice(range(active_days), p=np.array(weights)/sum(weights))
+                interactions_per_day[day_idx] += 1
+                remaining -= 1
+        
+        # Konversikan ke timestamp
+        for day, count in enumerate(interactions_per_day):
+            if count <= 0:
+                continue
+                
+            # Bagaimana distribusi dalam hari?
+            day_pattern = rng.choice(['morning', 'evening', 'random', 'work_hours'])
+            
+            for _ in range(count):
+                if day_pattern == 'morning':
+                    hour = rng.randint(6, 12)
+                elif day_pattern == 'evening':
+                    hour = rng.randint(17, 23)
+                elif day_pattern == 'work_hours':
+                    hour = rng.randint(9, 18)
+                else:  # random
+                    hour = rng.randint(0, 24)
+                    
+                minute = rng.randint(0, 60)
+                second = rng.randint(0, 60)
+                
+                timestamp = now - timedelta(
+                    days=day,
+                    hours=hour,
+                    minutes=minute,
+                    seconds=second
+                )
+                timestamps.append(timestamp)
+        
+        # Jika masih ada interaksi yang belum dialokasikan, tambahkan secara acak
+        while remaining > 0:
+            day = rng.randint(0, active_days)
+            hour = rng.randint(0, 24)
+            minute = rng.randint(0, 60)
+            second = rng.randint(0, 60)
+            
+            timestamp = now - timedelta(
+                days=day,
+                hours=hour,
+                minutes=minute,
+                seconds=second
+            )
+            timestamps.append(timestamp)
+            remaining -= 1
+        
+        # Urutkan berdasarkan waktu, terbaru dulu
+        timestamps.sort(reverse=True)
+        return timestamps
+
     def clean_json_string(self, json_str):
         """
         Comprehensively clean JSON string from invalid double quotes
@@ -2425,9 +2260,9 @@ class DataProcessor:
         return json_str
     
     def _save_processed_data(self, projects_df: pd.DataFrame, interactions_df: pd.DataFrame, 
-                        features_df: pd.DataFrame) -> None:
+                    features_df: pd.DataFrame) -> None:
         """
-        Save processed data dengan penyempurnaan penanganan JSON dan kolom multiple categories
+        Save processed data dengan penghapusan kolom yang tidak perlu
         
         Args:
             projects_df: DataFrame of projects
@@ -2448,6 +2283,35 @@ class DataProcessor:
         
         # Create a copy for CSV export
         projects_df_csv = projects_df.copy()
+        
+        # Hapus kolom redundan dan tidak diperlukan
+        columns_to_remove = []
+        
+        # Hapus kolom redundan price_usd dan volume_24h
+        if 'price_usd' in projects_df_csv.columns:
+            columns_to_remove.append('price_usd')
+            
+        if 'volume_24h' in projects_df_csv.columns:
+            columns_to_remove.append('volume_24h')
+        
+        # Hapus primary_categories karena sudah digabung dalam primary_category
+        if 'primary_categories' in projects_df_csv.columns:
+            columns_to_remove.append('primary_categories')
+            
+        # Hapus kolom deskripsi yang tidak diperlukan
+        for col in ['description_length_raw', 'description_word_count', 'description_avg_word_length']:
+            if col in projects_df_csv.columns:
+                columns_to_remove.append(col)
+                
+        # Hapus kolom sosial yang tidak diperlukan
+        for col in ['reddit_subscribers', 'discord_members', 'facebook_likes']:
+            if col in projects_df_csv.columns:
+                columns_to_remove.append(col)
+        
+        # Hapus kolom sekaligus
+        if columns_to_remove:
+            logger.info(f"Removing unnecessary columns: {columns_to_remove}")
+            projects_df_csv = projects_df_csv.drop(columns=columns_to_remove)
         
         # Properly handle 'platforms' column
         if 'platforms' in projects_df_csv.columns:
@@ -2492,31 +2356,13 @@ class DataProcessor:
             
             projects_df_csv['categories'] = projects_df_csv['categories'].apply(process_categories)
         
-        # Handle primary_categories
-        if 'primary_categories' in projects_df_csv.columns:
-            def process_primary_categories(x):
-                if isinstance(x, list):
-                    return json.dumps(x, ensure_ascii=False)
-                elif x is None or (isinstance(x, float) and np.isnan(x)):
-                    return json.dumps(['unknown'], ensure_ascii=False)
-                else:
-                    try:
-                        if isinstance(x, str):
-                            cleaned = self.clean_json_string(x)
-                            return json.dumps(json.loads(cleaned), ensure_ascii=False)
-                    except:
-                        pass
-                    return json.dumps(['unknown'], ensure_ascii=False)
-            
-            projects_df_csv['primary_categories'] = projects_df_csv['primary_categories'].apply(process_primary_categories)
-        
         # Ensure all required fields are not null
         for field in ['name', 'symbol', 'primary_category', 'chain']:
             if field in projects_df_csv.columns:
                 projects_df_csv[field] = projects_df_csv[field].fillna('unknown')
         
         # Ensure numeric fields are not null
-        for field in ['market_cap', 'price_usd', 'volume_24h', 'popularity_score', 'trend_score']:
+        for field in ['market_cap', 'current_price', 'total_volume', 'popularity_score', 'trend_score']:
             if field in projects_df_csv.columns:
                 projects_df_csv[field] = projects_df_csv[field].fillna(0)
         
@@ -2531,7 +2377,7 @@ class DataProcessor:
         features_df.to_csv(features_std_path, index=False)
         
         logger.info(f"Saved processed data to {PROCESSED_DIR}")
-        logger.info(f"Projects: {len(projects_df)} rows with {len(projects_df.columns)} columns")
+        logger.info(f"Projects: {len(projects_df_csv)} rows with {len(projects_df_csv.columns)} columns")
         logger.info(f"Interactions: {len(interactions_df)} rows")
         logger.info(f"Features: {features_df.shape}")
 
