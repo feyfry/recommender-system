@@ -578,7 +578,7 @@ def evaluate_all_models(models: Dict[str, Any],
 def evaluate_cold_start(model: Any,
                        model_name: str,
                        user_item_matrix: pd.DataFrame,
-                       cold_start_users: int = 250,
+                       cold_start_users: int = 100,
                        test_ratio: float = 0.75,     # Increased from 0.5
                        k_values: List[int] = [5, 10],  # Removed k=20
                        debug: bool = True) -> Dict[str, Any]:
