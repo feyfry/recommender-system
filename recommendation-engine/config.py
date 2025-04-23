@@ -47,16 +47,16 @@ CATEGORIES = [
 # Parameter model rekomendasi
 # - Neural Collaborative Filtering - DRASTICALLY SIMPLIFIED
 NCF_PARAMS = {
-    "embedding_dim": 16,           # Sangat dikecilkan dari 32
-    "layers": [32, 16, 8],         # Lapisan dipangkas
-    "learning_rate": 0.0002,       # Learning rate diperlambat
-    "batch_size": 256,             # Batch size dinaikkan
-    "epochs": 30,                  # Upper bound lebih tinggi
-    "val_ratio": 0.15,             # Validasi set lebih kecil
-    "dropout": 0.5,                # Dropout sangat tinggi
-    "weight_decay": 5e-4,          # Weight decay lebih tinggi
-    "patience": 10,                # Patience diperpanjang
-    "negative_ratio": 2            # Negatif sampel dikurangi
+    "embedding_dim": 64,           # Ditingkatkan dari 16 ke 64
+    "layers": [128, 64, 32, 16],   # Perluas jaringan
+    "learning_rate": 0.001,        # Ditingkatkan dari 0.0002 ke 0.001
+    "batch_size": 256,             # Pertahankan
+    "epochs": 50,                  # Tingkatkan
+    "val_ratio": 0.15,             # Pertahankan
+    "dropout": 0.3,                # Kurangi
+    "weight_decay": 1e-4,          # Kurangi
+    "patience": 10,                # Pertahankan
+    "negative_ratio": 4            # Ditingkatkan dari 2 ke 4
 }
 
 # - Feature-Enhanced CF
@@ -67,21 +67,21 @@ FECF_PARAMS = {
 
 # - Hybrid Model
 HYBRID_PARAMS = {
-    "ncf_weight": 0.5,            # Default weight - akan disesuaikan dinamis di hybrid.py - diturunkan dari 0.5
-    "fecf_weight": 0.5,           # Default weight - akan disesuaikan dinamis di hybrid.py - dinaikkan dari 0.5
+    "ncf_weight": 0.4,            # Default weight untuk NCF
+    "fecf_weight": 0.6,           # Default weight untuk FECF
     "interaction_threshold_low": 5,   # Di bawah ini mengandalkan FECF
-    "interaction_threshold_high": 20, # Di atas ini mengandalkan NCF
-    "diversity_factor": 0.15,      # Faktor untuk meningkatkan keragaman rekomendasi - diturunkan dari 0.25
-    "cold_start_fecf_weight": 0.9,  # Bobot FECF untuk pengguna cold-start
-    "explore_ratio": 0.2            # Proporsi rekomendasi untuk eksplorasi (berbasis konten) - diturunkan dari 0.25
+    "interaction_threshold_high": 20, # Di atas ini gunakan bobot seimbang
+    "diversity_factor": 0.15,      # Faktor untuk diversifikasi rekomendasi
+    "cold_start_fecf_weight": 0.95,  # Bobot FECF untuk pengguna cold-start
+    "explore_ratio": 0.2           # Proporsi rekomendasi untuk eksplorasi
 }
 
 # Konfigurasi kategori untuk meningkatkan keragaman
 CATEGORY_CONFIG = {
-    "max_per_category": 0.3,         # Maksimum 30% rekomendasi dari satu kategori
+    "max_per_category": 0.25,        # Maksimum 30% rekomendasi dari satu kategori
     "prioritize_diverse": True,      # Prioritaskan keragaman kategori
-    "boost_underrepresented": 0.2,   # Boost 0.2 untuk kategori yang kurang terwakili
-    "penalty_overrepresented": -0.3  # Penalti 0.3 untuk kategori yang terlalu dominan
+    "boost_underrepresented": 0.25,   # Boost 0.2 untuk kategori yang kurang terwakili
+    "penalty_overrepresented": -0.4  # Penalti 0.3 untuk kategori yang terlalu dominan
 }
 
 # Keputusan investasi
