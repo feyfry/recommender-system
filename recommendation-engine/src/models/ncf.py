@@ -203,104 +203,61 @@ class NCFModel(nn.Module):
              embedding_dim: int,
              layers: List[int],
              dropout: float):
-        """
-        Initialize NCF model
-        
-        Args:
-            num_users: Number of users
-            num_items: Number of items
-            embedding_dim: Dimension of embeddings
-            layers: List of MLP layer sizes
-            dropout: Dropout rate
-        """
         super(NCFModel, self).__init__()
         
-        # GMF part (General Matrix Factorization)
-        self.user_embedding_gmf = nn.Embedding(num_users, embedding_dim)
-        self.item_embedding_gmf = nn.Embedding(num_items, embedding_dim)
+        # User & item embeddings (single set, no GMF/MLP split)
+        self.user_embedding = nn.Embedding(num_users, embedding_dim)
+        self.item_embedding = nn.Embedding(num_items, embedding_dim)
         
-        # MLP part (Multi-Layer Perceptron)
-        self.user_embedding_mlp = nn.Embedding(num_users, embedding_dim)
-        self.item_embedding_mlp = nn.Embedding(num_items, embedding_dim)
-        
-        # PERBAIKAN: Add category embedding layer if available
-        self.use_categories = False  # Will be set by the recommender if categories are available
-        self.category_embedding = None
-        
-        # MLP layers
+        # Build MLP layers
         self.mlp_layers = nn.ModuleList()
-        input_size = 2 * embedding_dim
+        input_size = 2 * embedding_dim  # Concatenated embeddings
         
         for i, layer_size in enumerate(layers):
-            self.mlp_layers.append(nn.Linear(input_size, layer_size))
+            if i == 0:
+                self.mlp_layers.append(nn.Linear(input_size, layer_size))
+            else:
+                self.mlp_layers.append(nn.Linear(layers[i-1], layer_size))
+                
             self.mlp_layers.append(nn.ReLU())
             self.mlp_layers.append(nn.BatchNorm1d(layer_size))
             self.mlp_layers.append(nn.Dropout(dropout))
-            input_size = layer_size
         
         # Output layer
-        self.output_layer = nn.Linear(layers[-1] + embedding_dim, 1)
+        self.output_layer = nn.Linear(layers[-1], 1)
         self.sigmoid = nn.Sigmoid()
-        
-        # PERBAIKAN: Add attention mechanism for better category awareness
-        self.attention = nn.Sequential(
-            nn.Linear(embedding_dim, embedding_dim // 2),
-            nn.ReLU(),
-            nn.Linear(embedding_dim // 2, 1),
-            nn.Softmax(dim=1)
-        )
         
         # Initialize weights
         self._init_weights()
     
     def _init_weights(self):
-        """Initialize model weights dengan inisialisasi yang lebih baik"""
-        # Xavier/Glorot initialization for linear layers
+        # Weight initialization
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
+                nn.init.xavier_normal_(m.weight)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
-            # PERBAIKAN: Use normal distribution with adaptive standard deviation for embeddings
             elif isinstance(m, nn.Embedding):
-                # Smaller standard deviation for larger embedding dimensions
-                std = 1.0 / np.sqrt(m.embedding_dim)
-                nn.init.normal_(m.weight, mean=0, std=std)
+                nn.init.normal_(m.weight, std=0.01)
     
     def forward(self, user_indices, item_indices):
-        """Forward pass with enhanced attention mechanism"""
-        # GMF part
-        user_embedding_gmf = self.user_embedding_gmf(user_indices)
-        item_embedding_gmf = self.item_embedding_gmf(item_indices)
-        gmf_vector = user_embedding_gmf * item_embedding_gmf
+        # Get embeddings
+        user_embeds = self.user_embedding(user_indices)
+        item_embeds = self.item_embedding(item_indices)
         
-        # MLP part
-        user_embedding_mlp = self.user_embedding_mlp(user_indices)
-        item_embedding_mlp = self.item_embedding_mlp(item_indices)
-        mlp_vector = torch.cat([user_embedding_mlp, item_embedding_mlp], dim=-1)
+        # Concatenate embeddings
+        x = torch.cat([user_embeds, item_embeds], dim=-1)
         
-        # Process through MLP layers
+        # Pass through MLP layers
         for i in range(0, len(self.mlp_layers), 4):
-            mlp_vector = self.mlp_layers[i](mlp_vector)
-            mlp_vector = self.mlp_layers[i+1](mlp_vector)
-            mlp_vector = self.mlp_layers[i+2](mlp_vector)
-            mlp_vector = self.mlp_layers[i+3](mlp_vector)
+            x = self.mlp_layers[i](x)      # Linear
+            x = self.mlp_layers[i+1](x)    # ReLU
+            x = self.mlp_layers[i+2](x)    # BatchNorm
+            x = self.mlp_layers[i+3](x)    # Dropout
         
-        # PERBAIKAN: Apply attention to GMF vector for better feature importance weighting
-        if user_embedding_gmf.dim() > 1:  # Ensure batch dimension exists
-            attention_input = user_embedding_gmf.unsqueeze(1)  # Add sequence dimension
-            attention_weights = self.attention(attention_input)
-            gmf_vector_attended = attention_weights * gmf_vector.unsqueeze(1)
-            gmf_vector = gmf_vector_attended.squeeze(1)  # Remove sequence dimension
-        
-        # Concatenate GMF and MLP vectors
-        combined_vector = torch.cat([gmf_vector, mlp_vector], dim=-1)
-        
-        # Final prediction
-        output = self.output_layer(combined_vector)
-        output = self.sigmoid(output)
-        
-        return output.view(-1)
+        # Output layer
+        x = self.output_layer(x)
+        return self.sigmoid(x).view(-1)
 
 
 class NCFRecommender:
@@ -630,12 +587,12 @@ class NCFRecommender:
         val_losses = []
         
         # Early stopping parameters
-        patience = 5  # Jumlah epoch untuk sabar menunggu improvement
+        patience = self.params.get('patience', 5)  # Gunakan dari konfigurasi atau default 5
         best_val_loss = float('inf')
         patience_counter = 0
         best_model_state = None
-        
-        logger.info(f"Starting training for {num_epochs} epochs")
+
+        logger.info(f"Starting training for {num_epochs} epochs with patience {patience}")
         
         for epoch in range(1, num_epochs + 1):
             epoch_start_time = time.time()
@@ -728,7 +685,7 @@ class NCFRecommender:
             logger.info(f"Current learning rate: {current_lr}")
             
             # Early stopping check
-            if avg_val_loss < best_val_loss:
+            if avg_val_loss < best_val_loss * 0.995:  # 0.5% improvement needed
                 best_val_loss = avg_val_loss
                 patience_counter = 0
                 # Save best model state
@@ -743,9 +700,10 @@ class NCFRecommender:
             logger.info(f"Epoch {epoch}/{num_epochs} - "
                     f"Train Loss: {avg_train_loss:.4f}, "
                     f"Val Loss: {avg_val_loss:.4f}, "
-                    f"Time: {epoch_time:.2f}s")
+                    f"Time: {epoch_time:.2f}s, "
+                    f"LR: {current_lr}")
             
-            # Check early stopping
+             # Check early stopping
             if patience_counter >= patience:
                 logger.info(f"Early stopping triggered after {epoch} epochs")
                 break

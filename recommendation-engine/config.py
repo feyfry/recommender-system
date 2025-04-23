@@ -45,37 +45,35 @@ CATEGORIES = [
 ]
 
 # Parameter model rekomendasi
-# - Neural Collaborative Filtering
+# - Neural Collaborative Filtering - DRASTICALLY SIMPLIFIED
 NCF_PARAMS = {
-    "embedding_dim": 64,
-    "layers": [128, 64, 32, 16],
-    "learning_rate": 0.001,
-    "batch_size": 256,
-    "epochs": 25,
-    "val_ratio": 0.2,
-    "dropout": 0.3,
-    "weight_decay": 2e-4
+    "embedding_dim": 16,           # Sangat dikecilkan dari 32
+    "layers": [32, 16, 8],         # Lapisan dipangkas
+    "learning_rate": 0.0002,       # Learning rate diperlambat
+    "batch_size": 256,             # Batch size dinaikkan
+    "epochs": 30,                  # Upper bound lebih tinggi
+    "val_ratio": 0.15,             # Validasi set lebih kecil
+    "dropout": 0.5,                # Dropout sangat tinggi
+    "weight_decay": 5e-4,          # Weight decay lebih tinggi
+    "patience": 10,                # Patience diperpanjang
+    "negative_ratio": 2            # Negatif sampel dikurangi
 }
 
-# - Feature-Enhanced CF (LightFM)
+# - Feature-Enhanced CF
 FECF_PARAMS = {
     "no_components": 64,
-    "learning_rate": 0.05,
-    "loss": "warp",
-    "max_sampled": 10,
-    "epochs": 25,
     "content_alpha": 0.5     # Balance between CF and content (0.5 = 50-50 split)
 }
 
 # - Hybrid Model
 HYBRID_PARAMS = {
-    "ncf_weight": 0.5,            # Default weight - akan disesuaikan dinamis di hybrid.py
-    "fecf_weight": 0.5,           # Default weight - akan disesuaikan dinamis di hybrid.py
+    "ncf_weight": 0.5,            # Default weight - akan disesuaikan dinamis di hybrid.py - diturunkan dari 0.5
+    "fecf_weight": 0.5,           # Default weight - akan disesuaikan dinamis di hybrid.py - dinaikkan dari 0.5
     "interaction_threshold_low": 5,   # Di bawah ini mengandalkan FECF
     "interaction_threshold_high": 20, # Di atas ini mengandalkan NCF
-    "diversity_factor": 0.25,      # Faktor untuk meningkatkan keragaman rekomendasi
+    "diversity_factor": 0.15,      # Faktor untuk meningkatkan keragaman rekomendasi - diturunkan dari 0.25
     "cold_start_fecf_weight": 0.9,  # Bobot FECF untuk pengguna cold-start
-    "explore_ratio": 0.25             # Proporsi rekomendasi untuk eksplorasi (berbasis konten)
+    "explore_ratio": 0.2            # Proporsi rekomendasi untuk eksplorasi (berbasis konten) - diturunkan dari 0.25
 }
 
 # Konfigurasi kategori untuk meningkatkan keragaman

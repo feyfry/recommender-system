@@ -280,97 +280,98 @@ class HybridRecommender:
         
         return fecf_trained or ncf_trained
     
-    def recommend_for_user(self, user_id: str, n: int = 10, 
-                   exclude_known: bool = True) -> List[Tuple[str, float]]:
+    def recommend_for_user(self, user_id: str, n: int = 10, exclude_known: bool = True) -> List[Tuple[str, float]]:
         """
-        Generate recommendations for a user using hybrid approach with adaptive weighting,
-        enhanced category diversity, and score normalization
-        
-        Args:
-            user_id: User ID
-            n: Number of recommendations
-            exclude_known: Whether to exclude already interacted items
-            
-        Returns:
-            list: List of (project_id, score) tuples
+        Generate recommendations using filter-then-rerank approach
         """
-        # Check if user exists in the data
-        known_user = (self.user_item_matrix is not None and 
-                    user_id in self.user_item_matrix.index)
-        
         # Handle cold-start case
-        if not known_user:
-            logger.info(f"User {user_id} is a cold-start user")
+        if self.user_item_matrix is None or user_id not in self.user_item_matrix.index:
             return self._get_cold_start_recommendations(user_id, n)
         
-        # Count user interactions to determine user maturity
-        user_interaction_count = 0
-        if self.user_item_matrix is not None and user_id in self.user_item_matrix.index:
-            user_interactions = self.user_item_matrix.loc[user_id]
-            # PERBAIKAN: Cara yang lebih aman untuk menghitung interaksi positif
-            user_interaction_count = (user_interactions > 0).sum()
+        # Count user interactions
+        user_interactions = self.user_item_matrix.loc[user_id]
+        user_interaction_count = (user_interactions > 0).sum()
         
-        # Adaptive weighting based on user interaction count
-        # PERBAIKAN: Gunakan variabel yang lebih aman dan konsisten
-        interaction_threshold_low = self.params.get('interaction_threshold_low', 5)
-        interaction_threshold_high = self.params.get('interaction_threshold_high', 20)
-        
-        if user_interaction_count <= interaction_threshold_low:
-            # New user - rely more on FECF
-            fecf_weight = 0.8
-            ncf_weight = 0.2
-            logger.debug(f"User {user_id} has few interactions ({user_interaction_count}), using FECF-heavy weights")
-        elif user_interaction_count >= interaction_threshold_high:
-            # Mature user - rely more on NCF
-            fecf_weight = 0.3
-            ncf_weight = 0.7
-            logger.debug(f"User {user_id} is a mature user ({user_interaction_count} interactions), using NCF-heavy weights")
-        else:
-            # In-between user - gradual transition
-            # Linear interpolation between low and high thresholds
-            maturity_factor = (user_interaction_count - interaction_threshold_low) / (interaction_threshold_high - interaction_threshold_low)
-            fecf_weight = 0.8 - (0.5 * maturity_factor)  # 0.8 -> 0.3
-            ncf_weight = 0.2 + (0.5 * maturity_factor)   # 0.2 -> 0.7
-            logger.debug(f"User {user_id} has {user_interaction_count} interactions, using interpolated weights: FECF={fecf_weight:.2f}, NCF={ncf_weight:.2f}")
-        
-        # PERBAIKAN: Simplify hybrid approach for evaluation
-        # Untuk mencegah error, gunakan pendekatan yang lebih sederhana selama evaluasi
-        
-        # Get recommendations from each model
+        # Step 1: Generate candidate pool from FECF (primary recommender)
+        # Use a larger pool than needed (3x)
+        candidate_size = n * 3
         try:
-            fecf_recs = self.fecf_model.recommend_for_user(user_id, n=n*2, exclude_known=exclude_known)
-            fecf_dict = {item_id: score for item_id, score in fecf_recs}
+            fecf_candidates = self.fecf_model.recommend_for_user(user_id, n=candidate_size, exclude_known=exclude_known)
+            if not fecf_candidates:
+                return []
         except Exception as e:
             logger.warning(f"Error getting FECF recommendations: {e}")
-            fecf_dict = {}
+            return []
+        
+        # Step 2: Calculate diversity score based on categories
+        diversity_scores = {}
+        if hasattr(self, 'projects_df') and 'primary_category' in self.projects_df.columns:
+            # Create category mapping
+            item_to_category = {}
+            for _, row in self.projects_df.iterrows():
+                if 'id' in row and 'primary_category' in row:
+                    item_to_category[row['id']] = row['primary_category']
             
-        try:
-            ncf_recs = self.ncf_model.recommend_for_user(user_id, n=n*2, exclude_known=exclude_known)
-            ncf_dict = {item_id: score for item_id, score in ncf_recs}
-        except Exception as e:
-            logger.warning(f"Error getting NCF recommendations: {e}")
-            ncf_dict = {}
+            # Count category occurrences
+            category_counts = {}
+            for item_id, _ in fecf_candidates:
+                if item_id in item_to_category:
+                    cat = item_to_category[item_id]
+                    category_counts[cat] = category_counts.get(cat, 0) + 1
+            
+            # Calculate diversity scores - reward items from rare categories
+            if category_counts:
+                max_count = max(category_counts.values())
+                for item_id, _ in fecf_candidates:
+                    if item_id in item_to_category:
+                        cat = item_to_category[item_id]
+                        cat_count = category_counts.get(cat, 0)
+                        # Reward items from less represented categories
+                        diversity_scores[item_id] = 1.0 - (cat_count / (max_count + 1))
         
-        # Combine recommendations with weighted scores
-        combined_scores = {}
+        # Step 3: Use NCF to re-rank candidates only if user has enough history
+        # and NCF model is ready
+        reranked_candidates = []
         
-        # Add all FECF recommendations with weight
-        for item_id, score in fecf_dict.items():
-            combined_scores[item_id] = score * fecf_weight
+        if user_interaction_count >= 10 and self.ncf_model and hasattr(self.ncf_model, 'model') and self.ncf_model.model:
+            try:
+                # Get NCF scores for candidates
+                ncf_scores = {}
+                for item_id, _ in fecf_candidates:
+                    # Get prediction directly from NCF
+                    score = self.ncf_model.predict(user_id, item_id)
+                    if score > 0:  # Only consider positive scores
+                        ncf_scores[item_id] = score
+                
+                # If we got valid NCF scores, use them for re-ranking
+                if ncf_scores:
+                    # Combine FECF scores, NCF scores and diversity
+                    for item_id, fecf_score in fecf_candidates:
+                        # Base score is FECF score (0.7 weight)
+                        final_score = 0.7 * fecf_score
+                        
+                        # Add NCF contribution if available (0.2 weight)
+                        if item_id in ncf_scores:
+                            final_score += 0.2 * ncf_scores[item_id]
+                        
+                        # Add diversity bonus if available (0.1 weight)
+                        if item_id in diversity_scores:
+                            final_score += 0.1 * diversity_scores[item_id]
+                        
+                        reranked_candidates.append((item_id, final_score))
+            except Exception as e:
+                logger.warning(f"Error in NCF re-ranking: {e}")
+                # Fallback to original candidates with diversity
+                reranked_candidates = [(item_id, score + 0.1 * diversity_scores.get(item_id, 0)) 
+                                for item_id, score in fecf_candidates]
+        else:
+            # No NCF re-ranking, just use FECF with diversity bonus
+            reranked_candidates = [(item_id, score + 0.1 * diversity_scores.get(item_id, 0)) 
+                            for item_id, score in fecf_candidates]
         
-        # Add or update with NCF recommendations
-        for item_id, score in ncf_dict.items():
-            if item_id in combined_scores:
-                combined_scores[item_id] += score * ncf_weight
-            else:
-                combined_scores[item_id] = score * ncf_weight
-        
-        # Convert to list and sort by score
-        combined_list = [(item_id, score) for item_id, score in combined_scores.items()]
-        combined_list.sort(key=lambda x: x[1], reverse=True)
-        
-        # Return top N recommendations
-        return combined_list[:n]
+        # Sort by final score and return top n
+        reranked_candidates.sort(key=lambda x: x[1], reverse=True)
+        return reranked_candidates[:n]
     
     def _get_cold_start_recommendations_by_interest(self, user_id: str, n: int = 10) -> List[Tuple[str, float]]:
         """

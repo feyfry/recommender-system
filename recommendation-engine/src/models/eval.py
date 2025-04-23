@@ -578,15 +578,28 @@ def evaluate_all_models(models: Dict[str, Any],
 def evaluate_cold_start(model: Any,
                        model_name: str,
                        user_item_matrix: pd.DataFrame,
-                       cold_start_users: int = 100,  # Meningkatkan dari 20 ke 100
-                       test_ratio: float = 0.5,
-                       k_values: List[int] = EVAL_K_VALUES) -> Dict[str, Any]:
+                       cold_start_users: int = 100,
+                       test_ratio: float = 0.75,     # Increased from 0.5
+                       k_values: List[int] = [5, 10],  # Removed k=20
+                       debug: bool = True) -> Dict[str, Any]:
     """
-    Evaluate model performance on cold-start users dengan metodologi yang lebih ketat
-    """
-    logger.info(f"Evaluating {model_name} on cold-start scenario")
+    Evaluate model performance on cold-start users with more rigorous methodology
     
-    # Verifikasi model sebelum evaluasi
+    Args:
+        model: Recommender model to evaluate
+        model_name: Name of the model
+        user_item_matrix: User-item interaction matrix
+        cold_start_users: Number of users for cold-start evaluation
+        test_ratio: Ratio of interactions to hide for cold-start simulation
+        k_values: List of k values for evaluation metrics
+        debug: Whether to enable detailed debugging
+        
+    Returns:
+        dict: Evaluation metrics
+    """
+    logger.info(f"Evaluating {model_name} on cold-start scenario with {cold_start_users} users")
+    
+    # Verify model before evaluation
     if hasattr(model, 'model') and model.model is None:
         logger.error(f"Model {model_name} not trained or loaded")
         return {
@@ -597,41 +610,61 @@ def evaluate_cold_start(model: Any,
             "error": "model_not_loaded"
         }
     
-    # Find users with sufficient interactions - MENINGKATKAN THRESHOLD
+    # Identify extremely popular items (top 5%) to exclude from evaluation
+    # This makes the evaluation more challenging and realistic
+    item_popularity = user_item_matrix.sum()
+    popular_threshold = item_popularity.quantile(0.95)
+    extremely_popular_items = set(item_popularity[item_popularity > popular_threshold].index)
+    
+    if debug:
+        logger.info(f"Identified {len(extremely_popular_items)} extremely popular items to exclude")
+        logger.info(f"Popularity threshold: {popular_threshold} interactions")
+        
+    # Find users with sufficient interactions
     user_counts = (user_item_matrix > 0).sum(axis=1)
-    # Minimal 15 interaksi untuk evaluasi cold-start yang lebih ketat
-    eligible_users = user_counts[user_counts >= 15].index.tolist()
+    # Require at least 20 interactions (increased from 15)
+    min_interactions = 20
+    eligible_users = user_counts[user_counts >= min_interactions].index.tolist()
     
     if not eligible_users or len(eligible_users) < cold_start_users:
         logger.warning(f"Not enough users for cold-start evaluation. Found {len(eligible_users)} eligible users")
-        if len(eligible_users) < 50:  # Minimal 50 pengguna
+        if len(eligible_users) < 50:  # Minimum 50 users for meaningful evaluation
             return {"error": "insufficient_users"}
         cold_start_users = min(len(eligible_users), cold_start_users)
     
-    # Create RNG instance with more varied seed
-    seed = int(time.time()) % 10000  # Menggunakan seed dinamis
+    # Create a more varied RNG seed
+    seed = int(time.time() % 10000) + hash(model_name) % 1000
     rng = np.random.default_rng(seed)
 
-    # Sample users for cold-start simulation dengan stratifikasi
-    # Stratifikasi berdasarkan jumlah interaksi untuk menghindari bias
+    # Enhanced stratified sampling: categorize users by interaction count ranges
     user_strata = []
-    strata_ranges = [(15, 20), (21, 30), (31, 50), (51, 100), (101, float('inf'))]
+    # More fine-grained strata for better distribution
+    strata_ranges = [(20, 30), (31, 50), (51, 75), (76, 100), (101, 150), (151, float('inf'))]
     
     for low, high in strata_ranges:
         strata_users = user_counts[(user_counts >= low) & (user_counts < high)].index.tolist()
         if strata_users:
             user_strata.append(strata_users)
     
-    # Ambil pengguna dari setiap strata secara proporsional
+    # If we have no valid strata, use the basic eligible user list
+    if not user_strata:
+        user_strata = [eligible_users]
+        
+    # Select users from each stratum in proportion to its size
     cold_start_user_ids = []
-    users_per_strata = max(cold_start_users // len(user_strata), 1)
+    total_eligible = len(eligible_users)
     
-    for strata in user_strata:
-        sample_size = min(users_per_strata, len(strata))
-        sampled_users = rng.choice(strata, size=sample_size, replace=False).tolist()
+    for stratum in user_strata:
+        # Calculate proportional allocation (how many users from this stratum)
+        stratum_ratio = len(stratum) / total_eligible
+        stratum_allocation = max(5, int(cold_start_users * stratum_ratio))
+        
+        # Sample this stratum
+        sample_size = min(stratum_allocation, len(stratum))
+        sampled_users = rng.choice(stratum, size=sample_size, replace=False).tolist()
         cold_start_user_ids.extend(sampled_users)
     
-    # Tambahkan pengguna acak jika belum cukup
+    # Add additional users if needed
     if len(cold_start_user_ids) < cold_start_users:
         remaining = cold_start_users - len(cold_start_user_ids)
         remaining_users = [u for u in eligible_users if u not in cold_start_user_ids]
@@ -639,35 +672,119 @@ def evaluate_cold_start(model: Any,
             additional_users = rng.choice(remaining_users, size=min(remaining, len(remaining_users)), replace=False).tolist()
             cold_start_user_ids.extend(additional_users)
     
-    # Batasi ke jumlah yang diminta
+    # Limit to requested user count
     cold_start_user_ids = cold_start_user_ids[:cold_start_users]
-    logger.info(f"Selected {len(cold_start_user_ids)} users for cold-start evaluation")
+    
+    if debug:
+        logger.info(f"Selected {len(cold_start_user_ids)} users for cold-start evaluation")
+        logger.info(f"Distribution by interaction count:")
+        for low, high in strata_ranges:
+            count = sum(1 for u in cold_start_user_ids if low <= user_counts[u] < high)
+            logger.info(f"  {low}-{high}: {count} users ({count/len(cold_start_user_ids)*100:.1f}%)")
 
-    # Prepare test interactions dengan lebih banyak validasi
+    # Prepare test interactions with stricter requirements
     test_interactions = {}
+    category_diversity = {}
+    
+    # Try to get category information to track diversity
+    item_categories = {}
+    try:
+        if hasattr(model, 'projects_df') and model.projects_df is not None:
+            if 'primary_category' in model.projects_df.columns:
+                for _, row in model.projects_df.iterrows():
+                    if 'id' in row and 'primary_category' in row:
+                        item_categories[row['id']] = row['primary_category']
+                
+                if debug:
+                    logger.info(f"Found category information for {len(item_categories)} items")
+    except Exception as e:
+        logger.warning(f"Error getting category information: {str(e)}")
+    
     for user_id in cold_start_user_ids:
         user_items = user_item_matrix.loc[user_id]
         positive_items = user_items[user_items > 0].index.tolist()
         
-        # Memastikan setidaknya 5 item untuk testing
-        if len(positive_items) < 10:  # Minimal 10 item total
-            logger.debug(f"User {user_id} has too few items ({len(positive_items)}), skipping")
-            continue
-            
-        # Split into visible and test
-        test_size = max(min(int(len(positive_items) * test_ratio), len(positive_items) - 5), 5)
-        # Pastikan setidaknya 5 item untuk test dan 5 item untuk train
+        # Filter out extremely popular items for more challenging evaluation
+        non_popular_items = [item for item in positive_items if item not in extremely_popular_items]
         
-        test_items = rng.choice(
-            positive_items, 
-            size=test_size, 
-            replace=False
-        ).tolist()
+        # If we have almost no items after filtering, use some popular items
+        if len(non_popular_items) < 5:
+            # Keep some popular items to ensure sufficient test data
+            supplement_count = min(5, len(positive_items) - len(non_popular_items))
+            popular_user_items = [item for item in positive_items if item in extremely_popular_items]
+            if popular_user_items and supplement_count > 0:
+                added_items = rng.choice(popular_user_items, size=min(supplement_count, len(popular_user_items)), replace=False)
+                non_popular_items.extend(added_items)
+        
+        # Minimum requirements check - need at least 10 items total (increased from previous)
+        if len(non_popular_items) < 10:
+            if debug:
+                logger.debug(f"User {user_id} has too few non-popular items ({len(non_popular_items)}), skipping")
+            continue
+        
+        # Check category diversity if we have category information
+        if item_categories:
+            user_categories = set(item_categories.get(item, 'unknown') for item in non_popular_items)
+            if len(user_categories) < 2:  # Require at least 2 different categories
+                if debug:
+                    logger.debug(f"User {user_id} has insufficient category diversity ({len(user_categories)}), skipping")
+                continue
+            
+            # Track this user's category diversity
+            category_diversity[user_id] = len(user_categories)
+        
+        # More aggressive splitting - hide more items (75% instead of 50%)
+        test_size = max(min(int(len(non_popular_items) * test_ratio), len(non_popular_items) - 3), 5)
+        # Ensure at least 5 items for test and 3 items for train
+        
+        # Random split but stratified by category if possible
+        if item_categories and len(user_categories) >= 2:
+            # Group items by category
+            items_by_category = {}
+            for item in non_popular_items:
+                cat = item_categories.get(item, 'unknown')
+                if cat not in items_by_category:
+                    items_by_category[cat] = []
+                items_by_category[cat].append(item)
+            
+            # Take items from each category proportionally
+            test_items = []
+            for cat, cat_items in items_by_category.items():
+                # How many items to take from this category
+                cat_ratio = len(cat_items) / len(non_popular_items)
+                cat_count = max(1, int(test_size * cat_ratio))
+                # Take items randomly
+                if len(cat_items) > 1:  # Ensure we don't take all items from a category
+                    cat_test_items = rng.choice(cat_items, size=min(cat_count, len(cat_items)-1), replace=False)
+                    test_items.extend(cat_test_items)
+            
+            # Fill remaining slots if needed
+            remaining_items = [item for item in non_popular_items if item not in test_items]
+            if len(test_items) < test_size and remaining_items:
+                remaining_needed = min(test_size - len(test_items), len(remaining_items))
+                test_items.extend(rng.choice(remaining_items, size=remaining_needed, replace=False))
+        else:
+            # Simple random split
+            test_items = rng.choice(
+                non_popular_items, 
+                size=test_size, 
+                replace=False
+            ).tolist()
+        
+        # Store test interactions
         test_interactions[user_id] = test_items
     
-    if len(test_interactions) < 10:
+    # Final check for sufficient test data
+    if len(test_interactions) < 50:  # Minimum 50 users for reliable evaluation (increased from 10)
         logger.warning(f"Not enough valid users for cold-start evaluation after filtering: {len(test_interactions)}")
         return {"error": "insufficient_valid_users", "users_found": len(test_interactions)}
+    
+    if debug:
+        logger.info(f"Final cold-start evaluation will use {len(test_interactions)} users")
+        logger.info(f"Average test items per user: {sum(len(items) for items in test_interactions.values()) / len(test_interactions):.1f}")
+        if category_diversity:
+            avg_categories = sum(category_diversity.values()) / len(category_diversity)
+            logger.info(f"Average category diversity per user: {avg_categories:.1f} categories")
     
     # Evaluate model on cold-start users
     cold_start_results = evaluate_model(
@@ -676,13 +793,17 @@ def evaluate_cold_start(model: Any,
         test_users=list(test_interactions.keys()),
         test_interactions=test_interactions,
         k_values=k_values,
-        debug=True  # Aktifkan debug untuk analisis lebih mendalam
+        debug=debug  # Enable detailed debugging
     )
     
     # Add cold-start specific info
     cold_start_results['scenario'] = 'cold_start'
     cold_start_results['num_cold_start_users'] = len(test_interactions)
     cold_start_results['avg_test_items'] = sum(len(items) for items in test_interactions.values()) / len(test_interactions)
+    cold_start_results['test_ratio'] = test_ratio
+    cold_start_results['popular_items_excluded'] = len(extremely_popular_items)
+    if category_diversity:
+        cold_start_results['avg_category_diversity'] = avg_categories
     
     return cold_start_results
 

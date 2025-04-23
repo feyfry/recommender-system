@@ -227,8 +227,7 @@ class FeatureEnhancedCF:
                 content_similarity = cosine_similarity(self._item_features)
                 
                 # PERBAIKAN: Reduce alpha to give more weight to content features
-                # Change from 0.6 (60% collaborative, 40% content) to 0.5 (50-50 split)
-                alpha = 0.5  # Reduced from 0.6 to give content features more influence
+                alpha = self.params.get('content_alpha', 0.5)
                 
                 self.item_similarity_matrix = (
                     alpha * self.item_similarity_matrix + 
