@@ -1318,26 +1318,28 @@ class DataProcessor:
         """
         logger.info(f"Creating synthetic interactions for {n_users} users")
         
-        # Create RNG instance with multiple seeds for greater variability
-        base_seeds = [42, 123, 789, 234, 567]  # Multiple base seeds
-        rng = np.random.default_rng(np.random.choice(base_seeds))
+        # Create global RNG instance with fixed seed for reproducibility
+        base_seed = 42
+        global_rng = np.random.default_rng(base_seed)
         
-        interactions = []
+        # Create total time range for all interactions (now - max_days_ago to now)
+        now = datetime.now()
+        global_max_days_ago = 90  # Use a larger timeframe for better distribution
+        global_start_date = now - timedelta(days=global_max_days_ago)
+        
+        # Define personas and user types as before
         personas = list(USER_PERSONAS.keys())
         
         # Generate dynamic persona weights that change for each batch of users
-        # This creates more variation in user distribution
         num_personas = len(personas)
         persona_distributions = []
         
         # Create multiple persona distributions for different user batches
         num_batches = 5  # Divide users into batches with different distributions
         for i in range(num_batches):
-            # Create unique distribution for each batch
-            batch_seed = rng.integers(1000, 10000)
+            batch_seed = global_rng.integers(1000, 10000)
             batch_rng = np.random.default_rng(batch_seed)
             
-            # Generate more varied weights
             weights = batch_rng.random(size=num_personas)
             weights = weights / weights.sum()  # Normalize
             
@@ -1355,7 +1357,7 @@ class DataProcessor:
         category_freq = pd.Series(all_categories).value_counts(normalize=True).to_dict()
         unique_categories = list(category_freq.keys())
         
-        # Define multiple user activity profiles with significantly different patterns
+        # Define user activity profiles
         activity_profiles = {
             'very_casual': {
                 'interaction_count_range': (1, 5),
@@ -1408,10 +1410,13 @@ class DataProcessor:
         activity_types = list(activity_profiles.keys())
         activity_probs = [activity_profiles[t]['probs'] for t in activity_types]
         
+        # Store all interactions before creating DataFrame
+        all_interactions = []
+        
         # Generate users with much greater randomness and significantly different patterns
         for user_idx in range(1, n_users + 1):
-            # Truly unique seed per user for maximum variation
-            user_seed = rng.integers(10000, 1000000) + user_idx
+            # Create user-specific RNG with unique seed
+            user_seed = global_rng.integers(10000, 1000000) + user_idx
             user_rng = np.random.default_rng(user_seed)
             
             # Determine which batch this user belongs to
@@ -1432,7 +1437,6 @@ class DataProcessor:
             activity_profile = activity_profiles[activity_type]
             
             # Generate interaction count with extreme variability
-            # Use different distributions based on activity type
             if activity_type == 'power_user':
                 # Power users follow a different distribution - sometimes have extreme numbers
                 if user_rng.random() < 0.2:  # 20% chance of super-user
@@ -1466,8 +1470,7 @@ class DataProcessor:
             category_weights = np.clip(category_weights, 0.05, 0.95)
             category_weights = category_weights / category_weights.sum()
             
-            # ENHANCEMENT: Add secondary categories preferences with varying weights
-            # Randomly select 1-3 additional categories user might be interested in
+            # Add secondary categories preferences with varying weights
             available_categories = [c for c in unique_categories if c not in preferred_categories]
             if available_categories:
                 num_extra = min(user_rng.integers(1, 4), len(available_categories))
@@ -1486,12 +1489,7 @@ class DataProcessor:
                 preferred_categories = new_preferred
                 category_weights = new_weights / new_weights.sum()  # Re-normalize
             
-            # Select exploration parameters from profile ranges
-            min_explore, max_explore = activity_profile['exploration_rate']
-            base_exploration_prob = user_rng.uniform(min_explore, max_explore)
-            
-            # MAJOR ENHANCEMENT: More variable exploration decay patterns
-            # Different types of explorers:
+            # More variable exploration decay patterns
             explorer_type = user_rng.choice([
                 'consistent',      # Maintains exploration level
                 'quick_decay',     # Rapidly loses interest in exploration
@@ -1500,14 +1498,17 @@ class DataProcessor:
                 'increasing'       # Becomes more exploratory over time
             ])
             
-            exploration_decay = user_rng.uniform(0.7, 0.95)  # Base rate
+            # Select exploration parameters from profile ranges
+            min_explore, max_explore = activity_profile['exploration_rate']
+            base_exploration_prob = user_rng.uniform(min_explore, max_explore)
             exploration_probability = base_exploration_prob
+            exploration_decay = user_rng.uniform(0.7, 0.95)  # Base rate
             
             # Popularity bias - Extreme variation
             min_pop, max_pop = activity_profile['popularity_bias']
-            popularity_bias = user_rng.beta(5 * min_pop, 5 * (1-max_pop))  # Using beta for more varied distribution
+            popularity_bias = user_rng.beta(5 * min_pop, 5 * (1-max_pop))
             
-            # Time distribution for interactions - More varied patterns
+            # Time distribution for interactions
             session_patterns = activity_profile['session_patterns']
             session_clustering = user_rng.choice(session_patterns)
             
@@ -1521,15 +1522,19 @@ class DataProcessor:
                 ]
                 session_clustering = user_rng.choice(special_patterns)
             
-            max_days_ago = 30 + user_rng.integers(0, 60)  # Much more variety in history length
-
-            # Metode baru untuk menghasilkan timestamp yang lebih realistis
-            timestamps = self.generate_realistic_timestamps(n_interactions, max_days_ago)
+            # NEW: Create user-specific time window within the global time range
+            # This ensures better user interleaving while maintaining realistic patterns per user
+            user_start_offset = user_rng.integers(0, global_max_days_ago // 2)  # Random start within first half of global range
+            user_time_range = global_max_days_ago - user_start_offset
+            user_max_days_ago = min(user_time_range, 30 + user_rng.integers(0, 60))  # User's active period
+            
+            # Generate timestamps with improved distribution
+            timestamps = self._generate_user_timestamps(n_interactions, user_max_days_ago, user_start_offset, user_rng)
             
             # Generate highly variable project selection patterns
             selected_projects = []
             
-            # ENHANCEMENT: Different interest patterns
+            # Different interest patterns
             interest_pattern = user_rng.choice([
                 'stable',           # Consistent interests
                 'explorer',         # High variety, exploring many categories
@@ -1541,12 +1546,12 @@ class DataProcessor:
             
             # Extract category information for diversity tracking
             item_to_category = {}
-            
             if 'primary_category' in projects_df.columns:
                 item_to_category = dict(zip(projects_df['id'], projects_df['primary_category']))
                 
             # For fad_chaser, generate category shift points
             category_shifts = []
+            phase_categories = {}
             if interest_pattern == 'fad_chaser':
                 # Divide interactions into 2-4 phases with different category focus
                 num_phases = user_rng.integers(2, 5)
@@ -1558,11 +1563,8 @@ class DataProcessor:
                 category_shifts = shift_points
                 
                 # For each phase, select a different primary category
-                phase_categories = {}
                 for i in range(num_phases):
                     phase_categories[i] = user_rng.choice(preferred_categories)
-                    
-                logger.debug(f"User {user_idx} is a fad_chaser with {num_phases} phases at points {shift_points}")
             
             # Pattern-specific adjustments
             if interest_pattern == 'contrarian':
@@ -1594,7 +1596,6 @@ class DataProcessor:
                 # Update category focus for fad_chaser at shift points
                 if interest_pattern == 'fad_chaser' and interaction_idx in category_shifts:
                     phase = category_shifts.index(interaction_idx) + 1
-                    logger.debug(f"User {user_idx} shifting to phase {phase} category: {phase_categories[phase]}")
                     
                     # Dramatically shift category focus
                     if phase_categories[phase] in preferred_categories:
@@ -1624,7 +1625,7 @@ class DataProcessor:
                 # Determine if this interaction will be exploratory
                 is_exploratory = user_rng.random() < current_exploration_prob
                 
-                # ENHANCEMENT: Time-dependent exploration (more exploration early, more focus late)
+                # Time-dependent exploration (more exploration early, more focus late)
                 if not is_exploratory and interaction_idx < n_interactions // 3:
                     # More likely to explore early
                     is_exploratory = user_rng.random() < 0.3
@@ -1632,9 +1633,9 @@ class DataProcessor:
                     # More likely to focus late
                     is_exploratory = user_rng.random() < 0.3
                 
+                # Select category based on exploration mode
                 if is_exploratory:
                     # Exploration mode - venture beyond normal preferences
-                    # Different types of exploration
                     explore_type = user_rng.choice([
                         'random',           # Completely random category
                         'adjacent',         # Related to interests
@@ -1817,9 +1818,9 @@ class DataProcessor:
                 # Select project with probability based on weights
                 try:
                     if weights and project_ids:
-                        weights = np.array(weights)
-                        weights = weights / weights.sum()
-                        selected_index = user_rng.choice(len(weights), p=weights)
+                        weights_array = np.array(weights)
+                        weights_array = weights_array / weights_array.sum()
+                        selected_index = user_rng.choice(len(weights_array), p=weights_array)
                         selected_project = project_ids[selected_index]
                         selected_projects.append(selected_project)
                     else:
@@ -1843,8 +1844,7 @@ class DataProcessor:
                     selected_project = category_projects['id'].iloc[0]
                     selected_projects.append(selected_project)
                 
-                # ENHANCEMENT: Generate highly variable interaction types based on user persona and project
-                # Determine interaction type with extreme variability based on user persona and project characteristics
+                # Generate interaction type based on user persona and project
                 if user_persona == 'defi_enthusiast':
                     interaction_type_probs = {
                         'view': 0.3, 'favorite': 0.2, 'portfolio_add': 0.4, 'research': 0.1
@@ -1921,7 +1921,7 @@ class DataProcessor:
                         # New projects more likely to just be viewed
                         interaction_type_probs['view'] *= 1.0 + (maturity_impact * 0.4)
                     
-                    # ENHANCEMENT: Pattern-specific adjustments
+                    # Pattern-specific adjustments
                     if interest_pattern == 'deep_diver':
                         # Deep divers do more research
                         interaction_type_probs['research'] *= 1.5
@@ -1944,7 +1944,7 @@ class DataProcessor:
                 # Select interaction type
                 interaction_type = user_rng.choice(interaction_types, p=interaction_probs)
                 
-                # ENHANCEMENT: Determine interaction weight with extreme variability
+                # Determine interaction weight with extreme variability
                 # Add activity profile boost
                 weight_min, weight_max = activity_profile['weight_boost']
                 boost_factor = user_rng.uniform(weight_min, weight_max)
@@ -2010,150 +2010,162 @@ class DataProcessor:
                     interaction_time = timestamps[interaction_idx]
                 else:
                     # Fallback if not enough timestamps
-                    days_ago = int(user_rng.integers(0, max_days_ago))
+                    days_ago = int(user_rng.integers(0, user_max_days_ago))
                     random_seconds = int(user_rng.integers(0, 86400))
-                    interaction_time = datetime.now() - timedelta(days=int(days_ago), seconds=int(random_seconds))
+                    interaction_time = now - timedelta(days=int(days_ago+user_start_offset), seconds=int(random_seconds))
                 
-                # Add to interactions
-                interactions.append({
+                # Add to all interactions
+                all_interactions.append({
                     'user_id': f"user_{user_idx}",
                     'project_id': selected_project,
                     'interaction_type': interaction_type,
                     'weight': weight,
                     'timestamp': interaction_time.isoformat()
                 })
-            
-        # Create DataFrame and sort by timestamp
-        interactions_df = pd.DataFrame(interactions)
+        
+        # Create DataFrame
+        interactions_df = pd.DataFrame(all_interactions)
         
         if not interactions_df.empty:
             # Convert timestamp to datetime for sorting
             interactions_df['timestamp'] = pd.to_datetime(interactions_df['timestamp'])
+            # THIS IS THE KEY: Sort ALL interactions by timestamp only, not by user
             interactions_df = interactions_df.sort_values('timestamp')
             # Convert back to string format
             interactions_df['timestamp'] = interactions_df['timestamp'].dt.strftime('%Y-%m-%dT%H:%M:%S')
         
         return interactions_df
     
-    def generate_realistic_timestamps(self, n_interactions: int, max_days_ago: int = 60) -> List[datetime]:
-        """Menghasilkan timestamp yang lebih realistis dengan pola natural"""
+    def _generate_user_timestamps(self, n_interactions: int, max_days_ago: int, start_offset: int, user_rng) -> List[datetime]:
+        """
+        Generate realistic timestamps for a user with improved distribution and interleaving
         
-        # Pola interaksi yang realistis:
-        # 1. Beberapa interaksi awal saat pengguna mencoba platform
-        # 2. Periode tidak aktif
-        # 3. Masa penggunaan aktif dengan frekuensi yang berbeda-beda
-        
-        seed = int(datetime.now().timestamp() * 1000)  # Use current time as seed
-        rng = np.random.default_rng(seed)  # Initialize with seed
-
+        Args:
+            n_interactions: Number of interactions to generate
+            max_days_ago: Maximum days ago for this user's activity window
+            start_offset: Offset from global start date to ensure better user interleaving
+            user_rng: Random number generator instance for this user
+            
+        Returns:
+            List[datetime]: List of timestamps for this user
+        """
         now = datetime.now()
         timestamps = []
         
-        # Tentukan tipe pola pengguna
-        user_pattern = rng.choice([
-            'casual',       # Jarang, tidak teratur
-            'regular',      # Teratur tapi tidak sering
-            'active',       # Aktif, hampir setiap hari
-            'bursty',       # Aktif dalam periode singkat
-            'declining',    # Aktif di awal, menurun
-            'increasing',   # Semakin aktif seiring waktu
-            'weekend',      # Aktif di akhir pekan
-            'workday'       # Aktif di hari kerja
+        # Determine user pattern type
+        user_pattern = user_rng.choice([
+            'casual',       # Infrequent, irregular usage
+            'regular',      # Regular but not frequent
+            'active',       # Active, almost daily
+            'bursty',       # Active in short periods
+            'declining',    # Active initially, declining
+            'increasing',   # Increasingly active over time
+            'weekend',      # Active on weekends
+            'workday'       # Active on workdays
         ], p=[0.25, 0.25, 0.15, 0.1, 0.1, 0.05, 0.05, 0.05])
         
-        # Berapa hari dalam rentang waktu
-        active_days = min(max_days_ago, max(7, int(rng.gamma(shape=3.0, scale=max_days_ago/10))))
+        # How many days in the time range
+        active_days = min(max_days_ago, max(7, int(user_rng.gamma(shape=3.0, scale=max_days_ago/10))))
         
-        # Hari mana yang aktif, berdasarkan pola
+        # Which days are active, based on pattern
         if user_pattern == 'casual':
-            # 10-20% hari aktif, tersebar acak
-            active_day_count = int(active_days * rng.uniform(0.1, 0.2))
-            active_day_indices = sorted(rng.choice(range(active_days), size=active_day_count, replace=False))
+            # 10-20% active days, randomly distributed
+            active_day_count = int(active_days * user_rng.uniform(0.1, 0.2))
+            active_day_indices = sorted(user_rng.choice(range(active_days), size=min(active_day_count, active_days), replace=False))
         elif user_pattern == 'regular':
-            # 20-40% hari aktif, tersebar lebih merata
-            active_day_count = int(active_days * rng.uniform(0.2, 0.4))
-            active_day_indices = sorted(rng.choice(range(active_days), size=active_day_count, replace=False))
+            # 20-40% active days, more evenly distributed
+            active_day_count = int(active_days * user_rng.uniform(0.2, 0.4))
+            active_day_indices = sorted(user_rng.choice(range(active_days), size=min(active_day_count, active_days), replace=False))
         elif user_pattern == 'active':
-            # 40-70% hari aktif
-            active_day_count = int(active_days * rng.uniform(0.4, 0.7))
-            active_day_indices = sorted(rng.choice(range(active_days), size=active_day_count, replace=False))
+            # 40-70% active days
+            active_day_count = int(active_days * user_rng.uniform(0.4, 0.7))
+            active_day_indices = sorted(user_rng.choice(range(active_days), size=min(active_day_count, active_days), replace=False))
         elif user_pattern == 'bursty':
-            # Aktif dalam 1-3 periode singkat
-            burst_count = rng.randint(1, 4)
+            # Active in 1-3 short periods
+            burst_count = user_rng.integers(1, 4)
             active_day_indices = []
             for _ in range(burst_count):
-                burst_center = rng.randint(0, active_days)
-                burst_length = rng.randint(1, 5)
+                burst_center = user_rng.integers(0, active_days)
+                burst_length = user_rng.integers(1, 5)
                 for day in range(max(0, burst_center - burst_length), min(active_days, burst_center + burst_length)):
                     active_day_indices.append(day)
             active_day_indices = sorted(set(active_day_indices))
         elif user_pattern == 'declining':
-            # Lebih aktif di awal, menurun
-            active_day_count = int(active_days * rng.uniform(0.3, 0.5))
+            # More active early, declining
+            active_day_count = int(active_days * user_rng.uniform(0.3, 0.5))
             weights = np.linspace(1.0, 0.1, active_days)
-            active_day_indices = sorted(rng.choice(
+            active_day_indices = sorted(user_rng.choice(
                 range(active_days), 
-                size=active_day_count, 
+                size=min(active_day_count, active_days), 
                 replace=False, 
                 p=weights/weights.sum()
             ))
         elif user_pattern == 'increasing':
-            # Lebih aktif di akhir
-            active_day_count = int(active_days * rng.uniform(0.3, 0.5))
+            # More active later
+            active_day_count = int(active_days * user_rng.uniform(0.3, 0.5))
             weights = np.linspace(0.1, 1.0, active_days)
-            active_day_indices = sorted(rng.choice(
+            active_day_indices = sorted(user_rng.choice(
                 range(active_days), 
-                size=active_day_count, 
+                size=min(active_day_count, active_days), 
                 replace=False, 
                 p=weights/weights.sum()
             ))
         elif user_pattern == 'weekend':
-            # Aktif di akhir pekan
+            # Active on weekends
             active_day_indices = []
             for day in range(active_days):
                 # Simulate weekend (assume day 0 is today, and today is arbitrary)
-                is_weekend = (now - timedelta(days=day)).weekday() >= 5
-                if is_weekend or rng.random() < 0.15:  # 15% chance of activity on weekdays
+                is_weekend = (now - timedelta(days=int(day+start_offset))).weekday() >= 5
+                if is_weekend or user_rng.random() < 0.15:  # 15% chance of activity on weekdays
                     active_day_indices.append(day)
         else:  # workday
-            # Aktif di hari kerja
+            # Active on workdays
             active_day_indices = []
             for day in range(active_days):
                 # Simulate workday
-                is_workday = (now - timedelta(days=day)).weekday() < 5
-                if is_workday or rng.random() < 0.15:  # 15% chance of activity on weekends
+                is_workday = (now - timedelta(days=int(day+start_offset))).weekday() < 5
+                if is_workday or user_rng.random() < 0.15:  # 15% chance of activity on weekends
                     active_day_indices.append(day)
+
+        # Handle case with no active days
+        if not active_day_indices:
+            # Fallback to some random days
+            active_day_count = max(1, int(active_days * 0.1))
+            active_day_indices = sorted(user_rng.choice(range(active_days), size=min(active_day_count, active_days), replace=False))
         
-        # Distribusikan interaksi ke hari-hari aktif dengan variasi yang realistis
+        # Distribute interactions to active days with realistic variation
         interactions_per_day = [0] * active_days
         remaining = n_interactions
         
-        # Alokasikan minimal 1 interaksi per hari aktif
+        # Allocate minimum 1 interaction per active day
         for day in active_day_indices:
-            interactions_per_day[day] = 1
-            remaining -= 1
+            if day < len(interactions_per_day):  # Safety check
+                interactions_per_day[day] = 1
+                remaining -= 1
+                if remaining <= 0:
+                    break
         
-        # Alokasikan sisa interaksi dengan distribusi yang wajar
+        # Allocate remaining interactions with natural distribution
         if remaining > 0 and active_day_indices:
-            # Variasi dalam intensitas per hari
-            activity_intensity = rng.choice(['low', 'medium', 'high', 'mixed'])
+            # Variation in intensity per day
+            activity_intensity = user_rng.choice(['low', 'medium', 'high', 'mixed'])
             
             if activity_intensity == 'low':
-                # 1-3 interaksi per hari aktif
+                # 1-3 interactions per active day
                 max_per_day = 3
             elif activity_intensity == 'medium':
-                # 1-7 interaksi per hari aktif
+                # 1-7 interactions per active day
                 max_per_day = 7
             elif activity_intensity == 'high':
-                # 1-12 interaksi per hari aktif
+                # 1-12 interactions per active day
                 max_per_day = 12
             else:  # mixed
-                # Variasi tinggi, beberapa hari sangat aktif
+                # High variation, some days very active
                 max_per_day = 20
             
-            # Distribusikan dengan bias pada hari-hari tertentu
+            # Distribute with bias toward certain days
             while remaining > 0 and sum(1 for d in interactions_per_day if d < max_per_day) > 0:
-                # Pilih hari aktif secara acak, prioritaskan yang sudah memiliki aktivitas
+                # Select active day randomly, prioritize those with existing activity
                 weights = [
                     (d + 1) if i in active_day_indices and d < max_per_day else 0 
                     for i, d in enumerate(interactions_per_day)
@@ -2162,57 +2174,64 @@ class DataProcessor:
                 if sum(weights) == 0:
                     break
                     
-                day_idx = rng.choice(range(active_days), p=np.array(weights)/sum(weights))
+                weights_array = np.array(weights)
+                day_idx = user_rng.choice(range(active_days), p=weights_array/sum(weights_array))
                 interactions_per_day[day_idx] += 1
                 remaining -= 1
         
-        # Konversikan ke timestamp
+        # Convert to timestamps
         for day, count in enumerate(interactions_per_day):
             if count <= 0:
                 continue
                 
-            # Bagaimana distribusi dalam hari?
-            day_pattern = rng.choice(['morning', 'evening', 'random', 'work_hours'])
+            # How are interactions distributed within the day?
+            day_pattern = user_rng.choice(['morning', 'evening', 'random', 'work_hours'])
             
             for _ in range(count):
                 if day_pattern == 'morning':
-                    hour = rng.randint(6, 12)
+                    hour = user_rng.integers(6, 12)
                 elif day_pattern == 'evening':
-                    hour = rng.randint(17, 23)
+                    hour = user_rng.integers(17, 23)
                 elif day_pattern == 'work_hours':
-                    hour = rng.randint(9, 18)
+                    hour = user_rng.integers(9, 18)
                 else:  # random
-                    hour = rng.randint(0, 24)
+                    hour = user_rng.integers(0, 24)
                     
-                minute = rng.randint(0, 60)
-                second = rng.randint(0, 60)
+                minute = user_rng.integers(0, 60)
+                second = user_rng.integers(0, 60)
+                
+                # Apply start_offset to better distribute users in time
+                total_days_ago = day + start_offset
                 
                 timestamp = now - timedelta(
-                    days=day,
-                    hours=hour,
-                    minutes=minute,
-                    seconds=second
+                    days=int(total_days_ago),
+                    hours=int(hour),
+                    minutes=int(minute),
+                    seconds=int(second)
                 )
                 timestamps.append(timestamp)
         
-        # Jika masih ada interaksi yang belum dialokasikan, tambahkan secara acak
+        # If there are remaining interactions to allocate, add them randomly
         while remaining > 0:
-            day = rng.randint(0, active_days)
-            hour = rng.randint(0, 24)
-            minute = rng.randint(0, 60)
-            second = rng.randint(0, 60)
+            day = user_rng.integers(0, active_days)
+            hour = user_rng.integers(0, 24)
+            minute = user_rng.integers(0, 60)
+            second = user_rng.integers(0, 60)
+            
+            # Apply start_offset to better distribute users in time
+            total_days_ago = day + start_offset
             
             timestamp = now - timedelta(
-                days=day,
-                hours=hour,
-                minutes=minute,
-                seconds=second
+                days=int(total_days_ago),
+                hours=int(hour),
+                minutes=int(minute),
+                seconds=int(second)
             )
             timestamps.append(timestamp)
             remaining -= 1
         
-        # Urutkan berdasarkan waktu, terbaru dulu
-        timestamps.sort(reverse=True)
+        # Sort timestamps in chronological order (oldest to newest)
+        timestamps.sort()
         return timestamps
 
     def clean_json_string(self, json_str):
