@@ -47,21 +47,21 @@ CATEGORIES = [
 # Parameter model rekomendasi
 # - Neural Collaborative Filtering - DIOPTIMALKAN
 NCF_PARAMS = {
-    "embedding_dim": 64,           # Diturunkan dari 128 menjadi 64
-    "layers": [128, 64, 32, 16],   # Layer lebih dalam dengan unit lebih banyak
-    "learning_rate": 0.002,         # Slightly higher learning rate
+    "embedding_dim": 128,           # Ditingkatkan dari 64 menjadi 128
+    "layers": [256, 128, 64, 32],   # Layer lebih dalam dengan unit lebih banyak
+    "learning_rate": 0.001,         # Slightly higher learning rate
     "batch_size": 128,              # Reduced to prevent overfitting
     "epochs": 30,                  # Significantly increased
-    "val_ratio": 0.15,              # Tetap
+    "val_ratio": 0.2,              # Tetap
     "dropout": 0.4,                 # Increased dropout untuk regularisasi lebih kuat
     "weight_decay": 5e-4,           # Increased weight decay
     "patience": 10,                 # More patience for convergence
-    "negative_ratio": 4            # Increased negative samples
+    "negative_ratio": 4           # Increased negative samples
 }
 
 # - Feature-Enhanced CF
 FECF_PARAMS = {
-    "no_components": 64,            # Diturunkan dari 96 menjadi 64
+    "no_components": 96,            # Ditingkatkan dari 64 menjadi 96
     "content_alpha": 0.5           # Slightly more weight to collaborative data
 }
 

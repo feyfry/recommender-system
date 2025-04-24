@@ -375,7 +375,7 @@ python main.py collect --limit 500 --detail-limit 500
 # tambahkan param --rate-limit 3 jika ingin menghindari rate limit lebih panjang
 
 # Memproses data yang dikumpulkan
-python main.py process --users 2000
+python main.py process --users 500
 
 # Melatih model rekomendasi
 python main.py train --fecf --ncf --hybrid

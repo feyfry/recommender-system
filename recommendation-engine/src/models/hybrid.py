@@ -316,7 +316,7 @@ class HybridRecommender:
         interaction_threshold_high = self.params.get('interaction_threshold_high', 20)
         base_fecf_weight = self.params.get('fecf_weight', 0.5)
         base_ncf_weight = self.params.get('ncf_weight', 0.5)
-        diversity_factor = self.params.get('diversity_factor', 0.15)
+        diversity_factor = self.params.get('diversity_factor', 0.25)
         
         # IMPROVED: Analyze if user follows popular/trending items
         follows_trends = False
@@ -804,9 +804,9 @@ class HybridRecommender:
         }
         
         # Get cold-start parameters
-        cold_start_fecf_weight = self.params.get('cold_start_fecf_weight', 0.9)
-        explore_ratio = self.params.get('explore_ratio', 0.2)
-        diversity_factor = self.params.get('diversity_factor', 0.15)
+        cold_start_fecf_weight = self.params.get('cold_start_fecf_weight', 0.95)
+        explore_ratio = self.params.get('explore_ratio', 0.3)
+        diversity_factor = self.params.get('diversity_factor', 0.25)
         
         # Add partial history recommendations (highest weight)
         for item_id, score in partial_history_recs:

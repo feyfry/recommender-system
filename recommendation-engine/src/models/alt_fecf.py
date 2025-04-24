@@ -223,7 +223,7 @@ class FeatureEnhancedCF:
             user_item_array = self.user_item_matrix.values
             
             # Apply SVD
-            n_components = self.params.get('no_components', 64)
+            n_components = self.params.get('no_components', 96)
             logger.info(f"Applying SVD with {n_components} components")
             
             self.model = TruncatedSVD(n_components=n_components, random_state=42)
