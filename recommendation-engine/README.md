@@ -79,15 +79,88 @@ Sistem terdiri dari tiga komponen utama:
 
 Model Feature-Enhanced CF menggunakan SVD (Singular Value Decomposition) dari scikit-learn untuk matrix factorization dan menggabungkannya dengan content-based filtering berdasarkan fitur proyek (kategori, blockchain, dll). Implementasi ini menggantikan LightFM yang sebelumnya digunakan karena masalah kompatibilitas.
 
+**Kelebihan FECF:**
+- Efektif untuk pengguna baru (cold-start) dengan data interaksi terbatas
+- Mampu merekomendasikan item berdasarkan kesamaan fitur seperti kategori dan chain
+- Dapat menghasilkan rekomendasi berkualitas bahkan dengan data interaksi yang sparse
+
 ### Neural CF (PyTorch)
 
 Model Neural CF menggunakan deep learning untuk menangkap pola kompleks dalam interaksi user-item, menggabungkan matrix factorization dengan jaringan multi-layer perceptron untuk akurasi yang lebih baik. Model menggunakan embeddings untuk user dan item, serta layer MLP untuk mempelajari pola interaksi non-linear.
 
+**Kelebihan NCF:**
+- Sangat baik dalam personalisasi untuk pengguna dengan banyak interaksi (>20)
+- Dapat menangkap pola dan preferensi kompleks yang tidak tertangkap oleh model tradisional
+- Memberikan prediksi yang lebih akurat untuk pengguna yang aktif
+
+**Keterbatasan NCF:**
+- Memerlukan jumlah interaksi minimum untuk memberikan rekomendasi yang akurat
+- Kurang efektif pada cold-start problem dibandingkan dengan FECF
+
 ### Model Hybrid
 
-Model Hybrid menggabungkan kekuatan kedua pendekatan:
-- FECF untuk rekomendasi berbasis fitur dan penanganan cold-start
-- NCF untuk personalisasi mendalam dengan pengguna yang memiliki riwayat interaksi yang cukup
+Model Hybrid menggabungkan kekuatan kedua pendekatan dengan strategi filter-then-rerank:
+
+1. Menggunakan FECF untuk menghasilkan kandidat awal (filtering)
+2. Menggunakan NCF untuk memperbaiki peringkat kandidat (reranking)
+3. Menerapkan diversifikasi kategori untuk memastikan keragaman rekomendasi
+
+Model Hybrid menerapkan pembobotan dinamis berdasarkan jumlah interaksi pengguna:
+- **Pengguna Cold-Start (0 interaksi)**: Mengandalkan rekomendasi populer dan pengelompokan kategori
+- **Pengguna dengan Interaksi Terbatas (1-20)**: Bobot FECF lebih dominan dengan kontribusi NCF yang meningkat secara bertahap
+- **Pengguna dengan Interaksi Optimal (>20)**: Bobot seimbang antara FECF dan NCF
+
+## 📈 Evaluasi Model dan Metrik Performa
+
+Sistem ini menggunakan berbagai metrik standar untuk evaluasi kualitas rekomendasi:
+
+| Metrik | Deskripsi | Interpretasi |
+|--------|-----------|--------------|
+| **Precision** | Persentase rekomendasi yang relevan | Semakin tinggi = semakin akurat rekomendasi yang diberikan |
+| **Recall** | Persentase item relevan yang berhasil ditemukan | Semakin tinggi = semakin lengkap rekomendasi yang diberikan |
+| **F1** | Rata-rata harmonik dari precision dan recall | Keseimbangan antara akurasi dan kelengkapan |
+| **NDCG** | Normalized Discounted Cumulative Gain | Mengukur kualitas urutan rekomendasi (peringkat) |
+| **Hit Ratio** | Persentase pengguna yang mendapat minimal satu rekomendasi relevan | Mengukur cakupan layanan pada populasi pengguna |
+| **MRR** | Mean Reciprocal Rank | Mengukur seberapa cepat sistem menemukan rekomendasi pertama yang relevan |
+
+## 💡 Karakteristik Domain Cryptocurrency dalam Rekomendasi
+
+Domain cryptocurrency memiliki karakteristik unik yang mempengaruhi kinerja sistem rekomendasi:
+
+1. **Volatilitas Tinggi**: Perubahan harga dan popularitas yang cepat membuat pola interaksi berubah-ubah
+2. **Pengaruh Eksternal**: Keputusan investasi dipengaruhi oleh berita, media sosial, dan sentimen pasar
+3. **Data Sparsity**: Pengguna cenderung berinteraksi dengan sedikit token, menghasilkan matriks yang sparse
+4. **Dominasi Popularitas**: Proyek populer (Bitcoin, Ethereum) mendominasi interaksi, menciptakan distribusi long-tail
+5. **Konteks Temporal**: Waktu sangat mempengaruhi relevansi rekomendasi dalam domain crypto
+
+Karakteristik ini menjelaskan mengapa:
+- FECF bisa bersaing dengan model yang lebih kompleks seperti Hybrid
+- NCF mengalami tantangan dalam memberikan rekomendasi personalisasi
+- Strategi cold-start yang kuat sangat penting dalam domain ini
+
+## 📝 Tantangan dan Perbaikan Potensial
+
+Beberapa tantangan dan perbaikan potensial untuk sistem rekomendasi ini:
+
+1. **Pembobotan Dinamis**: 
+   - Mengganti hardcoded weight dengan pembobotan dinamis berdasarkan jumlah interaksi pengguna
+   - Menyesuaikan bobot FECF, NCF, dan faktor diversitas secara adaptif
+   - Menerapkan transisi halus antara pengguna cold-start dan pengguna yang sudah mapan
+
+2. **Strategi Cold-Start yang Lebih Baik**:
+   - Meningkatkan diversifikasi kategori untuk pengguna baru
+   - Menerapkan exploratory recommendations dengan elemen randomness
+   - Menggunakan pendekatan cluster-based untuk mencocokkan pengguna baru dengan grup yang serupa
+
+3. **Peningkatan Kualitas NCF**:
+   - Memperluas model dengan informasi kontekstual
+   - Meningkatkan negative sampling untuk domain yang sparse
+   - Menerapkan teknik regularisasi yang lebih kuat
+
+4. **Integrasi Sinyal Teknikal dan Tren**:
+   - Menggabungkan sinyal teknikal ke dalam proses rekomendasi
+   - Memasukkan tren sosial media dan sentimen
+   - Mempertimbangkan volatilitas dan momentum dalam pemberian peringkat
 
 ## 📈 Analisis Teknikal dengan Periode Dinamis
 
@@ -1064,9 +1137,33 @@ Laporan evaluasi disimpan di `data/models/` dalam format JSON, markdown, atau te
    ```
    - Untuk periode indikator yang lebih panjang, pastikan untuk menggunakan jumlah data historis yang lebih banyak
 
-## 📝 Lisensi
-
-Didistribusikan di bawah Lisensi MIT.
+10. **Meningkatkan Kualitas Hybrid Model**
+    - Jika model Hybrid tidak memberikan peningkatan signifikan, pastikan bobot dinamis sudah diimplementasikan:
+    ```python
+    # Di hybrid.py, pastikan menggunakan bobot dinamis
+    def recommend_for_user(self, user_id: str, n: int = 10, exclude_known: bool = True):
+        # ...
+        # Count user interactions
+        user_interactions = self.user_item_matrix.loc[user_id]
+        user_interaction_count = (user_interactions > 0).sum()
+        
+        # Get parameters from config
+        interaction_threshold_low = self.params.get('interaction_threshold_low', 5)
+        interaction_threshold_high = self.params.get('interaction_threshold_high', 20)
+        
+        # Adjust weights dynamically based on interaction count
+        if user_interaction_count < interaction_threshold_low:
+            effective_fecf_weight = 0.8
+            effective_ncf_weight = 0.1
+        elif user_interaction_count < interaction_threshold_high:
+            ratio = (user_interaction_count - interaction_threshold_low) / (interaction_threshold_high - interaction_threshold_low)
+            effective_fecf_weight = 0.8 - (0.3 * ratio)  # Gradually decrease FECF weight
+            effective_ncf_weight = 0.1 + (0.4 * ratio)   # Gradually increase NCF weight
+        else:
+            effective_fecf_weight = 0.5
+            effective_ncf_weight = 0.5
+        # ...
+    ```
 
 ## 📬 Kontak
 
