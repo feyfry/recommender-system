@@ -157,8 +157,10 @@ Beberapa tantangan dan perbaikan potensial untuk sistem rekomendasi ini:
    - Meningkatkan negative sampling untuk domain yang sparse
    - Menerapkan teknik regularisasi yang lebih kuat
 
+Fitur implementasi:
+
 4. **Integrasi Sinyal Teknikal dan Tren**:
-   - Menggabungkan sinyal teknikal ke dalam proses rekomendasi
+   - Menggabungkan sinyal teknikal ke dalam proses rekomendasi investasi (untuk buy/sell/hold)
    - Memasukkan tren sosial media dan sentimen
    - Mempertimbangkan volatilitas dan momentum dalam pemberian peringkat
 
