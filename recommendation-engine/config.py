@@ -1,5 +1,5 @@
 """
-Konfigurasi utama untuk sistem rekomendasi Web3
+Konfigurasi utama untuk sistem rekomendasi Web3 (versi yang dioptimalkan)
 """
 
 import os
@@ -45,43 +45,43 @@ CATEGORIES = [
 ]
 
 # Parameter model rekomendasi
-# - Neural Collaborative Filtering - DRASTICALLY SIMPLIFIED
+# - Neural Collaborative Filtering - DIOPTIMALKAN
 NCF_PARAMS = {
-    "embedding_dim": 64,           # Ditingkatkan dari 16 ke 64
-    "layers": [128, 64, 32, 16],   # Perluas jaringan
-    "learning_rate": 0.001,        # Ditingkatkan dari 0.0002 ke 0.001
-    "batch_size": 256,             # Pertahankan
-    "epochs": 50,                  # Tingkatkan
-    "val_ratio": 0.15,             # Pertahankan
-    "dropout": 0.3,                # Kurangi
-    "weight_decay": 1e-4,          # Kurangi
-    "patience": 10,                # Pertahankan
-    "negative_ratio": 4            # Ditingkatkan dari 2 ke 4
+    "embedding_dim": 64,           # Diturunkan dari 128 menjadi 64
+    "layers": [128, 64, 32],   # Layer lebih dalam dengan unit lebih banyak
+    "learning_rate": 0.002,         # Slightly higher learning rate
+    "batch_size": 256,              # Reduced to prevent overfitting
+    "epochs": 50,                  # Significantly increased
+    "val_ratio": 0.15,              # Tetap
+    "dropout": 0.4,                 # Increased dropout untuk regularisasi lebih kuat
+    "weight_decay": 5e-4,           # Increased weight decay
+    "patience": 10,                 # More patience for convergence
+    "negative_ratio": 4            # Increased negative samples
 }
 
 # - Feature-Enhanced CF
 FECF_PARAMS = {
-    "no_components": 64,
-    "content_alpha": 0.5     # Balance between CF and content (0.5 = 50-50 split)
+    "no_components": 64,            # Diturunkan dari 96 menjadi 64
+    "content_alpha": 0.45           # Slightly more weight to collaborative data
 }
 
-# - Hybrid Model
+# - Hybrid Model - DIOPTIMALKAN
 HYBRID_PARAMS = {
-    "ncf_weight": 0.4,            # Default weight untuk NCF
-    "fecf_weight": 0.6,           # Default weight untuk FECF
-    "interaction_threshold_low": 5,   # Di bawah ini mengandalkan FECF
-    "interaction_threshold_high": 20, # Di atas ini gunakan bobot seimbang
-    "diversity_factor": 0.15,      # Faktor untuk diversifikasi rekomendasi
-    "cold_start_fecf_weight": 0.95,  # Bobot FECF untuk pengguna cold-start
-    "explore_ratio": 0.2           # Proporsi rekomendasi untuk eksplorasi
+    "ncf_weight": 0.3,              # Reduced from 0.4 to give more weight to FECF
+    "fecf_weight": 0.7,             # Increased from 0.6
+    "interaction_threshold_low": 3, # Lowered from 5
+    "interaction_threshold_high": 15, # Lowered from 20
+    "diversity_factor": 0.25,       # Increased from 0.15 for better diversity
+    "cold_start_fecf_weight": 0.95, # Keep at 0.95 as it performs well
+    "explore_ratio": 0.3            # Increased from 0.2 to promote exploration
 }
 
 # Konfigurasi kategori untuk meningkatkan keragaman
 CATEGORY_CONFIG = {
-    "max_per_category": 0.25,        # Maksimum 30% rekomendasi dari satu kategori
-    "prioritize_diverse": True,      # Prioritaskan keragaman kategori
-    "boost_underrepresented": 0.25,   # Boost 0.2 untuk kategori yang kurang terwakili
-    "penalty_overrepresented": -0.4  # Penalti 0.3 untuk kategori yang terlalu dominan
+    "max_per_category": 0.2,        # Reduced from 0.25
+    "prioritize_diverse": True,
+    "boost_underrepresented": 0.35, # Increased from 0.25
+    "penalty_overrepresented": -0.5 # Increased from -0.4
 }
 
 # Keputusan investasi
@@ -130,11 +130,11 @@ USER_PERSONAS = {
     }
 }
 
-# Konfigurasi diversifikasi untuk interaksi sintetis
+# Konfigurasi diversifikasi untuk interaksi sintetis - DIOPTIMALKAN
 INTERACTION_DIVERSITY = {
     "enable_exploration": True,   # Aktifkan eksplorasi di luar kategori utama
-    "exploration_rate": 0.2,      # 20% eksplorasi kategori
-    "novelty_bias": 0.3,          # Preferensi untuk proyek baru/berbeda
+    "exploration_rate": 0.3,      # Increased from 0.2 to 0.3
+    "novelty_bias": 0.4,          # Increased from 0.3 to 0.4
     "temporal_variance": True,    # Variasi preferensi seiring waktu
     "negative_feedback": True     # Simulasi feedback negatif secara acak
 }
@@ -143,3 +143,21 @@ INTERACTION_DIVERSITY = {
 API_HOST = "0.0.0.0"
 API_PORT = 8000
 API_CACHE_TTL = 300  # 5 menit dalam detik
+
+# Cold-start evaluation parameters - DITAMBAHKAN
+COLD_START_EVAL_CONFIG = {
+    "cold_start_users": 20,         # Number of users for cold-start evaluation
+    "max_popular_items_exclude": 0.05, # Exclude top 5% most popular items
+    "test_ratio": 0.3,               # Ratio of interactions to hide for cold-start simulation
+    "min_interactions_required": 5,  # Minimum interactions needed for cold-start testing
+    "category_diversity_enabled": False, # Enable category diversity for evaluation
+}
+
+# Domain-specific weights for cryptocurrency - DITAMBAHKAN
+CRYPTO_DOMAIN_WEIGHTS = {
+    "trend_importance": 0.7,      # Importance of trend signals (crypto is highly trend-driven)
+    "popularity_decay": 0.05,     # How fast popularity decays over time
+    "category_correlation": 0.6,  # How much categories correlate with user preferences
+    "market_cap_influence": 0.4,  # How much market cap influences recommendations
+    "chain_importance": 0.3,      # Importance of blockchain when making recommendations
+}
