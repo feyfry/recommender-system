@@ -47,16 +47,16 @@ CATEGORIES = [
 # Parameter model rekomendasi
 # Neural Collaborative Filtering - NORMAL TUNING
 NCF_PARAMS = {
-    "embedding_dim": 64,            # Ukuran embedding yang lebih kecil, sesuai dengan ukuran dataset
-    "layers": [128, 64, 32],        # Arsitektur yang lebih sederhana
-    "learning_rate": 0.001,         # Learning rate yang lebih moderat
-    "batch_size": 128,              # Batch size lebih besar untuk stabilitas
-    "epochs": 30,                   # Epoch yang cukup tanpa berlebihan
-    "val_ratio": 0.2,               # Porsi validasi yang lebih besar
-    "dropout": 0.3,                 # Dropout lebih ringan
-    "weight_decay": 3e-4,           # Regularisasi lebih ringan
-    "patience": 7,                  # Patience lebih pendek
-    "negative_ratio": 4             # Negative samples lebih seimbang
+    "embedding_dim": 32,            # Kurangi dimensi embedding
+    "layers": [64, 32, 16],         # Arsitektur lebih sederhana
+    "learning_rate": 0.0005,        # Learning rate lebih kecil
+    "batch_size": 256,              # Batch size lebih besar untuk stabilitas
+    "epochs": 20,                   # Epoch cukup
+    "val_ratio": 0.15,              # Porsi validasi lebih kecil
+    "dropout": 0.4,                 # Dropout lebih agresif
+    "weight_decay": 8e-4,           # Regularisasi lebih kuat
+    "patience": 5,                  # Patience lebih pendek
+    "negative_ratio": 2             # Negative samples lebih sedikit
 }
 
 # Feature-Enhanced CF - MODERATE TUNING
@@ -67,13 +67,17 @@ FECF_PARAMS = {
 
 # Hybrid Model - MODERATE TUNING
 HYBRID_PARAMS = {
-    "ncf_weight": 0.4,              # Bobot NCF lebih kecil (lebih andal CF)
-    "fecf_weight": 0.6,             # Bobot FECF lebih besar
-    "interaction_threshold_low": 5,  # Threshold lebih tinggi untuk cold start
-    "interaction_threshold_high": 15, # Threshold lebih rendah untuk active users
-    "diversity_factor": 0.3,        # Faktor diversitas lebih moderat
-    "cold_start_fecf_weight": 0.8,  # Bobot FECF untuk cold start
-    "explore_ratio": 0.25           # Eksplorasi lebih kecil
+    "ncf_weight": 0.3,              # Kurangi bobot NCF karena underperform
+    "fecf_weight": 0.7,             # Tingkatkan bobot FECF
+    "interaction_threshold_low": 3,  # Turunkan threshold cold start
+    "interaction_threshold_high": 10, # Turunkan high threshold
+    "diversity_factor": 0.2,         # Kurangi faktor diversitas yang terlalu agresif
+    "cold_start_fecf_weight": 0.9,   # Lebih dominan FECF untuk cold start
+    "explore_ratio": 0.15,           # Kurangi eksplorasi
+    "normalization": "sigmoid",      # Metode normalisasi ("linear", "sigmoid", "rank", "none")
+    "ensemble_method": "weighted_avg", # Metode ensemble ("weighted_avg", "max", "rank_fusion")
+    "n_candidates_factor": 3,        # Faktor jumlah kandidat vs. hasil akhir
+    "category_diversity_weight": 0.15, # Bobot diversitas kategori
 }
 
 # Category Configuration - EXTREME TUNING

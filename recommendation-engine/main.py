@@ -473,7 +473,7 @@ def evaluate_models(args):
         if hybrid.load_data():
             # Cari hybrid model terbaru
             hybrid_files = [f for f in os.listdir(MODELS_DIR) 
-                         if f.startswith("hybrid_model_") and f.endswith(".pkl")]
+                         if f.startswith("enhanced_hybrid_model_") and f.endswith(".pkl")]
             if hybrid_files:
                 latest_model = sorted(hybrid_files)[-1]
                 model_path = os.path.join(MODELS_DIR, latest_model)
@@ -639,7 +639,7 @@ def recommend(args):
         else:  # hybrid
             # Cari hybrid model terbaru
             hybrid_files = [f for f in os.listdir(MODELS_DIR) 
-                          if f.startswith("hybrid_model_") and f.endswith(".pkl")]
+                          if f.startswith("enhanced_hybrid_model_") and f.endswith(".pkl")]
             if hybrid_files:
                 latest_model = sorted(hybrid_files)[-1]
                 model_path = os.path.join(MODELS_DIR, latest_model)

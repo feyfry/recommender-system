@@ -1,6 +1,6 @@
 """
-Hybrid Recommendation System yang mengkombinasikan 
-Feature-Enhanced CF dengan Neural CF (Dioptimalkan untuk cryptocurrency)
+Enhanced Hybrid Recommender yang mengintegrasikan FECF dan NCF 
+dengan metode ensemble yang lebih canggih untuk domain cryptocurrency
 """
 
 import os
@@ -10,9 +10,10 @@ import pandas as pd
 from typing import Dict, List, Optional, Tuple, Any, Union
 import time
 import pickle
-import random
+import json
 from datetime import datetime
 from pathlib import Path
+from scipy.special import expit  # Sigmoid function
 
 # Path handling
 import sys
@@ -20,7 +21,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from config import HYBRID_PARAMS, MODELS_DIR, PROCESSED_DIR, CRYPTO_DOMAIN_WEIGHTS
 
 # Import model components
-# from src.models.fecf import FeatureEnhancedCF
 from src.models.alt_fecf import FeatureEnhancedCF
 from src.models.ncf import NCFRecommender
 
@@ -34,19 +34,38 @@ logger = logging.getLogger(__name__)
 
 class HybridRecommender:
     """
-    Hybrid Recommender yang menggabungkan Feature-Enhanced CF dan Neural CF
-    dengan optimasi khusus untuk domain cryptocurrency
+    Hybrid Recommender dengan pendekatan ensemble yang ditingkatkan
+    optimalisasi untuk data sparse, dan penanganan kategori yang lebih baik
     """
     
     def __init__(self, params: Optional[Dict[str, Any]] = None):
         """
-        Initialize Hybrid Recommender
+        Initialize Enhanced Hybrid Recommender
         
         Args:
             params: Model parameters (overwrites defaults from config)
         """
-        # Model parameters
-        self.params = params or HYBRID_PARAMS
+        # Model parameters dengan default yang lebih baik
+        default_params = {
+            "ncf_weight": 0.3,              # Kurangi bobot NCF karena underperform
+            "fecf_weight": 0.7,             # Tingkatkan bobot FECF
+            "interaction_threshold_low": 3,  # Turunkan threshold cold start
+            "interaction_threshold_high": 10, # Turunkan high threshold
+            "diversity_factor": 0.2,         # Kurangi faktor diversitas yang terlalu agresif
+            "cold_start_fecf_weight": 0.9,   # Lebih dominan FECF untuk cold start
+            "explore_ratio": 0.15,           # Kurangi eksplorasi
+            "normalization": "sigmoid",      # Metode normalisasi ("linear", "sigmoid", "rank", "none")
+            "ensemble_method": "weighted_avg", # Metode ensemble ("weighted_avg", "max", "rank_fusion")
+            "n_candidates_factor": 3,        # Faktor jumlah kandidat vs. hasil akhir
+            "category_diversity_weight": 0.15, # Bobot diversitas kategori
+        }
+        
+        # Update dengan parameter yang disediakan atau dari config
+        self.params = default_params.copy()
+        if HYBRID_PARAMS:
+            self.params.update(HYBRID_PARAMS)
+        if params:
+            self.params.update(params)
         
         # Initialize component models
         self.fecf_model = None
@@ -59,6 +78,10 @@ class HybridRecommender:
         
         # Track recommendation sources for analytics
         self.recommendation_sources = {}
+        
+        # Cache untuk hasil normalisasi dan rekomendasi
+        self._normalization_cache = {}
+        self._recommendation_cache = {}
         
         # Domain-specific weights for cryptocurrency
         self.crypto_weights = CRYPTO_DOMAIN_WEIGHTS if 'CRYPTO_DOMAIN_WEIGHTS' in globals() else {
@@ -111,16 +134,57 @@ class HybridRecommender:
                 self.interactions_df = self.fecf_model.interactions_df
                 self.user_item_matrix = self.fecf_model.user_item_matrix
                 
-                logger.info("Data loaded successfully for Hybrid Recommender")
+                # Pre-process kategori untuk memudahkan penanganan
+                self.preprocess_categories()
+                
+                logger.info("Data loaded successfully for Enhanced Hybrid Recommender")
                 return True
             else:
                 logger.error("Failed to load data for one or more component models")
                 return False
                 
         except Exception as e:
-            logger.error(f"Error loading data for Hybrid Recommender: {str(e)}")
+            logger.error(f"Error loading data for Enhanced Hybrid Recommender: {str(e)}")
             return False
     
+    def preprocess_categories(self):
+        """
+        Pre-process kategori untuk menangani multiple categories dengan lebih baik
+        """
+        if self.projects_df is None or 'primary_category' not in self.projects_df.columns:
+            return
+            
+        # Check sample untuk mendeteksi format kategori
+        sample_value = self.projects_df['primary_category'].iloc[0] if len(self.projects_df) > 0 else None
+        
+        # Buat kolom kategori yang distandarisasi
+        self.projects_df['categories_list'] = self.projects_df['primary_category'].apply(self.process_categories)
+        
+        logger.info(f"Preprocessed categories for {len(self.projects_df)} projects")
+    
+    def process_categories(self, category_value):
+        """Proses kategori baik itu string tunggal maupun list"""
+        if isinstance(category_value, list):
+            return category_value  # Kembalikan list kategori
+        elif isinstance(category_value, str):
+            # Periksa apakah string dalam format list
+            if category_value.startswith('[') and category_value.endswith(']'):
+                try:
+                    # Coba parse JSON jika format valid
+                    parsed = json.loads(category_value)
+                    if isinstance(parsed, list):
+                        return parsed
+                    return [category_value]
+                except:
+                    # Fallback ke parsing manual jika JSON parse gagal
+                    if ',' in category_value:
+                        # Strip kurung dan whitespace, split by comma
+                        cleaned = category_value.strip('[]" ')
+                        return [cat.strip(' "\'') for cat in cleaned.split(',')]
+                    return [category_value]
+            return [category_value]  # Wrap string tunggal dalam list
+        return ['unknown']  # Default fallback
+        
     def train(self, 
              fecf_params: Optional[Dict[str, Any]] = None,
              ncf_params: Optional[Dict[str, Any]] = None,
@@ -144,8 +208,21 @@ class HybridRecommender:
         metrics['fecf'] = fecf_metrics
         
         # Train NCF
-        logger.info("Training Neural CF component")
-        ncf_metrics = self.ncf_model.train(save_model=save_model)
+        logger.info("Training Neural CF component with optimized parameters")
+        
+        # Update NCF params dengan nilai yang lebih baik untuk data sparse
+        optimized_ncf_params = {
+            "val_ratio": 0.15,              # Porsi validasi lebih kecil
+            "batch_size": 256,              # Batch size lebih besar untuk stabilitas
+            "num_epochs": 20,               # Epoch cukup
+            "learning_rate": 0.0005         # Learning rate lebih kecil
+        }
+        
+        # Gabungkan dengan ncf_params yang disediakan
+        if ncf_params:
+            optimized_ncf_params.update(ncf_params)
+            
+        ncf_metrics = self.ncf_model.train(save_model=save_model, **optimized_ncf_params)
         metrics['ncf'] = ncf_metrics
         
         # Save hybrid model weights if requested
@@ -167,7 +244,7 @@ class HybridRecommender:
         if filepath is None:
             # Create default path
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filepath = os.path.join(MODELS_DIR, f"hybrid_model_{timestamp}.pkl")
+            filepath = os.path.join(MODELS_DIR, f"enhanced_hybrid_model_{timestamp}.pkl")
             
         # Create directory if it doesn't exist
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -199,7 +276,7 @@ class HybridRecommender:
         with open(filepath, 'wb') as f:
             pickle.dump(model_state, f)
             
-        logger.info(f"Hybrid model saved to {filepath}")
+        logger.info(f"Enhanced Hybrid model saved to {filepath}")
         logger.info(f"  - FECF reference: {fecf_path}")
         logger.info(f"  - NCF reference: {ncf_path}")
         
@@ -223,12 +300,12 @@ class HybridRecommender:
         # Load hybrid weights if provided
         if hybrid_filepath and os.path.exists(hybrid_filepath):
             try:
-                logger.info(f"Loading hybrid model from {hybrid_filepath}")
+                logger.info(f"Loading enhanced hybrid model from {hybrid_filepath}")
                 with open(hybrid_filepath, 'rb') as f:
                     model_state = pickle.load(f)
                     
                 self.params = model_state.get('params', self.params)
-                logger.info(f"Hybrid model weights loaded from {hybrid_filepath}")
+                logger.info(f"Enhanced Hybrid model weights loaded from {hybrid_filepath}")
                 
                 # Get component model paths from hybrid model if not provided
                 if fecf_filepath is None:
@@ -245,12 +322,27 @@ class HybridRecommender:
         
         # Initialize component models if needed
         if self.fecf_model is None:
-            from src.models.alt_fecf import FeatureEnhancedCF
-            self.fecf_model = FeatureEnhancedCF()
+            try:
+                from src.models.alt_fecf import FeatureEnhancedCF
+                self.fecf_model = FeatureEnhancedCF()
+            except ImportError:
+                logger.error("Could not import FeatureEnhancedCF module")
+                return False
             
         if self.ncf_model is None:
-            from src.models.ncf import NCFRecommender
-            self.ncf_model = NCFRecommender()
+            try:
+                from src.models.ncf import NCFRecommender
+                self.ncf_model = NCFRecommender()
+            except ImportError:
+                logger.error("Could not import NCFRecommender module")
+                return False
+        
+        # Load data for both models if not already loaded
+        if self.projects_df is None:
+            data_loaded = self.load_data()
+            if not data_loaded:
+                logger.error("Failed to load data during model loading")
+                return False
         
         # Load component models
         fecf_success = True
@@ -268,6 +360,9 @@ class HybridRecommender:
                 logger.info(f"NCF component loaded from {ncf_filepath}")
             else:
                 logger.error(f"Failed to load NCF component from {ncf_filepath}")
+        
+        # Preprocess categories
+        self.preprocess_categories()
         
         # Model dianggap sukses jika minimal salah satu komponen berhasil dimuat
         return fecf_success or ncf_success
@@ -290,9 +385,394 @@ class HybridRecommender:
         
         return fecf_trained or ncf_trained
     
+    def normalize_scores(self, recommendations: List[Tuple[str, float]], 
+                    method: Optional[str] = None) -> List[Tuple[str, float]]:
+        """
+        Normalisasi skor rekomendasi dengan berbagai metode
+        
+        Args:
+            recommendations: List of (item_id, score) tuples
+            method: Normalization method ("linear", "sigmoid", "rank", "none")
+            
+        Returns:
+            list: List of (item_id, normalized_score) tuples
+        """
+        if not recommendations:
+            return []
+            
+        # Use specified method or default from params
+        method = method or self.params.get('normalization', 'sigmoid')
+        
+        # Quick return if no normalization requested
+        if method == 'none':
+            return recommendations
+            
+        # Extract items and scores
+        items = [item_id for item_id, _ in recommendations]
+        scores = np.array([score for _, score in recommendations])
+        
+        # Cache key for this normalization
+        items_key = '-'.join(items[:5]) + f"-{len(items)}"
+        scores_key = f"{scores.mean():.4f}-{scores.std():.4f}-{len(scores)}"
+        cache_key = f"{items_key}-{scores_key}-{method}"
+        
+        # Check cache first
+        if cache_key in self._normalization_cache:
+            return self._normalization_cache[cache_key]
+            
+        # Apply normalization method
+        if method == 'linear':
+            # Min-max scaling
+            min_val = scores.min()
+            max_val = scores.max()
+            if max_val > min_val:
+                normalized = (scores - min_val) / (max_val - min_val)
+            else:
+                normalized = np.ones_like(scores) * 0.5
+                
+        elif method == 'sigmoid':
+            # Sigmoid normalization - centers around 0.5 with smoother transition
+            mean = scores.mean()
+            std = max(scores.std(), 1e-5)  # Avoid division by zero
+            z_scores = (scores - mean) / std
+            normalized = expit(z_scores)  # Apply sigmoid function
+            
+        elif method == 'rank':
+            # Rank-based normalization
+            ranks = np.argsort(np.argsort(scores)[::-1]) + 1
+            normalized = 1 - (ranks / len(ranks))
+        else:
+            # Fallback to original scores
+            normalized = scores
+            
+        # Create normalized recommendations
+        normalized_recs = list(zip(items, normalized))
+        
+        # Store in cache
+        self._normalization_cache[cache_key] = normalized_recs
+        
+        return normalized_recs
+    
+    def get_effective_weights(self, user_id: str) -> Tuple[float, float, float]:
+        """
+        Determine model weights based on user interactions and model health
+        
+        Args:
+            user_id: User ID
+            
+        Returns:
+            tuple: (fecf_weight, ncf_weight, diversity_weight)
+        """
+        # Check model health
+        fecf_health = 1.0  # Default full health
+        ncf_health = 1.0   # Default full health
+        
+        if self.fecf_model is None or not hasattr(self.fecf_model, 'model') or self.fecf_model.model is None:
+            logger.warning("FECF model not available, falling back to NCF only")
+            fecf_health = 0.0
+        
+        if self.ncf_model is None or not hasattr(self.ncf_model, 'model') or self.ncf_model.model is None:
+            logger.warning("NCF model not available, falling back to FECF only")
+            ncf_health = 0.0
+            
+        # Get base weights from params
+        base_fecf_weight = self.params.get('fecf_weight', 0.7)
+        base_ncf_weight = self.params.get('ncf_weight', 0.3)
+        diversity_factor = self.params.get('diversity_factor', 0.2)
+        
+        # Count user interactions if available
+        user_interaction_count = 0
+        if self.user_item_matrix is not None and user_id in self.user_item_matrix.index:
+            user_interactions = self.user_item_matrix.loc[user_id]
+            user_interaction_count = (user_interactions > 0).sum()
+            
+        # Get thresholds
+        interaction_threshold_low = self.params.get('interaction_threshold_low', 3)
+        interaction_threshold_high = self.params.get('interaction_threshold_high', 10)
+        
+        # Determine effective weights based on interaction count and model health
+        if fecf_health == 0.0:
+            # No FECF model available, use only NCF
+            effective_fecf_weight = 0.0
+            effective_ncf_weight = 1.0
+            effective_diversity_weight = diversity_factor * 0.5  # Reduce diversity without FECF
+        elif ncf_health == 0.0:
+            # No NCF model available, use only FECF
+            effective_fecf_weight = 1.0
+            effective_ncf_weight = 0.0
+            effective_diversity_weight = diversity_factor * 1.2  # Increase diversity with just FECF
+        else:
+            # Both models available, apply adaptive weighting based on interaction count
+            if user_interaction_count < interaction_threshold_low:
+                # For cold-start users, rely more on FECF
+                effective_fecf_weight = 0.85 * fecf_health  # Increase from 0.75 to 0.85
+                effective_ncf_weight = 0.15 * ncf_health    # Decrease from 0.25 to 0.15
+                effective_diversity_weight = diversity_factor * 0.7  # Slightly lower diversity for cold-start
+            elif user_interaction_count < interaction_threshold_high:
+                # Linear interpolation between thresholds
+                ratio = (user_interaction_count - interaction_threshold_low) / (interaction_threshold_high - interaction_threshold_low)
+                fecf_low = 0.85
+                fecf_high = base_fecf_weight
+                effective_fecf_weight = (fecf_low - (fecf_low - fecf_high) * ratio) * fecf_health
+                effective_ncf_weight = (0.15 + (base_ncf_weight - 0.15) * ratio) * ncf_health
+                effective_diversity_weight = diversity_factor * (0.7 + ratio * 0.5)
+            else:
+                # For active users, use configured weights
+                effective_fecf_weight = base_fecf_weight * fecf_health
+                effective_ncf_weight = base_ncf_weight * ncf_health
+                effective_diversity_weight = diversity_factor
+        
+        # Normalize weights to sum to 1.0
+        total_weight = effective_fecf_weight + effective_ncf_weight
+        if total_weight > 0:
+            effective_fecf_weight /= total_weight
+            effective_ncf_weight /= total_weight
+            
+        return effective_fecf_weight, effective_ncf_weight, effective_diversity_weight
+    
+    def get_ensemble_recommendations(self, 
+                                   fecf_recs: List[Tuple[str, float]], 
+                                   ncf_recs: List[Tuple[str, float]],
+                                   fecf_weight: float = 0.7, 
+                                   ncf_weight: float = 0.3,
+                                   ensemble_method: Optional[str] = None) -> List[Tuple[str, float]]:
+        """
+        Implement advanced ensemble methods untuk menggabungkan rekomendasi
+        
+        Args:
+            fecf_recs: FECF recommendations as (item_id, score) tuples
+            ncf_recs: NCF recommendations as (item_id, score) tuples
+            fecf_weight: Weight for FECF model
+            ncf_weight: Weight for NCF model
+            ensemble_method: Ensemble method ("weighted_avg", "max", "rank_fusion")
+            
+        Returns:
+            list: Combined recommendations as (item_id, score) tuples
+        """
+        if not fecf_recs and not ncf_recs:
+            return []
+            
+        # Use specified method or default from params
+        ensemble_method = ensemble_method or self.params.get('ensemble_method', 'weighted_avg')
+            
+        # Quick return if only one model's recommendations are available
+        if not fecf_recs:
+            return ncf_recs
+        if not ncf_recs:
+            return fecf_recs
+            
+        # Normalize scores first
+        fecf_normalized = self.normalize_scores(fecf_recs, method=self.params.get('normalization', 'sigmoid'))
+        ncf_normalized = self.normalize_scores(ncf_recs, method=self.params.get('normalization', 'sigmoid'))
+        
+        # Create dictionaries for lookup
+        fecf_dict = dict(fecf_normalized)
+        ncf_dict = dict(ncf_normalized)
+        
+        # Get all unique items
+        all_items = set(fecf_dict.keys()) | set(ncf_dict.keys())
+        
+        if ensemble_method == 'max':
+            # Maximum score ensemble - ambil nilai tertinggi dari kedua model
+            results = {}
+            for item in all_items:
+                fecf_score = fecf_dict.get(item, 0)
+                ncf_score = ncf_dict.get(item, 0)
+                results[item] = max(fecf_score, ncf_score)
+                
+        elif ensemble_method == 'rank_fusion':
+            # Reciprocal Rank Fusion - menggabungkan berdasarkan posisi (rank) item
+            # Hitung rank untuk setiap model
+            fecf_ranks = {item: i+1 for i, (item, _) in enumerate(sorted(fecf_dict.items(), key=lambda x: x[1], reverse=True))}
+            ncf_ranks = {item: i+1 for i, (item, _) in enumerate(sorted(ncf_dict.items(), key=lambda x: x[1], reverse=True))}
+            
+            # Konstanta k untuk RRF (biasanya 60)
+            k = 60
+            
+            # Hitung RRF score
+            results = {}
+            for item in all_items:
+                # Gunakan rank maksimum jika item tidak ada di salah satu model
+                fecf_rank = fecf_ranks.get(item, len(fecf_ranks) + 1)
+                ncf_rank = ncf_ranks.get(item, len(ncf_ranks) + 1)
+                
+                # RRF formula: sum(1 / (k + rank_i))
+                fecf_score = 1.0 / (k + fecf_rank)
+                ncf_score = 1.0 / (k + ncf_rank)
+                
+                # Weighted sum
+                results[item] = fecf_weight * fecf_score + ncf_weight * ncf_score
+                
+        else:  # default to weighted_avg
+            # Weighted average ensemble
+            results = {}
+            for item in all_items:
+                fecf_score = fecf_dict.get(item, 0)
+                ncf_score = ncf_dict.get(item, 0)
+                
+                # Weighted average core - lebih sophisticated dari naive weighted sum
+                if item in fecf_dict and item in ncf_dict:
+                    # Jika item direkomendasikan oleh kedua model, gunakan weighted average
+                    results[item] = fecf_score * fecf_weight + ncf_score * ncf_weight
+                elif item in fecf_dict:
+                    # Jika hanya FECF merekomendasikan, kurangi confidence sedikit
+                    results[item] = fecf_score * fecf_weight * 0.9  # Slight confidence reduction
+                else:
+                    # Jika hanya NCF merekomendasikan, kurangi confidence lebih banyak
+                    results[item] = ncf_score * ncf_weight * 0.8  # More confidence reduction
+        
+        # Convert to list of tuples and sort
+        combined_recs = [(item, score) for item, score in results.items()]
+        combined_recs.sort(key=lambda x: x[1], reverse=True)
+        
+        return combined_recs
+    
+    def apply_diversity(self, recommendations: List[Tuple[str, float]], 
+                    n: int, diversity_weight: float = 0.2) -> List[Tuple[str, float]]:
+        """
+        Apply category and chain diversity with improved algorithm
+        
+        Args:
+            recommendations: List of (item_id, score) tuples
+            n: Number of results to return
+            diversity_weight: Weight of diversity factors
+            
+        Returns:
+            list: Diversified recommendations
+        """
+        if not recommendations or len(recommendations) <= n:
+            return recommendations
+            
+        # Prepare item metadata
+        item_categories = {}
+        item_chains = {}
+        
+        if self.projects_df is not None:
+            # Extract item metadata
+            for _, row in self.projects_df.iterrows():
+                if 'id' not in row:
+                    continue
+                    
+                item_id = row['id']
+                
+                # Extract multiple categories if available
+                if 'categories_list' in row:
+                    item_categories[item_id] = row['categories_list']
+                elif 'primary_category' in row:
+                    item_categories[item_id] = self.process_categories(row['primary_category'])
+                
+                # Extract chain information
+                if 'chain' in row:
+                    item_chains[item_id] = row['chain']
+        
+        # If no category/chain data available, just return top-n
+        if not item_categories and not item_chains:
+            return recommendations[:n]
+            
+        # Select top items without diversity first (guaranteed selection)
+        top_count = max(n // 5, 1)  # ~20% by pure score
+        result = recommendations[:top_count]
+        
+        # Track selected categories and chains
+        selected_categories = {}
+        selected_chains = {}
+        
+        # Populate initial tracking
+        for item_id, _ in result:
+            # Track categories
+            if item_id in item_categories:
+                for category in item_categories[item_id]:
+                    selected_categories[category] = selected_categories.get(category, 0) + 1
+            
+            # Track chains
+            if item_id in item_chains:
+                chain = item_chains[item_id]
+                selected_chains[chain] = selected_chains.get(chain, 0) + 1
+        
+        # Calculate diversity limits
+        max_per_category = max(2, int(n * 0.3))  # Maximum ~30% per category
+        max_per_chain = max(3, int(n * 0.4))     # Maximum ~40% per chain
+        
+        # Process remaining candidates
+        remaining = recommendations[top_count:]
+        
+        # Calculate diversity adjusted scores for all remaining items
+        diversity_adjusted = []
+        
+        for item_id, score in remaining:
+            category_adjustment = 0
+            chain_adjustment = 0
+            
+            # Category diversity adjustment
+            if item_id in item_categories:
+                # Periksa semua kategori item
+                cat_adjustments = []
+                item_cats = item_categories[item_id]
+                
+                for category in item_cats:
+                    cat_count = selected_categories.get(category, 0)
+                    
+                    if cat_count >= max_per_category:
+                        # Heavy penalty for overrepresented category
+                        cat_adjustments.append(-0.4)
+                    elif cat_count == 0:
+                        # Strong boost for new category
+                        cat_adjustments.append(0.2) 
+                    else:
+                        # Smaller adjustment based on count
+                        adjustment = 0.1 * (1 - cat_count / max_per_category)
+                        cat_adjustments.append(adjustment)
+                
+                # Use worst adjustment as the primary signal
+                # This avoids selecting items from overrepresented categories
+                # even if they have other categories that are underrepresented
+                if cat_adjustments:
+                    category_adjustment = min(cat_adjustments)
+            
+            # Chain diversity adjustment (simpler)
+            if item_id in item_chains:
+                chain = item_chains[item_id]
+                chain_count = selected_chains.get(chain, 0)
+                
+                if chain_count >= max_per_chain:
+                    chain_adjustment = -0.3  # Penalty for overrepresented chain
+                elif chain_count == 0:
+                    chain_adjustment = 0.15  # Bonus for new chain
+                else:
+                    chain_adjustment = 0.05 * (1 - chain_count / max_per_chain)
+            
+            # Apply diversity weight
+            diversity_score = (category_adjustment + chain_adjustment * 0.5) * diversity_weight
+            adjusted_score = score + diversity_score
+            
+            # Store original item, score, and adjusted score
+            diversity_adjusted.append((item_id, score, adjusted_score))
+        
+        # Sort by adjusted score
+        diversity_adjusted.sort(key=lambda x: x[2], reverse=True)
+        
+        # Select remaining items
+        for item_id, original_score, _ in diversity_adjusted:
+            if len(result) >= n:
+                break
+                
+            # Update category and chain tracking
+            if item_id in item_categories:
+                for category in item_categories[item_id]:
+                    selected_categories[category] = selected_categories.get(category, 0) + 1
+            
+            if item_id in item_chains:
+                chain = item_chains[item_id]
+                selected_chains[chain] = selected_chains.get(chain, 0) + 1
+            
+            # Add to result with original score
+            result.append((item_id, original_score))
+        
+        return result
+    
     def recommend_for_user(self, user_id: str, n: int = 10, exclude_known: bool = True) -> List[Tuple[str, float]]:
         """
-        Generate recommendations dengan penanganan error lebih baik dan keseimbangan dinamis antara FECF & NCF
+        Generate recommendations for a user using ensemble approach
         
         Args:
             user_id: User ID
@@ -307,301 +787,114 @@ class HybridRecommender:
         if hasattr(self, '_recommendation_cache') and cache_key in self._recommendation_cache:
             cache_entry = self._recommendation_cache[cache_key]
             cache_time = cache_entry.get('time', 0)
-            # Use cache if it's less than 1 hour old
-            if time.time() - cache_time < 3600:
+            # Use cache if it's less than 15 minutes old
+            if time.time() - cache_time < 900:  # 15 minutes in seconds
                 return cache_entry['recommendations']
         
+        # Check if this is a cold-start user
+        is_cold_start = True
+        if self.user_item_matrix is not None:
+            is_cold_start = user_id not in self.user_item_matrix.index
+            
         # Handle cold-start case
-        if self.user_item_matrix is None or user_id not in self.user_item_matrix.index:
+        if is_cold_start:
             return self._get_cold_start_recommendations(user_id, n)
             
-        # Count user interactions
-        user_interactions = self.user_item_matrix.loc[user_id]
-        user_interaction_count = (user_interactions > 0).sum()
+        # Get effective weights
+        fecf_weight, ncf_weight, diversity_weight = self.get_effective_weights(user_id)
         
-        # Get parameters with safe fallbacks
-        interaction_threshold_low = self.params.get('interaction_threshold_low', 5)
-        interaction_threshold_high = self.params.get('interaction_threshold_high', 15)
-        base_fecf_weight = self.params.get('fecf_weight', 0.6)
-        base_ncf_weight = self.params.get('ncf_weight', 0.4)
-        diversity_factor = self.params.get('diversity_factor', 0.3)
+        # Can't do anything if neither model is available
+        if fecf_weight == 0 and ncf_weight == 0:
+            logger.error("No models available for recommendations")
+            return []
+            
+        # Determine number of candidates to get from each model
+        n_candidates = min(n * self.params.get('n_candidates_factor', 3), 100)
         
-        # IMPROVEMENT: Adaptive weighting based on model health
-        # Check if models are trained properly
-        fecf_health = 1.0  # Default full health
-        ncf_health = 1.0   # Default full health
-        
-        if self.fecf_model is None or not hasattr(self.fecf_model, 'model') or self.fecf_model.model is None:
-            logger.warning("FECF model not available, falling back to NCF only")
-            fecf_health = 0.0
-        
-        if self.ncf_model is None or not hasattr(self.ncf_model, 'model') or self.ncf_model.model is None:
-            logger.warning("NCF model not available, falling back to FECF only")
-            ncf_health = 0.0
-        
-        # If both models are unhealthy, try to recover FECF at least
-        if fecf_health == 0.0 and ncf_health == 0.0:
-            logger.error("Both FECF and NCF models unavailable, attempting to recover FECF model")
+        # Get FECF recommendations if available
+        fecf_recs = []
+        if fecf_weight > 0:
             try:
-                from src.models.alt_fecf import FeatureEnhancedCF
-                self.fecf_model = FeatureEnhancedCF()
-                if self.fecf_model.load_data():
-                    # Try to load latest model
-                    fecf_files = [f for f in os.listdir(MODELS_DIR) 
-                                if f.startswith("fecf_model_") and f.endswith(".pkl")]
-                    if fecf_files:
-                        latest_model = sorted(fecf_files)[-1]
-                        model_path = os.path.join(MODELS_DIR, latest_model)
-                        if self.fecf_model.load_model(model_path):
-                            fecf_health = 0.8  # Recovered with slightly reduced confidence
-                            logger.info("Successfully recovered FECF model")
-            except Exception as e:
-                logger.error(f"Failed to recover FECF model: {e}")
-                # Return empty recommendations if all fails
-                return []
-        
-        # IMPROVEMENT: Dynamic weighting with health adjustment
-        if fecf_health == 0.0:
-            # No FECF model available, use only NCF
-            effective_fecf_weight = 0.0
-            effective_ncf_weight = 1.0
-            effective_diversity_weight = diversity_factor * 0.5  # Reduce diversity without FECF
-        elif ncf_health == 0.0:
-            # No NCF model available, use only FECF
-            effective_fecf_weight = 1.0
-            effective_ncf_weight = 0.0
-            effective_diversity_weight = diversity_factor * 1.2  # Increase diversity with just FECF
-        else:
-            # Both models available, apply dynamic weighting based on interaction count
-            if user_interaction_count < interaction_threshold_low:
-                # For few interactions, rely more on FECF
-                effective_fecf_weight = 0.75 * fecf_health
-                effective_ncf_weight = 0.25 * ncf_health
-                effective_diversity_weight = diversity_factor * 0.8
-            elif user_interaction_count < interaction_threshold_high:
-                # Linear interpolation between thresholds
-                ratio = (user_interaction_count - interaction_threshold_low) / (interaction_threshold_high - interaction_threshold_low)
-                effective_fecf_weight = (0.75 - (0.75 - base_fecf_weight) * ratio) * fecf_health
-                effective_ncf_weight = (0.25 + (base_ncf_weight - 0.25) * ratio) * ncf_health
-                effective_diversity_weight = diversity_factor * (0.8 + ratio * 0.4)
-            else:
-                # For many interactions, use configured weights with health adjustment
-                effective_fecf_weight = base_fecf_weight * fecf_health
-                effective_ncf_weight = base_ncf_weight * ncf_health
-                effective_diversity_weight = diversity_factor * 1.2
-        
-        # Normalize weights to sum to 1.0
-        total_weight = effective_fecf_weight + effective_ncf_weight
-        if total_weight > 0:
-            effective_fecf_weight /= total_weight
-            effective_ncf_weight /= total_weight
-        else:
-            # Fallback if both weights somehow become zero
-            return self._get_cold_start_recommendations(user_id, n)
-                
-        # OPTIMIZATION: Get candidates with failsafe error handling
-        candidates = []
-        
-        # Step 1: Try to get FECF recommendations
-        if effective_fecf_weight > 0:
-            try:
-                fecf_candidates = self.fecf_model.recommend_for_user(
+                fecf_recs = self.fecf_model.recommend_for_user(
                     user_id, 
-                    n=min(n*3, 100),  # Limit to reasonable number
+                    n=n_candidates,
                     exclude_known=exclude_known
                 )
-                candidates.extend([(item_id, score * effective_fecf_weight, 'fecf') 
-                                for item_id, score in fecf_candidates])
             except Exception as e:
                 logger.warning(f"Error getting FECF recommendations: {e}")
-                effective_ncf_weight = 1.0  # Switch fully to NCF
-        
-        # Step 2: Try to get NCF recommendations
-        if effective_ncf_weight > 0:
-            try:
-                ncf_candidates = self.ncf_model.recommend_for_user(
-                    user_id, 
-                    n=min(n*3, 100),
-                    exclude_known=exclude_known
-                )
-                candidates.extend([(item_id, score * effective_ncf_weight, 'ncf') 
-                                for item_id, score in ncf_candidates])
-            except Exception as e:
-                logger.warning(f"Error getting NCF recommendations: {e}")
-                if not candidates:  # If no FECF candidates either
+                # Adjust weights if FECF fails
+                if ncf_weight > 0:
+                    ncf_weight = 1.0
+                    fecf_weight = 0.0
+                else:
+                    # Both models failed, fallback to cold-start
                     return self._get_cold_start_recommendations(user_id, n)
         
-        # If still no candidates, fallback to cold start
-        if not candidates:
-            logger.warning(f"No recommendations from either model for user {user_id}, using cold start")
-            return self._get_cold_start_recommendations(user_id, n)
-        
-        # OPTIMIZATION: Create item metadata lookup
-        item_to_category = {}
-        item_to_chain = {}
-        item_to_trend = {}
-        
-        if hasattr(self, 'projects_df'):
-            for _, row in self.projects_df.iterrows():
-                if 'id' in row:
-                    if 'primary_category' in row:
-                        item_to_category[row['id']] = row['primary_category']
-                    if 'chain' in row:
-                        item_to_chain[row['id']] = row['chain']
-                    if 'trend_score' in row:
-                        item_to_trend[row['id']] = row['trend_score']
-        
-        # Merge duplicate items by summing their scores
-        item_scores = {}
-        item_sources = {}
-        
-        for item_id, score, source in candidates:
-            if item_id not in item_scores:
-                item_scores[item_id] = score
-                item_sources[item_id] = [source]
-            else:
-                # Use max instead of sum for more natural scoring
-                item_scores[item_id] = max(item_scores[item_id], score)
-                item_sources[item_id].append(source)
-        
-        # Create list of item/score tuples
-        merged_candidates = [(item_id, score) for item_id, score in item_scores.items()]
-        
-        # Add trend bonus
-        boosted_candidates = []
-        for item_id, score in merged_candidates:
-            final_score = score
-            
-            # Apply trend boosting for crypto domain
-            if item_id in item_to_trend:
-                trend_score = item_to_trend[item_id]
-                if trend_score > 80:  # Extremely trending
-                    final_score += 0.15
-                elif trend_score > 65:  # Highly trending
-                    final_score += 0.08
-                elif trend_score > 50:  # Moderately trending
-                    final_score += 0.03
-            
-            boosted_candidates.append((item_id, final_score))
-        
-        # Sort by boosted score
-        boosted_candidates.sort(key=lambda x: x[1], reverse=True)
-        
-        # IMPROVEMENT: Better diversity algorithm
-        if item_to_category and item_to_chain:
-            # Track selected categories and chains for diversity
-            selected_categories = {}
-            selected_chains = {}
-            
-            # Set diversity limits based on request size
-            max_per_category = max(2, int(n * 0.3))
-            max_per_chain = max(3, int(n * 0.4))
-            
-            # Top-recommendations without diversity constraints
-            top_count = max(n // 5, 1)  # ~20% by pure score
-            result = boosted_candidates[:top_count]
-            
-            # Update tracking
-            for item_id, _ in result:
-                category = item_to_category.get(item_id, 'unknown')
-                chain = item_to_chain.get(item_id, 'unknown')
-                
-                selected_categories[category] = selected_categories.get(category, 0) + 1
-                selected_chains[chain] = selected_chains.get(chain, 0) + 1
-            
-            # Calculate diversity penalties for all remaining candidates
-            remaining = boosted_candidates[top_count:]
-            diversity_adjusted = []
-            
-            for item_id, score in remaining:
-                category = item_to_category.get(item_id, 'unknown')
-                chain = item_to_chain.get(item_id, 'unknown')
-                
-                cat_count = selected_categories.get(category, 0)
-                chain_count = selected_chains.get(chain, 0)
-                
-                # Calculate penalty
-                penalty = 0
-                
-                # Category penalty
-                if cat_count >= max_per_category:
-                    penalty -= 0.5 * effective_diversity_weight
-                elif cat_count == 0:
-                    # Boost for new categories
-                    penalty += 0.3 * effective_diversity_weight
+        # Get NCF recommendations if available
+        ncf_recs = []
+        if ncf_weight > 0:
+            try:
+                ncf_recs = self.ncf_model.recommend_for_user(
+                    user_id, 
+                    n=n_candidates,
+                    exclude_known=exclude_known
+                )
+            except Exception as e:
+                logger.warning(f"Error getting NCF recommendations: {e}")
+                # Adjust weights if NCF fails
+                if fecf_weight > 0:
+                    fecf_weight = 1.0
+                    ncf_weight = 0.0
                 else:
-                    # Small adjustment based on count
-                    penalty += 0.1 * (1 - cat_count / max_per_category) * effective_diversity_weight
-                
-                # Chain penalty (less weight than category)
-                if chain_count >= max_per_chain:
-                    penalty -= 0.3 * effective_diversity_weight
-                elif chain_count == 0:
-                    # Boost for new chains
-                    penalty += 0.2 * effective_diversity_weight
-                else:
-                    # Small adjustment
-                    penalty += 0.05 * (1 - chain_count / max_per_chain) * effective_diversity_weight
-                
-                # Calculate final adjusted score
-                adjusted_score = score + penalty
-                
-                diversity_adjusted.append((item_id, score, category, chain, adjusted_score))
-            
-            # Sort by adjusted score
-            diversity_adjusted.sort(key=lambda x: x[4], reverse=True)
-            
-            # Select remaining items with diversity
-            for item_id, original_score, category, chain, _ in diversity_adjusted:
-                if len(result) >= n:
-                    break
-                    
-                # Update category and chain counts
-                selected_categories[category] = selected_categories.get(category, 0) + 1
-                selected_chains[chain] = selected_chains.get(chain, 0) + 1
-                
-                # Add to results with original score
-                result.append((item_id, original_score))
-            
-            # Final sort by original score
-            result.sort(key=lambda x: x[1], reverse=True)
-            
-            # OPTIMIZATION: Cache results
-            if not hasattr(self, '_recommendation_cache'):
-                self._recommendation_cache = {}
-            
-            self._recommendation_cache[cache_key] = {
-                'recommendations': result[:n],
-                'time': time.time()
-            }
-            
-            # Store recommendation sources for analytics
-            for item_id, _ in result[:n]:
-                self.recommendation_sources[item_id] = item_sources.get(item_id, ['unknown'])
-            
-            return result[:n]
+                    # Both models failed, fallback to cold-start
+                    return self._get_cold_start_recommendations(user_id, n)
         
-        # If no category/chain info, return top candidates
-        result = boosted_candidates[:n]
+        # Use enhanced ensemble to combine recommendations
+        combined_recs = self.get_ensemble_recommendations(
+            fecf_recs=fecf_recs,
+            ncf_recs=ncf_recs,
+            fecf_weight=fecf_weight,
+            ncf_weight=ncf_weight,
+            ensemble_method=self.params.get('ensemble_method', 'weighted_avg')
+        )
         
-        # OPTIMIZATION: Cache results
+        # Apply diversity
+        diversified_recs = self.apply_diversity(
+            combined_recs, 
+            n=n, 
+            diversity_weight=diversity_weight
+        )
+        
+        # Store in cache
         if not hasattr(self, '_recommendation_cache'):
             self._recommendation_cache = {}
-        
+            
         self._recommendation_cache[cache_key] = {
-            'recommendations': result,
+            'recommendations': diversified_recs[:n],
             'time': time.time()
         }
         
-        # Store recommendation sources for analytics
-        for item_id, _ in result:
-            self.recommendation_sources[item_id] = item_sources.get(item_id, ['unknown'])
+        # Track sources for analytics
+        fecf_items = {item_id for item_id, _ in fecf_recs}
+        ncf_items = {item_id for item_id, _ in ncf_recs}
         
-        return result
+        for item_id, _ in diversified_recs[:n]:
+            sources = []
+            if item_id in fecf_items:
+                sources.append('fecf')
+            if item_id in ncf_items:
+                sources.append('ncf')
+                
+            if not sources:
+                sources = ['unknown']
+                
+            self.recommendation_sources[item_id] = sources
+        
+        return diversified_recs[:n]
     
-    def _get_cold_start_recommendations_by_interest(self, user_id: str, n: int = 10) -> List[Tuple[str, float]]:
+    def _get_cold_start_recommendations(self, user_id: str, n: int = 10) -> List[Tuple[str, float]]:
         """
-        Generate recommendations for cold-start-like exploration based on user's general interests
+        Get enhanced cold-start recommendations with improved category handling
         
         Args:
             user_id: User ID
@@ -610,317 +903,123 @@ class HybridRecommender:
         Returns:
             list: List of (project_id, score) tuples
         """
-        # Get user's top categories from existing interactions
-        user_categories = []
+        # Use optimized weights for cold-start
+        fecf_weight = self.params.get('cold_start_fecf_weight', 0.9)
+        ncf_weight = 1.0 - fecf_weight
         
-        if self.user_item_matrix is not None and user_id in self.user_item_matrix.index:
+        # Get FECF cold-start recommendations
+        fecf_recs = []
+        if fecf_weight > 0 and self.fecf_model is not None:
             try:
-                if self.projects_df is not None and 'primary_category' in self.projects_df.columns:
-                    # Get user's interacted items
-                    user_interactions = self.user_item_matrix.loc[user_id]
-                    interacted_items = user_interactions[user_interactions > 0].index.tolist()
-                    
-                    # Map items to categories
-                    item_to_category = dict(zip(self.projects_df['id'], self.projects_df['primary_category']))
-                    
-                    # Count categories
-                    category_counts = {}
-                    for item in interacted_items:
-                        category = item_to_category.get(item)
-                        if category:
-                            category_counts[category] = category_counts.get(category, 0) + 1
-                    
-                    # Get top categories
-                    if category_counts:
-                        sorted_categories = sorted(category_counts.items(), key=lambda x: x[1], reverse=True)
-                        user_categories = [cat for cat, _ in sorted_categories[:3]]
+                fecf_cold_start = self.fecf_model.get_cold_start_recommendations(n=n*2)
+                fecf_recs = [(rec['id'], rec['recommendation_score']) 
+                           for rec in fecf_cold_start if 'id' in rec]
             except Exception as e:
-                logger.warning(f"Error inferring user categories: {e}")
-        
-        # Get cold-start-like recommendations using inferred interests
-        if user_categories:
-            # IMPROVED: Get recommendations for both similar and contrasting categories
-            # First, get similar category recommendations
-            similar_recs = self.fecf_model.get_cold_start_recommendations(
-                user_interests=user_categories,
-                n=n
-            )
-            similar_tuples = [(rec['id'], rec['recommendation_score'] * 1.2) for rec in similar_recs]  # Boost for core interests
-            
-            # Next, find some contrasting categories for diversity
-            all_categories = set()
-            if self.projects_df is not None and 'primary_category' in self.projects_df.columns:
-                all_categories = set(self.projects_df['primary_category'].dropna().unique())
-            
-            # Find categories dissimilar to user's interests
-            contrasting_categories = []
-            for cat in all_categories:
-                if cat not in user_categories and len(contrasting_categories) < 2:  # Get up to 2 contrasting categories
-                    contrasting_categories.append(cat)
-            
-            # Get recommendations from contrasting categories
-            contrasting_recs = []
-            if contrasting_categories:
-                contrast_results = self.fecf_model.get_cold_start_recommendations(
-                    user_interests=contrasting_categories,
-                    n=n//3  # Fewer recommendations from contrasting categories
-                )
-                contrasting_recs = [(rec['id'], rec['recommendation_score'] * 0.7) for rec in contrast_results]  # Lower scores
-            
-            # Get trending items for novelty
-            trending_recs = []
+                logger.warning(f"Error getting FECF cold-start recommendations: {e}")
+                
+        # Get NCF cold-start recommendations (popularity-based)
+        ncf_recs = []
+        if ncf_weight > 0 and self.ncf_model is not None:
+            try:
+                ncf_cold_start = self.ncf_model.get_popular_projects(n=n*2)
+                ncf_recs = [(rec['id'], rec['recommendation_score']) 
+                          for rec in ncf_cold_start if 'id' in rec]
+            except Exception as e:
+                logger.warning(f"Error getting NCF cold-start recommendations: {e}")
+                
+        # If both models failed, return trending projects
+        if not fecf_recs and not ncf_recs:
+            trending_projects = []
             if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
-                trending_df = self.projects_df.sort_values('trend_score', ascending=False).head(n//4)
-                trending_recs = [(row['id'], row['trend_score']/100 * 0.9) for _, row in trending_df.iterrows()]
-            
-            # Combine and sort
-            combined_recs = similar_tuples + contrasting_recs + trending_recs
-            combined_recs.sort(key=lambda x: x[1], reverse=True)
-            
-            # Check for known items to exclude
-            known_items = set()
-            if self.user_item_matrix is not None and user_id in self.user_item_matrix.index:
-                user_interactions = self.user_item_matrix.loc[user_id]
-                known_items = set(user_interactions[user_interactions > 0].index)
-            
-            # Filter and return
-            filtered_recs = [(item, score) for item, score in combined_recs if item not in known_items]
-            return filtered_recs[:n]
-        else:
-            # Fallback to standard cold-start if no categories can be inferred
-            cold_start_recs = self.fecf_model.get_cold_start_recommendations(n=n)
-            return [(rec['id'], rec['recommendation_score']) for rec in cold_start_recs]
-    
-    def _get_cold_start_recommendations(self, user_id: str, n: int = 10) -> List[Tuple[str, float]]:
-        """
-        Generate optimized recommendations for cold-start users for cryptocurrency domain
-        """
-        # 1. First try to get recommendations based on any partial history if available
-        partial_history_recs = []
-        if hasattr(self, 'user_item_matrix') and user_id in self.user_item_matrix.index:
-            user_interactions = self.user_item_matrix.loc[user_id]
-            interaction_count = (user_interactions > 0).sum()
-            
-            if interaction_count > 0:  # User has some history, but may not have enough for full recommendation
-                # Try to get recommendations based on those few interactions
-                partial_history_recs = self._get_cold_start_recommendations_by_interest(user_id, n*2)
-        
-        # 2. Get baseline recommendations from FECF for robust coverage
-        fecf_recs = self.fecf_model.get_cold_start_recommendations(n=n*2)
-        fecf_scores = [(rec.get('id'), rec.get('recommendation_score', 0.5)) 
-                    for rec in fecf_recs if 'id' in rec]
-        
-        # 3. Get popularity-based recommendations from NCF
-        try:
-            ncf_recs = self.ncf_model.get_popular_projects(n=n*2)
-            ncf_scores = [(rec.get('id'), rec.get('recommendation_score', 0.5)) 
-                        for rec in ncf_recs if 'id' in rec]
-        except Exception as e:
-            logger.warning(f"Error getting NCF recommendations for cold-start: {str(e)}")
-            ncf_scores = []
-        
-        # 4. Add trending items (critical for crypto cold-start)
-        trending_scores = []
+                trending = self.projects_df.sort_values('trend_score', ascending=False).head(n*2)
+                trending_projects = [(row['id'], row['trend_score']/100) 
+                                  for _, row in trending.iterrows()]
+                return trending_projects[:n]
+            else:
+                # Last resort: just return random projects
+                if hasattr(self, 'projects_df'):
+                    random_projects = self.projects_df.sample(min(n, len(self.projects_df)))
+                    return [(row['id'], 0.5) for _, row in random_projects.iterrows()]
+                return []
+                
+        # Also get trending projects for cold-start
+        trending_recs = []
         if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
-            trending_df = self.projects_df.sort_values('trend_score', ascending=False).head(n)
-            trending_scores = [(row['id'], row['trend_score']/100) for _, row in trending_df.iterrows()]
-        
-        # Combine all recommendation sources
-        all_recs = {}
-        
-        # Add scores with source tracking for better weighting
-        # Crypto-specific: More weight on trending and FECF for cold-start
-        source_weights = {
-            'partial': 0.9,       # Highest weight for partial history (if available)
-            'trending': 0.85,     # Very high for trending (crypto-specific)
-            'fecf': 0.75,         # High weight for FECF
-            'ncf': 0.4            # Lower weight for general popularity
-        }
-        
-        # Get cold-start parameters
-        cold_start_fecf_weight = self.params.get('cold_start_fecf_weight', 0.95)
-        explore_ratio = self.params.get('explore_ratio', 0.4)
-        diversity_factor = self.params.get('diversity_factor', 0.4)
-        
-        # Add partial history recommendations (highest weight)
-        for item_id, score in partial_history_recs:
-            all_recs[item_id] = {'score': score * source_weights['partial'], 'source': 'partial'}
-        
-        # Add trending recommendations (very important for crypto)
-        for item_id, score in trending_scores:
-            if item_id in all_recs:
-                all_recs[item_id]['score'] = max(all_recs[item_id]['score'], score * source_weights['trending'])
-                all_recs[item_id]['source'] = 'trending+' + all_recs[item_id]['source']
-            else:
-                all_recs[item_id] = {'score': score * source_weights['trending'], 'source': 'trending'}
-        
-        # Add FECF recommendations
-        for item_id, score in fecf_scores:
-            if item_id in all_recs:
-                all_recs[item_id]['score'] = max(all_recs[item_id]['score'], score * source_weights['fecf'])
-                if 'fecf' not in all_recs[item_id]['source']:
-                    all_recs[item_id]['source'] += '+fecf'
-            else:
-                all_recs[item_id] = {'score': score * source_weights['fecf'], 'source': 'fecf'}
-        
-        # Add NCF recommendations
-        for item_id, score in ncf_scores:
-            if item_id in all_recs:
-                all_recs[item_id]['score'] = max(all_recs[item_id]['score'], score * source_weights['ncf'])
-                if 'ncf' not in all_recs[item_id]['source']:
-                    all_recs[item_id]['source'] += '+ncf'
-            else:
-                all_recs[item_id] = {'score': score * source_weights['ncf'], 'source': 'ncf'}
-        
-        # Get category and chain information for diversity
-        item_categories = {}
-        item_chains = {}
-        market_caps = {}
-        
-        try:
-            if hasattr(self, 'projects_df'):
-                # Map items to categories and chains
-                for _, row in self.projects_df.iterrows():
-                    if 'id' in row:
-                        if 'primary_category' in row:
-                            item_categories[row['id']] = row['primary_category']
-                        if 'chain' in row:
-                            item_chains[row['id']] = row['chain'] 
-                        if 'market_cap' in row:
-                            market_caps[row['id']] = row['market_cap']
-        except Exception as e:
-            logger.warning(f"Error getting category/chain info: {e}")
-        
-        # Calculate diversity factors and apply to scores
-        scored_candidates = []
-        
-        # For cold-start in crypto, we want:
-        # 1. A good mix of established projects (higher market cap)
-        # 2. Some exposure to trending projects
-        # 3. Diversity across categories and chains
-        for item_id, data in all_recs.items():
-            base_score = data['score']
-            source = data['source']
-            final_score = base_score
+            trending = self.projects_df.sort_values('trend_score', ascending=False).head(n)
+            trending_recs = [(row['id'], row['trend_score']/100) 
+                           for _, row in trending.iterrows()]
             
-            # Market cap factor - for cold-start crypto, balance is key
-            if item_id in market_caps:
-                market_cap = market_caps[item_id]
-                # Find percentile within available projects
-                if market_caps:
-                    max_market_cap = max(market_caps.values())
-                    if max_market_cap > 0:
-                        market_cap_percentile = market_cap / max_market_cap
-                        
-                        # For cold-start in crypto, prefer established projects but include some smaller ones
-                        if market_cap_percentile > 0.75:  # Big established projects
-                            final_score += 0.15  # Strong boost
-                        elif market_cap_percentile > 0.5:  # Mid-size projects
-                            final_score += 0.1   # Medium boost
-                        elif market_cap_percentile > 0.25:  # Smaller but not tiny
-                            final_score += 0.05  # Small boost
-                        # No boost for very small projects (higher risk for cold-start)
-            
-            # Source-based adjustments for cryptocurrency domain
-            if 'trending' in source:
-                final_score += 0.1  # Additional boost for trending (very important in crypto)
-            if 'partial' in source:
-                final_score += 0.05  # Slight boost for recommendations based on partial history
-            
-            # Track category and chain for diversity balancing
-            category = item_categories.get(item_id, 'unknown')
-            chain = item_chains.get(item_id, 'unknown')
-            
-            scored_candidates.append((item_id, final_score, category, chain))
+        # Use a 3-way ensemble for cold-start
+        # 70% from model recommendations (weighted between FECF and NCF)
+        # 30% from trending for discovery
         
-        # Sort by score and prepare for diversity filtering
-        scored_candidates.sort(key=lambda x: x[1], reverse=True)
+        # Get model recommendations using ensemble
+        model_recs = self.get_ensemble_recommendations(
+            fecf_recs=fecf_recs,
+            ncf_recs=ncf_recs,
+            fecf_weight=fecf_weight,
+            ncf_weight=ncf_weight,
+            ensemble_method='weighted_avg'  # Simplified for cold-start
+        )
         
-        # Ensure good diversity across category and chains 
-        # First, select some top items unconditionally
-        top_count = max(n // 4, 1)  # 25% by pure score
-        result = scored_candidates[:top_count]
+        # Calculate counts for each source
+        model_count = int(n * 0.7)  # 70% from models
+        trend_count = n - model_count  # 30% from trending
         
-        # Track categories and chains
-        selected_categories = {}
-        selected_chains = {}
+        # Make sure counts are at least 1 if we have recommendations
+        model_count = max(1, model_count) if model_recs else 0
+        trend_count = max(1, trend_count) if trending_recs else 0
         
-        for item_id, _, category, chain in result:
-            selected_categories[category] = selected_categories.get(category, 0) + 1
-            selected_chains[chain] = selected_chains.get(chain, 0) + 1
-        
-        # Max per category (25% of total)
-        max_per_category = max(1, int(n * 0.25))
-        # Max per chain (35% of total)
-        max_per_chain = max(2, int(n * 0.35))
-        
-        # Remaining candidates
-        remaining = scored_candidates[top_count:]
-        
-        # Select remaining with diversity in mind
-        while len(result) < n and remaining:
-            best_idx = -1
-            best_score = -float('inf')
-            
-            for idx, (item_id, score, category, chain) in enumerate(remaining):
-                # Calculate diversity adjustment
-                diversity_adjustment = 0
-                
-                # Category diversity
-                cat_count = selected_categories.get(category, 0)
-                if cat_count >= max_per_category:
-                    diversity_adjustment -= 0.5  # Big penalty if already at max
-                elif cat_count == 0:
-                    diversity_adjustment += 0.2  # Bonus for new category
-                
-                # Chain diversity
-                chain_count = selected_chains.get(chain, 0)
-                if chain_count >= max_per_chain:
-                    diversity_adjustment -= 0.4  # Penalty if chain overrepresented
-                elif chain_count == 0:
-                    diversity_adjustment += 0.15  # Bonus for new chain
-                
-                adjusted_score = score + diversity_adjustment
-                
-                if adjusted_score > best_score:
-                    best_idx = idx
-                    best_score = adjusted_score
-            
-            if best_idx >= 0:
-                item_id, score, category, chain = remaining.pop(best_idx)
-                result.append((item_id, score, category, chain))
-                
-                # Update tracking
-                selected_categories[category] = selected_categories.get(category, 0) + 1
-                selected_chains[chain] = selected_chains.get(chain, 0) + 1
-            else:
-                # If no suitable candidate found, take next best by raw score
-                if remaining:
-                    item_id, score, category, chain = remaining.pop(0)
-                    result.append((item_id, score, category, chain))
-                    
-                    # Update tracking
-                    selected_categories[category] = selected_categories.get(category, 0) + 1
-                    selected_chains[chain] = selected_chains.get(chain, 0) + 1
+        # Adjust if either source is empty
+        if not model_recs:
+            trend_count = n
+        elif not trending_recs:
+            model_count = n
+        else:
+            # Make sure they sum to n
+            while model_count + trend_count > n:
+                if model_count > trend_count:
+                    model_count -= 1
                 else:
-                    break
+                    trend_count -= 1
+                    
+            while model_count + trend_count < n:
+                if model_count < trend_count:
+                    model_count += 1
+                else:
+                    trend_count += 1
         
-        # Convert back to simple (item_id, score) format and sort by final score
-        final_results = [(item_id, score) for item_id, score, _, _ in result]
-        final_results.sort(key=lambda x: x[1], reverse=True)
+        # Get recommendations from each source
+        selected_model_recs = model_recs[:model_count]
         
-        return final_results[:n]
+        # Filter out trending items that are already in model recs
+        model_items = {item_id for item_id, _ in selected_model_recs}
+        filtered_trending = [(item_id, score) for item_id, score in trending_recs 
+                          if item_id not in model_items]
+        selected_trending_recs = filtered_trending[:trend_count]
+        
+        # Combine all sources
+        combined = selected_model_recs + selected_trending_recs
+        
+        # Apply diversity
+        diversified = self.apply_diversity(
+            combined, 
+            n=n, 
+            diversity_weight=self.params.get('category_diversity_weight', 0.15)
+        )
+        
+        return diversified[:n]
     
     def recommend_projects(self, user_id: str, n: int = 10) -> List[Dict[str, Any]]:
         """
-        Generate project recommendations with full details and model metadata
+        Generate project recommendations with full details
         
         Args:
             user_id: User ID
             n: Number of recommendations
             
         Returns:
-            list: List of project dictionaries with recommendation scores and model sources
+            list: List of project dictionaries with recommendation scores
         """
         # Check if this is a cold-start user
         is_cold_start = False
@@ -933,14 +1032,7 @@ class HybridRecommender:
             user_interactions = self.user_item_matrix.loc[user_id]
             user_interaction_count = (user_interactions > 0).sum()
         
-        # Get FECF and NCF recommendations separately for analysis
-        fecf_recs = self.fecf_model.recommend_for_user(user_id, n=n*2)
-        fecf_dict = {item_id: score for item_id, score in fecf_recs}
-        
-        ncf_recs = self.ncf_model.recommend_for_user(user_id, n=n*2)
-        ncf_dict = {item_id: score for item_id, score in ncf_recs}
-        
-        # Get recommendations as (project_id, score) tuples from the hybrid model
+        # Get recommendations as (project_id, score) tuples
         recommendations = self.recommend_for_user(user_id, n)
         
         # Convert to detailed project dictionaries
@@ -957,46 +1049,31 @@ class HybridRecommender:
                 # Add recommendation score
                 project_dict['recommendation_score'] = float(score)
                 
-                # Add model source information
-                fecf_score = fecf_dict.get(project_id, 0)
-                ncf_score = ncf_dict.get(project_id, 0)
-                
-                # Determine primary influence based on component scores
-                fecf_influence = 0
-                ncf_influence = 0
-                
-                if fecf_score > 0 or ncf_score > 0:
-                    total = fecf_score + ncf_score
-                    if total > 0:
-                        fecf_influence = fecf_score / total
-                        ncf_influence = ncf_score / total
-                
-                # Add model contribution information
-                project_dict['model_metadata'] = {
-                    'fecf_score': float(fecf_score),
-                    'ncf_score': float(ncf_score),
-                    'fecf_influence': float(fecf_influence),
-                    'ncf_influence': float(ncf_influence),
-                    'primary_source': 'fecf' if fecf_influence >= ncf_influence else 'ncf'
-                }
+                # Add recommendation source info if available
+                if project_id in self.recommendation_sources:
+                    sources = self.recommendation_sources[project_id]
+                    project_dict['recommendation_source'] = '+'.join(sources)
                 
                 # Add to results
                 detailed_recommendations.append(project_dict)
         
-        # Add overall recommendation metadata
-        recommendation_metadata = {
-            'user_id': user_id,
-            'is_cold_start': is_cold_start,
-            'interaction_count': user_interaction_count,
-            'model_weights': {
-                'fecf': self.params.get('fecf_weight', 0.5),
-                'ncf': self.params.get('ncf_weight', 0.5)
-            },
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        # Add metadata to the first recommendation if any
+        # Add overall recommendation metadata to the first recommendation
         if detailed_recommendations:
+            # Get effective weights
+            fecf_weight, ncf_weight, diversity_weight = self.get_effective_weights(user_id)
+            
+            recommendation_metadata = {
+                'user_id': user_id,
+                'is_cold_start': is_cold_start,
+                'interaction_count': user_interaction_count,
+                'model_weights': {
+                    'fecf': fecf_weight,
+                    'ncf': ncf_weight,
+                    'diversity': diversity_weight
+                },
+                'timestamp': datetime.now().isoformat()
+            }
+            
             detailed_recommendations[0]['recommendation_metadata'] = recommendation_metadata
         
         return detailed_recommendations
@@ -1012,7 +1089,28 @@ class HybridRecommender:
             list: List of trending project dictionaries
         """
         # Delegate to FECF
-        return self.fecf_model.get_trending_projects(n)
+        if self.fecf_model is not None:
+            return self.fecf_model.get_trending_projects(n)
+        
+        # Fallback if FECF not available
+        if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
+            trending = self.projects_df.sort_values('trend_score', ascending=False).head(n)
+            
+            # Prepare result
+            result = []
+            for _, project in trending.iterrows():
+                project_dict = project.to_dict()
+                
+                # Add recommendation score from trend score
+                project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0)) / 100
+                
+                # Add to results
+                result.append(project_dict)
+                
+            return result
+        
+        # Last resort
+        return self.get_popular_projects(n)
     
     def get_popular_projects(self, n: int = 10) -> List[Dict[str, Any]]:
         """
@@ -1025,7 +1123,44 @@ class HybridRecommender:
             list: List of popular project dictionaries
         """
         # Delegate to FECF
-        return self.fecf_model.get_popular_projects(n)
+        if self.fecf_model is not None:
+            return self.fecf_model.get_popular_projects(n)
+        
+        # Fallback if FECF not available
+        if hasattr(self, 'projects_df'):
+            if 'popularity_score' in self.projects_df.columns:
+                popular = self.projects_df.sort_values('popularity_score', ascending=False).head(n)
+            elif 'market_cap' in self.projects_df.columns:
+                # Use market cap as a proxy for popularity
+                popular = self.projects_df.sort_values('market_cap', ascending=False).head(n)
+            else:
+                # Random selection
+                popular = self.projects_df.sample(min(n, len(self.projects_df)))
+            
+            # Prepare result
+            result = []
+            for _, project in popular.iterrows():
+                project_dict = project.to_dict()
+                
+                # Add recommendation score
+                if 'popularity_score' in project_dict:
+                    project_dict['recommendation_score'] = float(project_dict['popularity_score']) / 100
+                elif 'market_cap' in project_dict:
+                    max_cap = self.projects_df['market_cap'].max()
+                    if max_cap > 0:
+                        project_dict['recommendation_score'] = float(project_dict['market_cap']) / max_cap
+                    else:
+                        project_dict['recommendation_score'] = 0.5
+                else:
+                    project_dict['recommendation_score'] = 0.5
+                
+                # Add to results
+                result.append(project_dict)
+                
+            return result
+        
+        # Should never reach here
+        return []
     
     def get_similar_projects(self, project_id: str, n: int = 10) -> List[Dict[str, Any]]:
         """
@@ -1039,51 +1174,133 @@ class HybridRecommender:
             list: List of similar project dictionaries
         """
         # Delegate to FECF
-        return self.fecf_model.get_similar_projects(project_id, n)
-    
-    def get_trading_signals(self, project_id: str) -> Dict[str, Any]:
-        """
-        Get trading signals for a project
+        if self.fecf_model is not None:
+            return self.fecf_model.get_similar_projects(project_id, n)
         
-        Args:
-            project_id: Project ID
+        # Fallback using category similarity if FECF not available
+        if hasattr(self, 'projects_df'):
+            project_data = self.projects_df[self.projects_df['id'] == project_id]
             
-        Returns:
-            dict: Trading signal information
-        """
-        # This would be implemented with the technical analysis module
-        # For now, return a placeholder
-        return {
-            "project_id": project_id,
-            "action": "hold",
-            "confidence": 0.5,
-            "message": "Trading signals not yet implemented in hybrid model"
-        }
+            if not project_data.empty:
+                project = project_data.iloc[0]
+                
+                # Get categories
+                categories = []
+                if 'categories_list' in project:
+                    categories = project['categories_list']
+                elif 'primary_category' in project:
+                    categories = self.process_categories(project['primary_category'])
+                
+                # Get chain
+                chain = project.get('chain', 'unknown')
+                
+                # Filter by category and chain
+                if categories and chain != 'unknown':
+                    # Look for projects in same category AND chain first
+                    similar_by_both = self.projects_df[
+                        (self.projects_df['id'] != project_id) &
+                        (self.projects_df['chain'] == chain)
+                    ]
+                    
+                    if 'categories_list' in self.projects_df.columns:
+                        # Filter by category lists
+                        similar_by_both = similar_by_both[
+                            similar_by_both['categories_list'].apply(
+                                lambda x: any(cat in categories for cat in x)
+                            )
+                        ]
+                    elif 'primary_category' in self.projects_df.columns:
+                        # Filter by primary_category
+                        similar_by_both = similar_by_both[
+                            similar_by_both['primary_category'].apply(
+                                lambda x: x in categories if isinstance(x, str) else False
+                            )
+                        ]
+                    
+                    if len(similar_by_both) >= n:
+                        # Enough results, add similarity score and return
+                        result = []
+                        for _, similar in similar_by_both.head(n).iterrows():
+                            sim_dict = similar.to_dict()
+                            sim_dict['similarity_score'] = 0.85  # High similarity
+                            result.append(sim_dict)
+                        return result
+                
+                # If not enough by both, try just category
+                if categories:
+                    similar_by_category = self.projects_df[
+                        self.projects_df['id'] != project_id
+                    ]
+                    
+                    if 'categories_list' in self.projects_df.columns:
+                        similar_by_category = similar_by_category[
+                            similar_by_category['categories_list'].apply(
+                                lambda x: any(cat in categories for cat in x)
+                            )
+                        ]
+                    elif 'primary_category' in self.projects_df.columns:
+                        similar_by_category = similar_by_category[
+                            similar_by_category['primary_category'].apply(
+                                lambda x: x in categories if isinstance(x, str) else False
+                            )
+                        ]
+                    
+                    if len(similar_by_category) >= n:
+                        # Enough results, add similarity score and return
+                        result = []
+                        for _, similar in similar_by_category.head(n).iterrows():
+                            sim_dict = similar.to_dict()
+                            sim_dict['similarity_score'] = 0.75  # Medium similarity
+                            result.append(sim_dict)
+                        return result
+                
+                # If still not enough, try chain
+                if chain != 'unknown':
+                    similar_by_chain = self.projects_df[
+                        (self.projects_df['id'] != project_id) &
+                        (self.projects_df['chain'] == chain)
+                    ]
+                    
+                    if len(similar_by_chain) >= n:
+                        # Enough results, add similarity score and return
+                        result = []
+                        for _, similar in similar_by_chain.head(n).iterrows():
+                            sim_dict = similar.to_dict()
+                            sim_dict['similarity_score'] = 0.65  # Lower similarity
+                            result.append(sim_dict)
+                        return result
+            
+            # Last resort - just return popular projects
+            return self.get_popular_projects(n)
+        
+        # Should never reach here
+        return []
 
 
 if __name__ == "__main__":
     # Testing the module
-    hybrid = HybridRecommender()
+    enhanced_hybrid = HybridRecommender()
     
     # Load data
-    if hybrid.load_data():
-        # Train model (skip for testing to save time)
-        print("Skipping training for testing purposes")
+    if enhanced_hybrid.load_data():
+        # Train model
+        metrics = enhanced_hybrid.train(save_model=True)
+        print(f"Training metrics: {metrics}")
         
         # Test recommendations
-        if hybrid.user_item_matrix is not None and not hybrid.user_item_matrix.empty:
-            test_user = hybrid.user_item_matrix.index[0]
+        if enhanced_hybrid.user_item_matrix is not None and not enhanced_hybrid.user_item_matrix.empty:
+            test_user = enhanced_hybrid.user_item_matrix.index[0]
             print(f"\nHybrid recommendations for user {test_user}:")
-            recs = hybrid.recommend_projects(test_user, n=5)
+            recs = enhanced_hybrid.recommend_projects(test_user, n=5)
             
             for i, rec in enumerate(recs, 1):
                 print(f"{i}. {rec.get('name', rec.get('id'))} - Score: {rec.get('recommendation_score', 0):.4f}")
                 
         # Test popular projects
         print("\nPopular projects:")
-        popular = hybrid.get_popular_projects(n=5)
+        popular = enhanced_hybrid.get_popular_projects(n=5)
         
         for i, proj in enumerate(popular, 1):
-            print(f"{i}. {proj.get('name', proj.get('id'))} - Score: {proj.get('popularity_score', 0):.4f}")
+            print(f"{i}. {proj.get('name', proj.get('id'))} - Score: {proj.get('recommendation_score', 0):.4f}")
     else:
-        print("Failed to load data for Hybrid Recommender")
+        print("Failed to load data for Enhanced Hybrid Recommender")
