@@ -244,7 +244,7 @@ class HybridRecommender:
         if filepath is None:
             # Create default path
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filepath = os.path.join(MODELS_DIR, f"enhanced_hybrid_model_{timestamp}.pkl")
+            filepath = os.path.join(MODELS_DIR, f"hybrid_model_{timestamp}.pkl")
             
         # Create directory if it doesn't exist
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
