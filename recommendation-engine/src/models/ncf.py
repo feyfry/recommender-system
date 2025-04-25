@@ -109,6 +109,25 @@ class NCFDataset(Dataset):
         rng = np.random.default_rng(42)
         neg_samples = []
         
+        # Pertama, hitung popularitas item berdasarkan frekuensi interaksi
+        item_popularity = np.zeros(len(self.all_items))
+        for user_idx in self.user_item_map:
+            for item_idx in self.user_item_map[user_idx]:
+                # Cari indeks item dalam all_items array
+                item_pos = np.where(self.all_items == item_idx)[0]
+                if len(item_pos) > 0:
+                    item_popularity[item_pos[0]] += 1
+        
+        # Normalisasi popularitas dan buat distribusi probabilitas inverse (untuk mendorong diversity)
+        max_pop = item_popularity.max()
+        if max_pop > 0:
+            # 1 - (pop/max*0.8) membuat item populer tetap memiliki kesempatan dipilih,
+            # tetapi dengan probabilitas yang lebih rendah
+            item_probability = 1.0 - (item_popularity / max_pop * 0.8)
+            item_probability = item_probability / item_probability.sum()
+        else:
+            item_probability = np.ones_like(item_popularity) / len(item_popularity)
+        
         for i, user_idx in enumerate(self.user_indices):
             # Get items yang sudah diinteraksi
             interacted_items = set(self.user_item_map.get(user_idx, []))
@@ -126,10 +145,9 @@ class NCFDataset(Dataset):
             
             # Generate negative samples untuk user ini
             for _ in range(self.num_negative):
-                # Strategi sampling yang berbeda berdasarkan availability data
-                if user_preferred_categories and self.item_categories and rng.random() < 0.7:
-                    # 70% probability: Sample dari kategori yang disukai tapi item yang belum diinteraksi
-                    # Ini membantu model untuk membedakan item yang disukai vs tidak dalam kategori yang sama
+                # Strategi sampling yang lebih seimbang
+                if user_preferred_categories and self.item_categories and rng.random() < 0.5:
+                    # 50% probability: Sample dari kategori yang disukai tapi item yang belum diinteraksi
                     preferred_cat = rng.choice(user_preferred_categories)
                     
                     # Cari item dalam kategori ini yang belum diinteraksi
@@ -142,48 +160,29 @@ class NCFDataset(Dataset):
                     if cat_items:
                         neg_item_idx = rng.choice(cat_items)
                     else:
-                        # Jika tidak ada item yang cocok, lakukan random sampling
+                        # Jika tidak ada item yang cocok, gunakan distribusi probabilitas
                         while True:
-                            neg_item_idx = rng.choice(self.all_items)
-                            if neg_item_idx not in interacted_items:
-                                break
-                elif self.item_trend_scores and rng.random() < 0.3:
-                    # 30% probability: Sample item berdasarkan popularitas/trending (untuk domain crypto)
-                    # Buat distribusi probabilitas berdasarkan trend score
-                    items = []
-                    scores = []
-                    
-                    for item in self.all_items:
-                        if item not in interacted_items and item in self.item_trend_scores:
-                            items.append(item)
-                            scores.append(self.item_trend_scores[item])
-                    
-                    if items:
-                        # Normalisasi scores untuk probability distribution
-                        scores = np.array(scores)
-                        min_score = scores.min() if scores.size > 0 else 0
-                        max_score = scores.max() if scores.size > 0 else 1
-                        
-                        if max_score > min_score:
-                            # Normalisasi untuk sampling probabilitas
-                            probs = (scores - min_score) / (max_score - min_score)
-                            probs = probs / probs.sum()
-                            
-                            neg_item_idx = rng.choice(items, p=probs)
-                        else:
-                            neg_item_idx = rng.choice(items)
-                    else:
-                        # Jika tidak ada item yang cocok, lakukan random sampling
-                        while True:
-                            neg_item_idx = rng.choice(self.all_items)
+                            neg_item_idx = rng.choice(self.all_items, p=item_probability)
                             if neg_item_idx not in interacted_items:
                                 break
                 else:
-                    # Random sampling dari semua item yang belum diinteraksi
-                    while True:
-                        neg_item_idx = rng.choice(self.all_items)
+                    # 50% probability: Gunakan distribusi probabilitas inverse popularitas
+                    # Ini mendorong model untuk belajar tentang lebih banyak item, tidak hanya yang populer
+                    attempts = 0
+                    while attempts < 5:  # Batasi jumlah percobaan untuk efisiensi
+                        neg_item_idx = rng.choice(self.all_items, p=item_probability)
                         if neg_item_idx not in interacted_items:
                             break
+                        attempts += 1
+                    
+                    # Jika gagal setelah beberapa percobaan, fallback ke random sampling
+                    if attempts >= 5 or neg_item_idx in interacted_items:
+                        available_items = np.array([item for item in self.all_items if item not in interacted_items])
+                        if len(available_items) > 0:
+                            neg_item_idx = rng.choice(available_items)
+                        else:
+                            # Fallback terakhir jika tidak ada item tersedia sama sekali
+                            neg_item_idx = rng.choice(self.all_items)
                 
                 # Tambahkan sebagai sample negatif
                 neg_samples.append((user_idx, neg_item_idx, 0.0))
@@ -240,10 +239,7 @@ class CryptoNCFModel(nn.Module):
     dengan arsitektur yang lebih dalam dan fitur khusus
     """
     
-    def __init__(self, num_users: int, num_items: int, 
-             embedding_dim: int,
-             layers: List[int],
-             dropout: float):
+    def __init__(self, num_users: int, num_items: int, embedding_dim: int, layers: List[int], dropout: float):
         super(CryptoNCFModel, self).__init__()
         
         # Embeddings yang terpisah untuk GMF dan MLP
@@ -253,7 +249,7 @@ class CryptoNCFModel(nn.Module):
         self.user_embedding_mlp = nn.Embedding(num_users, embedding_dim)
         self.item_embedding_mlp = nn.Embedding(num_items, embedding_dim)
         
-        # MLP layers
+        # MLP layers with safe BatchNorm
         self.mlp_layers = nn.ModuleList()
         input_size = 2 * embedding_dim  # Concatenated embeddings
         
@@ -265,7 +261,12 @@ class CryptoNCFModel(nn.Module):
             
             # Use LeakyReLU for better gradients on negative values
             self.mlp_layers.append(nn.LeakyReLU(0.1))
-            self.mlp_layers.append(nn.BatchNorm1d(layer_size))
+            
+            # Use GroupNorm instead of BatchNorm for better handling of small batches
+            # GroupNorm doesn't depend on batch statistics and works even with batch size=1
+            num_groups = min(8, layer_size)  # Use 8 groups or fewer if layer is small
+            self.mlp_layers.append(nn.GroupNorm(num_groups, layer_size))
+            
             self.mlp_layers.append(nn.Dropout(dropout))
         
         # Output layer: combine GMF and MLP results
@@ -290,6 +291,9 @@ class CryptoNCFModel(nn.Module):
                 nn.init.normal_(m.weight, std=0.01)
     
     def forward(self, user_indices, item_indices):
+        # Deteksi batch size
+        batch_size = user_indices.size(0)
+        
         # GMF path
         user_embedding_gmf = self.user_embedding_gmf(user_indices)
         item_embedding_gmf = self.item_embedding_gmf(item_indices)
@@ -300,12 +304,20 @@ class CryptoNCFModel(nn.Module):
         item_embedding_mlp = self.item_embedding_mlp(item_indices)
         mlp_vector = torch.cat([user_embedding_mlp, item_embedding_mlp], dim=-1)
         
-        # Process through MLP layers
+        # Process through MLP layers dengan penanganan batch kecil
         for i in range(0, len(self.mlp_layers), 4):
-            mlp_vector = self.mlp_layers[i](mlp_vector)      # Linear
-            mlp_vector = self.mlp_layers[i+1](mlp_vector)    # LeakyReLU
-            mlp_vector = self.mlp_layers[i+2](mlp_vector)    # BatchNorm
-            mlp_vector = self.mlp_layers[i+3](mlp_vector)    # Dropout
+            # Linear layer selalu aman
+            mlp_vector = self.mlp_layers[i](mlp_vector)
+            
+            # Activation juga selalu aman
+            mlp_vector = self.mlp_layers[i+1](mlp_vector)
+            
+            # BatchNorm bermasalah untuk batch size = 1
+            if batch_size > 1:  # Skip BatchNorm untuk batch kecil
+                mlp_vector = self.mlp_layers[i+2](mlp_vector)
+            
+            # Dropout aman untuk semua ukuran batch
+            mlp_vector = self.mlp_layers[i+3](mlp_vector)
         
         # Combine GMF and MLP paths
         combined = torch.cat([gmf_vector, mlp_vector], dim=-1)
@@ -482,12 +494,90 @@ class NCFRecommender:
         logger.info(f"Rating statistics - Min: {ratings.min():.4f}, Max: {ratings.max():.4f}, Mean: {ratings.mean():.4f}")
         
         return user_indices, item_indices, ratings, encoded_categories, encoded_trend_scores
+    
+    def _validate_training_data(self, user_indices, item_indices, ratings):
+        """
+        Validasi data training sebelum splitting untuk mencegah masalah pada stratified split
+        
+        Args:
+            user_indices: Array indeks user
+            item_indices: Array indeks item 
+            ratings: Array rating
+            
+        Returns:
+            tuple: (user_indices, item_indices, ratings, can_stratify)
+        """
+        logger.info("Validating training data...")
+        
+        # Check for min interaction count per user
+        user_counts = np.zeros(len(np.unique(user_indices)), dtype=int)
+        for idx in user_indices:
+            user_counts[idx] += 1
+        
+        min_user_interactions = user_counts.min()
+        max_user_interactions = user_counts.max()
+        avg_user_interactions = user_counts.mean()
+        
+        logger.info(f"User interaction statistics: min={min_user_interactions}, "
+                f"max={max_user_interactions}, avg={avg_user_interactions:.2f}")
+        
+        # Check if we can use stratified split
+        can_stratify = True
+        
+        # Stratified split memerlukan setidaknya 2 sampel per user
+        if min_user_interactions < 2:
+            logger.warning(f"Some users have only {min_user_interactions} interactions, which is too few for stratified split")
+            
+            # Identifikasi user dengan minimal 2 interaksi
+            valid_users = np.where(user_counts >= 2)[0]
+            
+            # Hitung berapa banyak user yang valid
+            valid_user_ratio = len(valid_users) / len(user_counts)
+            logger.info(f"Found {len(valid_users)}/{len(user_counts)} users with at least 2 interactions ({valid_user_ratio:.1%})")
+            
+            if valid_user_ratio < 0.8:
+                # Jika terlalu banyak user yang akan dihapus, gunakan saja semua data
+                logger.warning("Too many users would be filtered out, disabling stratified split")
+                can_stratify = False
+            else:
+                # Filter data untuk menyertakan hanya user dengan interaksi yang cukup
+                valid_indices = np.isin(user_indices, valid_users)
+                
+                # Log filtering info
+                removed_interactions = len(user_indices) - np.sum(valid_indices)
+                logger.info(f"Filtered out {removed_interactions}/{len(user_indices)} interactions ({removed_interactions/len(user_indices):.1%})")
+                
+                # Filter arrays
+                user_indices = user_indices[valid_indices]
+                item_indices = item_indices[valid_indices]
+                ratings = ratings[valid_indices]
+        
+        # Check for class imbalance
+        unique_ratings, rating_counts = np.unique(ratings, return_counts=True)
+        min_rating_count = rating_counts.min()
+        
+        # Stratified split berdasarkan user memerlukan minimal 2 sampel per class
+        if min_rating_count < 2:
+            logger.warning(f"Some rating values have only {min_rating_count} samples, disabling stratified split")
+            can_stratify = False
+        
+        # Pastikan tidak ada user yang hilang semua interaksinya
+        unique_users_after = len(np.unique(user_indices))
+        if unique_users_after < len(np.unique(user_counts)):
+            logger.warning(f"Some users were completely filtered out. Original: {len(np.unique(user_counts))}, "
+                        f"After: {unique_users_after}")
+        
+        # Sampel final
+        logger.info(f"Final training data: {len(user_indices)} interactions, "
+                f"{len(np.unique(user_indices))} users, {len(np.unique(item_indices))} items")
+        
+        return user_indices, item_indices, ratings, can_stratify
         
     def train(self, val_ratio: Optional[float] = None, batch_size: Optional[int] = None, 
-        num_epochs: Optional[int] = None, learning_rate: Optional[float] = None,
-        save_model: bool = True) -> Dict[str, List[float]]:
+      num_epochs: Optional[int] = None, learning_rate: Optional[float] = None,
+      save_model: bool = True) -> Dict[str, List[float]]:
         """
-        Train the NCF model dengan arsitektur hybrid GMF+MLP dan optimasi kustom
+        Train the NCF model dengan arsitektur hybrid GMF+MLP dan optimasi early stopping yang lebih baik
         
         Args:
             val_ratio: Validation data ratio
@@ -500,12 +590,12 @@ class NCFRecommender:
             dict: Training metrics (loss per epoch)
         """
         # Use config params if not specified
-        val_ratio = val_ratio if val_ratio is not None else self.params.get('val_ratio', 0.15)
-        batch_size = batch_size if batch_size is not None else self.params.get('batch_size', 64)
-        num_epochs = num_epochs if num_epochs is not None else self.params.get('epochs', 50)
-        learning_rate = learning_rate if learning_rate is not None else self.params.get('learning_rate', 0.003)
+        val_ratio = val_ratio if val_ratio is not None else self.params.get('val_ratio', 0.2)
+        batch_size = batch_size if batch_size is not None else self.params.get('batch_size', 128)
+        num_epochs = num_epochs if num_epochs is not None else self.params.get('epochs', 30)
+        learning_rate = learning_rate if learning_rate is not None else self.params.get('learning_rate', 0.001)
         
-        logger.info("Starting NCF training with optimized architecture")
+        logger.info("Starting NCF training with improved architecture")
         start_time = time.time()
         
         # Prepare data
@@ -515,15 +605,28 @@ class NCFRecommender:
             logger.error(f"Error preparing data: {str(e)}")
             return {"error": str(e)}
         
-        # Try stratified split, fall back to random split if not possible
+        # Validate training data sebelum splitting
+        user_indices, item_indices, ratings, can_stratify = self._validate_training_data(
+            user_indices, item_indices, ratings
+        )
+        
+        # Split data with appropriate strategy
         try:
-            # Split data into train and validation with stratification by user
-            train_indices, val_indices = train_test_split(
-                np.arange(len(user_indices)), 
-                test_size=val_ratio, 
-                random_state=42,
-                stratify=user_indices  # Stratified by user for better balance
-            )
+            if can_stratify:
+                # Split data into train and validation with stratification by user
+                train_indices, val_indices = train_test_split(
+                    np.arange(len(user_indices)), 
+                    test_size=val_ratio, 
+                    random_state=42,
+                    stratify=user_indices  # Stratified by user for better balance
+                )
+            else:
+                logger.warning("Cannot perform stratified split, using random split")
+                train_indices, val_indices = train_test_split(
+                    np.arange(len(user_indices)), 
+                    test_size=val_ratio, 
+                    random_state=42
+                )
         except ValueError as e:
             logger.warning(f"Could not perform stratified split: {e}")
             logger.warning("Falling back to random split without stratification")
@@ -531,7 +634,6 @@ class NCFRecommender:
                 np.arange(len(user_indices)), 
                 test_size=val_ratio, 
                 random_state=42
-                # No stratify parameter
             )
         
         train_user_indices = user_indices[train_indices]
@@ -543,7 +645,7 @@ class NCFRecommender:
         val_ratings = ratings[val_indices]
         
         # Dynamic negative sampling ratio based on dataset size
-        num_negative = self.params.get('negative_ratio', 6)
+        num_negative = self.params.get('negative_ratio', 4)
         logger.info(f"Using {num_negative} negative samples per positive interaction")
         
         # Create datasets dengan metadata untuk improved sampling
@@ -569,8 +671,9 @@ class NCFRecommender:
             train_dataset, 
             batch_size=batch_size, 
             shuffle=True, 
-            num_workers=0,  # Using 0 to avoid issues with pickle
-            pin_memory=self.use_cuda  # Better GPU memory transfer
+            num_workers=0,
+            pin_memory=self.use_cuda,
+            drop_last=True  # Hindari batch terakhir dengan ukuran tidak standar
         )
         
         val_loader = DataLoader(
@@ -578,10 +681,11 @@ class NCFRecommender:
             batch_size=batch_size, 
             shuffle=False, 
             num_workers=0,
-            pin_memory=self.use_cuda
+            pin_memory=self.use_cuda,
+            drop_last=True
         )
         
-        # Initialize model with enhanced architecture
+        # Initialize model with improved architecture
         num_users = len(self.user_encoder.classes_)
         num_items = len(self.item_encoder.classes_)
 
@@ -596,7 +700,7 @@ class NCFRecommender:
         # Use Binary Cross Entropy loss
         criterion = nn.BCELoss()
         
-        # Use AdamW with weight decay for better regularization
+        # Use AdamW with lower weight decay
         optimizer = optim.AdamW(
             self.model.parameters(), 
             lr=learning_rate,
@@ -624,10 +728,13 @@ class NCFRecommender:
         val_losses = []
         
         # Early stopping parameters
-        patience = self.params.get('patience', 30)  # Increased patience for better convergence
+        patience = self.params.get('patience', 5)  # Reduced patience
         best_val_loss = float('inf')
         patience_counter = 0
         best_model_state = None
+        improvement_threshold = 0.005  # Perlu 0.5% improvement untuk dianggap signifikan
+        consecutive_no_improvement = 0  # Counter untuk kasus tanpa improvement berturut-turut
+        max_consecutive_no_improvement = 3  # Maksimal epoch tanpa improvement berturut-turut
 
         logger.info(f"Starting training for {num_epochs} epochs with patience {patience}")
         
@@ -648,6 +755,10 @@ class NCFRecommender:
                         item_indices = item_indices.squeeze(1)
                     if ratings.dim() > 1 and ratings.size(1) == 1:
                         ratings = ratings.squeeze(1)
+                    
+                    # Skip batch jika ukuran batch = 1 (untuk mencegah BatchNorm error)
+                    if user_indices.size(0) <= 1:
+                        continue
                     
                     # Move to device
                     user_indices = user_indices.to(self.device)
@@ -697,6 +808,10 @@ class NCFRecommender:
                         if ratings.dim() > 1 and ratings.size(1) == 1:
                             ratings = ratings.squeeze(1)
                         
+                        # Skip batch jika ukuran batch = 1
+                        if user_indices.size(0) <= 1:
+                            continue
+                        
                         # Move to device
                         user_indices = user_indices.to(self.device)
                         item_indices = item_indices.to(self.device)
@@ -720,16 +835,25 @@ class NCFRecommender:
             current_lr = optimizer.param_groups[0]['lr']
             logger.info(f"Current learning rate: {current_lr:.6f}")
             
-            # Early stopping check with improvement threshold
-            if avg_val_loss < best_val_loss * 0.998:  # 0.2% improvement required
+            # Early stopping dengan improvement threshold yang lebih ketat
+            if avg_val_loss < best_val_loss * (1 - improvement_threshold):
+                improvement_percent = 100 * (best_val_loss - avg_val_loss) / best_val_loss
                 best_val_loss = avg_val_loss
                 patience_counter = 0
+                consecutive_no_improvement = 0
                 # Save best model state
                 best_model_state = copy.deepcopy(self.model.state_dict())
-                logger.info(f"New best validation loss: {best_val_loss:.4f}")
+                logger.info(f"New best validation loss: {best_val_loss:.4f} (improved by {improvement_percent:.2f}%)")
             else:
                 patience_counter += 1
-                logger.info(f"Validation loss did not improve. Patience: {patience_counter}/{patience}")
+                consecutive_no_improvement += 1
+                logger.info(f"Validation loss did not improve significantly. Patience: {patience_counter}/{patience}")
+                
+                # Jika ada peningkatan tapi tidak signifikan, reset consecutive counter
+                if avg_val_loss < best_val_loss:
+                    consecutive_no_improvement = 0
+                    logger.info(f"Small improvement detected: {best_val_loss:.4f} -> {avg_val_loss:.4f}")
+                    best_val_loss = avg_val_loss
             
             # Log progress
             epoch_time = time.time() - epoch_start_time
@@ -739,13 +863,25 @@ class NCFRecommender:
                     f"Time: {epoch_time:.2f}s, "
                     f"LR: {current_lr:.6f}")
             
-             # Check early stopping
-            if patience_counter >= patience:
-                logger.info(f"Early stopping triggered after {epoch} epochs")
+            # Check early stopping dengan dua kondisi:
+            # 1. Melewati batas patience normal
+            # 2. Consecutive epochs tanpa improvement mencapai batas
+            if patience_counter >= patience or consecutive_no_improvement >= max_consecutive_no_improvement:
+                if patience_counter >= patience:
+                    logger.info(f"Early stopping triggered after {epoch} epochs (patience exceeded)")
+                else:
+                    logger.info(f"Early stopping triggered after {epoch} epochs (no significant improvement for {max_consecutive_no_improvement} epochs)")
                 break
+            
+            # Deteksi plateauing loss dan kurangi learning rate jika perlu
+            if epoch > 5 and avg_train_loss > 0.9 * train_losses[-2]:
+                new_lr = current_lr * 0.5
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = new_lr
+                logger.info(f"Learning rate reduced to {new_lr:.6f} due to plateauing loss")
         
         # Restore best model if we did early stopping
-        if best_model_state is not None and patience_counter >= patience:
+        if best_model_state is not None and (patience_counter >= patience or consecutive_no_improvement >= max_consecutive_no_improvement):
             logger.info(f"Restoring model to best state with validation loss {best_val_loss:.4f}")
             self.model.load_state_dict(best_model_state)
         
@@ -761,8 +897,9 @@ class NCFRecommender:
             'train_loss': train_losses,
             'val_loss': val_losses,
             'training_time': total_time,
-            'early_stopped': patience_counter >= patience,
-            'best_epoch': epoch - patience_counter if patience_counter >= patience else epoch
+            'early_stopped': patience_counter >= patience or consecutive_no_improvement >= max_consecutive_no_improvement,
+            'best_epoch': epoch - patience_counter if patience_counter >= patience else epoch,
+            'best_val_loss': best_val_loss
         }
     
     def save_model(self, filepath: Optional[str] = None) -> str:

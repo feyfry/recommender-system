@@ -292,7 +292,7 @@ class HybridRecommender:
     
     def recommend_for_user(self, user_id: str, n: int = 10, exclude_known: bool = True) -> List[Tuple[str, float]]:
         """
-        Generate recommendations with improved performance using caching and vectorization
+        Generate recommendations dengan penanganan error lebih baik dan keseimbangan dinamis antara FECF & NCF
         
         Args:
             user_id: User ID
@@ -314,53 +314,129 @@ class HybridRecommender:
         # Handle cold-start case
         if self.user_item_matrix is None or user_id not in self.user_item_matrix.index:
             return self._get_cold_start_recommendations(user_id, n)
-        
+            
         # Count user interactions
         user_interactions = self.user_item_matrix.loc[user_id]
         user_interaction_count = (user_interactions > 0).sum()
         
-        # Get parameters
-        interaction_threshold_low = self.params.get('interaction_threshold_low', 3)
-        interaction_threshold_high = self.params.get('interaction_threshold_high', 20)
-        base_fecf_weight = self.params.get('fecf_weight', 0.4)
-        base_ncf_weight = self.params.get('ncf_weight', 0.6)
-        diversity_factor = self.params.get('diversity_factor', 0.4)
+        # Get parameters with safe fallbacks
+        interaction_threshold_low = self.params.get('interaction_threshold_low', 5)
+        interaction_threshold_high = self.params.get('interaction_threshold_high', 15)
+        base_fecf_weight = self.params.get('fecf_weight', 0.6)
+        base_ncf_weight = self.params.get('ncf_weight', 0.4)
+        diversity_factor = self.params.get('diversity_factor', 0.3)
         
-        # OPTIMIZATION: Dynamic weighting with simpler calculation
-        if user_interaction_count < interaction_threshold_low:
-            # For few interactions, rely heavily on FECF
-            effective_fecf_weight = 0.85
-            effective_ncf_weight = 0.05
-            effective_diversity_weight = 0.10
-        elif user_interaction_count < interaction_threshold_high:
-            # Linear interpolation between thresholds
-            ratio = (user_interaction_count - interaction_threshold_low) / (interaction_threshold_high - interaction_threshold_low)
-            effective_fecf_weight = 0.85 - (0.85 - base_fecf_weight) * ratio
-            effective_ncf_weight = 0.05 + (base_ncf_weight - 0.05) * ratio
-            effective_diversity_weight = diversity_factor * (1 + ratio * 0.5)
-        else:
-            # For many interactions, use configured weights
-            effective_fecf_weight = base_fecf_weight
-            effective_ncf_weight = base_ncf_weight
-            effective_diversity_weight = diversity_factor * 1.1
+        # IMPROVEMENT: Adaptive weighting based on model health
+        # Check if models are trained properly
+        fecf_health = 1.0  # Default full health
+        ncf_health = 1.0   # Default full health
         
-        # OPTIMIZATION: Get candidates with batch processing
-        # Step 1: Get FECF candidates with limited number
-        candidate_size = min(n * 3, 100)  # Limit to reasonable number
-        try:
-            # Get recommendations from FECF
-            fecf_candidates = self.fecf_model.recommend_for_user(
-                user_id, 
-                n=candidate_size, 
-                exclude_known=exclude_known
-            )
-            if not fecf_candidates:
+        if self.fecf_model is None or not hasattr(self.fecf_model, 'model') or self.fecf_model.model is None:
+            logger.warning("FECF model not available, falling back to NCF only")
+            fecf_health = 0.0
+        
+        if self.ncf_model is None or not hasattr(self.ncf_model, 'model') or self.ncf_model.model is None:
+            logger.warning("NCF model not available, falling back to FECF only")
+            ncf_health = 0.0
+        
+        # If both models are unhealthy, try to recover FECF at least
+        if fecf_health == 0.0 and ncf_health == 0.0:
+            logger.error("Both FECF and NCF models unavailable, attempting to recover FECF model")
+            try:
+                from src.models.alt_fecf import FeatureEnhancedCF
+                self.fecf_model = FeatureEnhancedCF()
+                if self.fecf_model.load_data():
+                    # Try to load latest model
+                    fecf_files = [f for f in os.listdir(MODELS_DIR) 
+                                if f.startswith("fecf_model_") and f.endswith(".pkl")]
+                    if fecf_files:
+                        latest_model = sorted(fecf_files)[-1]
+                        model_path = os.path.join(MODELS_DIR, latest_model)
+                        if self.fecf_model.load_model(model_path):
+                            fecf_health = 0.8  # Recovered with slightly reduced confidence
+                            logger.info("Successfully recovered FECF model")
+            except Exception as e:
+                logger.error(f"Failed to recover FECF model: {e}")
+                # Return empty recommendations if all fails
                 return []
-        except Exception as e:
-            logger.warning(f"Error getting FECF recommendations: {e}")
-            return []
         
-        # OPTIMIZATION: Extract item metadata once
+        # IMPROVEMENT: Dynamic weighting with health adjustment
+        if fecf_health == 0.0:
+            # No FECF model available, use only NCF
+            effective_fecf_weight = 0.0
+            effective_ncf_weight = 1.0
+            effective_diversity_weight = diversity_factor * 0.5  # Reduce diversity without FECF
+        elif ncf_health == 0.0:
+            # No NCF model available, use only FECF
+            effective_fecf_weight = 1.0
+            effective_ncf_weight = 0.0
+            effective_diversity_weight = diversity_factor * 1.2  # Increase diversity with just FECF
+        else:
+            # Both models available, apply dynamic weighting based on interaction count
+            if user_interaction_count < interaction_threshold_low:
+                # For few interactions, rely more on FECF
+                effective_fecf_weight = 0.75 * fecf_health
+                effective_ncf_weight = 0.25 * ncf_health
+                effective_diversity_weight = diversity_factor * 0.8
+            elif user_interaction_count < interaction_threshold_high:
+                # Linear interpolation between thresholds
+                ratio = (user_interaction_count - interaction_threshold_low) / (interaction_threshold_high - interaction_threshold_low)
+                effective_fecf_weight = (0.75 - (0.75 - base_fecf_weight) * ratio) * fecf_health
+                effective_ncf_weight = (0.25 + (base_ncf_weight - 0.25) * ratio) * ncf_health
+                effective_diversity_weight = diversity_factor * (0.8 + ratio * 0.4)
+            else:
+                # For many interactions, use configured weights with health adjustment
+                effective_fecf_weight = base_fecf_weight * fecf_health
+                effective_ncf_weight = base_ncf_weight * ncf_health
+                effective_diversity_weight = diversity_factor * 1.2
+        
+        # Normalize weights to sum to 1.0
+        total_weight = effective_fecf_weight + effective_ncf_weight
+        if total_weight > 0:
+            effective_fecf_weight /= total_weight
+            effective_ncf_weight /= total_weight
+        else:
+            # Fallback if both weights somehow become zero
+            return self._get_cold_start_recommendations(user_id, n)
+                
+        # OPTIMIZATION: Get candidates with failsafe error handling
+        candidates = []
+        
+        # Step 1: Try to get FECF recommendations
+        if effective_fecf_weight > 0:
+            try:
+                fecf_candidates = self.fecf_model.recommend_for_user(
+                    user_id, 
+                    n=min(n*3, 100),  # Limit to reasonable number
+                    exclude_known=exclude_known
+                )
+                candidates.extend([(item_id, score * effective_fecf_weight, 'fecf') 
+                                for item_id, score in fecf_candidates])
+            except Exception as e:
+                logger.warning(f"Error getting FECF recommendations: {e}")
+                effective_ncf_weight = 1.0  # Switch fully to NCF
+        
+        # Step 2: Try to get NCF recommendations
+        if effective_ncf_weight > 0:
+            try:
+                ncf_candidates = self.ncf_model.recommend_for_user(
+                    user_id, 
+                    n=min(n*3, 100),
+                    exclude_known=exclude_known
+                )
+                candidates.extend([(item_id, score * effective_ncf_weight, 'ncf') 
+                                for item_id, score in ncf_candidates])
+            except Exception as e:
+                logger.warning(f"Error getting NCF recommendations: {e}")
+                if not candidates:  # If no FECF candidates either
+                    return self._get_cold_start_recommendations(user_id, n)
+        
+        # If still no candidates, fallback to cold start
+        if not candidates:
+            logger.warning(f"No recommendations from either model for user {user_id}, using cold start")
+            return self._get_cold_start_recommendations(user_id, n)
+        
+        # OPTIMIZATION: Create item metadata lookup
         item_to_category = {}
         item_to_chain = {}
         item_to_trend = {}
@@ -375,72 +451,57 @@ class HybridRecommender:
                     if 'trend_score' in row:
                         item_to_trend[row['id']] = row['trend_score']
         
-        # Step 2: Only use NCF for re-ranking if user has enough interactions
-        reranked_candidates = []
+        # Merge duplicate items by summing their scores
+        item_scores = {}
+        item_sources = {}
         
-        if user_interaction_count >= interaction_threshold_low and self.ncf_model and hasattr(self.ncf_model, 'model'):
-            try:
-                # OPTIMIZATION: Batch process NCF predictions
-                fecf_items = [item_id for item_id, _ in fecf_candidates]
-                
-                # Get all NCF scores at once
-                ncf_scores = {}
-                batch_size = 50  # Process in batches to avoid memory issues
-                
-                for i in range(0, len(fecf_items), batch_size):
-                    batch = fecf_items[i:i+batch_size]
-                    for item_id in batch:
-                        score = self.ncf_model.predict(user_id, item_id)
-                        if score > 0:
-                            ncf_scores[item_id] = score
-                
-                # Create a lookup for FECF scores
-                fecf_scores_dict = {item_id: score for item_id, score in fecf_candidates}
-                
-                # OPTIMIZATION: Calculate all final scores at once
-                for item_id, fecf_score in fecf_candidates:
-                    # Calculate base score
-                    final_score = effective_fecf_weight * fecf_score
-                    
-                    # Add NCF contribution
-                    if item_id in ncf_scores:
-                        ncf_score = ncf_scores[item_id]
-                        ncf_contribution = effective_ncf_weight * ncf_score
-                        final_score += ncf_contribution
-                    
-                    # Add trend bonus
-                    if item_id in item_to_trend:
-                        trend_score = item_to_trend[item_id]
-                        if trend_score > 80:
-                            final_score += 0.15
-                        elif trend_score > 65:
-                            final_score += 0.08
-                        elif trend_score > 50:
-                            final_score += 0.03
-                    
-                    reranked_candidates.append((item_id, final_score))
-                    
-            except Exception as e:
-                logger.warning(f"Error in NCF re-ranking: {e}")
-                # Fallback to original candidates
-                reranked_candidates = fecf_candidates
-        else:
-            # No NCF re-ranking, just use FECF
-            reranked_candidates = fecf_candidates
+        for item_id, score, source in candidates:
+            if item_id not in item_scores:
+                item_scores[item_id] = score
+                item_sources[item_id] = [source]
+            else:
+                # Use max instead of sum for more natural scoring
+                item_scores[item_id] = max(item_scores[item_id], score)
+                item_sources[item_id].append(source)
         
-        # Sort by final score
-        reranked_candidates.sort(key=lambda x: x[1], reverse=True)
+        # Create list of item/score tuples
+        merged_candidates = [(item_id, score) for item_id, score in item_scores.items()]
         
-        # OPTIMIZATION: Simplified diversity selection
-        if item_to_category and item_to_chain:
-            # Select top items first
-            top_count = max(n // 5, 1)  # ~20% by pure score
-            result = reranked_candidates[:top_count]
+        # Add trend bonus
+        boosted_candidates = []
+        for item_id, score in merged_candidates:
+            final_score = score
             
-            # Track category and chain counts
+            # Apply trend boosting for crypto domain
+            if item_id in item_to_trend:
+                trend_score = item_to_trend[item_id]
+                if trend_score > 80:  # Extremely trending
+                    final_score += 0.15
+                elif trend_score > 65:  # Highly trending
+                    final_score += 0.08
+                elif trend_score > 50:  # Moderately trending
+                    final_score += 0.03
+            
+            boosted_candidates.append((item_id, final_score))
+        
+        # Sort by boosted score
+        boosted_candidates.sort(key=lambda x: x[1], reverse=True)
+        
+        # IMPROVEMENT: Better diversity algorithm
+        if item_to_category and item_to_chain:
+            # Track selected categories and chains for diversity
             selected_categories = {}
             selected_chains = {}
             
+            # Set diversity limits based on request size
+            max_per_category = max(2, int(n * 0.3))
+            max_per_chain = max(3, int(n * 0.4))
+            
+            # Top-recommendations without diversity constraints
+            top_count = max(n // 5, 1)  # ~20% by pure score
+            result = boosted_candidates[:top_count]
+            
+            # Update tracking
             for item_id, _ in result:
                 category = item_to_category.get(item_id, 'unknown')
                 chain = item_to_chain.get(item_id, 'unknown')
@@ -448,12 +509,8 @@ class HybridRecommender:
                 selected_categories[category] = selected_categories.get(category, 0) + 1
                 selected_chains[chain] = selected_chains.get(chain, 0) + 1
             
-            # Maximum per category and chain
-            max_per_category = max(2, int(n * 0.3))
-            max_per_chain = max(3, int(n * 0.4))
-            
-            # OPTIMIZATION: Pre-compute diversity adjustments for all remaining candidates
-            remaining = reranked_candidates[top_count:]
+            # Calculate diversity penalties for all remaining candidates
+            remaining = boosted_candidates[top_count:]
             diversity_adjusted = []
             
             for item_id, score in remaining:
@@ -463,36 +520,42 @@ class HybridRecommender:
                 cat_count = selected_categories.get(category, 0)
                 chain_count = selected_chains.get(chain, 0)
                 
-                # Calculate diversity adjustment
-                adjustment = 0
+                # Calculate penalty
+                penalty = 0
                 
-                # Category adjustment
+                # Category penalty
                 if cat_count >= max_per_category:
-                    adjustment -= 0.5
+                    penalty -= 0.5 * effective_diversity_weight
                 elif cat_count == 0:
-                    adjustment += 0.3
+                    # Boost for new categories
+                    penalty += 0.3 * effective_diversity_weight
                 else:
-                    adjustment += 0.1 * (1 - cat_count / max_per_category)
+                    # Small adjustment based on count
+                    penalty += 0.1 * (1 - cat_count / max_per_category) * effective_diversity_weight
                 
-                # Chain adjustment
+                # Chain penalty (less weight than category)
                 if chain_count >= max_per_chain:
-                    adjustment -= 0.3
+                    penalty -= 0.3 * effective_diversity_weight
                 elif chain_count == 0:
-                    adjustment += 0.2
+                    # Boost for new chains
+                    penalty += 0.2 * effective_diversity_weight
                 else:
-                    adjustment += 0.05 * (1 - chain_count / max_per_chain)
+                    # Small adjustment
+                    penalty += 0.05 * (1 - chain_count / max_per_chain) * effective_diversity_weight
                 
-                adjusted_score = score + (adjustment * effective_diversity_weight)
+                # Calculate final adjusted score
+                adjusted_score = score + penalty
+                
                 diversity_adjusted.append((item_id, score, category, chain, adjusted_score))
             
             # Sort by adjusted score
             diversity_adjusted.sort(key=lambda x: x[4], reverse=True)
             
-            # Select remaining items
+            # Select remaining items with diversity
             for item_id, original_score, category, chain, _ in diversity_adjusted:
                 if len(result) >= n:
                     break
-                
+                    
                 # Update category and chain counts
                 selected_categories[category] = selected_categories.get(category, 0) + 1
                 selected_chains[chain] = selected_chains.get(chain, 0) + 1
@@ -500,7 +563,7 @@ class HybridRecommender:
                 # Add to results with original score
                 result.append((item_id, original_score))
             
-            # Sort final results by score
+            # Final sort by original score
             result.sort(key=lambda x: x[1], reverse=True)
             
             # OPTIMIZATION: Cache results
@@ -512,21 +575,29 @@ class HybridRecommender:
                 'time': time.time()
             }
             
+            # Store recommendation sources for analytics
+            for item_id, _ in result[:n]:
+                self.recommendation_sources[item_id] = item_sources.get(item_id, ['unknown'])
+            
             return result[:n]
         
-        # If no category/chain information, return top candidates
-        final_result = reranked_candidates[:n]
+        # If no category/chain info, return top candidates
+        result = boosted_candidates[:n]
         
         # OPTIMIZATION: Cache results
         if not hasattr(self, '_recommendation_cache'):
             self._recommendation_cache = {}
         
         self._recommendation_cache[cache_key] = {
-            'recommendations': final_result,
+            'recommendations': result,
             'time': time.time()
         }
         
-        return final_result
+        # Store recommendation sources for analytics
+        for item_id, _ in result:
+            self.recommendation_sources[item_id] = item_sources.get(item_id, ['unknown'])
+        
+        return result
     
     def _get_cold_start_recommendations_by_interest(self, user_id: str, n: int = 10) -> List[Tuple[str, float]]:
         """

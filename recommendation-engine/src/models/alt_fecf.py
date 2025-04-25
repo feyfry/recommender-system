@@ -161,7 +161,7 @@ class FeatureEnhancedCF:
     
     def _create_item_features(self) -> csr_matrix:
         """
-        Create item features matrix from features dataframe with enhanced crypto-specific weighting
+        Create item features matrix dengan normalisasi yang lebih baik
         
         Returns:
             csr_matrix: Item features matrix
@@ -177,11 +177,11 @@ class FeatureEnhancedCF:
         # Convert to sparse matrix
         item_features = self.features_df.set_index('id')[feature_cols]
         
-        # CRITICAL FIX: Ensure all items in user_item_matrix are in the features
+        # Pastikan semua items di user_item_matrix ada di features
         all_items = set(self.user_item_matrix.columns)
         available_items = set(item_features.index)
         
-        # Check for missing items - this is where the issue happens
+        # Check for missing items
         missing_items = all_items - available_items
         
         if missing_items:
@@ -199,15 +199,19 @@ class FeatureEnhancedCF:
         # Ensure only items in user-item matrix are included
         item_features = item_features.reindex(index=self.user_item_matrix.columns, fill_value=0)
         
-        # Convert to sparse matrix
-        features_matrix = csr_matrix(item_features.values)
+        # L2 normalisasi fitur untuk membuat skala yang lebih seragam
+        from sklearn.preprocessing import normalize
+        norm_features = normalize(item_features.values, norm='l2', axis=0)
+        
+        # Convert to sparse matrix dengan format yang optimal
+        features_matrix = csr_matrix(norm_features)
         
         logger.info(f"Created item features matrix with shape {features_matrix.shape}")
         return features_matrix
     
     def train(self, save_model: bool = True) -> Dict[str, float]:
         """
-        Train the Feature-Enhanced CF model using SVD with enhanced content features
+        Train the Feature-Enhanced CF model menggunakan SVD dengan parameter optimal
         
         Args:
             save_model: Whether to save the model after training
@@ -222,12 +226,29 @@ class FeatureEnhancedCF:
             # Convert user-item matrix to numpy array
             user_item_array = self.user_item_matrix.values
             
-            # Apply SVD
-            n_components = self.params.get('no_components', 128)
-            logger.info(f"Applying SVD with {n_components} components")
+            # Tentukan jumlah komponen yang optimal
+            # Recommend tidak melebihi 10% dari dimensi terkecil
+            min_dimension = min(user_item_array.shape)
+            n_components = min(48, min_dimension // 10)
+            logger.info(f"Applying SVD with {n_components} components (auto-sized based on data)")
             
-            self.model = TruncatedSVD(n_components=n_components, random_state=42)
+            # Gunakan TruncatedSVD dengan parameter yang lebih baik
+            self.model = TruncatedSVD(
+                n_components=n_components,
+                random_state=42,
+                n_iter=10  # Menambahkan iterasi untuk memastikan konvergensi
+            )
+            
+            # Fit SVD model
             item_factors = self.model.fit_transform(user_item_array.T)  # Transpose for item factors
+            
+            # Hitung total explained variance
+            explained_variance = self.model.explained_variance_ratio_.sum()
+            logger.info(f"SVD explained variance: {explained_variance:.4f}")
+            
+            # Berhenti jika variance terlalu rendah - menunjukkan data tidak cocok untuk SVD
+            if explained_variance < 0.3:  # Minimal 30% variance harus bisa dijelaskan
+                logger.warning(f"Low explained variance ({explained_variance:.4f}), SVD might not be suitable for this data")
             
             # Compute item-item similarity matrix using item factors
             self.item_similarity_matrix = cosine_similarity(item_factors)
@@ -237,34 +258,47 @@ class FeatureEnhancedCF:
                 logger.info("Enhancing with content features (domain-optimized weighting)")
                 content_similarity = cosine_similarity(self._item_features)
                 
-                # Get content alpha from params
-                alpha = self.params.get('content_alpha', 0.7)
+                # Get content alpha from params, dengan pembatasan nilai
+                alpha = max(0.3, min(0.7, self.params.get('content_alpha', 0.5)))
                 
                 # Apply domain-specific adjustments
                 category_importance = self.crypto_weights.get("category_correlation", 0.6)
                 
-                # If categories are more important in this domain, give them more weight
+                # Jika categories lebih penting dalam domain ini, berikan weight lebih
                 if category_importance > 0.5:
-                    # Reduce alpha to give more weight to content features
+                    # Reducer alpha untuk memberikan bobot lebih ke content features
                     alpha = alpha * 0.9
                 
-                self.item_similarity_matrix = (
-                    alpha * self.item_similarity_matrix + 
-                    (1 - alpha) * content_similarity
-                )
+                # Blend kedua similarity matrices dengan mempertahankan sparsity
+                # Untuk items dengan content similarity = 0, gunakan CF similarity saja
+                for i in range(self.item_similarity_matrix.shape[0]):
+                    for j in range(self.item_similarity_matrix.shape[1]):
+                        if content_similarity[i, j] > 0:
+                            self.item_similarity_matrix[i, j] = (
+                                alpha * self.item_similarity_matrix[i, j] + 
+                                (1 - alpha) * content_similarity[i, j]
+                            )
+                
+                logger.info(f"Content features blended with CF with alpha={alpha:.2f}")
             
             training_time = time.time() - start_time
-            metrics = {"training_time": training_time}
+            metrics = {
+                "training_time": training_time,
+                "n_components": n_components,
+                "explained_variance": explained_variance
+            }
             
             logger.info(f"Model training completed in {training_time:.2f} seconds")
             
             # Save model if requested
             if save_model:
                 self.save_model()
-                
+                    
             return metrics
         except Exception as e:
             logger.error(f"Error during training: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {"error": str(e), "training_time": time.time() - start_time}
     
     def save_model(self, filepath: Optional[str] = None) -> str:

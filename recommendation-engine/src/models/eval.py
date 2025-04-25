@@ -453,7 +453,7 @@ def prepare_test_data(user_item_matrix: pd.DataFrame,
                     test_ratio: float = EVAL_TEST_RATIO, 
                     min_interactions: int = 5,
                     random_seed: int = 42,
-                    max_test_users: int = 150) -> Tuple[List[str], Dict[str, List[str]]]:  # OPTIMIZATION: Limit test users
+                    max_test_users: int = 100) -> Tuple[List[str], Dict[str, List[str]]]:  # OPTIMIZATION: Limit test users
     """
     Prepare test data for model evaluation with improved sampling - OPTIMIZED
     
@@ -549,7 +549,7 @@ def evaluate_all_models(models: Dict[str, Any],
                        min_interactions: int = 5,
                        k_values: List[int] = EVAL_K_VALUES,
                        save_results: bool = True,
-                       max_test_users: int = 150,          # OPTIMIZATION: Limit test users
+                       max_test_users: int = 100,          # OPTIMIZATION: Limit test users
                        max_users_per_batch: int = 50,      # OPTIMIZATION: Process in batches
                        use_parallel: bool = False,         # OPTIMIZATION: Parallelization option 
                        num_workers: int = 4) -> Dict[str, Dict[str, Any]]:
@@ -733,7 +733,7 @@ def evaluate_cold_start(model: Any,
         config = COLD_START_EVAL_CONFIG
     
     # Set parameters from config or use provided values
-    cold_start_users = min(150, cold_start_users or config.get('cold_start_users', 150))
+    cold_start_users = min(100, cold_start_users or config.get('cold_start_users', 100))
     test_ratio = test_ratio or config.get('test_ratio', 0.4)
     popular_exclude_ratio = config.get('max_popular_items_exclude', 0.1)
     min_interactions = config.get('min_interactions_required', 3)

@@ -45,35 +45,35 @@ CATEGORIES = [
 ]
 
 # Parameter model rekomendasi
-# Neural Collaborative Filtering - EXTREME TUNING
+# Neural Collaborative Filtering - NORMAL TUNING
 NCF_PARAMS = {
-    "embedding_dim": 256,           # Doubled from 128
-    "layers": [512, 256, 128, 64], # Much deeper architecture
-    "learning_rate": 0.003,        # More aggressive learning
-    "batch_size": 64,              # Smaller for better granularity
-    "epochs": 50,                  # Much more training time
-    "val_ratio": 0.15,            # Less validation data
-    "dropout": 0.5,               # Heavy dropout
-    "weight_decay": 1e-3,         # Stronger regularization
-    "patience": 20,               # More patience for convergence
-    "negative_ratio": 6           # More negative samples
+    "embedding_dim": 64,            # Ukuran embedding yang lebih kecil, sesuai dengan ukuran dataset
+    "layers": [128, 64, 32],        # Arsitektur yang lebih sederhana
+    "learning_rate": 0.001,         # Learning rate yang lebih moderat
+    "batch_size": 128,              # Batch size lebih besar untuk stabilitas
+    "epochs": 30,                   # Epoch yang cukup tanpa berlebihan
+    "val_ratio": 0.2,               # Porsi validasi yang lebih besar
+    "dropout": 0.3,                 # Dropout lebih ringan
+    "weight_decay": 3e-4,           # Regularisasi lebih ringan
+    "patience": 7,                  # Patience lebih pendek
+    "negative_ratio": 4             # Negative samples lebih seimbang
 }
 
-# Feature-Enhanced CF - EXTREME TUNING
+# Feature-Enhanced CF - MODERATE TUNING
 FECF_PARAMS = {
-    "no_components": 128,          # Much higher dimensionality
-    "content_alpha": 0.7          # Much stronger content influence
+    "no_components": 48,            # Jumlah komponen lebih sedikit (sekitar 10% jumlah item)
+    "content_alpha": 0.5            # Keseimbangan antara collaborative dan content features
 }
 
-# Hybrid Model - EXTREME TUNING
+# Hybrid Model - MODERATE TUNING
 HYBRID_PARAMS = {
-    "ncf_weight": 0.5,             # Balanced weight
-    "fecf_weight": 0.5,            # Balanced weight
-    "interaction_threshold_low": 3, # Lower threshold for cold start
-    "interaction_threshold_high": 20, # Higher threshold for active users
-    "diversity_factor": 0.4,       # Much stronger diversity push
-    "cold_start_fecf_weight": 0.95, # Almost pure content-based for cold start
-    "explore_ratio": 0.4           # Much more exploration
+    "ncf_weight": 0.4,              # Bobot NCF lebih kecil (lebih andal CF)
+    "fecf_weight": 0.6,             # Bobot FECF lebih besar
+    "interaction_threshold_low": 5,  # Threshold lebih tinggi untuk cold start
+    "interaction_threshold_high": 15, # Threshold lebih rendah untuk active users
+    "diversity_factor": 0.3,        # Faktor diversitas lebih moderat
+    "cold_start_fecf_weight": 0.8,  # Bobot FECF untuk cold start
+    "explore_ratio": 0.25           # Eksplorasi lebih kecil
 }
 
 # Category Configuration - EXTREME TUNING

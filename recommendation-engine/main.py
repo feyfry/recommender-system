@@ -9,6 +9,7 @@ import time
 import traceback
 from datetime import datetime
 from typing import Optional, Dict, Any
+import pandas as pd
 
 # Buat direktori logs jika belum ada
 os.makedirs("logs", exist_ok=True)
@@ -102,7 +103,7 @@ def process_data(args):
 
 def train_models(args):
     """
-    Melatih model rekomendasi
+    Melatih model rekomendasi dengan penanganan error lebih baik
     
     Args:
         args: Command line arguments
@@ -118,6 +119,13 @@ def train_models(args):
             print("❌ Missing processed data files. Please run data processing first with: python main.py process")
             return False
         
+        # Analisis data sebelum training untuk memeriksa kualitas
+        validation_passed = _validate_data_quality()
+        if not validation_passed:
+            user_input = input("⚠️ Data quality validation failed. Continue with training anyway? (y/n): ")
+            if user_input.lower() != 'y':
+                return False
+                
         # Pastikan direktori model ada
         models_dir = MODELS_DIR
         if not os.path.exists(models_dir):
@@ -156,7 +164,12 @@ def train_models(args):
         
         print("Training recommendation models...")
         
+        # Train FECF first as NCF and Hybrid depend on it
         for model_name, model in models_to_train:
+            # Skip non-FECF models in first pass
+            if model_name != "FECF":
+                continue
+                
             print(f"Training {model_name} model...")
             try:
                 # Load data
@@ -205,6 +218,70 @@ def train_models(args):
                     "error": str(e)
                 }
         
+        # Now train NCF and Hybrid models
+        for model_name, model in models_to_train:
+            # Skip FECF as it was already trained
+            if model_name == "FECF":
+                continue
+                
+            print(f"Training {model_name} model...")
+            try:
+                # Load data
+                data_loaded = model.load_data()
+                if not data_loaded:
+                    logger.error(f"Failed to load data for {model_name} model")
+                    print(f"❌ Failed to load data for {model_name} model")
+                    results[model_name] = {
+                        "success": False,
+                        "error": "Failed to load data"
+                    }
+                    continue
+                
+                # Train model with batch size check
+                model_start_time = time.time()
+                
+                # Add custom parameters for NCF model to avoid BatchNorm issues
+                if model_name == "NCF":
+                    # Adjust batch size to be divisible by 8 for better BatchNorm performance
+                    batch_size = ((len(model.users) + 7) // 8) * 8
+                    batch_size = min(max(batch_size, 32), 128)  # Keep between 32 and 128
+                    
+                    print(f"Using optimized batch size of {batch_size} for NCF model")
+                    metrics = model.train(save_model=True, batch_size=batch_size)
+                else:
+                    metrics = model.train(save_model=True)
+                
+                # Cek apakah training berhasil
+                if "error" in metrics:
+                    logger.error(f"Error training {model_name} model: {metrics['error']}")
+                    print(f"❌ Error training {model_name} model: {metrics['error']}")
+                    results[model_name] = {
+                        "success": False,
+                        "error": metrics["error"],
+                        "time": metrics.get("training_time", 0)
+                    }
+                    continue
+                
+                model_elapsed_time = time.time() - model_start_time
+                
+                results[model_name] = {
+                    "success": True,
+                    "time": model_elapsed_time,
+                    "metrics": metrics
+                }
+                
+                print(f"✅ {model_name} model trained in {model_elapsed_time:.2f} seconds")
+                
+            except Exception as e:
+                logger.error(f"Error training {model_name} model: {str(e)}")
+                logger.error(traceback.format_exc())
+                print(f"❌ Error training {model_name} model: {str(e)}")
+                
+                results[model_name] = {
+                    "success": False,
+                    "error": str(e)
+                }
+        
         # Calculate total time
         total_time = time.time() - start_time
         
@@ -218,6 +295,16 @@ def train_models(args):
             
             if result.get("success", False) and "time" in result:
                 print(f"  Training time: {result['time']:.2f} seconds")
+                
+                # Print key metrics
+                if "metrics" in result:
+                    metrics = result["metrics"]
+                    if model_name == "FECF" and "explained_variance" in metrics:
+                        print(f"  Explained variance: {metrics['explained_variance']:.4f}")
+                    elif model_name == "NCF" and "best_val_loss" in metrics:
+                        print(f"  Best validation loss: {metrics['best_val_loss']:.4f}")
+                        if "early_stopped" in metrics and metrics["early_stopped"]:
+                            print(f"  Early stopped at epoch {metrics.get('best_epoch', '?')}")
             elif "error" in result:
                 print(f"  Error: {result['error']}")
         
@@ -234,6 +321,91 @@ def train_models(args):
         logger.error(traceback.format_exc())
         print(f"❌ Error during model training: {e}")
         return False
+    
+def _validate_data_quality():
+    """
+    Validasi kualitas data sebelum training
+    
+    Returns:
+        bool: True jika data valid, False jika ada masalah serius
+    """
+    try:
+        # Load interactions
+        interactions_path = os.path.join(PROCESSED_DIR, "interactions.csv")
+        interactions_df = pd.read_csv(interactions_path)
+        
+        # Load projects
+        projects_path = os.path.join(PROCESSED_DIR, "projects.csv")
+        projects_df = pd.read_csv(projects_path)
+        
+        # Check essential conditions
+        warnings = []
+        
+        # 1. Check minimum data size
+        min_users = 50
+        min_items = 50
+        min_interactions = 1000
+        
+        unique_users = interactions_df['user_id'].nunique()
+        unique_items = interactions_df['project_id'].nunique()
+        total_interactions = len(interactions_df)
+        
+        if unique_users < min_users:
+            warnings.append(f"Too few users: {unique_users} (minimum recommended: {min_users})")
+        
+        if unique_items < min_items:
+            warnings.append(f"Too few items: {unique_items} (minimum recommended: {min_items})")
+        
+        if total_interactions < min_interactions:
+            warnings.append(f"Too few interactions: {total_interactions} (minimum recommended: {min_interactions})")
+        
+        # 2. Check interactions per user distribution
+        user_counts = interactions_df['user_id'].value_counts()
+        min_interactions_per_user = user_counts.min()
+        max_interactions_per_user = user_counts.max()
+        median_interactions_per_user = user_counts.median()
+        
+        if min_interactions_per_user < 3:
+            warnings.append(f"Some users have very few interactions: minimum {min_interactions_per_user} (recommended: at least 5)")
+        
+        if median_interactions_per_user < 5:
+            warnings.append(f"Median interactions per user is low: {median_interactions_per_user} (recommended: at least 10)")
+        
+        # 3. Check ratings distribution
+        if 'weight' in interactions_df.columns:
+            weight_stats = interactions_df['weight'].describe()
+            if weight_stats['min'] == weight_stats['max']:
+                warnings.append(f"All interaction weights are identical: {weight_stats['min']}")
+            
+            # Check if weights heavily skewed
+            if weight_stats['mean'] < weight_stats['25%'] or weight_stats['mean'] > weight_stats['75%']:
+                warnings.append("Interaction weights distribution is heavily skewed")
+        
+        # 4. Check item popularity distribution
+        item_counts = interactions_df['project_id'].value_counts()
+        popular_item_ratio = (item_counts > 50).sum() / len(item_counts)
+        
+        if popular_item_ratio < 0.01:
+            warnings.append(f"Very few popular items: only {popular_item_ratio:.1%} items have >50 interactions")
+        
+        # Print warnings if any
+        if warnings:
+            print("\n⚠️ Data Quality Warnings:")
+            for warning in warnings:
+                print(f"  - {warning}")
+            print("\nThese issues may affect model performance.\n")
+            
+            # Return False only for critical problems
+            return len(warnings) < 3  # Fail validation if 3+ warnings
+        
+        # Data seems good
+        print("✅ Data quality check passed.")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error validating data quality: {e}")
+        print(f"⚠️ Could not validate data quality: {e}")
+        return True  # Let training proceed despite validation error
 
 def evaluate_models(args):
     """
