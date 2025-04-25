@@ -67,8 +67,8 @@ FECF_PARAMS = {
 
 # Hybrid Model - EXTREME TUNING
 HYBRID_PARAMS = {
-    "ncf_weight": 0.6,             # More weight on neural approach
-    "fecf_weight": 0.4,            # Less on traditional CF
+    "ncf_weight": 0.5,             # Balanced weight
+    "fecf_weight": 0.5,            # Balanced weight
     "interaction_threshold_low": 3, # Lower threshold for cold start
     "interaction_threshold_high": 20, # Higher threshold for active users
     "diversity_factor": 0.4,       # Much stronger diversity push
