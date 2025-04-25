@@ -142,7 +142,7 @@ def load_models_on_startup():
             
         # Check for Hybrid model files
         hybrid_files = [f for f in os.listdir(MODELS_DIR) 
-                      if f.startswith("hybrid_model_") and f.endswith(".pkl")]
+                      if f.startswith("enhanced_hybrid_model_") and f.endswith(".pkl")]
         
         if hybrid_files:
             latest_hybrid = sorted(hybrid_files)[-1]
@@ -228,7 +228,7 @@ def get_model(model_type: str) -> Any:
                 model_loaded = model.load_model(model_path)
         else:  # hybrid
             hybrid_files = [f for f in os.listdir(MODELS_DIR) 
-                         if f.startswith("hybrid_model_") and f.endswith(".pkl")]
+                         if f.startswith("enhanced_hybrid_model_") and f.endswith(".pkl")]
             if hybrid_files:
                 latest_hybrid = sorted(hybrid_files)[-1]
                 model_path = os.path.join(MODELS_DIR, latest_hybrid)
