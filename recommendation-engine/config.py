@@ -45,43 +45,43 @@ CATEGORIES = [
 ]
 
 # Parameter model rekomendasi
-# - Neural Collaborative Filtering - DIOPTIMALKAN
+# Neural Collaborative Filtering - EXTREME TUNING
 NCF_PARAMS = {
-    "embedding_dim": 128,           # Ditingkatkan dari 64 menjadi 128
-    "layers": [256, 128, 64, 32],   # Layer lebih dalam dengan unit lebih banyak
-    "learning_rate": 0.001,         # Slightly higher learning rate
-    "batch_size": 128,              # Reduced to prevent overfitting
-    "epochs": 30,                  # Significantly increased
-    "val_ratio": 0.2,              # Tetap
-    "dropout": 0.4,                 # Increased dropout untuk regularisasi lebih kuat
-    "weight_decay": 5e-4,           # Increased weight decay
-    "patience": 10,                 # More patience for convergence
-    "negative_ratio": 4           # Increased negative samples
+    "embedding_dim": 256,           # Doubled from 128
+    "layers": [512, 256, 128, 64], # Much deeper architecture
+    "learning_rate": 0.003,        # More aggressive learning
+    "batch_size": 64,              # Smaller for better granularity
+    "epochs": 50,                  # Much more training time
+    "val_ratio": 0.15,            # Less validation data
+    "dropout": 0.5,               # Heavy dropout
+    "weight_decay": 1e-3,         # Stronger regularization
+    "patience": 20,               # More patience for convergence
+    "negative_ratio": 6           # More negative samples
 }
 
-# - Feature-Enhanced CF
+# Feature-Enhanced CF - EXTREME TUNING
 FECF_PARAMS = {
-    "no_components": 96,            # Ditingkatkan dari 64 menjadi 96
-    "content_alpha": 0.5           # Slightly more weight to collaborative data
+    "no_components": 128,          # Much higher dimensionality
+    "content_alpha": 0.7          # Much stronger content influence
 }
 
-# - Hybrid Model - DIOPTIMALKAN
+# Hybrid Model - EXTREME TUNING
 HYBRID_PARAMS = {
-    "ncf_weight": 0.5,              # Increased from 0.3
-    "fecf_weight": 0.5,             # Reduced from 0.7
-    "interaction_threshold_low": 5, # Hold it
-    "interaction_threshold_high": 20, # Hold it
-    "diversity_factor": 0.25,       # Increased from 0.15 for better diversity
-    "cold_start_fecf_weight": 0.95, # Keep at 0.95 as it performs well
-    "explore_ratio": 0.3            # Increased from 0.2 to promote exploration
+    "ncf_weight": 0.6,             # More weight on neural approach
+    "fecf_weight": 0.4,            # Less on traditional CF
+    "interaction_threshold_low": 3, # Lower threshold for cold start
+    "interaction_threshold_high": 20, # Higher threshold for active users
+    "diversity_factor": 0.4,       # Much stronger diversity push
+    "cold_start_fecf_weight": 0.95, # Almost pure content-based for cold start
+    "explore_ratio": 0.4           # Much more exploration
 }
 
-# Konfigurasi kategori untuk meningkatkan keragaman
+# Category Configuration - EXTREME TUNING
 CATEGORY_CONFIG = {
-    "max_per_category": 0.2,        # Reduced from 0.25
+    "max_per_category": 0.15,       # Even stricter category limits
     "prioritize_diverse": True,
-    "boost_underrepresented": 0.35, # Increased from 0.25
-    "penalty_overrepresented": -0.5 # Increased from -0.4
+    "boost_underrepresented": 0.5,  # Stronger boost
+    "penalty_overrepresented": -0.8 # Much stronger penalty
 }
 
 # Keputusan investasi
@@ -130,13 +130,13 @@ USER_PERSONAS = {
     }
 }
 
-# Konfigurasi diversifikasi untuk interaksi sintetis - DIOPTIMALKAN
+# Interaction Diversity - EXTREME TUNING
 INTERACTION_DIVERSITY = {
-    "enable_exploration": True,   # Aktifkan eksplorasi di luar kategori utama
-    "exploration_rate": 0.3,      # Increased from 0.2 to 0.3
-    "novelty_bias": 0.4,          # Increased from 0.3 to 0.4
-    "temporal_variance": True,    # Variasi preferensi seiring waktu
-    "negative_feedback": True     # Simulasi feedback negatif secara acak
+    "enable_exploration": True,
+    "exploration_rate": 0.45,       # Much higher exploration
+    "novelty_bias": 0.6,           # Strong novelty preference
+    "temporal_variance": True,
+    "negative_feedback": True
 }
 
 # API settings
@@ -144,20 +144,20 @@ API_HOST = "0.0.0.0"
 API_PORT = 8000
 API_CACHE_TTL = 300  # 5 menit dalam detik
 
-# Cold-start evaluation parameters
+# Cold Start Evaluation - EXTREME TUNING
 COLD_START_EVAL_CONFIG = {
-    "cold_start_users": 20,         # Number of users for cold-start evaluation
-    "max_popular_items_exclude": 0.05, # Exclude top 5% most popular items
-    "test_ratio": 0.3,               # Ratio of interactions to hide for cold-start simulation
-    "min_interactions_required": 5,  # Minimum interactions needed for cold-start testing
-    "category_diversity_enabled": True, # Enable category diversity for evaluation
+    "cold_start_users": 150,         # More test users
+    "max_popular_items_exclude": 0.1, # Exclude more popular items
+    "test_ratio": 0.4,               # Larger test set
+    "min_interactions_required": 3,   # Lower requirement
+    "category_diversity_enabled": True,
 }
 
-# Domain-specific weights for cryptocurrency
+# Domain-specific weights - EXTREME TUNING
 CRYPTO_DOMAIN_WEIGHTS = {
-    "trend_importance": 0.7,      # Importance of trend signals (crypto is highly trend-driven)
-    "popularity_decay": 0.05,     # How fast popularity decays over time
-    "category_correlation": 0.6,  # How much categories correlate with user preferences
-    "market_cap_influence": 0.4,  # How much market cap influences recommendations
-    "chain_importance": 0.3,      # Importance of blockchain when making recommendations
+    "trend_importance": 0.85,       # Much stronger trend following
+    "popularity_decay": 0.1,        # Faster popularity decay
+    "category_correlation": 0.8,    # Stronger category influence
+    "market_cap_influence": 0.6,    # More weight on market cap
+    "chain_importance": 0.5,        # Stronger chain preference
 }

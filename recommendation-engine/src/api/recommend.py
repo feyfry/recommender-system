@@ -34,16 +34,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Global models container
+# Global model dan cache
 _models = {
     "fecf": None,
     "ncf": None,
     "hybrid": None
 }
 
-# Cache for recommendations
-_recommendations_cache = {}
-_cache_ttl = 3600  # 1 hour in seconds
+# Ditambahkan: cache per-model untuk menyimpan rekomendasi untuk setiap user
+_user_recommendations_cache = {
+    "fecf": {},
+    "ncf": {},
+    "hybrid": {}
+}
+
+# Ditambahkan: cache waktu kedaluwarsa yang lebih lama untuk pengguna yang jarang berubah
+_cache_ttl = {
+    "cold_start": 86400,  # 24 jam untuk cold-start user
+    "low_activity": 43200,  # 12 jam untuk pengguna dengan aktivitas rendah (<10 interaksi)
+    "normal": 7200,     # 2 jam untuk pengguna normal (10-50 interaksi)
+    "active": 3600      # 1 jam untuk pengguna sangat aktif (>50 interaksi)
+}
 
 # Pydantic models
 class RecommendationRequest(BaseModel):
@@ -164,7 +175,7 @@ load_models_on_startup()
 # Helper functions
 def get_model(model_type: str) -> Any:
     """
-    Get or initialize model based on type with improved error handling
+    Get or initialize model based on type with aggressive caching
     
     Args:
         model_type: Type of model ('fecf', 'ncf', 'hybrid')
@@ -179,31 +190,28 @@ def get_model(model_type: str) -> Any:
     
     # Return existing model if available
     if _models[model_type] is not None:
-        # Verify the model is properly loaded
-        if hasattr(_models[model_type], 'model') and _models[model_type].model is None:
-            logger.warning(f"{model_type} model is loaded but not trained, attempting to reload")
-        else:
-            return _models[model_type]
+        return _models[model_type]
     
-    # Initialize model if it's not loaded yet
+    # Initialize model jika belum ada
     try:
         if model_type == "fecf":
+            from src.models.alt_fecf import FeatureEnhancedCF
             model = FeatureEnhancedCF()
         elif model_type == "ncf":
+            from src.models.ncf import NCFRecommender
             model = NCFRecommender()
         else:  # hybrid
+            from src.models.hybrid import HybridRecommender
             model = HybridRecommender()
         
-        # Load data
+        # Load data - dilakukan sekali saja saat startup
+        logger.info(f"Loading data for {model_type} model")
         data_loaded = model.load_data()
         if not data_loaded:
             logger.error(f"Failed to load data for {model_type} model")
-            # Try to return whatever we have, even if incomplete
-            if _models[model_type] is not None:
-                return _models[model_type]
-            return model
+            return None
             
-        # Find model file paths
+        # Find and load model file
         model_loaded = False
         if model_type == "fecf":
             fecf_files = [f for f in os.listdir(MODELS_DIR) 
@@ -229,24 +237,18 @@ def get_model(model_type: str) -> Any:
         
         if model_loaded:
             logger.info(f"{model_type} model loaded successfully")
+            # Store model for later use
+            _models[model_type] = model
+            return model
         else:
-            logger.warning(f"Could not load {model_type} model file")
-        
-        # Store model for later use
-        _models[model_type] = model
-        
-        return model
-    
+            logger.error(f"Failed to load {model_type} model file")
+            return None
+            
     except Exception as e:
         logger.error(f"Error initializing {model_type} model: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
-        
-        # Fallback to existing model if available, even if it might not be fully loaded
-        if _models[model_type] is not None:
-            return _models[model_type]
-            
-        raise HTTPException(status_code=500, detail=f"Model initialization error: {str(e)}")
+        return None
 
 def is_cold_start_user(user_id: str, model: Any) -> bool:
     """
@@ -301,16 +303,17 @@ def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
 @router.post("/projects", response_model=RecommendationResponse)
 async def recommend_projects(request: RecommendationRequest):
     """
-    Get project recommendations for a user
+    Get project recommendations for a user with aggressive caching
     """
     start_time = datetime.now()
     logger.info(f"Recommendation request for user {request.user_id} using {request.model_type} model")
     
-    # Check cache first
-    cache_key = get_cache_key(request)
-    if cache_key in _recommendations_cache:
-        cache_entry = _recommendations_cache[cache_key]
-        
+    # OPTIMIZATION: Check user cache first
+    cache = _user_recommendations_cache.get(request.model_type, {})
+    cache_key = f"{request.user_id}_{request.num_recommendations}_{request.category}_{request.chain}"
+    
+    if cache_key in cache:
+        cache_entry = cache[cache_key]
         # Check if cache is still valid
         if datetime.now() < cache_entry['expires']:
             logger.info(f"Returning cached recommendations for {cache_key}")
@@ -324,9 +327,30 @@ async def recommend_projects(request: RecommendationRequest):
     try:
         # Get appropriate model
         model = get_model(request.model_type)
+        if not model:
+            raise HTTPException(status_code=500, detail=f"Failed to load {request.model_type} model")
         
         # Check if this is a cold-start user
-        is_cold_start = is_cold_start_user(request.user_id, model)
+        is_cold_start = False
+        user_interaction_count = 0
+        
+        if hasattr(model, 'user_item_matrix') and model.user_item_matrix is not None:
+            is_cold_start = request.user_id not in model.user_item_matrix.index
+            
+            if not is_cold_start:
+                # Count user interactions for TTL decisions
+                user_interactions = model.user_item_matrix.loc[request.user_id]
+                user_interaction_count = (user_interactions > 0).sum()
+        
+        # Determine cache TTL based on user activity
+        if is_cold_start:
+            cache_ttl = _cache_ttl["cold_start"]
+        elif user_interaction_count < 10:
+            cache_ttl = _cache_ttl["low_activity"]
+        elif user_interaction_count < 50:
+            cache_ttl = _cache_ttl["normal"]
+        else:
+            cache_ttl = _cache_ttl["active"]
         
         # Get recommendations
         if is_cold_start:
@@ -373,6 +397,7 @@ async def recommend_projects(request: RecommendationRequest):
         
         # Create response with sanitized data
         project_responses = []
+        
         for rec in recommendations:
             # Sanitize data (handle NaN values)
             clean_rec = sanitize_project_data(rec)
@@ -382,12 +407,12 @@ async def recommend_projects(request: RecommendationRequest):
                     id=clean_rec.get('id'),
                     name=clean_rec.get('name'),
                     symbol=clean_rec.get('symbol'),
-                    image=clean_rec.get('image'),  # Tetap gunakan field image
-                    price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),  # Ambil dari current_price jika price_usd tidak ada
+                    image=clean_rec.get('image'),
+                    price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),
                     price_change_24h=clean_rec.get('price_change_24h'),
-                    price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
+                    price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),
                     market_cap=clean_rec.get('market_cap'),
-                    volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),  # Ambil dari total_volume jika volume_24h tidak ada
+                    volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),
                     popularity_score=clean_rec.get('popularity_score'),
                     trend_score=clean_rec.get('trend_score'),
                     category=clean_rec.get('primary_category', clean_rec.get('category')),
@@ -407,10 +432,13 @@ async def recommend_projects(request: RecommendationRequest):
             execution_time=(datetime.now() - start_time).total_seconds()
         )
         
-        # Store in cache
-        _recommendations_cache[cache_key] = {
+        # OPTIMIZATION: Store in user-specific cache with appropriate TTL
+        if not request.user_id in _user_recommendations_cache:
+            _user_recommendations_cache[request.model_type] = {}
+            
+        _user_recommendations_cache[request.model_type][cache_key] = {
             'response': response,
-            'expires': datetime.now() + timedelta(seconds=_cache_ttl)
+            'expires': datetime.now() + timedelta(seconds=cache_ttl)
         }
         
         return response
@@ -563,18 +591,33 @@ async def get_similar_projects(
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 # Clear cache endpoint (admin only)
+# Fungsi untuk membersihkan cache secara lebih agresif
 @router.post("/cache/clear")
-async def clear_cache():
+async def clear_cache(full_clear: bool = False):
     """
-    Clear recommendation cache (admin only)
+    Clear recommendation cache with more options
+    
+    Args:
+        full_clear: Whether to clear all caches, including models
     """
-    global _recommendations_cache
+    global _user_recommendations_cache
+    global _models
     
     try:
-        cache_size = len(_recommendations_cache)
-        _recommendations_cache = {}
+        # Count items before clearing
+        total_items = sum(len(cache) for cache in _user_recommendations_cache.values())
         
-        return {"message": f"Cache cleared ({cache_size} entries)"}
+        # Clear recommendation cache
+        for model_type in _user_recommendations_cache:
+            _user_recommendations_cache[model_type] = {}
+        
+        # Optionally clear loaded models
+        if full_clear:
+            for model_type in _models:
+                _models[model_type] = None
+            return {"message": f"All caches cleared ({total_items} recommendations and all loaded models)"}
+        
+        return {"message": f"Recommendation cache cleared ({total_items} entries)"}
     
     except Exception as e:
         logger.error(f"Error clearing cache: {str(e)}")

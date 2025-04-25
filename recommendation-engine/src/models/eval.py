@@ -275,12 +275,12 @@ def evaluate_model(model_name: str,
                   k_values: List[int] = [5, 10, 20],
                   metrics: List[str] = ['precision', 'recall', 'ndcg', 'map', 'mrr', 'hit_ratio'],
                   debug: bool = False,
-                  max_users_per_batch: int = 5,   # OPTIMIZATION: Process in batches
-                  max_debug_users: int = 3,        # OPTIMIZATION: Limit debug users
-                  use_parallel: bool = False,      # OPTIMIZATION: Enable parallel processing
+                  max_users_per_batch: int = 50,   # OPTIMIZED: Increased batch size
+                  max_debug_users: int = 3,
+                  use_parallel: bool = True,       # OPTIMIZED: Enable parallelism by default
                   num_workers: int = 4) -> Dict[str, Any]:
     """
-    Evaluate a recommender model with improved debugging and metrics - OPTIMIZED
+    Evaluate a recommender model with improved performance
     
     Args:
         model_name: Name of the model
@@ -301,7 +301,7 @@ def evaluate_model(model_name: str,
     logger.info(f"Evaluating {model_name} model")
     start_time = time.time()
     
-    # OPTIMIZATION: Limit debug users to save time
+    # OPTIMIZATION: Limit debug users
     debug_users = random.sample(test_users, min(max_debug_users, len(test_users))) if debug else []
     
     # Store results
@@ -311,35 +311,15 @@ def evaluate_model(model_name: str,
         'timestamp': datetime.now().isoformat()
     }
     
-    # OPTIMIZATION: Process in smaller batches
-    all_actual = []
-    all_predicted = []
+    # OPTIMIZATION: Pre-filter valid test users
+    valid_test_users = [user_id for user_id in test_users if user_id in test_interactions]
+    if len(valid_test_users) != len(test_users):
+        logger.warning(f"Skipping {len(test_users) - len(valid_test_users)} users with no test interactions")
     
-    # DEBUG: Detailed logging
-    total_recommendations = 0
-    total_hits = 0
-    empty_recommendations = 0
-    
-    # Track category-based performance (for domain understanding)
-    category_performance = {}
-    
-    # OPTIMIZATION: Create batches of users to evaluate
+    # OPTIMIZATION: Create batches of users
     user_batches = []
-    current_batch = []
-    
-    for user_id in test_users:
-        if user_id not in test_interactions:
-            continue
-            
-        current_batch.append(user_id)
-        
-        if len(current_batch) >= max_users_per_batch:
-            user_batches.append(current_batch)
-            current_batch = []
-    
-    # Add remaining users as final batch
-    if current_batch:
-        user_batches.append(current_batch)
+    for i in range(0, len(valid_test_users), max_users_per_batch):
+        user_batches.append(valid_test_users[i:i+max_users_per_batch])
     
     # Define function to process one user
     def process_user(user_id):
@@ -354,46 +334,37 @@ def evaluate_model(model_name: str,
         if is_debug_user:
             logger.info(f"DEBUG - Generating recommendations for user {user_id}")
             logger.info(f"DEBUG - User has {len(actual_items)} test interactions")
-            logger.info(f"DEBUG - Sample test items: {actual_items[:3]}")
         
         # Get recommendations (project IDs only)
         try:
+            # Optimize with caching for repeated calls to the same user
+            max_k = max(k_values)
             # Use model-specific recommendation method
             if hasattr(recommender, 'recommend_for_user'):
-                recommendations = recommender.recommend_for_user(user_id, n=max(k_values), exclude_known=False)
+                recommendations = recommender.recommend_for_user(user_id, n=max_k, exclude_known=False)
                 predicted_items = [item_id for item_id, _ in recommendations]
             else:
                 # Fallback for models without recommend_for_user
-                recommendations = recommender.recommend_projects(user_id, n=max(k_values))
+                recommendations = recommender.recommend_projects(user_id, n=max_k)
                 predicted_items = [item.get('id') for item in recommendations]
                 
-            # DEBUG: Log recommendations
-            if is_debug_user:
-                logger.info(f"DEBUG - Received {len(predicted_items)} recommendations")
-                logger.info(f"DEBUG - Sample recommendations: {predicted_items[:5]}")
-                
-            # Calculate hits (recommendations that match test items)
-            hits = set(predicted_items) & set(actual_items)
-            
-            if is_debug_user:
-                logger.info(f"DEBUG - Found {len(hits)} hits out of {len(predicted_items)} recommendations")
-                if hits:
-                    logger.info(f"DEBUG - Hits: {list(hits)}")
-                    
             return actual_items, predicted_items
             
         except Exception as e:
             logger.error(f"Error generating recommendations for user {user_id}: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
             return actual_items, []
-        
-    # OPTIMIZATION: Parallel processing
+    
+    # OPTIMIZATION: Process all users either in parallel or sequentially
+    all_actual = []
+    all_predicted = []
+    
     if use_parallel and num_workers > 1:
+        logger.info(f"Processing {len(user_batches)} batches with {num_workers} parallel workers")
         for batch_idx, user_batch in enumerate(user_batches):
             logger.info(f"Processing batch {batch_idx+1}/{len(user_batches)} with {len(user_batch)} users")
             batch_results = []
             
+            # Process batch in parallel
             with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
                 batch_results = list(executor.map(process_user, user_batch))
             
@@ -401,75 +372,53 @@ def evaluate_model(model_name: str,
             for actual_items, predicted_items in batch_results:
                 if actual_items is None:
                     continue
-                    
                 all_actual.append(actual_items)
                 all_predicted.append(predicted_items)
-                
-                # Update stats
-                total_recommendations += len(predicted_items)
-                if not predicted_items:
-                    empty_recommendations += 1
-                
-                hits = set(predicted_items) & set(actual_items)
-                total_hits += len(hits)
     else:
         # Sequential processing
         for batch_idx, user_batch in enumerate(user_batches):
             logger.info(f"Processing batch {batch_idx+1}/{len(user_batches)} with {len(user_batch)} users")
             batch_start = time.time()
             
+            # OPTIMIZATION: Pre-allocate batch results
+            batch_actual = []
+            batch_predicted = []
+            
             for user_id in user_batch:
                 actual_items, predicted_items = process_user(user_id)
-                
                 if actual_items is None:
                     continue
-                
-                all_actual.append(actual_items)
-                all_predicted.append(predicted_items)
-                
-                # Update stats
-                if predicted_items:
-                    total_recommendations += len(predicted_items)
-                else:
-                    empty_recommendations += 1
-                
-                hits = set(predicted_items) & set(actual_items)
-                total_hits += len(hits)
+                batch_actual.append(actual_items)
+                batch_predicted.append(predicted_items)
+            
+            # Add batch results to overall results
+            all_actual.extend(batch_actual)
+            all_predicted.extend(batch_predicted)
             
             batch_time = time.time() - batch_start
             logger.info(f"Batch {batch_idx+1} processed in {batch_time:.2f}s")
     
-    # DEBUG: Overall statistics
-    if debug:
-        logger.info(f"DEBUG - Summary for {model_name}:")
-        logger.info(f"DEBUG - Total test users: {len(test_users)}")
-        logger.info(f"DEBUG - Users with empty recommendations: {empty_recommendations}")
-        logger.info(f"DEBUG - Total recommendations: {total_recommendations}")
-        logger.info(f"DEBUG - Total hits: {total_hits}")
-        if total_recommendations > 0:
-            logger.info(f"DEBUG - Overall hit rate: {total_hits/total_recommendations:.4f}")
-    
-    # OPTIMIZATION: Calculate metrics in one pass to avoid redundant computations
+    # OPTIMIZATION: Vectorized metrics calculation
     metrics_values = {}
     
-    # Calculate all metrics at once
+    # Calculate all metrics at once for all k values
     for k in k_values:
-        precision_sum = 0
-        recall_sum = 0
-        f1_sum = 0
-        ndcg_sum = 0
+        precision_values = []
+        recall_values = []
+        f1_values = []
+        ndcg_values = []
         
         for actual, predicted in zip(all_actual, all_predicted):
-            precision_sum += precision_at_k(actual, predicted, k)
-            recall_sum += recall_at_k(actual, predicted, k)
-            f1_sum += f1_at_k(actual, predicted, k)
-            ndcg_sum += ndcg_at_k(actual, predicted, k)
+            precision_values.append(precision_at_k(actual, predicted, k))
+            recall_values.append(recall_at_k(actual, predicted, k))
+            f1_values.append(f1_at_k(actual, predicted, k))
+            ndcg_values.append(ndcg_at_k(actual, predicted, k))
         
-        num_users = len(all_actual)
-        metrics_values[f'precision@{k}'] = precision_sum / num_users if num_users > 0 else 0
-        metrics_values[f'recall@{k}'] = recall_sum / num_users if num_users > 0 else 0
-        metrics_values[f'f1@{k}'] = f1_sum / num_users if num_users > 0 else 0
-        metrics_values[f'ndcg@{k}'] = ndcg_sum / num_users if num_users > 0 else 0
+        # Use numpy for faster calculation
+        metrics_values[f'precision@{k}'] = np.mean(precision_values) if precision_values else 0
+        metrics_values[f'recall@{k}'] = np.mean(recall_values) if recall_values else 0
+        metrics_values[f'f1@{k}'] = np.mean(f1_values) if f1_values else 0
+        metrics_values[f'ndcg@{k}'] = np.mean(ndcg_values) if ndcg_values else 0
         metrics_values[f'map@{k}'] = mean_average_precision(all_actual, all_predicted, k)
         metrics_values[f'hit_ratio@{k}'] = hit_ratio(all_actual, all_predicted, k)
     
@@ -500,12 +449,11 @@ def evaluate_model(model_name: str,
     
     return results
 
-
 def prepare_test_data(user_item_matrix: pd.DataFrame, 
                     test_ratio: float = EVAL_TEST_RATIO, 
                     min_interactions: int = 5,
                     random_seed: int = 42,
-                    max_test_users: int = 20) -> Tuple[List[str], Dict[str, List[str]]]:  # OPTIMIZATION: Limit test users
+                    max_test_users: int = 150) -> Tuple[List[str], Dict[str, List[str]]]:  # OPTIMIZATION: Limit test users
     """
     Prepare test data for model evaluation with improved sampling - OPTIMIZED
     
@@ -601,8 +549,8 @@ def evaluate_all_models(models: Dict[str, Any],
                        min_interactions: int = 5,
                        k_values: List[int] = EVAL_K_VALUES,
                        save_results: bool = True,
-                       max_test_users: int = 20,          # OPTIMIZATION: Limit test users
-                       max_users_per_batch: int = 5,      # OPTIMIZATION: Process in batches
+                       max_test_users: int = 150,          # OPTIMIZATION: Limit test users
+                       max_users_per_batch: int = 50,      # OPTIMIZATION: Process in batches
                        use_parallel: bool = False,         # OPTIMIZATION: Parallelization option 
                        num_workers: int = 4) -> Dict[str, Dict[str, Any]]:
     """
@@ -669,7 +617,7 @@ def evaluate_all_models(models: Dict[str, Any],
                     model.load_model(model_path)
     
     # OPTIMIZATION: Reduce number of runs for faster evaluation
-    num_runs = 1
+    num_runs = 3
     all_results = {model_name: [] for model_name in models.keys()}
     
     for run in range(num_runs):
@@ -760,7 +708,7 @@ def evaluate_cold_start(model: Any,
                        test_ratio: Optional[float] = None,     
                        k_values: List[int] = [5, 10], 
                        debug: bool = False,
-                       max_users_per_batch: int = 5,      # OPTIMIZATION: Process in batches
+                       max_users_per_batch: int = 50,      # OPTIMIZATION: Process in batches
                        use_parallel: bool = False) -> Dict[str, Any]:
     """
     Evaluate model performance on cold-start users - OPTIMIZED
@@ -785,11 +733,11 @@ def evaluate_cold_start(model: Any,
         config = COLD_START_EVAL_CONFIG
     
     # Set parameters from config or use provided values
-    cold_start_users = min(20, cold_start_users or config.get('cold_start_users', 20))
-    test_ratio = test_ratio or config.get('test_ratio', 0.3)
-    popular_exclude_ratio = config.get('max_popular_items_exclude', 0.05)
-    min_interactions = config.get('min_interactions_required', 5)
-    category_diversity_enabled = config.get('category_diversity_enabled', False)
+    cold_start_users = min(150, cold_start_users or config.get('cold_start_users', 150))
+    test_ratio = test_ratio or config.get('test_ratio', 0.4)
+    popular_exclude_ratio = config.get('max_popular_items_exclude', 0.1)
+    min_interactions = config.get('min_interactions_required', 3)
+    category_diversity_enabled = config.get('category_diversity_enabled', True)
     
     logger.info(f"Evaluating {model_name} on cold-start scenario with {cold_start_users} users")
     

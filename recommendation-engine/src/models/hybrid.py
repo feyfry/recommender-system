@@ -292,8 +292,7 @@ class HybridRecommender:
     
     def recommend_for_user(self, user_id: str, n: int = 10, exclude_known: bool = True) -> List[Tuple[str, float]]:
         """
-        Generate recommendations using improved crypto-specific approach
-        with dynamic weighting based on user behavior and market trends
+        Generate recommendations with improved performance using caching and vectorization
         
         Args:
             user_id: User ID
@@ -303,6 +302,15 @@ class HybridRecommender:
         Returns:
             list: List of (project_id, score) tuples
         """
+        # OPTIMIZATION: Check cache first
+        cache_key = f"{user_id}_{n}_{exclude_known}"
+        if hasattr(self, '_recommendation_cache') and cache_key in self._recommendation_cache:
+            cache_entry = self._recommendation_cache[cache_key]
+            cache_time = cache_entry.get('time', 0)
+            # Use cache if it's less than 1 hour old
+            if time.time() - cache_time < 3600:
+                return cache_entry['recommendations']
+        
         # Handle cold-start case
         if self.user_item_matrix is None or user_id not in self.user_item_matrix.index:
             return self._get_cold_start_recommendations(user_id, n)
@@ -311,359 +319,214 @@ class HybridRecommender:
         user_interactions = self.user_item_matrix.loc[user_id]
         user_interaction_count = (user_interactions > 0).sum()
         
-        # Get parameters from config
-        interaction_threshold_low = self.params.get('interaction_threshold_low', 5)
+        # Get parameters
+        interaction_threshold_low = self.params.get('interaction_threshold_low', 3)
         interaction_threshold_high = self.params.get('interaction_threshold_high', 20)
-        base_fecf_weight = self.params.get('fecf_weight', 0.5)
-        base_ncf_weight = self.params.get('ncf_weight', 0.5)
-        diversity_factor = self.params.get('diversity_factor', 0.25)
+        base_fecf_weight = self.params.get('fecf_weight', 0.4)
+        base_ncf_weight = self.params.get('ncf_weight', 0.6)
+        diversity_factor = self.params.get('diversity_factor', 0.4)
         
-        # IMPROVED: Analyze if user follows popular/trending items
-        follows_trends = False
-        try:
-            if hasattr(self, 'projects_df') and 'popularity_score' in self.projects_df.columns:
-                # Get interacted items
-                interacted_items = user_interactions[user_interactions > 0].index.tolist()
-                # Get popularity scores for interacted items
-                popularity_scores = []
-                
-                for item in interacted_items:
-                    item_df = self.projects_df[self.projects_df['id'] == item]
-                    if not item_df.empty and 'popularity_score' in item_df.columns:
-                        popularity_scores.append(item_df['popularity_score'].values[0])
-                        
-                # If user mainly interacts with popular items, they follow trends
-                if popularity_scores and np.mean(popularity_scores) > 70:  # threshold for "popular"
-                    follows_trends = True
-                    logger.debug(f"User {user_id} follows popular trends")
-        except Exception as e:
-            logger.debug(f"Error analyzing user trends: {e}")
-        
-        # IMPROVED: Dynamic weighting with crypto-specific adaptations
+        # OPTIMIZATION: Dynamic weighting with simpler calculation
         if user_interaction_count < interaction_threshold_low:
-            # For users with very few interactions, rely heavily on FECF and trending
-            effective_fecf_weight = 0.85  # Increased from 0.8
-            effective_ncf_weight = 0.05  # Reduced from 0.1
+            # For few interactions, rely heavily on FECF
+            effective_fecf_weight = 0.85
+            effective_ncf_weight = 0.05
             effective_diversity_weight = 0.10
         elif user_interaction_count < interaction_threshold_high:
             # Linear interpolation between thresholds
             ratio = (user_interaction_count - interaction_threshold_low) / (interaction_threshold_high - interaction_threshold_low)
-            
-            # If user follows trends, give more weight to FECF (which captures popularity better)
-            if follows_trends:
-                # More weight to FECF for trend followers
-                effective_fecf_weight = base_fecf_weight + (0.85 - base_fecf_weight) * (1 - ratio) * 0.8
-                effective_ncf_weight = base_ncf_weight - (base_ncf_weight - 0.05) * (1 - ratio) * 0.8
-                # Lower diversity for trend followers who want what's popular
-                effective_diversity_weight = diversity_factor * 0.7
-            else:
-                # More balanced approach for non-trend followers
-                effective_fecf_weight = base_fecf_weight + (0.85 - base_fecf_weight) * (1 - ratio)
-                effective_ncf_weight = base_ncf_weight - (base_ncf_weight - 0.05) * (1 - ratio)
-                # Higher diversity for explorers
-                effective_diversity_weight = diversity_factor * (1 + ratio * 0.5)
+            effective_fecf_weight = 0.85 - (0.85 - base_fecf_weight) * ratio
+            effective_ncf_weight = 0.05 + (base_ncf_weight - 0.05) * ratio
+            effective_diversity_weight = diversity_factor * (1 + ratio * 0.5)
         else:
-            # For users with many interactions, use personalized weights
-            if follows_trends:
-                # Trend followers get more weight on FECF
-                effective_fecf_weight = base_fecf_weight + 0.15
-                effective_ncf_weight = base_ncf_weight - 0.15
-                effective_diversity_weight = diversity_factor * 0.8
-            else:
-                # Non-trend followers get the normal configured weights
-                effective_fecf_weight = base_fecf_weight
-                effective_ncf_weight = base_ncf_weight
-                effective_diversity_weight = diversity_factor * 1.1
+            # For many interactions, use configured weights
+            effective_fecf_weight = base_fecf_weight
+            effective_ncf_weight = base_ncf_weight
+            effective_diversity_weight = diversity_factor * 1.1
         
-        # Apply domain-specific trend importance modifier
-        trend_importance = self.crypto_weights.get("trend_importance", 0.7)
-        if trend_importance > 0.6:  # If trend is very important in this domain
-            effective_fecf_weight = effective_fecf_weight * 1.1  # Boost FECF more
-            effective_ncf_weight = effective_ncf_weight * 0.9  # Reduce NCF
-        
-        # Log the effective weights being used
-        logger.debug(f"User {user_id} ({user_interaction_count} interactions): " +
-                    f"FECF={effective_fecf_weight:.2f}, NCF={effective_ncf_weight:.2f}, " +
-                    f"Diversity={effective_diversity_weight:.2f}")
-        
-        # Step 1: Generate larger candidate pool from FECF
-        candidate_size = n * 4  # Increased from n*3 for more options
+        # OPTIMIZATION: Get candidates with batch processing
+        # Step 1: Get FECF candidates with limited number
+        candidate_size = min(n * 3, 100)  # Limit to reasonable number
         try:
-            fecf_candidates = self.fecf_model.recommend_for_user(user_id, n=candidate_size, exclude_known=exclude_known)
+            # Get recommendations from FECF
+            fecf_candidates = self.fecf_model.recommend_for_user(
+                user_id, 
+                n=candidate_size, 
+                exclude_known=exclude_known
+            )
             if not fecf_candidates:
                 return []
         except Exception as e:
             logger.warning(f"Error getting FECF recommendations: {e}")
             return []
         
-        # Step 2: Enhanced diversity calculation based on multiple factors
-        diversity_scores = {}
+        # OPTIMIZATION: Extract item metadata once
+        item_to_category = {}
+        item_to_chain = {}
+        item_to_trend = {}
+        
         if hasattr(self, 'projects_df'):
-            # Create mapping dictionaries for various attributes
-            item_to_category = {}
-            item_to_chain = {}
-            item_to_market_cap = {}
-            item_to_trend = {}
-            
             for _, row in self.projects_df.iterrows():
                 if 'id' in row:
                     if 'primary_category' in row:
                         item_to_category[row['id']] = row['primary_category']
                     if 'chain' in row:
                         item_to_chain[row['id']] = row['chain']
-                    if 'market_cap' in row:
-                        item_to_market_cap[row['id']] = row['market_cap']
                     if 'trend_score' in row:
                         item_to_trend[row['id']] = row['trend_score']
-            
-            # Count category and chain occurrences in candidates
-            category_counts = {}
-            chain_counts = {}
-            
-            for item_id, _ in fecf_candidates:
-                if item_id in item_to_category:
-                    cat = item_to_category[item_id]
-                    category_counts[cat] = category_counts.get(cat, 0) + 1
-                
-                if item_id in item_to_chain:
-                    chain = item_to_chain[item_id]
-                    chain_counts[chain] = chain_counts.get(chain, 0) + 1
-            
-            # Calculate diversity scores based on all factors
-            category_importance = self.crypto_weights.get("category_correlation", 0.6)
-            chain_importance = self.crypto_weights.get("chain_importance", 0.3)
-            market_cap_influence = self.crypto_weights.get("market_cap_influence", 0.4)
-            
-            if category_counts and chain_counts:
-                max_cat_count = max(category_counts.values()) if category_counts else 1
-                max_chain_count = max(chain_counts.values()) if chain_counts else 1
-                
-                for item_id, _ in fecf_candidates:
-                    # Start with base diversity score
-                    diversity_score = 0.5
-                    
-                    # Factor 1: Category rarity (weighted by domain importance)
-                    if item_id in item_to_category:
-                        cat = item_to_category[item_id]
-                        cat_count = category_counts.get(cat, 0)
-                        cat_diversity = 1.0 - (cat_count / (max_cat_count + 1))
-                        diversity_score += category_importance * 0.4 * cat_diversity
-                    
-                    # Factor 2: Chain rarity (weighted by domain importance)
-                    if item_id in item_to_chain:
-                        chain = item_to_chain[item_id]
-                        chain_count = chain_counts.get(chain, 0)
-                        chain_diversity = 1.0 - (chain_count / (max_chain_count + 1))
-                        diversity_score += chain_importance * 0.5 * chain_diversity
-                    
-                    # Factor 3: Market cap diversity (prefer some smaller caps)
-                    if item_id in item_to_market_cap and sum(item_to_market_cap.values()) > 0:
-                        market_cap = item_to_market_cap[item_id]
-                        market_cap_percentile = market_cap / max(item_to_market_cap.values())
-                        
-                        # For crypto, we want a mix but more bias towards higher cap items for safety
-                        if market_cap_percentile > 0.7:  # High market cap
-                            diversity_score += market_cap_influence * 0.1
-                        elif 0.3 <= market_cap_percentile <= 0.7:  # Mid market cap
-                            diversity_score += market_cap_influence * 0.2
-                        else:  # Low market cap (smaller bonus as higher risk)
-                            diversity_score += market_cap_influence * 0.05
-                    
-                    # Factor 4: Trend bonus for highly trending items
-                    if item_id in item_to_trend:
-                        trend_score = item_to_trend[item_id]
-                        if trend_score > 75:  # Highly trending
-                            diversity_score += 0.15  # Significant boost for trending items
-                        elif trend_score > 60:  # Moderately trending
-                            diversity_score += 0.08
-                    
-                    diversity_scores[item_id] = diversity_score
         
-        # Step 3: Use NCF to re-rank candidates with improved adaptation
+        # Step 2: Only use NCF for re-ranking if user has enough interactions
         reranked_candidates = []
         
-        if user_interaction_count >= interaction_threshold_low and self.ncf_model and hasattr(self.ncf_model, 'model') and self.ncf_model.model:
+        if user_interaction_count >= interaction_threshold_low and self.ncf_model and hasattr(self.ncf_model, 'model'):
             try:
-                # Get NCF scores for candidates
-                ncf_scores = {}
-                for item_id, _ in fecf_candidates:
-                    # Get prediction directly from NCF
-                    score = self.ncf_model.predict(user_id, item_id)
-                    if score > 0:  # Only consider positive scores
-                        ncf_scores[item_id] = score
+                # OPTIMIZATION: Batch process NCF predictions
+                fecf_items = [item_id for item_id, _ in fecf_candidates]
                 
-                # If we got valid NCF scores, use them for re-ranking
-                if ncf_scores:
-                    # IMPROVED: Multi-factor scoring with domain-specific weights
-                    for item_id, fecf_score in fecf_candidates:
-                        # Initialize with FECF score (weighted)
-                        final_score = effective_fecf_weight * fecf_score
-                        
-                        # Add NCF contribution if available
-                        if item_id in ncf_scores:
-                            ncf_contribution = effective_ncf_weight * ncf_scores[item_id]
-                            # Amplify strong signals, dampen weak signals
-                            if ncf_scores[item_id] > 0.8:  # Strong signal
-                                ncf_contribution *= 1.3
-                            elif ncf_scores[item_id] < 0.3:  # Weak signal
-                                ncf_contribution *= 0.7
-                            final_score += ncf_contribution
-                        
-                        # Add diversity bonus if available
-                        if item_id in diversity_scores:
-                            final_score += effective_diversity_weight * diversity_scores[item_id]
-                        
-                        # IMPROVED: Add trend bonus for cryptocurrency
-                        if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
-                            try:
-                                project_row = self.projects_df[self.projects_df['id'] == item_id]
-                                if not project_row.empty:
-                                    trend_score = project_row['trend_score'].values[0]
-                                    # Cryptocurrency is highly trend-sensitive
-                                    if trend_score > 80:  # Extremely trending
-                                        final_score += 0.15
-                                    elif trend_score > 65:  # Highly trending
-                                        final_score += 0.08
-                                    elif trend_score > 50:  # Moderately trending
-                                        final_score += 0.03
-                            except Exception as e:
-                                logger.debug(f"Error retrieving trend score: {e}")
-                        
-                        reranked_candidates.append((item_id, final_score))
+                # Get all NCF scores at once
+                ncf_scores = {}
+                batch_size = 50  # Process in batches to avoid memory issues
+                
+                for i in range(0, len(fecf_items), batch_size):
+                    batch = fecf_items[i:i+batch_size]
+                    for item_id in batch:
+                        score = self.ncf_model.predict(user_id, item_id)
+                        if score > 0:
+                            ncf_scores[item_id] = score
+                
+                # Create a lookup for FECF scores
+                fecf_scores_dict = {item_id: score for item_id, score in fecf_candidates}
+                
+                # OPTIMIZATION: Calculate all final scores at once
+                for item_id, fecf_score in fecf_candidates:
+                    # Calculate base score
+                    final_score = effective_fecf_weight * fecf_score
+                    
+                    # Add NCF contribution
+                    if item_id in ncf_scores:
+                        ncf_score = ncf_scores[item_id]
+                        ncf_contribution = effective_ncf_weight * ncf_score
+                        final_score += ncf_contribution
+                    
+                    # Add trend bonus
+                    if item_id in item_to_trend:
+                        trend_score = item_to_trend[item_id]
+                        if trend_score > 80:
+                            final_score += 0.15
+                        elif trend_score > 65:
+                            final_score += 0.08
+                        elif trend_score > 50:
+                            final_score += 0.03
+                    
+                    reranked_candidates.append((item_id, final_score))
+                    
             except Exception as e:
                 logger.warning(f"Error in NCF re-ranking: {e}")
-                # Fallback to original candidates with diversity
-                reranked_candidates = [(item_id, score + effective_diversity_weight * diversity_scores.get(item_id, 0)) 
-                                for item_id, score in fecf_candidates]
+                # Fallback to original candidates
+                reranked_candidates = fecf_candidates
         else:
-            # No NCF re-ranking, just use FECF with diversity bonus
-            reranked_candidates = [(item_id, score + effective_diversity_weight * diversity_scores.get(item_id, 0)) 
-                            for item_id, score in fecf_candidates]
+            # No NCF re-ranking, just use FECF
+            reranked_candidates = fecf_candidates
         
         # Sort by final score
         reranked_candidates.sort(key=lambda x: x[1], reverse=True)
         
-        # IMPROVED: Ensure category and chain diversity in final selection
-        if hasattr(self, 'projects_df') and 'primary_category' in self.projects_df.columns:
-            # Create mapping of item to category and chain
-            item_categories = {}
-            item_chains = {}
-            
-            for _, row in self.projects_df.iterrows():
-                if 'id' in row:
-                    if 'primary_category' in row:
-                        item_categories[row['id']] = row['primary_category']
-                    if 'chain' in row:
-                        item_chains[row['id']] = row['chain']
-            
-            # First, select some top items unconditionally
-            top_count = max(n // 5, 1)  # 20% of recommendations by pure score
+        # OPTIMIZATION: Simplified diversity selection
+        if item_to_category and item_to_chain:
+            # Select top items first
+            top_count = max(n // 5, 1)  # ~20% by pure score
             result = reranked_candidates[:top_count]
             
-            # Track selected categories and chains
+            # Track category and chain counts
             selected_categories = {}
             selected_chains = {}
             
             for item_id, _ in result:
-                if item_id in item_categories:
-                    category = item_categories[item_id]
-                    selected_categories[category] = selected_categories.get(category, 0) + 1
-                if item_id in item_chains:
-                    chain = item_chains[item_id]
-                    selected_chains[chain] = selected_chains.get(chain, 0) + 1
+                category = item_to_category.get(item_id, 'unknown')
+                chain = item_to_chain.get(item_id, 'unknown')
+                
+                selected_categories[category] = selected_categories.get(category, 0) + 1
+                selected_chains[chain] = selected_chains.get(chain, 0) + 1
             
-            # Maximum items allowed per category (30% of total)
+            # Maximum per category and chain
             max_per_category = max(2, int(n * 0.3))
-            # Maximum items allowed per chain (40% of total)
             max_per_chain = max(3, int(n * 0.4))
             
-            # Remaining candidates
+            # OPTIMIZATION: Pre-compute diversity adjustments for all remaining candidates
             remaining = reranked_candidates[top_count:]
+            diversity_adjusted = []
             
-            # Select remaining items with diversity considerations
-            while len(result) < n and remaining:
-                best_idx = -1
-                best_adjusted_score = -float('inf')
+            for item_id, score in remaining:
+                category = item_to_category.get(item_id, 'unknown')
+                chain = item_to_chain.get(item_id, 'unknown')
                 
-                for idx, (item_id, score) in enumerate(remaining):
-                    category_adjustment = 0
-                    chain_adjustment = 0
-                    
-                    # Category diversity adjustment
-                    if item_id in item_categories:
-                        category = item_categories[item_id]
-                        current_cat_count = selected_categories.get(category, 0)
-                        
-                        if current_cat_count >= max_per_category:
-                            # Heavy penalty for exceeding max per category
-                            category_adjustment = -0.5
-                        elif current_cat_count == 0:
-                            # Strong boost for new categories
-                            category_adjustment = 0.3
-                        else:
-                            # Small adjustment based on representation
-                            category_adjustment = 0.1 * (1 - current_cat_count / max_per_category)
-                    
-                    # Chain diversity adjustment
-                    if item_id in item_chains:
-                        chain = item_chains[item_id]
-                        current_chain_count = selected_chains.get(chain, 0)
-                        
-                        if current_chain_count >= max_per_chain:
-                            # Penalty for exceeding max per chain
-                            chain_adjustment = -0.3
-                        elif current_chain_count == 0:
-                            # Boost for new chains
-                            chain_adjustment = 0.2
-                        else:
-                            # Small adjustment based on representation
-                            chain_adjustment = 0.05 * (1 - current_chain_count / max_per_chain)
-                    
-                    # Combined adjustment weighted by domain importance
-                    diversity_adjustment = (
-                        category_adjustment * self.crypto_weights.get("category_correlation", 0.6) +
-                        chain_adjustment * self.crypto_weights.get("chain_importance", 0.3)
-                    )
-                    
-                    adjusted_score = score + diversity_adjustment
-                    
-                    if adjusted_score > best_adjusted_score:
-                        best_idx = idx
-                        best_adjusted_score = adjusted_score
+                cat_count = selected_categories.get(category, 0)
+                chain_count = selected_chains.get(chain, 0)
                 
-                if best_idx >= 0:
-                    item_id, score = remaining.pop(best_idx)
-                    result.append((item_id, score))
-                    
-                    # Update category and chain tracking
-                    if item_id in item_categories:
-                        category = item_categories[item_id]
-                        selected_categories[category] = selected_categories.get(category, 0) + 1
-                    if item_id in item_chains:
-                        chain = item_chains[item_id]
-                        selected_chains[chain] = selected_chains.get(chain, 0) + 1
+                # Calculate diversity adjustment
+                adjustment = 0
+                
+                # Category adjustment
+                if cat_count >= max_per_category:
+                    adjustment -= 0.5
+                elif cat_count == 0:
+                    adjustment += 0.3
                 else:
-                    # If no item found with our diversity criteria, just take next best
-                    if remaining:
-                        item_id, score = remaining.pop(0)
-                        result.append((item_id, score))
-                        
-                        # Update tracking
-                        if item_id in item_categories:
-                            category = item_categories[item_id]
-                            selected_categories[category] = selected_categories.get(category, 0) + 1
-                        if item_id in item_chains:
-                            chain = item_chains[item_id]
-                            selected_chains[chain] = selected_chains.get(chain, 0) + 1
-                    else:
-                        break
+                    adjustment += 0.1 * (1 - cat_count / max_per_category)
+                
+                # Chain adjustment
+                if chain_count >= max_per_chain:
+                    adjustment -= 0.3
+                elif chain_count == 0:
+                    adjustment += 0.2
+                else:
+                    adjustment += 0.05 * (1 - chain_count / max_per_chain)
+                
+                adjusted_score = score + (adjustment * effective_diversity_weight)
+                diversity_adjusted.append((item_id, score, category, chain, adjusted_score))
+            
+            # Sort by adjusted score
+            diversity_adjusted.sort(key=lambda x: x[4], reverse=True)
+            
+            # Select remaining items
+            for item_id, original_score, category, chain, _ in diversity_adjusted:
+                if len(result) >= n:
+                    break
+                
+                # Update category and chain counts
+                selected_categories[category] = selected_categories.get(category, 0) + 1
+                selected_chains[chain] = selected_chains.get(chain, 0) + 1
+                
+                # Add to results with original score
+                result.append((item_id, original_score))
             
             # Sort final results by score
             result.sort(key=lambda x: x[1], reverse=True)
+            
+            # OPTIMIZATION: Cache results
+            if not hasattr(self, '_recommendation_cache'):
+                self._recommendation_cache = {}
+            
+            self._recommendation_cache[cache_key] = {
+                'recommendations': result[:n],
+                'time': time.time()
+            }
+            
             return result[:n]
         
         # If no category/chain information, return top candidates
-        return reranked_candidates[:n]
+        final_result = reranked_candidates[:n]
+        
+        # OPTIMIZATION: Cache results
+        if not hasattr(self, '_recommendation_cache'):
+            self._recommendation_cache = {}
+        
+        self._recommendation_cache[cache_key] = {
+            'recommendations': final_result,
+            'time': time.time()
+        }
+        
+        return final_result
     
     def _get_cold_start_recommendations_by_interest(self, user_id: str, n: int = 10) -> List[Tuple[str, float]]:
         """
@@ -805,8 +668,8 @@ class HybridRecommender:
         
         # Get cold-start parameters
         cold_start_fecf_weight = self.params.get('cold_start_fecf_weight', 0.95)
-        explore_ratio = self.params.get('explore_ratio', 0.3)
-        diversity_factor = self.params.get('diversity_factor', 0.25)
+        explore_ratio = self.params.get('explore_ratio', 0.4)
+        diversity_factor = self.params.get('diversity_factor', 0.4)
         
         # Add partial history recommendations (highest weight)
         for item_id, score in partial_history_recs:

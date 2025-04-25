@@ -223,7 +223,7 @@ class FeatureEnhancedCF:
             user_item_array = self.user_item_matrix.values
             
             # Apply SVD
-            n_components = self.params.get('no_components', 96)
+            n_components = self.params.get('no_components', 128)
             logger.info(f"Applying SVD with {n_components} components")
             
             self.model = TruncatedSVD(n_components=n_components, random_state=42)
@@ -238,7 +238,7 @@ class FeatureEnhancedCF:
                 content_similarity = cosine_similarity(self._item_features)
                 
                 # Get content alpha from params
-                alpha = self.params.get('content_alpha', 0.5)
+                alpha = self.params.get('content_alpha', 0.7)
                 
                 # Apply domain-specific adjustments
                 category_importance = self.crypto_weights.get("category_correlation", 0.6)
@@ -359,11 +359,9 @@ class FeatureEnhancedCF:
             return False
         return True
     
-    def recommend_for_user(self, user_id: str, n: int = 10, 
-                 exclude_known: bool = True) -> List[Tuple[str, float]]:
+    def recommend_for_user(self, user_id: str, n: int = 10, exclude_known: bool = True) -> List[Tuple[str, float]]:
         """
-        Generate recommendations for a user with improved cryptocurrency-specific optimizations,
-        better score normalization and diversity enhancements
+        Generate recommendations for a user with improved performance and vectorization
         
         Args:
             user_id: User ID
@@ -382,267 +380,150 @@ class FeatureEnhancedCF:
             logger.warning(f"User {user_id} not found in the user-item matrix")
             return self._get_cold_start_recommendations(n)
             
-        # Get user's ratings
-        user_ratings = self.user_item_matrix.loc[user_id].copy()  # Make explicit copy
+        # Get user's ratings - use copy to avoid modifying original
+        user_ratings = self.user_item_matrix.loc[user_id].copy()
         
-        # Get positive interactions
+        # Get positive interactions once
         positive_indices = user_ratings.index[user_ratings > 0].tolist()
+        positive_weights = user_ratings[positive_indices].values
         
-        # Get known items to exclude
-        known_items = set()
-        if exclude_known:
-            known_items = set(positive_indices)
-            logger.debug(f"User {user_id} has {len(known_items)} known items to exclude")
-            
-        # Get all items
-        all_items = list(self.user_item_matrix.columns)
+        # Get known items to exclude - do this once
+        known_items = set(positive_indices) if exclude_known else set()
         
-        # Calculate scores for all items
-        scores = []
-        for item_id in all_items:
-            if item_id in known_items and exclude_known:
-                continue
-                
-            # Find item index
-            if item_id not in self._item_mapping:
-                continue
-                
-            item_idx = self._item_mapping[item_id]
+        # Prepare items for vectorized computation
+        # Only consider items not in known_items
+        all_items = [item for item in self.user_item_matrix.columns if item not in known_items]
+        if not all_items:
+            logger.warning(f"No items available for recommendation after excluding known items")
+            return []
+        
+        # Get similarity scores in a vectorized way
+        item_scores = np.zeros(len(all_items))
+        
+        # OPTIMIZATION: Pre-calculate all required indices
+        try:
+            rated_indices = [self._item_mapping[item] for item in positive_indices if item in self._item_mapping]
+            candidate_indices = [self._item_mapping[item] for item in all_items if item in self._item_mapping]
             
-            # Calculate weighted sum of similarities with user's rated items
-            score = 0
-            
-            # Calculate score using weighted influence of rated items
-            weights_sum = 0
-            for rated_item in positive_indices:
-                if rated_item not in self._item_mapping:
-                    continue
-                    
-                rated_idx = self._item_mapping[rated_item]
-                rating_value = float(user_ratings[rated_item])  # Explicit conversion
-                similarity = self.item_similarity_matrix[item_idx, rated_idx]
+            # OPTIMIZATION: Use vectorized operations for similarity calculation
+            for i, item_idx in enumerate(candidate_indices):
+                # Use numpy's vectorized operations
+                similarities = np.array([self.item_similarity_matrix[item_idx, rated_idx] for rated_idx in rated_indices])
+                weights = np.array(positive_weights[:len(rated_indices)])
                 
-                # IMPROVED: Apply domain-specific weightings
-                # For cryptocurrency: Recent interactions have more influence due to market volatility
-                if self.interactions_df is not None and 'timestamp' in self.interactions_df.columns:
-                    # Find user's interaction with this item
-                    user_interactions = self.interactions_df[
-                        (self.interactions_df['user_id'] == user_id) & 
-                        (self.interactions_df['project_id'] == rated_item)
-                    ]
-                    
-                    if not user_interactions.empty and 'timestamp' in user_interactions.columns:
-                        # Get most recent interaction
-                        try:
-                            timestamp = pd.to_datetime(user_interactions['timestamp'].max())
-                            now = pd.Timestamp.now()
-                            days_ago = (now - timestamp).days
-                            
-                            # Apply time decay factor (more recent = higher weight)
-                            time_decay = np.exp(-self.crypto_weights.get("popularity_decay", 0.05) * days_ago)
-                            rating_value = rating_value * (0.7 + 0.3 * time_decay)  # Blend of base and recency
-                        except Exception as e:
-                            # In case of timestamp parsing issues
-                            logger.debug(f"Error processing timestamp: {e}")
-                
-                score += similarity * rating_value
-                weights_sum += abs(rating_value)
-            
-            # Normalize by sum of weights if available
-            if weights_sum > 0:
-                score = score / weights_sum
-                
-            scores.append((item_id, score))
-            
+                # Weighted sum with normalization
+                if len(similarities) > 0 and weights.sum() > 0:
+                    item_scores[i] = np.sum(similarities * weights) / weights.sum()
+        except Exception as e:
+            logger.error(f"Error in similarity calculation: {e}")
+        
+        # Create list of (item_id, score) tuples
+        scores = list(zip(all_items, item_scores))
+        
         # Sort by score
         scores.sort(key=lambda x: x[1], reverse=True)
         
-        # No scores generated
-        if not scores:
-            logger.warning(f"No recommendations generated for user {user_id}")
-            return []
-            
-        logger.debug(f"Generated {len(scores)} candidates for user {user_id}")
+        # OPTIMIZATION: Get more candidates for diversity but limit to a reasonable number
+        candidate_size = min(n * 3, 100)  # Don't get too many candidates
+        top_candidates = scores[:candidate_size]
         
-        # IMPROVED: Enhanced normalization with cryptocurrency-specific considerations
-        top_scores = scores[:n*3]  # Take 3x needed to ensure sufficient variety
-        
-        # Find min and max scores for normalization
-        min_score = min([s for _, s in top_scores])
-        max_score = max([s for _, s in top_scores])
-        score_range = max(0.001, max_score - min_score)  # Avoid division by zero
-        
-        # Apply enhanced score normalization
-        normalized_scores = []
-        for item_id, raw_score in top_scores:
-            # Min-max normalization to 0-1 scale
-            norm_score = (raw_score - min_score) / score_range
+        # Check if we have category and chain data for diversity
+        if hasattr(self, 'projects_df') and 'primary_category' in self.projects_df.columns:
+            # OPTIMIZATION: Create item metadata lookup only once
+            item_metadata = {}
+            for _, row in self.projects_df.iterrows():
+                if 'id' in row:
+                    item_data = {
+                        'category': row.get('primary_category', 'unknown'),
+                        'chain': row.get('chain', 'unknown')
+                    }
+                    item_metadata[row['id']] = item_data
             
-            # Apply sigmoid-like transformation with stronger curve
-            # This creates better separation between good and great recommendations
-            # Increased steepness parameter from 5 to 7 for crypto - want clearer distinction
-            sigmoid_score = 1.0 / (1.0 + np.exp(-7 * (norm_score - 0.5)))
+            # OPTIMIZATION: More efficient diversification
+            # First, select some top items unconditionally
+            top_count = max(n // 5, 1)  # ~20% by pure score
+            result_items = [item for item, _ in top_candidates[:top_count]]
+            result_scores = [score for _, score in top_candidates[:top_count]]
             
-            # IMPROVED: Add domain-specific boosts
-            # 1. Add trending bonus for cryptocurrency
-            if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
-                try:
-                    project_row = self.projects_df[self.projects_df['id'] == item_id]
-                    if not project_row.empty:
-                        trend_score = project_row['trend_score'].values[0]
-                        # Cryptocurrency is highly trend-sensitive
-                        if trend_score > 80:  # Extremely trending
-                            sigmoid_score += 0.15
-                        elif trend_score > 65:  # Highly trending
-                            sigmoid_score += 0.08
-                except Exception as e:
-                    logger.debug(f"Error retrieving trend score: {e}")
+            # Track selected categories and chains for diversity
+            category_counts = {}
+            chain_counts = {}
+            
+            # Initialize tracking
+            for item in result_items:
+                if item in item_metadata:
+                    meta = item_metadata[item]
+                    category = meta['category']
+                    chain = meta['chain']
                     
-            # 2. Consider market cap - provide slight boost for established projects
-            if hasattr(self, 'projects_df') and 'market_cap' in self.projects_df.columns:
-                try:
-                    project_row = self.projects_df[self.projects_df['id'] == item_id]
-                    if not project_row.empty and 'market_cap' in project_row:
-                        market_cap = project_row['market_cap'].values[0]
-                        # Get percentile within all projects
-                        all_caps = self.projects_df['market_cap'].values
-                        cap_percentile = np.searchsorted(np.sort(all_caps), market_cap) / len(all_caps)
-                        
-                        # Apply market cap modifier based on domain settings
-                        market_importance = self.crypto_weights.get("market_cap_influence", 0.4)
-                        if cap_percentile > 0.8:  # Top 20% by market cap
-                            sigmoid_score += 0.05 * market_importance
-                except Exception as e:
-                    logger.debug(f"Error applying market cap adjustment: {e}")
+                    category_counts[category] = category_counts.get(category, 0) + 1
+                    chain_counts[chain] = chain_counts.get(chain, 0) + 1
             
-            normalized_scores.append((item_id, sigmoid_score))
-        
-        # Re-sort with normalized scores
-        normalized_scores.sort(key=lambda x: x[1], reverse=True)
-        
-        # IMPROVED: Add category and chain diversity to final selection
-        if hasattr(self, 'projects_df'):
-            # Get category and chain information
-            item_categories = {}
-            item_chains = {}
+            # Diversity limits
+            max_per_category = max(2, int(n * 0.3))
+            max_per_chain = max(3, int(n * 0.4))
             
-            if 'primary_category' in self.projects_df.columns:
-                for _, row in self.projects_df.iterrows():
-                    if 'id' in row:
-                        if 'primary_category' in row:
-                            item_categories[row['id']] = row['primary_category']
-                        if 'chain' in row:
-                            item_chains[row['id']] = row['chain']
+            # Pool remaining candidates
+            remaining = top_candidates[top_count:]
             
-            if item_categories and item_chains:
-                # First select some top items unconditionally
-                top_count = max(n // 5, 1)  # 20% of recommendations by pure score
-                result = normalized_scores[:top_count]
-                
-                # Track selected categories and chains
-                selected_categories = {}
-                selected_chains = {}
-                
-                for item_id, _ in result:
-                    if item_id in item_categories:
-                        category = item_categories[item_id]
-                        selected_categories[category] = selected_categories.get(category, 0) + 1
-                    if item_id in item_chains:
-                        chain = item_chains[item_id]
-                        selected_chains[chain] = selected_chains.get(chain, 0) + 1
-                
-                # Maximum items allowed per category (30% of total)
-                max_per_category = max(2, int(n * 0.3))
-                # Maximum items allowed per chain (40% of total)
-                max_per_chain = max(3, int(n * 0.4))
-                
-                # Remaining candidates
-                remaining = normalized_scores[top_count:]
-                
-                # Select remaining items with diversity considerations
-                while len(result) < n and remaining:
-                    best_idx = -1
-                    best_adjusted_score = -float('inf')
+            # OPTIMIZATION: Pre-calculate diversity adjustments for all remaining items
+            diversity_adjustments = []
+            for item_id, score in remaining:
+                adjustment = 0
+                if item_id in item_metadata:
+                    meta = item_metadata[item_id]
+                    category = meta['category']
+                    chain = meta['chain']
                     
-                    for idx, (item_id, score) in enumerate(remaining):
-                        category_adjustment = 0
-                        chain_adjustment = 0
-                        
-                        # Category diversity adjustment
-                        if item_id in item_categories:
-                            category = item_categories[item_id]
-                            current_cat_count = selected_categories.get(category, 0)
-                            
-                            if current_cat_count >= max_per_category:
-                                # Heavy penalty for exceeding max per category
-                                category_adjustment = -0.5
-                            elif current_cat_count == 0:
-                                # Strong boost for new categories
-                                category_adjustment = 0.3
-                            else:
-                                # Small adjustment based on representation
-                                category_adjustment = 0.1 * (1 - current_cat_count / max_per_category)
-                        
-                        # Chain diversity adjustment
-                        if item_id in item_chains:
-                            chain = item_chains[item_id]
-                            current_chain_count = selected_chains.get(chain, 0)
-                            
-                            if current_chain_count >= max_per_chain:
-                                # Penalty for exceeding max per chain
-                                chain_adjustment = -0.3
-                            elif current_chain_count == 0:
-                                # Boost for new chains
-                                chain_adjustment = 0.2
-                            else:
-                                # Small adjustment based on representation
-                                chain_adjustment = 0.05 * (1 - current_chain_count / max_per_chain)
-                        
-                        # Combined adjustment weighted by domain importance
-                        diversity_adjustment = (
-                            category_adjustment * self.crypto_weights.get("category_correlation", 0.6) +
-                            chain_adjustment * self.crypto_weights.get("chain_importance", 0.3)
-                        )
-                        
-                        adjusted_score = score + diversity_adjustment
-                        
-                        if adjusted_score > best_adjusted_score:
-                            best_idx = idx
-                            best_adjusted_score = adjusted_score
-                    
-                    if best_idx >= 0:
-                        item_id, score = remaining.pop(best_idx)
-                        result.append((item_id, score))
-                        
-                        # Update category and chain tracking
-                        if item_id in item_categories:
-                            category = item_categories[item_id]
-                            selected_categories[category] = selected_categories.get(category, 0) + 1
-                        if item_id in item_chains:
-                            chain = item_chains[item_id]
-                            selected_chains[chain] = selected_chains.get(chain, 0) + 1
+                    # Category adjustment
+                    cat_count = category_counts.get(category, 0)
+                    if cat_count >= max_per_category:
+                        adjustment -= 0.5
+                    elif cat_count == 0:
+                        adjustment += 0.3
                     else:
-                        # If no item found with diversity criteria, take next best
-                        if remaining:
-                            item_id, score = remaining.pop(0)
-                            result.append((item_id, score))
-                            
-                            # Update tracking
-                            if item_id in item_categories:
-                                category = item_categories[item_id]
-                                selected_categories[category] = selected_categories.get(category, 0) + 1
-                            if item_id in item_chains:
-                                chain = item_chains[item_id]
-                                selected_chains[chain] = selected_chains.get(chain, 0) + 1
-                        else:
-                            break
+                        adjustment += 0.1 * (1 - cat_count / max_per_category)
+                    
+                    # Chain adjustment
+                    chain_count = chain_counts.get(chain, 0)
+                    if chain_count >= max_per_chain:
+                        adjustment -= 0.3
+                    elif chain_count == 0:
+                        adjustment += 0.2
+                    else:
+                        adjustment += 0.05 * (1 - chain_count / max_per_chain)
                 
-                # Sort final results by score
-                result.sort(key=lambda x: x[1], reverse=True)
-                return result[:n]
+                diversity_adjustments.append((item_id, score, adjustment, score + adjustment))
+            
+            # Sort by adjusted score once
+            diversity_adjustments.sort(key=lambda x: x[3], reverse=True)
+            
+            # Select remaining items efficiently
+            for item_id, score, _, _ in diversity_adjustments:
+                if len(result_items) >= n:
+                    break
+                    
+                # Only update tracking if we select this item
+                if item_id in item_metadata:
+                    meta = item_metadata[item_id]
+                    category = meta['category']
+                    chain = meta['chain']
+                    
+                    # Update category and chain counts
+                    category_counts[category] = category_counts.get(category, 0) + 1
+                    chain_counts[chain] = chain_counts.get(chain, 0) + 1
+                
+                # Add to results
+                result_items.append(item_id)
+                result_scores.append(score)
+            
+            # Create final result tuples and sort by original score
+            result = list(zip(result_items, result_scores))
+            result.sort(key=lambda x: x[1], reverse=True)
+            return result[:n]
         
-        # Return top n normalized scores if no diversity enhancement
-        return normalized_scores[:n]
+        # If no category/chain information, return top candidates
+        return top_candidates[:n]
     
     def _get_cold_start_recommendations(self, n: int = 10) -> List[Tuple[str, float]]:
         """

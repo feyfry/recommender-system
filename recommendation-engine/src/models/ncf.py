@@ -500,10 +500,10 @@ class NCFRecommender:
             dict: Training metrics (loss per epoch)
         """
         # Use config params if not specified
-        val_ratio = val_ratio if val_ratio is not None else self.params.get('val_ratio', 0.2)
-        batch_size = batch_size if batch_size is not None else self.params.get('batch_size', 128)
-        num_epochs = num_epochs if num_epochs is not None else self.params.get('epochs', 30)
-        learning_rate = learning_rate if learning_rate is not None else self.params.get('learning_rate', 0.001)
+        val_ratio = val_ratio if val_ratio is not None else self.params.get('val_ratio', 0.15)
+        batch_size = batch_size if batch_size is not None else self.params.get('batch_size', 64)
+        num_epochs = num_epochs if num_epochs is not None else self.params.get('epochs', 50)
+        learning_rate = learning_rate if learning_rate is not None else self.params.get('learning_rate', 0.003)
         
         logger.info("Starting NCF training with optimized architecture")
         start_time = time.time()
@@ -600,7 +600,7 @@ class NCFRecommender:
         optimizer = optim.AdamW(
             self.model.parameters(), 
             lr=learning_rate,
-            weight_decay=self.params.get('weight_decay', 5e-4)
+            weight_decay=self.params.get('weight_decay', 1e-3)
         )
         
         # Learning rate scheduler with warm-up and cosine annealing
@@ -624,7 +624,7 @@ class NCFRecommender:
         val_losses = []
         
         # Early stopping parameters
-        patience = self.params.get('patience', 15)  # Increased patience for better convergence
+        patience = self.params.get('patience', 30)  # Increased patience for better convergence
         best_val_loss = float('inf')
         patience_counter = 0
         best_model_state = None
