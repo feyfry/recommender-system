@@ -62,7 +62,7 @@ NCF_PARAMS = {
 # Feature-Enhanced CF - MODERATE TUNING
 FECF_PARAMS = {
     "no_components": 48,            # Jumlah komponen lebih sedikit (sekitar 10% jumlah item)
-    "content_alpha": 0.5            # Keseimbangan antara collaborative dan content features
+    "content_alpha": 0.65            # Keseimbangan antara collaborative dan content features
 }
 
 # Hybrid Model - MODERATE TUNING
@@ -150,7 +150,7 @@ API_CACHE_TTL = 300  # 5 menit dalam detik
 
 # Cold Start Evaluation - EXTREME TUNING
 COLD_START_EVAL_CONFIG = {
-    "cold_start_users": 150,         # More test users
+    "cold_start_users": 100,         # More test users
     "max_popular_items_exclude": 0.1, # Exclude more popular items
     "test_ratio": 0.4,               # Larger test set
     "min_interactions_required": 3,   # Lower requirement
@@ -160,8 +160,8 @@ COLD_START_EVAL_CONFIG = {
 # Domain-specific weights - EXTREME TUNING
 CRYPTO_DOMAIN_WEIGHTS = {
     "trend_importance": 0.85,       # Much stronger trend following
-    "popularity_decay": 0.1,        # Faster popularity decay
-    "category_correlation": 0.8,    # Stronger category influence
-    "market_cap_influence": 0.6,    # More weight on market cap
+    "popularity_decay": 0.15,        # Faster popularity decay
+    "category_correlation": 0.7,    # Stronger category influence
+    "market_cap_influence": 0.5,    # More weight on market cap
     "chain_importance": 0.5,        # Stronger chain preference
 }
