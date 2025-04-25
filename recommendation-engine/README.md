@@ -16,14 +16,14 @@ Sistem ini menggunakan data dari CoinGecko API untuk menyediakan rekomendasi pro
 Sistem ini mengimplementasikan beberapa pendekatan rekomendasi:
 1. **Feature-Enhanced Collaborative Filtering** menggunakan scikit-learn SVD
 2. **Neural Collaborative Filtering** menggunakan PyTorch
-3. **Model Hybrid** yang menggabungkan kedua pendekatan
+3. **Enhanced Hybrid Model** yang menggabungkan kedua pendekatan dengan teknik ensemble canggih
 
 ## 🚀 Fitur Utama
 
 1. **Model Rekomendasi Ganda:**
    - Feature-Enhanced CF untuk rekomendasi berbasis konten
    - Neural CF untuk personalisasi berbasis deep learning
-   - Model Hybrid untuk performa optimal
+   - Enhanced Hybrid Model dengan normalisasi skor dan ensemble learning
 
 2. **Integrasi Analisis Teknikal dengan Periode Dinamis:**
    - Periode indikator yang dapat dikonfigurasi untuk berbagai gaya trading (jangka pendek, standar, jangka panjang)
@@ -32,9 +32,10 @@ Sistem ini mengimplementasikan beberapa pendekatan rekomendasi:
    - Deteksi peristiwa pasar (pump, dump, volatilitas tinggi) dengan threshold yang dapat disesuaikan
    - Preset gaya trading untuk jangka pendek, standar, dan jangka panjang
 
-3. **Penanganan Cold-Start:**
+3. **Penanganan Cold-Start yang Ditingkatkan:**
    - Rekomendasi untuk pengguna baru berdasarkan minat
-   - Rekomendasi berbasis fitur untuk proyek baru
+   - Penanganan multi-kategori yang lebih baik
+   - Normalisasi skor untuk cold-start pengguna
 
 4. **API Service dengan Konfigurasi Fleksibel:**
    - Endpoint REST API untuk integrasi dengan aplikasi backend Laravel
@@ -46,6 +47,42 @@ Sistem ini mengimplementasikan beberapa pendekatan rekomendasi:
    - Pengumpulan data reguler dari CoinGecko
    - Pipeline pemrosesan untuk ekstraksi fitur
    - Pelatihan dan evaluasi model otomatis
+
+## 🔄 Pembaruan Terbaru
+
+### Enhanced Hybrid Model (April 2025)
+
+Model hybrid telah dioptimalkan dengan beberapa perbaikan signifikan:
+
+1. **Teknik Ensemble yang Ditingkatkan:**
+   - Normalisasi skor menggunakan sigmoid transformation
+   - Implementasi tiga metode ensemble (weighted average, max, rank fusion)
+   - Pembobotan dinamis berdasarkan jumlah interaksi pengguna
+
+2. **Penanganan Kategori Multipel:**
+   - Parser kategori yang lebih baik yang dapat menangani format list dan string
+   - Diversifikasi kategori yang lebih efektif
+
+3. **Optimasi untuk Data Sparse:**
+   - Parameter arsitektur NCF yang disesuaikan untuk data sparse
+   - Strategi negative sampling yang ditingkatkan
+
+### Performa Model Terbaru (April 2025)
+
+| Model | Precision | Recall | F1 | NDCG | Hit Ratio | MRR |
+|-------|-----------|--------|----|----|-----------|-----|
+| fecf | 0.1316 | 0.3855 | 0.1826 | 0.2945 | 0.8148 | 0.4001 |
+| ncf | 0.1098 | 0.2802 | 0.1458 | 0.1986 | 0.7138 | 0.2974 |
+| hybrid | 0.1461 | 0.4045 | 0.1987 | 0.2954 | 0.8788 | 0.3923 |
+
+**Cold-Start Performance:**
+
+| Model | Precision | Recall | F1 | NDCG | Hit Ratio |
+|-------|-----------|--------|----|-------|-----------|
+| cold_start_fecf | 0.0810 | 0.2254 | 0.1145 | 0.1684 | 0.5238 |
+| cold_start_hybrid | 0.1060 | 0.2765 | 0.1437 | 0.1958 | 0.5783 |
+
+Model hybrid yang ditingkatkan mengungguli kedua model dasar dalam hampir semua metrik, dengan peningkatan paling signifikan pada Recall (+4.9% vs FECF) dan Hit Ratio (+7.9% vs FECF). Untuk kasus cold-start, hybrid sekarang mengungguli FECF di semua metrik.
 
 ## 🏗️ Arsitektur Sistem
 
@@ -97,18 +134,25 @@ Model Neural CF menggunakan deep learning untuk menangkap pola kompleks dalam in
 - Memerlukan jumlah interaksi minimum untuk memberikan rekomendasi yang akurat
 - Kurang efektif pada cold-start problem dibandingkan dengan FECF
 
-### Model Hybrid
+### Enhanced Hybrid Model
 
-Model Hybrid menggabungkan kekuatan kedua pendekatan dengan strategi filter-then-rerank:
+Model Hybrid baru menggabungkan kekuatan kedua pendekatan dengan teknik ensemble yang lebih canggih:
 
-1. Menggunakan FECF untuk menghasilkan kandidat awal (filtering)
-2. Menggunakan NCF untuk memperbaiki peringkat kandidat (reranking)
-3. Menerapkan diversifikasi kategori untuk memastikan keragaman rekomendasi
+1. **Normalisasi Skor**: Menerapkan transformasi sigmoid untuk menyeimbangkan distribusi skor dari kedua model sebelum penggabungan
 
-Model Hybrid menerapkan pembobotan dinamis berdasarkan jumlah interaksi pengguna:
-- **Pengguna Cold-Start (0 interaksi)**: Mengandalkan rekomendasi populer dan pengelompokan kategori
-- **Pengguna dengan Interaksi Terbatas (1-20)**: Bobot FECF lebih dominan dengan kontribusi NCF yang meningkat secara bertahap
-- **Pengguna dengan Interaksi Optimal (>20)**: Bobot seimbang antara FECF dan NCF
+2. **Metode Ensemble Fleksibel**:
+   - **Weighted Average**: Menggabungkan skor dengan pembobotan yang disesuaikan dengan jumlah interaksi pengguna
+   - **Maximum Score**: Mengambil skor tertinggi dari kedua model untuk setiap item
+   - **Rank Fusion**: Menggabungkan berdasarkan peringkat bukan skor mentah
+
+3. **Pembobotan Dinamis**:
+   - **Pengguna Cold-Start (0-3 interaksi)**: 85% FECF, 15% NCF
+   - **Pengguna dengan Interaksi Menengah (4-10)**: Transisi secara bertahap
+   - **Pengguna dengan Interaksi Banyak (>10)**: 70% FECF, 30% NCF
+
+4. **Diversifikasi yang Ditingkatkan**:
+   - Penanganan multi-kategori untuk diversifikasi yang lebih baik
+   - Strategi penalti dan bonus dinamis untuk kategori dan blockchain
 
 ## 📈 Evaluasi Model dan Metrik Performa
 
@@ -137,32 +181,6 @@ Karakteristik ini menjelaskan mengapa:
 - FECF bisa bersaing dengan model yang lebih kompleks seperti Hybrid
 - NCF mengalami tantangan dalam memberikan rekomendasi personalisasi
 - Strategi cold-start yang kuat sangat penting dalam domain ini
-
-## 📝 Tantangan dan Perbaikan Potensial
-
-Beberapa tantangan dan perbaikan potensial untuk sistem rekomendasi ini:
-
-1. **Pembobotan Dinamis**: 
-   - Mengganti hardcoded weight dengan pembobotan dinamis berdasarkan jumlah interaksi pengguna
-   - Menyesuaikan bobot FECF, NCF, dan faktor diversitas secara adaptif
-   - Menerapkan transisi halus antara pengguna cold-start dan pengguna yang sudah mapan
-
-2. **Strategi Cold-Start yang Lebih Baik**:
-   - Meningkatkan diversifikasi kategori untuk pengguna baru
-   - Menerapkan exploratory recommendations dengan elemen randomness
-   - Menggunakan pendekatan cluster-based untuk mencocokkan pengguna baru dengan grup yang serupa
-
-3. **Peningkatan Kualitas NCF**:
-   - Memperluas model dengan informasi kontekstual
-   - Meningkatkan negative sampling untuk domain yang sparse
-   - Menerapkan teknik regularisasi yang lebih kuat
-
-Fitur implementasi:
-
-4. **Integrasi Sinyal Teknikal dan Tren**:
-   - Menggabungkan sinyal teknikal ke dalam proses rekomendasi investasi (untuk buy/sell/hold)
-   - Memasukkan tren sosial media dan sentimen
-   - Mempertimbangkan volatilitas dan momentum dalam pemberian peringkat
 
 ## 📈 Analisis Teknikal dengan Periode Dinamis
 
@@ -384,7 +402,7 @@ python main.py train --fecf --ncf --hybrid
 python main.py evaluate --cold-start
 
 # Menghasilkan rekomendasi untuk pengguna
-python main.py recommend --user-id user_1 --model fecf --num 10
+python main.py recommend --user-id user_1 --model hybrid --num 10
 
 # Menghasilkan sinyal trading untuk proyek dengan berbagai opsi periode indikator
 # Menggunakan preset gaya trading
@@ -1023,6 +1041,7 @@ web3-recommendation-system/
 │   │   ├── alt_fecf.py   # Alternative FECF menggunakan scikit-learn
 │   │   ├── ncf.py        # Neural CF
 │   │   ├── hybrid.py     # Model Hybrid
+│   │   ├── enhanced_hybrid.py  # Enhanced Hybrid Model (New!)
 │   │   └── eval.py       # Evaluasi model
 │   │
 │   ├── technical/        # Analisis teknikal dengan dukungan periode dinamis
@@ -1055,117 +1074,103 @@ Laporan evaluasi disimpan di `data/models/` dalam format JSON, markdown, atau te
 
 ## 🔍 Pemecahan Masalah
 
-1. **Performa NCF Rendah**
-   - NCF membutuhkan lebih banyak data pengguna untuk bekerja optimal
-   - Tingkatkan parameter epochs di `config.py`
-   ```python
-   NCF_PARAMS = {
-       "embedding_dim": 64,
-       "layers": [128, 64, 32, 16],
-       "learning_rate": 0.001,
-       "batch_size": 128,  # Kurangi dari 256
-       "epochs": 50,       # Tingkatkan dari 20
-       "val_ratio": 0.2,
-       "dropout": 0.2,
-       "weight_decay": 1e-4
-   }
-   ```
-   - Gunakan jumlah users yang lebih banyak saat memproses data:
+1. **Performa Rendah pada Model Hybrid**
+   - Periksa apakah Anda menggunakan file `enhanced_hybrid.py` terbaru
+   - Pastikan file model disimpan dengan format nama yang benar:
    ```bash
-   python main.py process --users 5000
+   # Periksa apakah hybrid model menggunakan format nama yang sama
+   ls -la data/models/hybrid_model_*
    ```
-
-2. **Menggunakan Implementasi Alternatif (alt_fecf vs fecf)**
-   - Sistem secara default menggunakan implementasi scikit-learn SVD (`alt_fecf.py`)
-   - Jika ingin menggunakan implementasi LightFM original, aktifkan di `src/models/hybrid.py`:
-   ```python
-   from src.models.fecf import FeatureEnhancedCF  # Uncomment untuk menggunakan LightFM
-   # from src.models.alt_fecf import FeatureEnhancedCF  # Comment jika menggunakan LightFM
-   ```
-   - Jika menggunakan LightFM, pastikan untuk menginstall LightFM:
-   ```bash
-   pip install lightfm
-   ```
-   - Perhatikan bahwa LightFM memerlukan Python 3.10 (tidak kompatibel dengan Python 3.12+)
-
-3. **Rate Limiting CoinGecko API**
-   - Gunakan delay yang lebih panjang antar request:
-     ```bash
-     python main.py collect --rate-limit 3
-     ```
-   - Pertimbangkan untuk mendapatkan API key untuk limit yang lebih tinggi
-
-4. **Masalah Instalasi TA-Lib**
-   - Pastikan kompiler C tersedia di sistem Anda (Visual C++ di Windows, GCC di Linux)
-
-5. **Masalah Memori dengan Dataset Besar**
-   - Proses data dalam batch:
-     ```bash
-     python main.py process --batch-size 1000
-     ```
-   - Kurangi jumlah koin yang dikumpulkan:
-     ```bash
-     python main.py collect --limit 250
-     ```
-
-6. **Penyesuaian Model Hybrid**
-   - Jika NCF tetap berkinerja buruk, sesuaikan bobot hybrid:
+   - Sesuaikan bobot model hybrid di `config.py`:
    ```python
    HYBRID_PARAMS = {
-       "ncf_weight": 0.3,   # Kurangi dari 0.5
-       "fecf_weight": 0.7   # Tingkatkan dari 0.5
+       "ncf_weight": 0.3,              # Kurangi bobot NCF
+       "fecf_weight": 0.7,             # Tingkatkan bobot FECF
+       "interaction_threshold_low": 3,  # Turunkan threshold
+       "cold_start_fecf_weight": 0.9,   # FECF lebih dominan untuk cold-start
+       "normalization": "sigmoid",      # Normalisasi yang tepat
    }
    ```
 
-7. **Model Loading Issues**
-   - Jika model tidak dimuat dengan benar, periksa file model di direktori `data/models/`
-   - Gunakan opsi debug untuk melihat detil loading proses model:
+2. **Masalah dengan Penanganan Kategori Multipel**
+   - Tambahkan fungsi `process_categories()` ke `alt_fecf.py` setelah metode `__init__()`
+   - Pastikan kolom kategori diproses dengan benar di metode `_create_item_features()`
+   - Tambahkan metode `preprocess_categories()` untuk memproses kategori di awal
+
+3. **Overfitting pada NCF**
+   - Kurangi kompleksitas arsitektur di `config.py`:
+   ```python
+   NCF_PARAMS = {
+       "embedding_dim": 32,            # Kurangi dari 64
+       "layers": [64, 32, 16],         # Lebih sederhana
+       "learning_rate": 0.0005,        # Turunkan
+       "dropout": 0.4,                 # Tingkatkan
+       "negative_ratio": 2             # Kurangi
+   }
+   ```
+
+4. **Masalah Data Sparse**
+   - Tingkatkan jumlah interaksi sintetis dalam pemrosesan data:
+   ```bash
+   python main.py process --users 800 --min-interactions-per-user 10
+   ```
+   - Sesuaikan parameter untuk data sparse di `config.py`:
+   ```python
+   COLD_START_EVAL_CONFIG = {
+       "min_interactions_required": 2   # Turunkan requirement
+   }
+   ```
+
+5. **Performa Cold-Start yang Buruk**
+   - Tingkatkan `cold_start_fecf_weight` ke 0.95
+   - Sesuaikan strategi diversifikasi kategori:
+   ```python
+   CATEGORY_CONFIG = {
+       "max_per_category": 0.2,        # Batasi lebih ketat untuk keragaman
+       "boost_underrepresented": 0.6,  # Boost lebih tinggi
+   }
+   ```
+
+6. **Integrasi Enhanced Hybrid Model**
+   - Gunakan file `enhanced_hybrid.py` dengan mengganti referensi di `main.py`:
+   ```python
+   # Di main.py, cari bagian yang menginisialisasi model hybrid
+   # Dan ganti dengan:
+   from src.models.enhanced_hybrid import EnhancedHybridRecommender
+   models_to_train.append(("Hybrid", EnhancedHybridRecommender()))
+   ```
+
+7. **Mengatasi Model Loading Issues**
+   - Pastikan nama file model konsisten:
+   ```python
+   # Enhanced hybrid harus menggunakan format nama yang sama
+   filepath = os.path.join(MODELS_DIR, f"hybrid_model_{timestamp}.pkl")
+   ```
+   - Gunakan perintah debug untuk memverifikasi loading:
    ```bash
    python main.py debug --user-id user_1 --model hybrid --num 10
    ```
 
-8. **Caching Issues pada API**
-   - Jika API memberikan hasil yang tidak diperbarui, hapus cache:
-   ```bash
-   curl -X POST http://localhost:8000/recommend/cache/clear
-   curl -X POST http://localhost:8000/analysis/cache/clear
+8. **Inconsistent API Results**
+   - Hapus cache API jika implementasi model berubah
+   - Verifikasi struktur dan format response API
+
+9. **Perbaikan Konfigurasi untuk Domain Cryptocurrency**
+   ```python
+   # Domain-specific weights di config.py
+   CRYPTO_DOMAIN_WEIGHTS = {
+       "trend_importance": 0.85,       # Tingkatkan
+       "popularity_decay": 0.15,       # Tingkatkan
+       "category_correlation": 0.7,    # Tingkatkan
+       "market_cap_influence": 0.5,    # Sedikit turun
+       "chain_importance": 0.4,        # Tingkatkan
+   }
    ```
 
-9. **Masalah dengan Indikator Teknikal**
-   - Jika Anda mengalami hasil analisis teknikal yang tidak konsisten, coba pastikan data cukup untuk indikator yang dipilih:
-   ```bash
-   # Tingkatkan jumlah hari data yang diminta
-   python main.py signals --project-id bitcoin --days 60
-   ```
-   - Untuk periode indikator yang lebih panjang, pastikan untuk menggunakan jumlah data historis yang lebih banyak
-
-10. **Meningkatkan Kualitas Hybrid Model**
-    - Jika model Hybrid tidak memberikan peningkatan signifikan, pastikan bobot dinamis sudah diimplementasikan:
-    ```python
-    # Di hybrid.py, pastikan menggunakan bobot dinamis
-    def recommend_for_user(self, user_id: str, n: int = 10, exclude_known: bool = True):
-        # ...
-        # Count user interactions
-        user_interactions = self.user_item_matrix.loc[user_id]
-        user_interaction_count = (user_interactions > 0).sum()
-        
-        # Get parameters from config
-        interaction_threshold_low = self.params.get('interaction_threshold_low', 5)
-        interaction_threshold_high = self.params.get('interaction_threshold_high', 20)
-        
-        # Adjust weights dynamically based on interaction count
-        if user_interaction_count < interaction_threshold_low:
-            effective_fecf_weight = 0.8
-            effective_ncf_weight = 0.1
-        elif user_interaction_count < interaction_threshold_high:
-            ratio = (user_interaction_count - interaction_threshold_low) / (interaction_threshold_high - interaction_threshold_low)
-            effective_fecf_weight = 0.8 - (0.3 * ratio)  # Gradually decrease FECF weight
-            effective_ncf_weight = 0.1 + (0.4 * ratio)   # Gradually increase NCF weight
-        else:
-            effective_fecf_weight = 0.5
-            effective_ncf_weight = 0.5
-        # ...
-    ```
+10. **Memperbaiki Persistensi Model**
+    - Gunakan format timestamp yang konsisten untuk semua model
+    - Simpan metadata performa model dalam file model
+    - Implementasikan versioning model sederhana
 
 ## 📬 Kontak
 
