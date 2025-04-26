@@ -917,8 +917,21 @@ def start_api(args):
     try:
         # Import uvicorn and API app
         import uvicorn
-        from src.api.main import app
+        logger.info("Successfully imported uvicorn")
+        
+        # Coba import app secara eksplisit dengan try-except terpisah
+        try:
+            from src.api.main import app
+            logger.info("Successfully imported app from src.api.main")
+        except Exception as e:
+            logger.error(f"Error importing app from src.api.main: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            print(f"❌ Error importing app: {str(e)}")
+            return False
+        
         from config import API_HOST, API_PORT
+        logger.info("Successfully imported API_HOST and API_PORT from config")
         
         # Get host and port from args or config
         host = getattr(args, 'host', API_HOST)
@@ -936,14 +949,17 @@ def start_api(args):
             host=host, 
             port=port,
             reload=True,  # Enable auto-reload during development
-            log_level="info"
+            log_level="debug"  # Set log level to debug for more info
         )
         
         return True
         
     except Exception as e:
         logger.error(f"Error starting API server: {str(e)}")
+        import traceback
+        logger.error(f"Full error traceback: {traceback.format_exc()}")  # Log full traceback
         print(f"❌ Error starting API server: {str(e)}")
+        print("Check logs/main.log for full traceback details")
         return False
 
 """

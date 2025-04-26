@@ -91,6 +91,7 @@ class TechnicalIndicators:
         self.close_col = 'close'
         self.high_col = 'high' if 'high' in prices_df.columns else self.close_col
         self.low_col = 'low' if 'low' in prices_df.columns else self.close_col
+        self.open_col = 'open' if 'open' in prices_df.columns else self.close_col  # Tambahkan ini
         self.volume_col = 'volume' if 'volume' in prices_df.columns else None
         
         # Log informasi periode yang digunakan

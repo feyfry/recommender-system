@@ -4,7 +4,7 @@ API endpoints untuk analisis teknikal proyek Web3
 
 import os
 import logging
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any, Tuple, Union
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
@@ -140,7 +140,7 @@ class IndicatorPeriods(BaseModel):
     ma_long: int = Field(200, ge=50, le=500, description="Periode MA jangka panjang (standard: 200)")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "rsi_period": 14,
                 "macd_fast": 12,
@@ -274,6 +274,10 @@ async def get_trading_signals(request: TradingSignalRequest):
             days=optimal_days, 
             interval=optimal_interval
         )
+        
+        # Ensure price_data has necessary columns (PERBAIKAN)
+        if 'close' not in price_data.columns and 'price' in price_data.columns:
+            price_data['close'] = price_data['price']
         
         # Detect market regime
         market_regime = detect_market_regime(price_data)
@@ -920,7 +924,11 @@ async def get_market_events(
     project_id: str = Path(..., description="Project ID"),
     days: int = Query(40, ge=1, le=365),
     interval: str = Query("1d", description="Price data interval"),
-    custom_thresholds: Dict[str, float] = Query(None, description="Custom thresholds for event detection")
+    # custom_thresholds: Dict[str, float] = Query(None, description="Custom thresholds for event detection")
+    pump_threshold: Optional[float] = Query(None, description="Threshold for pump events"),
+    dump_threshold: Optional[float] = Query(None, description="Threshold for dump events"),
+    volatility_threshold: Optional[float] = Query(None, description="Threshold for high volatility events"),
+    volume_threshold: Optional[float] = Query(None, description="Threshold for volume spike events")
 ):
     """
     Detect market events such as pumps, dumps, high volatility, etc. with enhanced detection
@@ -937,6 +945,17 @@ async def get_market_events(
         
         # Detect market regime first
         market_regime = detect_market_regime(price_data)
+
+        # custom_thresholds dari parameter individual
+        custom_thresholds = {}
+        if pump_threshold is not None:
+            custom_thresholds['pump'] = pump_threshold
+        if dump_threshold is not None:
+            custom_thresholds['dump'] = dump_threshold
+        if volatility_threshold is not None:
+            custom_thresholds['volatility'] = volatility_threshold
+        if volume_threshold is not None:
+            custom_thresholds['volume_spike'] = volume_threshold
         
         # Adjust thresholds based on market regime if no custom thresholds
         if not custom_thresholds:
@@ -1222,8 +1241,9 @@ async def backtest_strategy(
             indicator_periods = get_optimal_parameters(price_data, market_regime)
             logger.info(f"Using optimized parameters for {market_regime} regime")
             
-        # Run backtest
-        backtest_results = backtest_strategy(
+        # Run backtest - import dari src.technical.signals untuk menghindari rekursi
+        from src.technical.signals import backtest_strategy as run_backtest
+        backtest_results = run_backtest(
             price_data, 
             strategy_type=strategy_type,
             indicator_periods=indicator_periods,
@@ -1245,13 +1265,66 @@ async def backtest_strategy(
         returns_series = backtest_results.get('returns_series', pd.Series())
         drawdown_series = backtest_results.get('drawdown_series', pd.Series())
         
+        # Helper functions untuk metrik tambahan
+        def calculate_sortino_ratio(returns):
+            """Calculate Sortino ratio (return / downside risk)"""
+            if returns.empty:
+                return 0
+            downside_returns = returns[returns < 0]
+            if downside_returns.empty or downside_returns.std() == 0:
+                return 0
+            return (returns.mean() * np.sqrt(252)) / (downside_returns.std() * np.sqrt(252))
+        
+        def get_max_consecutive(trades, result_type):
+            """Get maximum consecutive wins or losses"""
+            max_consecutive = 0
+            current_consecutive = 0
+            
+            if result_type == "win":
+                for i in range(0, len(trades), 2):
+                    if i+1 < len(trades) and trades[i+1]['capital'] > trades[i]['capital']:
+                        current_consecutive += 1
+                        max_consecutive = max(max_consecutive, current_consecutive)
+                    else:
+                        current_consecutive = 0
+            else:  # loss
+                for i in range(0, len(trades), 2):
+                    if i+1 < len(trades) and trades[i+1]['capital'] <= trades[i]['capital']:
+                        current_consecutive += 1
+                        max_consecutive = max(max_consecutive, current_consecutive)
+                    else:
+                        current_consecutive = 0
+                        
+            return max_consecutive
+        
+        def calculate_profit_factor(trades):
+            """Calculate profit factor (total gains / total losses)"""
+            total_gains = 0
+            total_losses = 0
+            
+            for i in range(0, len(trades), 2):
+                if i+1 < len(trades):
+                    trade_result = trades[i+1]['capital'] - trades[i]['capital']
+                    if trade_result > 0:
+                        total_gains += trade_result
+                    else:
+                        total_losses += abs(trade_result)
+            
+            return total_gains / total_losses if total_losses > 0 else float('inf')
+        
+        def calculate_recovery_factor(total_return, max_drawdown):
+            """Calculate recovery factor (return / max drawdown)"""
+            if max_drawdown == 0:
+                return float('inf')
+            return total_return / max_drawdown
+        
         additional_metrics = {
             "volatility": float(returns_series.std() * np.sqrt(252)) if not returns_series.empty else 0,
-            "sortino_ratio": self._calculate_sortino_ratio(returns_series) if not returns_series.empty else 0,
-            "max_consecutive_wins": self._get_max_consecutive(trade_history, "win"),
-            "max_consecutive_losses": self._get_max_consecutive(trade_history, "loss"),
-            "profit_factor": self._calculate_profit_factor(trade_history),
-            "recovery_factor": self._calculate_recovery_factor(
+            "sortino_ratio": calculate_sortino_ratio(returns_series),
+            "max_consecutive_wins": get_max_consecutive(trade_history, "win"),
+            "max_consecutive_losses": get_max_consecutive(trade_history, "loss"),
+            "profit_factor": calculate_profit_factor(trade_history),
+            "recovery_factor": calculate_recovery_factor(
                 backtest_results['total_return'],
                 backtest_results['max_drawdown']
             ) if backtest_results.get('max_drawdown') else 0

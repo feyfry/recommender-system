@@ -497,10 +497,10 @@ class TechnicalAnalyzer:
             df['rsi_slope'] = df['rsi'].diff(5)
             df['price_slope'] = df[close_col].diff(5)
             
-            # Bullish divergence (price: down, RSI: up)
+            # Bullish divergence: price makes higher high but RSI makes lower high
             df['bullish_divergence'] = ((df['price_slope'] < 0) & (df['rsi_slope'] > 0)).astype(int)
             
-            # Bearish divergence (price: up, RSI: down)
+            # Bearish divergence: price makes lower low but RSI makes higher low
             df['bearish_divergence'] = ((df['price_slope'] > 0) & (df['rsi_slope'] < 0)).astype(int)
         
         # Price Rate of Change Indicator dengan berbagai periode
