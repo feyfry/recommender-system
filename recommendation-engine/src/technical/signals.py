@@ -34,6 +34,324 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def detect_market_regime(prices_df: pd.DataFrame, window: int = 30) -> str:
+    """
+    Mendeteksi regime pasar saat ini
+
+    Args:
+        prices_df: DataFrame dengan data harga
+        window: Periode untuk perhitungan (default: 30)
+        
+    Returns:
+        str: Tipe regime pasar ('trending_bullish', 'trending_bearish', 'ranging', 'volatile')
+    """
+    # Pastikan ada cukup data
+    if len(prices_df) < window * 2:
+        logger.warning(f"Tidak cukup data untuk deteksi regime pasar, minimal {window*2} titik data diperlukan")
+        return "unknown"
+    
+    # Extract price data
+    close_prices = prices_df['close']
+    
+    # Hitung returns
+    returns = close_prices.pct_change().dropna()
+    
+    # Hitung volatilitas
+    volatility = returns.rolling(window=window).std() * np.sqrt(252)  # Annualized
+    current_volatility = volatility.iloc[-1] if not pd.isna(volatility.iloc[-1]) else 0.3
+    
+    # Hitung ADX - kekuatan tren
+    if 'high' in prices_df.columns and 'low' in prices_df.columns:
+        adx, plus_di, minus_di = calculate_adx(
+            prices_df['high'], 
+            prices_df['low'], 
+            close_prices,
+            window=14
+        )
+        current_adx = adx.iloc[-1] if not pd.isna(adx.iloc[-1]) else 15
+        current_plus_di = plus_di.iloc[-1] if not pd.isna(plus_di.iloc[-1]) else 15
+        current_minus_di = minus_di.iloc[-1] if not pd.isna(minus_di.iloc[-1]) else 15
+    else:
+        # Fallback jika kolom high/low tidak tersedia
+        current_adx = 15
+        current_plus_di = 15
+        current_minus_di = 15
+    
+    # Hitung slope dari moving average untuk arah tren
+    ma_short = close_prices.rolling(window=20).mean()
+    ma_slope = (ma_short.iloc[-1] - ma_short.iloc[-window]) / ma_short.iloc[-window] if len(ma_short) > window else 0
+    
+    # Logika deteksi regime
+    if current_adx > 25:  # Tren kuat
+        if ma_slope > 0 and current_plus_di > current_minus_di:
+            if current_volatility > 0.5:  # Volatile
+                return "trending_bullish_volatile"
+            else:
+                return "trending_bullish"
+        elif ma_slope < 0 and current_minus_di > current_plus_di:
+            if current_volatility > 0.5:  # Volatile
+                return "trending_bearish_volatile"
+            else:
+                return "trending_bearish"
+        else:
+            return "trending_neutral"
+    else:  # Tren lemah / ranging
+        if current_volatility > 0.5:
+            return "ranging_volatile"
+        else:
+            return "ranging_low_volatility"
+
+
+def get_optimal_parameters(prices_df: pd.DataFrame, market_regime: str = None, 
+                          trading_style: str = 'standard') -> Dict[str, Any]:
+    """
+    Menentukan parameter teknikal optimal berdasarkan karakteristik pasar
+
+    Args:
+        prices_df: DataFrame dengan data harga
+        market_regime: Tipe regime pasar (jika None, akan dihitung)
+        trading_style: Gaya trading ('short_term', 'standard', 'long_term')
+        
+    Returns:
+        dict: Parameter teknikal yang dioptimalkan
+    """
+    # Deteksi regime pasar jika tidak disediakan
+    if market_regime is None:
+        market_regime = detect_market_regime(prices_df)
+    
+    logger.info(f"Menentukan parameter optimal untuk regime: {market_regime}, style: {trading_style}")
+    
+    # Parameter dasar berdasarkan trading style
+    if trading_style == 'short_term':
+        base_params = {
+            'rsi_period': 7,
+            'macd_fast': 8,
+            'macd_slow': 17,
+            'macd_signal': 9,
+            'bb_period': 10,
+            'stoch_k': 7,
+            'stoch_d': 3,
+            'ma_short': 10,
+            'ma_medium': 30,
+            'ma_long': 60,
+            'atr_period': 7,
+            'adx_period': 7
+        }
+    elif trading_style == 'long_term':
+        base_params = {
+            'rsi_period': 21,
+            'macd_fast': 19,
+            'macd_slow': 39,
+            'macd_signal': 9,
+            'bb_period': 30,
+            'stoch_k': 21,
+            'stoch_d': 7,
+            'ma_short': 50,
+            'ma_medium': 100,
+            'ma_long': 200,
+            'atr_period': 21,
+            'adx_period': 21
+        }
+    else:  # standard
+        base_params = {
+            'rsi_period': 14,
+            'macd_fast': 12,
+            'macd_slow': 26,
+            'macd_signal': 9,
+            'bb_period': 20,
+            'stoch_k': 14,
+            'stoch_d': 3,
+            'ma_short': 20,
+            'ma_medium': 50,
+            'ma_long': 200,
+            'atr_period': 14,
+            'adx_period': 14
+        }
+    
+    # Adaptasi parameter berdasarkan market regime
+    if 'trending_bullish' in market_regime:
+        # Untuk tren bullish, fokus pada indikator momentum dan tren
+        params = base_params.copy()
+        # Kurangi periode RSI untuk mendeteksi momentum lebih cepat
+        params['rsi_period'] = max(5, int(base_params['rsi_period'] * 0.8))
+        # Perkecil periode MACD untuk respon lebih cepat
+        params['macd_fast'] = max(6, int(base_params['macd_fast'] * 0.9))
+        params['macd_slow'] = max(12, int(base_params['macd_slow'] * 0.9))
+        # Perkecil periode Bollinger untuk respon lebih cepat
+        params['bb_period'] = max(8, int(base_params['bb_period'] * 0.9))
+        
+    elif 'trending_bearish' in market_regime:
+        # Untuk tren bearish, fokus pada overbought conditions dan sinyal pembalikan
+        params = base_params.copy()
+        # Periode RSI normal untuk mendeteksi oversold conditions
+        # Perbesar periode Bollinger sedikit untuk konfirmasi lebih kuat
+        params['bb_period'] = min(40, int(base_params['bb_period'] * 1.1))
+        
+    elif 'ranging_volatile' in market_regime:
+        # Untuk pasar sideways dengan volatilitas tinggi, gunakan oscillators
+        params = base_params.copy()
+        # Perkecil periode RSI dan stochastic untuk mendeteksi oversold/overbought
+        params['rsi_period'] = max(5, int(base_params['rsi_period'] * 0.7))
+        params['stoch_k'] = max(5, int(base_params['stoch_k'] * 0.7))
+        # Perbesar Bollinger untuk menangkap range lebih baik
+        params['bb_period'] = min(40, int(base_params['bb_period'] * 1.2))
+        
+    elif 'ranging_low_volatility' in market_regime:
+        # Untuk pasar sideways dengan volatilitas rendah, gunakan oscillators dengan periode lebih panjang
+        params = base_params.copy()
+        # Perbesar periode untuk mengurangi noise
+        params['rsi_period'] = min(30, int(base_params['rsi_period'] * 1.2))
+        params['macd_fast'] = min(20, int(base_params['macd_fast'] * 1.1))
+        params['macd_slow'] = min(40, int(base_params['macd_slow'] * 1.1))
+        params['bb_period'] = min(40, int(base_params['bb_period'] * 1.2))
+        
+    else:  # Default/unknown
+        params = base_params.copy()
+    
+    # Jika volatilitas tinggi, sesuaikan beberapa parameter
+    if 'volatile' in market_regime:
+        # Perbesar periode Bollinger dan RSI untuk filter noise
+        params['bb_period'] = min(40, int(params['bb_period'] * 1.1))
+        params['rsi_period'] = max(5, min(30, int(params['rsi_period'] * 1.1)))
+    
+    # Batasi parameter agar tidak terlalu ekstrem
+    for key, value in params.items():
+        if key in ['rsi_period', 'stoch_k', 'macd_fast']:
+            params[key] = max(5, value)  # Minimal 5
+        elif key in ['macd_slow', 'macd_signal', 'stoch_d', 'bb_period']:
+            params[key] = max(7, value)  # Minimal 7
+    
+    return params
+
+
+def weighted_signal_ensemble(signals: Dict[str, Dict[str, Any]], 
+                           market_regime: str) -> Dict[str, Any]:
+    """
+    Menggabungkan sinyal trading dengan bobot yang disesuaikan berdasarkan market regime
+    
+    Args:
+        signals: Dictionary berisi signal dari berbagai indikator
+        market_regime: Tipe regime pasar saat ini
+        
+    Returns:
+        dict: Hasil ensemble berisi action, confidence, dan scoring details
+    """
+    # Default weights
+    weights = {
+        'rsi': 0.15,
+        'macd': 0.20,
+        'bollinger': 0.15,
+        'stochastic': 0.10,
+        'adx': 0.10,
+        'moving_avg': 0.30
+    }
+    
+    # Sesuaikan bobot berdasarkan market regime
+    if 'trending_bullish' in market_regime:
+        # Prioritaskan tren indikator untuk market bullish
+        weights = {
+            'rsi': 0.15,         # RSI penting untuk momentum
+            'macd': 0.25,        # MACD penting untuk tren
+            'bollinger': 0.10,   # Bollinger kurang penting dalam tren jelas
+            'stochastic': 0.10,  # Stochastic untuk konfirmasi momentum
+            'adx': 0.15,         # ADX penting untuk kekuatan tren
+            'moving_avg': 0.25   # Moving average sangat penting dalam tren
+        }
+    elif 'trending_bearish' in market_regime:
+        # Prioritaskan indikator reversal untuk market bearish
+        weights = {
+            'rsi': 0.20,         # RSI penting untuk deteksi oversold
+            'macd': 0.20,        # MACD untuk momentum
+            'bollinger': 0.15,   # Bollinger untuk boundaries
+            'stochastic': 0.15,  # Stochastic untuk konfirmasi
+            'adx': 0.10,         # ADX untuk kekuatan tren
+            'moving_avg': 0.20   # Moving average untuk arah tren
+        }
+    elif 'ranging_volatile' in market_regime:
+        # Prioritaskan oscillators untuk market ranging volatile
+        weights = {
+            'rsi': 0.25,         # RSI sangat penting di market ranging
+            'macd': 0.10,        # MACD kurang penting
+            'bollinger': 0.30,   # Bollinger penting untuk range boundaries
+            'stochastic': 0.20,  # Stochastic penting untuk overbought/oversold
+            'adx': 0.05,         # ADX kurang relevan
+            'moving_avg': 0.10   # MA kurang penting dalam ranging market
+        }
+    elif 'ranging_low_volatility' in market_regime:
+        # Strategi khusus untuk market ranging dengan volatilitas rendah
+        weights = {
+            'rsi': 0.20,         # RSI penting
+            'macd': 0.15,        # MACD untuk perubahan momentum
+            'bollinger': 0.30,   # Bollinger sangat penting untuk boundaries
+            'stochastic': 0.15,  # Stochastic untuk overbought/oversold
+            'adx': 0.05,         # ADX kurang relevan
+            'moving_avg': 0.15   # MA untuk dukungan/resistensi
+        }
+    
+    # Hitung weighted scores
+    buy_score = 0
+    sell_score = 0
+    total_weight = 0
+    used_signals = []
+    
+    for indicator, signal_info in signals.items():
+        if indicator in weights and 'signal' in signal_info:
+            weight = weights[indicator]
+            signal = signal_info['signal']
+            strength = signal_info.get('strength', 0.5)
+            
+            total_weight += weight
+            used_signals.append(indicator)
+            
+            if signal == 'buy':
+                buy_score += strength * weight
+            elif signal == 'sell':
+                sell_score += strength * weight
+            # 'hold' tidak berkontribusi ke buy_score atau sell_score
+    
+    # Jika tidak ada sinyal yang ditemukan, set nilai default
+    if total_weight == 0:
+        logger.warning("Tidak ada sinyal valid yang ditemukan untuk ensemble")
+        return {
+            "action": "hold",
+            "confidence": 0.5,
+            "buy_score": 0,
+            "sell_score": 0,
+            "used_signals": []
+        }
+    
+    # Normalisasi skor
+    buy_score = buy_score / total_weight 
+    sell_score = sell_score / total_weight
+    
+    # Tentukan aksi berdasarkan skor tertinggi
+    threshold = 0.2  # Minimum difference untuk keputusan yang jelas
+    
+    if buy_score > sell_score + threshold:
+        action = "buy"
+        confidence = buy_score
+    elif sell_score > buy_score + threshold:
+        action = "sell"
+        confidence = sell_score
+    else:
+        action = "hold"
+        # Konfiden hold berdasarkan kedekatan skor buy dan sell
+        # Jika keduanya mendekati, konfiden hold tinggi
+        confidence = 1.0 - abs(buy_score - sell_score)
+    
+    # Batas confidence 0-1
+    confidence = min(1.0, max(0.0, confidence))
+    
+    return {
+        "action": action,
+        "confidence": confidence,
+        "buy_score": buy_score,
+        "sell_score": sell_score,
+        "used_signals": used_signals,
+        "weights": {k: v for k, v in weights.items() if k in used_signals}
+    }
+
+
 def calculate_rsi(prices: pd.Series, window: int = 14) -> pd.Series:
     """
     Calculate Relative Strength Index (RSI)
@@ -73,19 +391,33 @@ def calculate_rsi(prices: pd.Series, window: int = 14) -> pd.Series:
 
 
 def _calculate_rsi_pandas(prices: pd.Series, window: int = 14) -> pd.Series:
-    """Implementasi RSI menggunakan pandas"""
-    # Calculate RSI using pandas
+    """Implementasi RSI menggunakan pandas yang diperbarui dengan Exponential Average"""
+    # Calculate price changes
     delta = prices.diff()
+    
+    # Separate gains and losses
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta < 0, 0)
     
-    avg_gain = gain.rolling(window=window).mean()
-    avg_loss = loss.rolling(window=window).mean()
+    # Calculate averages - gunakan EMA untuk hasil yang lebih responsif
+    # First values using SMA
+    avg_gain = gain.iloc[:window].mean()
+    avg_loss = loss.iloc[:window].mean()
     
-    rs = avg_gain / avg_loss.replace(0, np.finfo(float).eps)  # Avoid division by zero
-    rsi = 100 - (100 / (1 + rs))
+    # Rest of the values - smoother RSI dengan formula Wilder
+    rsi_values = [np.nan] * window
+    for i in range(window, len(prices)):
+        avg_gain = (avg_gain * (window - 1) + gain.iloc[i]) / window
+        avg_loss = (avg_loss * (window - 1) + loss.iloc[i]) / window
+        
+        # Hindari division by zero
+        if avg_loss == 0:
+            rsi_values.append(100)
+        else:
+            rs = avg_gain / avg_loss
+            rsi_values.append(100 - (100 / (1 + rs)))
     
-    return rsi
+    return pd.Series(rsi_values, index=prices.index)
 
 
 def calculate_macd(prices: pd.Series, 
@@ -150,13 +482,13 @@ def _calculate_macd_pandas(prices: pd.Series,
                           fast_period: int = 12, 
                           slow_period: int = 26, 
                           signal_period: int = 9) -> Tuple[pd.Series, pd.Series, pd.Series]:
-    """Implementasi MACD menggunakan pandas"""
-    # Calculate MACD using pandas
-    fast_ema = prices.ewm(span=fast_period, adjust=False).mean()
-    slow_ema = prices.ewm(span=slow_period, adjust=False).mean()
+    """Implementasi MACD menggunakan pandas yang diperbarui untuk akurasi yang lebih baik"""
+    # Versi yang lebih akurat dengan adjust=True
+    fast_ema = prices.ewm(span=fast_period, adjust=True, min_periods=fast_period).mean()
+    slow_ema = prices.ewm(span=slow_period, adjust=True, min_periods=slow_period).mean()
     
     macd = fast_ema - slow_ema
-    signal = macd.ewm(span=signal_period, adjust=False).mean()
+    signal = macd.ewm(span=signal_period, adjust=True, min_periods=signal_period).mean()
     histogram = macd - signal
     
     return macd, signal, histogram
@@ -218,9 +550,9 @@ def calculate_bollinger_bands(prices: pd.Series, window: int = 20, num_std: floa
 
 def _calculate_bollinger_pandas(prices: pd.Series, window: int = 20, num_std: float = 2.0) -> Tuple[pd.Series, pd.Series, pd.Series]:
     """Implementasi Bollinger Bands menggunakan pandas"""
-    # Calculate Bollinger Bands using pandas
-    middle = prices.rolling(window=window).mean()
-    std = prices.rolling(window=window).std()
+    # Gunakan SMA yang sebenarnya untuk konsistensi
+    middle = prices.rolling(window=window, min_periods=window).mean()
+    std = prices.rolling(window=window, min_periods=window).std()
     
     upper = middle + (std * num_std)
     lower = middle - (std * num_std)
@@ -299,582 +631,26 @@ def _calculate_stochastic_pandas(prices: pd.Series,
                               low_prices: pd.Series,
                               k_period: int = 14, 
                               d_period: int = 3) -> Tuple[pd.Series, pd.Series]:
-    """Implementasi Stochastic Oscillator menggunakan pandas"""
-    # Calculate Stochastic Oscillator using pandas
-    lowest_low = low_prices.rolling(window=k_period).min()
-    highest_high = high_prices.rolling(window=k_period).max()
+    """Implementasi Stochastic Oscillator menggunakan pandas yang diperbarui"""
+    # Calculate Stochastic Oscillator dengan implementasi yang lebih akurat
+    # Stochastic %K = (Current Close - Lowest Low) / (Highest High - Lowest Low) * 100
+    
+    # Hitung range k_period
+    lowest_low = low_prices.rolling(window=k_period, min_periods=k_period).min()
+    highest_high = high_prices.rolling(window=k_period, min_periods=k_period).max()
     
     # Hindari pembagian dengan nol
     denominator = highest_high - lowest_low
     denominator = denominator.replace(0, np.finfo(float).eps)
     
-    k = 100 * (prices - lowest_low) / denominator
-    d = k.rolling(window=d_period).mean()
+    # Hitung %K dengan min/max capping
+    k_raw = ((prices - lowest_low) / denominator) * 100
+    k = k_raw.clip(0, 100)  # Pastikan nilainya dalam range 0-100
+    
+    # Hitung %D (simple moving average dari %K)
+    d = k.rolling(window=d_period, min_periods=d_period).mean()
     
     return k, d
-
-
-def generate_trading_signals(prices_df: pd.DataFrame, 
-                           indicator_periods: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """
-    Generate trading signals based on technical indicators
-    
-    Args:
-        prices_df: DataFrame with price data (must have 'close' column, 
-                  optionally 'high', 'low', 'volume')
-        indicator_periods: Dictionary of indicator periods:
-            - rsi_period: RSI period (default 14)
-            - macd_fast: MACD fast period (default 12)
-            - macd_slow: MACD slow period (default 26)
-            - macd_signal: MACD signal period (default 9)
-            - bb_period: Bollinger Bands period (default 20)
-            - stoch_k: Stochastic K period (default 14)
-            - stoch_d: Stochastic D period (default 3)
-            - ma_short: Short moving average period (default 20)
-            - ma_medium: Medium moving average period (default 50)
-            - ma_long: Long moving average period (default 200)
-        
-    Returns:
-        dict: Trading signals and analysis
-    """
-    logger.info("Generating trading signals")
-    
-    # Default period jika tidak ada yang disediakan
-    if indicator_periods is None:
-        indicator_periods = {}
-    
-    # Ekstrak periode indikator atau gunakan default
-    rsi_period = indicator_periods.get('rsi_period', 14)
-    macd_fast = indicator_periods.get('macd_fast', 12)
-    macd_slow = indicator_periods.get('macd_slow', 26)
-    macd_signal = indicator_periods.get('macd_signal', 9)
-    bb_period = indicator_periods.get('bb_period', 20)
-    stoch_k = indicator_periods.get('stoch_k', 14)
-    stoch_d = indicator_periods.get('stoch_d', 3)
-    ma_short = indicator_periods.get('ma_short', 20)
-    ma_medium = indicator_periods.get('ma_medium', 50)
-    ma_long = indicator_periods.get('ma_long', 200)
-    
-    # Log periode indikator yang digunakan
-    logger.info(f"Indikator Periods - RSI: {rsi_period}, MACD: {macd_fast}/{macd_slow}/{macd_signal}, "
-               f"BB: {bb_period}, Stoch: {stoch_k}/{stoch_d}, MA: {ma_short}/{ma_medium}/{ma_long}")
-    
-    # Verify required columns
-    required_columns = ['close']
-    for col in required_columns:
-        if col not in prices_df.columns:
-            logger.error(f"Required column '{col}' not found in prices_df")
-            return {
-                "error": f"Missing required column: {col}",
-                "action": "hold",
-                "confidence": 0.0
-            }
-    
-    # Pastikan minimal data cukup untuk perhitungan
-    # Hitung minimal data yang diperlukan berdasarkan indikator terlama
-    min_required_points = max(
-        3 * rsi_period,
-        macd_slow + macd_signal + 10,
-        bb_period + 10,
-        stoch_k + stoch_d + 5,
-        ma_long + 10
-    )
-    
-    # Perubahan di sini: Sesuaikan kebutuhan data berdasarkan trading style
-    # Jika periode MA jangka panjang kurang dari 100, tidak perlu data sangat panjang
-    is_short_term = ma_long <= 100
-    if is_short_term:
-        # Untuk analisis jangka pendek, kurangi kebutuhan data
-        min_required_points = min(min_required_points, 60)
-        logger.info(f"Analisis jangka pendek terdeteksi, kebutuhan data minimum disesuaikan menjadi {min_required_points}")
-    elif ma_long > 100:
-        # Sanity check: minimum 30 days untuk semua analisis
-        min_required_points = max(30, min_required_points)
-    
-    if len(prices_df) < min_required_points:
-        logger.warning(f"Tidak cukup data untuk analisis teknikal yang akurat. Minimal {min_required_points} titik data diperlukan, hanya {len(prices_df)} tersedia.")
-        
-        # Jika terlalu sedikit data, berikan error yang lebih spesifik
-        if len(prices_df) < 20:
-            logger.info(f"Data terlalu sedikit untuk analisis teknikal dasar")
-            return {
-                "error": f"Data tidak cukup untuk analisis. Dibutuhkan minimal 20 titik data, hanya tersedia {len(prices_df)}.",
-                "action": "hold",
-                "confidence": 0.0,
-                "min_days_needed": min_required_points
-            }
-        
-        # Jika data cukup untuk analisis dasar tapi kurang dari ideal, lanjutkan dengan warning
-        logger.info(f"Coba tambahkan parameter 'days' dengan nilai lebih besar (misalnya, {min_required_points + 10})")
-        # Di sini kita lanjutkan dengan perhitungan meskipun data kurang ideal
-    
-    # Use appropriate column names or defaults
-    close_col = 'close'
-    high_col = 'high' if 'high' in prices_df.columns else close_col
-    low_col = 'low' if 'low' in prices_df.columns else close_col
-    
-    # Extract price series
-    close_prices = prices_df[close_col]
-    high_prices = prices_df[high_col]
-    low_prices = prices_df[low_col]
-    
-    # Check if TA-Lib is available and log it
-    if TALIB_AVAILABLE:
-        logger.info("Menggunakan TA-Lib untuk perhitungan indikator teknikal")
-    else:
-        logger.info("TA-Lib tidak tersedia, menggunakan implementasi pandas")
-    
-    # Calculate indicators
-    # 1. RSI
-    rsi = calculate_rsi(close_prices, window=rsi_period)
-    
-    # 2. MACD
-    macd, signal, histogram = calculate_macd(close_prices, 
-                                           fast_period=macd_fast, 
-                                           slow_period=macd_slow, 
-                                           signal_period=macd_signal)
-    
-    # 3. Bollinger Bands
-    upper_band, middle_band, lower_band = calculate_bollinger_bands(close_prices, window=bb_period)
-    
-    # 4. Stochastic Oscillator
-    k, d = calculate_stochastic(close_prices, high_prices, low_prices, 
-                              k_period=stoch_k, d_period=stoch_d)
-    
-    # 5. ADX
-    adx, plus_di, minus_di = calculate_adx(high_prices, low_prices, close_prices)
-    
-    # 6. Moving Averages
-    sma_short = close_prices.rolling(window=ma_short).mean()
-    sma_medium = close_prices.rolling(window=ma_medium).mean()
-    sma_long = close_prices.rolling(window=ma_long).mean()
-    
-    # Log status perhitungan indikator
-    for indicator_name, indicator_data in [
-        ("RSI", rsi), 
-        ("MACD", macd),
-        ("MACD Signal", signal),
-        ("Bollinger Middle", middle_band),
-        ("Stochastic K", k),
-        ("ADX", adx)
-    ]:
-        valid_points = indicator_data.count()
-        total_points = len(indicator_data)
-        logger.info(f"Indikator {indicator_name}: {valid_points}/{total_points} titik data valid")
-    
-    # Get latest values
-    latest_close = close_prices.iloc[-1]
-    latest_rsi = rsi.iloc[-1] if not pd.isna(rsi.iloc[-1]) else 50  # Default ke netral jika tidak valid
-    latest_macd = macd.iloc[-1] if not pd.isna(macd.iloc[-1]) else 0
-    latest_signal = signal.iloc[-1] if not pd.isna(signal.iloc[-1]) else 0
-    latest_histogram = histogram.iloc[-1] if not pd.isna(histogram.iloc[-1]) else 0
-    latest_upper = upper_band.iloc[-1] if not pd.isna(upper_band.iloc[-1]) else latest_close * 1.05
-    latest_middle = middle_band.iloc[-1] if not pd.isna(middle_band.iloc[-1]) else latest_close
-    latest_lower = lower_band.iloc[-1] if not pd.isna(lower_band.iloc[-1]) else latest_close * 0.95
-    latest_k = k.iloc[-1] if not pd.isna(k.iloc[-1]) else 50
-    latest_d = d.iloc[-1] if not pd.isna(d.iloc[-1]) else 50
-    latest_adx = adx.iloc[-1] if not pd.isna(adx.iloc[-1]) else 15
-    latest_plus_di = plus_di.iloc[-1] if not pd.isna(plus_di.iloc[-1]) else 20
-    latest_minus_di = minus_di.iloc[-1] if not pd.isna(minus_di.iloc[-1]) else 20
-    
-    # Validasi nilai sma
-    latest_sma_short = sma_short.iloc[-1] if not pd.isna(sma_short.iloc[-1]) else latest_close
-    latest_sma_medium = sma_medium.iloc[-1] if not pd.isna(sma_medium.iloc[-1]) else latest_close
-    latest_sma_long = sma_long.iloc[-1] if not pd.isna(sma_long.iloc[-1]) else latest_close
-    
-    # Calculate signals
-    signals = {}
-    
-    # RSI signals
-    if latest_rsi < 30:
-        signals['rsi'] = {
-            'signal': 'buy',
-            'strength': min(1.0, (30 - latest_rsi) / 10),
-            'description': f"RSI oversold di level {latest_rsi:.2f} (periode {rsi_period})"
-        }
-    elif latest_rsi > 70:
-        signals['rsi'] = {
-            'signal': 'sell',
-            'strength': min(1.0, (latest_rsi - 70) / 10),
-            'description': f"RSI overbought di level {latest_rsi:.2f} (periode {rsi_period})"
-        }
-    else:
-        signals['rsi'] = {
-            'signal': 'hold',
-            'strength': 0.5,
-            'description': f"RSI netral di level {latest_rsi:.2f} (periode {rsi_period})"
-        }
-    
-    # MACD signals - perbaiki pengecekan crossover
-    # Pastikan kita memiliki setidaknya 2 data poin valid
-    valid_macd = macd.dropna()
-    valid_signal = signal.dropna()
-    
-    macd_cross_up = False
-    macd_cross_down = False
-    
-    if len(valid_macd) >= 2 and len(valid_signal) >= 2:
-        macd_cross_up = (valid_macd.iloc[-1] > valid_signal.iloc[-1]) and (valid_macd.iloc[-2] <= valid_signal.iloc[-2])
-        macd_cross_down = (valid_macd.iloc[-1] < valid_signal.iloc[-1]) and (valid_macd.iloc[-2] >= valid_signal.iloc[-2])
-    
-    if macd_cross_up:
-        signals['macd'] = {
-            'signal': 'buy',
-            'strength': 0.8,
-            'description': f"MACD memotong ke atas signal line (bullish) - ({macd_fast}/{macd_slow}/{macd_signal})"
-        }
-    elif macd_cross_down:
-        signals['macd'] = {
-            'signal': 'sell',
-            'strength': 0.8,
-            'description': f"MACD memotong ke bawah signal line (bearish) - ({macd_fast}/{macd_slow}/{macd_signal})"
-        }
-    elif latest_macd > latest_signal:
-        signals['macd'] = {
-            'signal': 'buy',
-            'strength': 0.6,
-            'description': f"MACD di atas signal line (bullish) - ({macd_fast}/{macd_slow}/{macd_signal})"
-        }
-    elif latest_macd < latest_signal:
-        signals['macd'] = {
-            'signal': 'sell',
-            'strength': 0.6,
-            'description': f"MACD di bawah signal line (bearish) - ({macd_fast}/{macd_slow}/{macd_signal})"
-        }
-    else:
-        signals['macd'] = {
-            'signal': 'hold',
-            'strength': 0.5,
-            'description': f"MACD netral - ({macd_fast}/{macd_slow}/{macd_signal})"
-        }
-    
-    # Bollinger Bands signals
-    # Cek apakah nilai Bollinger Bands valid
-    if not pd.isna(latest_upper) and not pd.isna(latest_lower) and latest_upper > latest_lower:
-        bb_percent = (latest_close - latest_lower) / (latest_upper - latest_lower)
-        
-        if latest_close > latest_upper:
-            signals['bollinger'] = {
-                'signal': 'sell',
-                'strength': 0.7,
-                'description': f"Harga di atas upper Bollinger Band (overbought) - (periode {bb_period})"
-            }
-        elif latest_close < latest_lower:
-            signals['bollinger'] = {
-                'signal': 'buy',
-                'strength': 0.7,
-                'description': f"Harga di bawah lower Bollinger Band (oversold) - (periode {bb_period})"
-            }
-        elif bb_percent > 0.8:
-            signals['bollinger'] = {
-                'signal': 'sell',
-                'strength': 0.6,
-                'description': f"Harga mendekati upper Bollinger Band (potensi pembalikan) - (periode {bb_period})"
-            }
-        elif bb_percent < 0.2:
-            signals['bollinger'] = {
-                'signal': 'buy',
-                'strength': 0.6,
-                'description': f"Harga mendekati lower Bollinger Band (potensi pembalikan) - (periode {bb_period})"
-            }
-        else:
-            signals['bollinger'] = {
-                'signal': 'hold',
-                'strength': 0.5,
-                'description': f"Harga di dalam Bollinger Bands (netral) - (periode {bb_period})"
-            }
-    else:
-        signals['bollinger'] = {
-            'signal': 'hold',
-            'strength': 0.5,
-            'description': f"Harga di dalam Bollinger Bands (netral) - (periode {bb_period})"
-        }
-    
-    # Stochastic signals - perbaiki pengecekan crossover
-    valid_k = k.dropna()
-    valid_d = d.dropna()
-    
-    stoch_cross_up = False
-    stoch_cross_down = False
-    
-    if len(valid_k) >= 2 and len(valid_d) >= 2:
-        stoch_cross_up = (valid_k.iloc[-1] > valid_d.iloc[-1]) and (valid_k.iloc[-2] <= valid_d.iloc[-2])
-        stoch_cross_down = (valid_k.iloc[-1] < valid_d.iloc[-1]) and (valid_k.iloc[-2] >= valid_d.iloc[-2])
-    
-    if latest_k < 20 and stoch_cross_up:
-        signals['stochastic'] = {
-            'signal': 'buy',
-            'strength': 0.8,
-            'description': f"Stochastic %K memotong ke atas %D di zona oversold (sinyal beli kuat) - ({stoch_k}/{stoch_d})"
-        }
-    elif latest_k > 80 and stoch_cross_down:
-        signals['stochastic'] = {
-            'signal': 'sell',
-            'strength': 0.8,
-            'description': f"Stochastic %K memotong ke bawah %D di zona overbought (sinyal jual kuat) - ({stoch_k}/{stoch_d})"
-        }
-    elif latest_k < 20:
-        signals['stochastic'] = {
-            'signal': 'buy',
-            'strength': 0.7,
-            'description': f"Stochastic oscillator oversold di level {latest_k:.2f} - ({stoch_k}/{stoch_d})"
-        }
-    elif latest_k > 80:
-        signals['stochastic'] = {
-            'signal': 'sell',
-            'strength': 0.7,
-            'description': f"Stochastic oscillator overbought di level {latest_k:.2f} - ({stoch_k}/{stoch_d})"
-        }
-    else:
-        signals['stochastic'] = {
-            'signal': 'hold',
-            'strength': 0.5,
-            'description': f"Stochastic oscillator netral - ({stoch_k}/{stoch_d})"
-        }
-    
-    # ADX signals
-    if latest_adx > 25:
-        if latest_plus_di > latest_minus_di:
-            signals['adx'] = {
-                'signal': 'buy',
-                'strength': min(1.0, latest_adx / 50),
-                'description': f"Tren kuat dengan +DI > -DI (ADX: {latest_adx:.2f})"
-            }
-        else:
-            signals['adx'] = {
-                'signal': 'sell',
-                'strength': min(1.0, latest_adx / 50),
-                'description': f"Tren kuat dengan -DI > +DI (ADX: {latest_adx:.2f})"
-            }
-    else:
-        signals['adx'] = {
-            'signal': 'hold',
-            'strength': 0.5,
-            'description': f"Tren lemah (ADX: {latest_adx:.2f})"
-        }
-    
-    # Moving Average signals
-    # Perbaiki pengecekan golden cross / death cross
-    valid_sma_medium = sma_medium.dropna()
-    valid_sma_long = sma_long.dropna()
-    
-    golden_cross = False
-    death_cross = False
-    
-    if len(valid_sma_medium) >= 2 and len(valid_sma_long) >= 2:
-        golden_cross = (valid_sma_medium.iloc[-1] > valid_sma_long.iloc[-1]) and (valid_sma_medium.iloc[-2] <= valid_sma_long.iloc[-2])
-        death_cross = (valid_sma_medium.iloc[-1] < valid_sma_long.iloc[-1]) and (valid_sma_medium.iloc[-2] >= valid_sma_long.iloc[-2])
-    
-    if golden_cross:
-        signals['moving_avg'] = {
-            'signal': 'buy',
-            'strength': 0.9,
-            'description': f"Golden Cross: MA {ma_medium} hari memotong di atas MA {ma_long} hari (sinyal beli kuat)"
-        }
-    elif death_cross:
-        signals['moving_avg'] = {
-            'signal': 'sell',
-            'strength': 0.9,
-            'description': f"Death Cross: MA {ma_medium} hari memotong di bawah MA {ma_long} hari (sinyal jual kuat)"
-        }
-    elif latest_close > latest_sma_short and latest_sma_short > latest_sma_medium and latest_sma_medium > latest_sma_long:
-        signals['moving_avg'] = {
-            'signal': 'buy',
-            'strength': 0.8,
-            'description': f"Harga di atas semua moving average utama (tren bullish) - MA {ma_short}/{ma_medium}/{ma_long}"
-        }
-    elif latest_close < latest_sma_short and latest_sma_short < latest_sma_medium and latest_sma_medium < latest_sma_long:
-        signals['moving_avg'] = {
-            'signal': 'sell',
-            'strength': 0.8,
-            'description': f"Harga di bawah semua moving average utama (tren bearish) - MA {ma_short}/{ma_medium}/{ma_long}"
-        }
-    elif latest_close > latest_sma_long:
-        signals['moving_avg'] = {
-            'signal': 'buy',
-            'strength': 0.6,
-            'description': f"Harga di atas MA {ma_long} hari (bullish jangka panjang)"
-        }
-    elif latest_close < latest_sma_long:
-        signals['moving_avg'] = {
-            'signal': 'sell',
-            'strength': 0.6,
-            'description': f"Harga di bawah MA {ma_long} hari (bearish jangka panjang)"
-        }
-    else:
-        signals['moving_avg'] = {
-            'signal': 'hold',
-            'strength': 0.5,
-            'description': f"Moving average netral - MA {ma_short}/{ma_medium}/{ma_long}"
-        }
-    
-    # Combine signals
-    buy_count = sum(1 for s in signals.values() if s['signal'] == 'buy')
-    sell_count = sum(1 for s in signals.values() if s['signal'] == 'sell')
-    hold_count = sum(1 for s in signals.values() if s['signal'] == 'hold')
-    
-    buy_strength = sum(s['strength'] for s in signals.values() if s['signal'] == 'buy')
-    sell_strength = sum(s['strength'] for s in signals.values() if s['signal'] == 'sell')
-    
-    total_indicators = len(signals)
-    
-    # Determine overall action
-    if buy_count > sell_count and buy_strength > sell_strength:
-        action = "buy"
-        confidence = buy_strength / (buy_strength + sell_strength + 0.001)
-    elif sell_count > buy_count and sell_strength > buy_strength:
-        action = "sell"
-        confidence = sell_strength / (buy_strength + sell_strength + 0.001)
-    else:
-        action = "hold"
-        confidence = max(0.5, hold_count / total_indicators)
-    
-    # Normalize confidence to range [0, 1]
-    confidence = min(1.0, max(0.0, confidence))
-    
-    # Create supporting evidence
-    evidence = []
-    
-    for indicator, signal in signals.items():
-        if signal['signal'] == action or (action == "hold" and signal['signal'] == "hold"):
-            evidence.append(signal['description'])
-    
-    # Generate target price if applicable
-    target_price = None
-
-    if 'high' in prices_df.columns and 'low' in prices_df.columns:
-        atr = calculate_atr(high_prices, low_prices, close_prices)
-        latest_atr = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else (latest_close * 0.02)  # Default to 2% of price
-        
-        if action == "buy":
-            # Target price for buying: current price + 2*ATR
-            # Use abs() to ensure positive ATR value
-            target_price = latest_close + (2 * abs(latest_atr))
-        elif action == "sell":
-            # Target price for selling: current price - 2*ATR
-            # Use abs() to ensure positive ATR value
-            target_price = latest_close - (2 * abs(latest_atr))
-    
-    # Check if confidence meets threshold
-    strong_signal = confidence >= CONFIDENCE_THRESHOLD
-    
-    # Calculate Bollinger Percent B untuk API response
-    if pd.isna(latest_upper) or pd.isna(latest_lower) or latest_upper == latest_lower:
-        bb_percent_b = 0.5  # Default ke nilai netral
-    else:
-        bb_percent_b = (latest_close - latest_lower) / (latest_upper - latest_lower)
-    
-    # Create final recommendation
-    recommendation = {
-        "action": action,
-        "confidence": float(confidence),
-        "strong_signal": strong_signal,
-        "evidence": evidence,
-        "indicators": {
-            "rsi": float(np.nan_to_num(latest_rsi)),
-            "macd": float(np.nan_to_num(latest_macd)),
-            "macd_signal": float(np.nan_to_num(latest_signal)),
-            "macd_histogram": float(np.nan_to_num(latest_histogram)),
-            "bollinger_percent": float(np.nan_to_num(bb_percent_b)),
-            "stochastic_k": float(np.nan_to_num(latest_k)),
-            "stochastic_d": float(np.nan_to_num(latest_d)),
-            "adx": float(np.nan_to_num(latest_adx))
-        },
-        "indicator_periods": {
-            "rsi_period": rsi_period,
-            "macd_fast": macd_fast,
-            "macd_slow": macd_slow,
-            "macd_signal": macd_signal,
-            "bb_period": bb_period,
-            "stoch_k": stoch_k,
-            "stoch_d": stoch_d,
-            "ma_short": ma_short,
-            "ma_medium": ma_medium,
-            "ma_long": ma_long
-        }
-    }
-    
-    if target_price is not None and not pd.isna(target_price):
-        recommendation["target_price"] = float(target_price)
-    
-    return recommendation
-
-
-def calculate_atr(high_prices: pd.Series, 
-                low_prices: pd.Series, 
-                close_prices: pd.Series, 
-                window: int = 14) -> pd.Series:
-    """
-    Calculate Average True Range (ATR)
-    
-    Args:
-        high_prices: Series of high prices
-        low_prices: Series of low prices
-        close_prices: Series of closing prices
-        window: Window size for ATR calculation
-        
-    Returns:
-        pd.Series: ATR values
-    """
-    # Pastikan ada cukup data untuk perhitungan
-    if len(close_prices) < window + 1:  # +1 untuk previous close
-        logger.warning(f"Tidak cukup data untuk menghitung ATR. Minimal {window + 1} titik data diperlukan.")
-        return pd.Series(np.nan, index=close_prices.index)
-        
-    if TALIB_AVAILABLE:
-        try:
-            # Pastikan input adalah array numpy yang valid
-            if np.isnan(high_prices.values).any() or np.isnan(low_prices.values).any() or np.isnan(close_prices.values).any():
-                high_cleaned = high_prices.fillna(method='ffill').fillna(method='bfill')
-                low_cleaned = low_prices.fillna(method='ffill').fillna(method='bfill')
-                close_cleaned = close_prices.fillna(method='ffill').fillna(method='bfill')
-                atr = talib.ATR(
-                    high_cleaned.values, 
-                    low_cleaned.values, 
-                    close_cleaned.values, 
-                    timeperiod=window
-                )
-            else:
-                atr = talib.ATR(
-                    high_prices.values, 
-                    low_prices.values, 
-                    close_prices.values, 
-                    timeperiod=window
-                )
-                
-            # Cek hasilnya valid
-            if np.isnan(atr).all():
-                logger.warning("TA-Lib ATR mengembalikan semua NaN, menggunakan implementasi pandas sebagai fallback")
-                return _calculate_atr_pandas(high_prices, low_prices, close_prices, window)
-                
-            return pd.Series(atr, index=close_prices.index)
-        except Exception as e:
-            logger.error(f"Error saat menghitung ATR dengan TA-Lib: {str(e)}")
-            return _calculate_atr_pandas(high_prices, low_prices, close_prices, window)
-    else:
-        return _calculate_atr_pandas(high_prices, low_prices, close_prices, window)
-
-
-def _calculate_atr_pandas(high_prices: pd.Series, 
-                      low_prices: pd.Series, 
-                      close_prices: pd.Series, 
-                      window: int = 14) -> pd.Series:
-    """Implementasi ATR menggunakan pandas"""
-    # Calculate ATR using pandas
-    prev_close = close_prices.shift(1)
-    tr1 = high_prices - low_prices  # High - Low
-    tr2 = (high_prices - prev_close).abs()  # |High - Previous Close|
-    tr3 = (low_prices - prev_close).abs()  # |Low - Previous Close|
-    
-    # Handle NaN values in each component
-    tr1 = tr1.fillna(0)
-    tr2 = tr2.fillna(0)
-    tr3 = tr3.fillna(0)
-    
-    true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    atr = true_range.rolling(window=window).mean()
-    
-    return atr
 
 
 def calculate_adx(high_prices: pd.Series, 
@@ -964,7 +740,7 @@ def _calculate_adx_pandas(high_prices: pd.Series,
                       low_prices: pd.Series, 
                       close_prices: pd.Series, 
                       window: int = 14) -> Tuple[pd.Series, pd.Series, pd.Series]:
-    """Implementasi ADX menggunakan pandas"""
+    """Implementasi ADX menggunakan pandas yang diperbarui"""
     try:
         # 1. True Range
         prev_close = close_prices.shift(1)
@@ -978,34 +754,47 @@ def _calculate_adx_pandas(high_prices: pd.Series,
         tr3 = tr3.fillna(0)
         
         true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        atr = true_range.rolling(window=window).mean()
+        atr = true_range.ewm(span=window, min_periods=window).mean()  # EMA for Wilder's smoothing
         
         # 2. Directional Movement
-        high_diff = high_prices - high_prices.shift(1)
-        low_diff = low_prices.shift(1) - low_prices
+        up_move = high_prices - high_prices.shift(1)
+        down_move = low_prices.shift(1) - low_prices
         
         # Handle NaN values
-        high_diff = high_diff.fillna(0)
-        low_diff = low_diff.fillna(0)
+        up_move = up_move.fillna(0)
+        down_move = down_move.fillna(0)
         
-        plus_dm = high_diff.where((high_diff > low_diff) & (high_diff > 0), 0)
-        minus_dm = low_diff.where((low_diff > high_diff) & (low_diff > 0), 0)
+        # Plus Directional Movement (+DM)
+        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
+        # Negative Directional Movement (-DM)
+        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
         
-        # 3. Directional Indicators
-        # Avoid division by zero
+        # Convert to Series
+        plus_dm = pd.Series(plus_dm, index=close_prices.index)
+        minus_dm = pd.Series(minus_dm, index=close_prices.index)
+        
+        # 3. Smoothed Directional Movement
+        # Wilder's smoothing (similar to EMA with alpha=1/period)
+        smooth_plus_dm = plus_dm.ewm(span=window, min_periods=window).mean()
+        smooth_minus_dm = minus_dm.ewm(span=window, min_periods=window).mean()
+        
+        # Ensure ATR is not zero
         atr_safe = atr.replace(0, np.finfo(float).eps)
         
-        plus_di = 100 * (plus_dm.rolling(window=window).mean() / atr_safe)
-        minus_di = 100 * (minus_dm.rolling(window=window).mean() / atr_safe)
+        # 4. Directional Indicators
+        plus_di = 100 * (smooth_plus_dm / atr_safe)
+        minus_di = 100 * (smooth_minus_dm / atr_safe)
         
-        # 4. Directional Index
-        plus_minus_sum = plus_di + minus_di
-        plus_minus_sum_safe = plus_minus_sum.replace(0, np.finfo(float).eps)
+        # 5. Directional Index (DX)
+        di_diff = (plus_di - minus_di).abs()
+        di_sum = plus_di + minus_di
         
-        dx = 100 * ((plus_di - minus_di).abs() / plus_minus_sum_safe)
+        # Avoid division by zero
+        di_sum_safe = di_sum.replace(0, np.finfo(float).eps)
+        dx = 100 * (di_diff / di_sum_safe)
         
-        # 5. Average Directional Index
-        adx = dx.rolling(window=window).mean()
+        # 6. Average Directional Index (ADX)
+        adx = dx.ewm(span=window, min_periods=window).mean()
         
         return adx, plus_di, minus_di
     except Exception as e:
@@ -1013,6 +802,1036 @@ def _calculate_adx_pandas(high_prices: pd.Series,
         # Return empty series if calculation fails
         empty_series = pd.Series(np.nan, index=close_prices.index)
         return empty_series, empty_series, empty_series
+
+
+def calculate_atr(high_prices: pd.Series, 
+                low_prices: pd.Series, 
+                close_prices: pd.Series, 
+                window: int = 14) -> pd.Series:
+    """
+    Calculate Average True Range (ATR)
+    
+    Args:
+        high_prices: Series of high prices
+        low_prices: Series of low prices
+        close_prices: Series of closing prices
+        window: Window size for ATR calculation
+        
+    Returns:
+        pd.Series: ATR values
+    """
+    # Pastikan ada cukup data untuk perhitungan
+    if len(close_prices) < window + 1:  # +1 untuk previous close
+        logger.warning(f"Tidak cukup data untuk menghitung ATR. Minimal {window + 1} titik data diperlukan.")
+        return pd.Series(np.nan, index=close_prices.index)
+        
+    if TALIB_AVAILABLE:
+        try:
+            # Pastikan input adalah array numpy yang valid
+            if np.isnan(high_prices.values).any() or np.isnan(low_prices.values).any() or np.isnan(close_prices.values).any():
+                high_cleaned = high_prices.fillna(method='ffill').fillna(method='bfill')
+                low_cleaned = low_prices.fillna(method='ffill').fillna(method='bfill')
+                close_cleaned = close_prices.fillna(method='ffill').fillna(method='bfill')
+                atr = talib.ATR(
+                    high_cleaned.values, 
+                    low_cleaned.values, 
+                    close_cleaned.values, 
+                    timeperiod=window
+                )
+            else:
+                atr = talib.ATR(
+                    high_prices.values, 
+                    low_prices.values, 
+                    close_prices.values, 
+                    timeperiod=window
+                )
+                
+            # Cek hasilnya valid
+            if np.isnan(atr).all():
+                logger.warning("TA-Lib ATR mengembalikan semua NaN, menggunakan implementasi pandas sebagai fallback")
+                return _calculate_atr_pandas(high_prices, low_prices, close_prices, window)
+                
+            return pd.Series(atr, index=close_prices.index)
+        except Exception as e:
+            logger.error(f"Error saat menghitung ATR dengan TA-Lib: {str(e)}")
+            return _calculate_atr_pandas(high_prices, low_prices, close_prices, window)
+    else:
+        return _calculate_atr_pandas(high_prices, low_prices, close_prices, window)
+
+
+def _calculate_atr_pandas(high_prices: pd.Series, 
+                      low_prices: pd.Series, 
+                      close_prices: pd.Series, 
+                      window: int = 14) -> pd.Series:
+    """Implementasi ATR menggunakan pandas yang diperbarui"""
+    # Calculate ATR using pandas with Wilder's smoothing for better accuracy
+    prev_close = close_prices.shift(1)
+    tr1 = high_prices - low_prices  # High - Low
+    tr2 = (high_prices - prev_close).abs()  # |High - Previous Close|
+    tr3 = (low_prices - prev_close).abs()  # |Low - Previous Close|
+    
+    # Handle NaN values in each component
+    tr1 = tr1.fillna(0)
+    tr2 = tr2.fillna(0)
+    tr3 = tr3.fillna(0)
+    
+    true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    
+    # Gunakan Exponential Moving Average (EMA) dengan factor 1/n untuk hasil yang sama dengan Wilder
+    # Wilder's smoothing formula equivalen dengan EMA dengan alpha = 1/n
+    # Menggunakan span = 2*window-1 untuk EMA supaya setara dengan Wilder's smoothing
+    atr = true_range.ewm(alpha=1/window, min_periods=window, adjust=False).mean()
+    
+    return atr
+
+
+def calculate_ichimoku(prices_df: pd.DataFrame, 
+                      conversion_period: int = 9, 
+                      base_period: int = 26,
+                      span_b_period: int = 52, 
+                      displacement_period: int = 26) -> Dict[str, pd.Series]:
+    """
+    Calculate Ichimoku Cloud components (Tenkan-sen, Kijun-sen, Senkou Span A, Senkou Span B, Chikou Span)
+    
+    Args:
+        prices_df: DataFrame dengan data harga (harus memiliki 'high', 'low', 'close')
+        conversion_period: Period for Tenkan-sen (default: 9)
+        base_period: Period for Kijun-sen (default: 26)
+        span_b_period: Period for Senkou Span B (default: 52)
+        displacement_period: Displacement period (default: 26)
+        
+    Returns:
+        dict: Ichimoku components (tenkan, kijun, senkou_a, senkou_b, chikou)
+    """
+    # Cek apakah columns diperlukan ada
+    required = ['high', 'low', 'close']
+    for col in required:
+        if col not in prices_df.columns:
+            logger.warning(f"Column {col} tidak tersedia untuk kalkulasi Ichimoku Cloud")
+            return {}  # Return empty dict if required columns not available
+
+    # Extract high, low, close
+    high = prices_df['high']
+    low = prices_df['low']
+    close = prices_df['close']
+    
+    # Calculate Tenkan-sen (Conversion Line)
+    tenkan_high = high.rolling(window=conversion_period).max()
+    tenkan_low = low.rolling(window=conversion_period).min()
+    tenkan = (tenkan_high + tenkan_low) / 2
+    
+    # Calculate Kijun-sen (Base Line)
+    kijun_high = high.rolling(window=base_period).max()
+    kijun_low = low.rolling(window=base_period).min()
+    kijun = (kijun_high + kijun_low) / 2
+    
+    # Calculate Senkou Span A (Leading Span A)
+    senkou_a = ((tenkan + kijun) / 2).shift(displacement_period)
+    
+    # Calculate Senkou Span B (Leading Span B)
+    senkou_b_high = high.rolling(window=span_b_period).max()
+    senkou_b_low = low.rolling(window=span_b_period).min()
+    senkou_b = ((senkou_b_high + senkou_b_low) / 2).shift(displacement_period)
+    
+    # Calculate Chikou Span (Lagging Span)
+    chikou = close.shift(-displacement_period)
+    
+    return {
+        'tenkan': tenkan,
+        'kijun': kijun,
+        'senkou_a': senkou_a,
+        'senkou_b': senkou_b,
+        'chikou': chikou
+    }
+
+
+def backtest_strategy(prices_df: pd.DataFrame, 
+                    strategy_type: str = 'macd', 
+                    indicator_periods: Optional[Dict[str, Any]] = None,
+                    initial_capital: float = 10000.0) -> Dict[str, Any]:
+    """
+    Backtest a trading strategy
+
+    Args:
+        prices_df: DataFrame dengan data harga
+        strategy_type: Tipe strategi ('macd', 'rsi', 'bollinger', dll)
+        indicator_periods: Parameter periode indikator
+        initial_capital: Modal awal
+        
+    Returns:
+        dict: Hasil backtest (profit, trades, metrics)
+    """
+    # Cek apakah data cukup
+    if len(prices_df) < 50:
+        logger.warning("Tidak cukup data untuk backtest. Minimal 50 titik data diperlukan.")
+        return {"error": "Insufficient data for backtesting"}
+    
+    # Copy data agar tidak mengubah original
+    df = prices_df.copy()
+    
+    # Tambahkan indikator sesuai strategi
+    if strategy_type == 'macd':
+        macd_fast = indicator_periods.get('macd_fast', 12) if indicator_periods else 12
+        macd_slow = indicator_periods.get('macd_slow', 26) if indicator_periods else 26
+        macd_signal = indicator_periods.get('macd_signal', 9) if indicator_periods else 9
+        
+        macd, signal, hist = calculate_macd(df['close'], macd_fast, macd_slow, macd_signal)
+        
+        df['macd'] = macd
+        df['macd_signal'] = signal
+        df['macd_hist'] = hist
+        df['position'] = 0
+        
+        # Generate signals
+        df.loc[macd > signal, 'position'] = 1  # Buy signal
+        df.loc[macd < signal, 'position'] = -1  # Sell signal
+        
+    elif strategy_type == 'rsi':
+        rsi_period = indicator_periods.get('rsi_period', 14) if indicator_periods else 14
+        rsi_overbought = indicator_periods.get('rsi_overbought', 70) if indicator_periods else 70
+        rsi_oversold = indicator_periods.get('rsi_oversold', 30) if indicator_periods else 30
+        
+        df['rsi'] = calculate_rsi(df['close'], rsi_period)
+        df['position'] = 0
+        
+        # Generate signals - buy when oversold, sell when overbought
+        df.loc[df['rsi'] < rsi_oversold, 'position'] = 1  # Buy signal
+        df.loc[df['rsi'] > rsi_overbought, 'position'] = -1  # Sell signal
+        
+    elif strategy_type == 'bollinger':
+        bb_period = indicator_periods.get('bb_period', 20) if indicator_periods else 20
+        bb_std = indicator_periods.get('bb_std', 2.0) if indicator_periods else 2.0
+        
+        upper, middle, lower = calculate_bollinger_bands(df['close'], bb_period, bb_std)
+        
+        df['bb_upper'] = upper
+        df['bb_middle'] = middle
+        df['bb_lower'] = lower
+        df['position'] = 0
+        
+        # Buy when price touches lower band, sell when it touches upper band
+        df.loc[df['close'] <= df['bb_lower'], 'position'] = 1
+        df.loc[df['close'] >= df['bb_upper'], 'position'] = -1
+        
+    else:
+        # Default strategy: simple moving average crossover
+        short_ma = indicator_periods.get('ma_short', 20) if indicator_periods else 20
+        long_ma = indicator_periods.get('ma_medium', 50) if indicator_periods else 50
+        
+        df['short_ma'] = df['close'].rolling(window=short_ma).mean()
+        df['long_ma'] = df['close'].rolling(window=long_ma).mean()
+        df['position'] = 0
+        
+        # Buy when short MA crosses above long MA, sell when it crosses below
+        df.loc[df['short_ma'] > df['long_ma'], 'position'] = 1
+        df.loc[df['short_ma'] < df['long_ma'], 'position'] = -1
+    
+    # Hitung perubahan posisi untuk trade signals
+    df['position_change'] = df['position'].diff()
+    
+    # Simulasi trading
+    df['returns'] = df['close'].pct_change()
+    df['strategy_returns'] = df['position'].shift(1) * df['returns']
+    
+    # Hapus NaN di awal
+    df = df.dropna()
+    
+    # Hitung metrik
+    capital = initial_capital
+    holdings = 0
+    trades = []
+    entries = []
+    exits = []
+    
+    for i, row in df.iterrows():
+        if row['position_change'] > 0:  # Enter long position
+            entry_price = row['close']
+            entry_date = i
+            holdings = capital / entry_price
+            entries.append((entry_date, entry_price))
+            trades.append({
+                'type': 'buy',
+                'date': entry_date,
+                'price': entry_price,
+                'holdings': holdings,
+                'capital': capital
+            })
+        elif row['position_change'] < 0 and holdings > 0:  # Exit long position
+            exit_price = row['close']
+            exit_date = i
+            capital = holdings * exit_price
+            exits.append((exit_date, exit_price))
+            trades.append({
+                'type': 'sell',
+                'date': exit_date,
+                'price': exit_price,
+                'holdings': 0,
+                'capital': capital
+            })
+            holdings = 0
+    
+    # Hitung hasil akhir
+    final_capital = capital if holdings == 0 else holdings * df['close'].iloc[-1]
+    total_return = (final_capital - initial_capital) / initial_capital
+    annual_return = total_return * (252 / len(df))  # Annualized return
+    
+    # Hitung drawdown
+    df['cumulative_returns'] = (1 + df['strategy_returns']).cumprod()
+    df['cumulative_max'] = df['cumulative_returns'].cummax()
+    df['drawdown'] = (df['cumulative_max'] - df['cumulative_returns']) / df['cumulative_max']
+    
+    max_drawdown = df['drawdown'].max()
+    
+    # Hitung Sharpe ratio (annualized, assuming risk-free rate of 0)
+    sharpe_ratio = np.sqrt(252) * df['strategy_returns'].mean() / df['strategy_returns'].std() if df['strategy_returns'].std() != 0 else 0
+    
+    # Hitung win rate
+    if len(trades) < 2:
+        win_rate = 0
+    else:
+        wins = 0
+        for i in range(1, len(trades), 2):
+            if i < len(trades):
+                if trades[i]['capital'] > trades[i-1]['capital']:
+                    wins += 1
+        win_rate = wins / ((len(trades) // 2) or 1)  # Avoid division by zero
+    
+    return {
+        'total_return': total_return,
+        'annual_return': annual_return,
+        'max_drawdown': max_drawdown,
+        'sharpe_ratio': sharpe_ratio,
+        'win_rate': win_rate,
+        'num_trades': len(trades) // 2,  # Bagi 2 karena setiap trade = entry + exit
+        'trades': trades,
+        'returns_series': df['strategy_returns'],
+        'cumulative_returns': df['cumulative_returns'],
+        'drawdown_series': df['drawdown']
+    }
+
+
+def generate_trading_signals(prices_df: pd.DataFrame, 
+                           indicator_periods: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Generate trading signals based on technical indicators
+    
+    Args:
+        prices_df: DataFrame with price data (must have 'close' column, 
+                  optionally 'high', 'low', 'volume')
+        indicator_periods: Dictionary of indicator periods
+        
+    Returns:
+        dict: Trading signals and analysis
+    """
+    logger.info("Generating trading signals")
+    
+    # Default period jika tidak ada yang disediakan
+    if indicator_periods is None:
+        indicator_periods = {}
+    
+    # Deteksi market regime
+    market_regime = detect_market_regime(prices_df)
+    logger.info(f"Detected market regime: {market_regime}")
+    
+    # Jika tidak ada periode yang diberikan, tentukan yang optimal untuk regime ini
+    if not indicator_periods:
+        indicator_periods = get_optimal_parameters(prices_df, market_regime)
+        logger.info(f"Using optimized parameters for {market_regime}")
+    
+    # Ekstrak periode indikator atau gunakan default
+    rsi_period = indicator_periods.get('rsi_period', 14)
+    macd_fast = indicator_periods.get('macd_fast', 12)
+    macd_slow = indicator_periods.get('macd_slow', 26)
+    macd_signal = indicator_periods.get('macd_signal', 9)
+    bb_period = indicator_periods.get('bb_period', 20)
+    stoch_k = indicator_periods.get('stoch_k', 14)
+    stoch_d = indicator_periods.get('stoch_d', 3)
+    ma_short = indicator_periods.get('ma_short', 20)
+    ma_medium = indicator_periods.get('ma_medium', 50)
+    ma_long = indicator_periods.get('ma_long', 200)
+    
+    # Log periode indikator yang digunakan
+    logger.info(f"Indikator Periods - RSI: {rsi_period}, MACD: {macd_fast}/{macd_slow}/{macd_signal}, "
+               f"BB: {bb_period}, Stoch: {stoch_k}/{stoch_d}, MA: {ma_short}/{ma_medium}/{ma_long}")
+    
+    # Verify required columns
+    required_columns = ['close']
+    for col in required_columns:
+        if col not in prices_df.columns:
+            logger.error(f"Required column '{col}' not found in prices_df")
+            return {
+                "error": f"Missing required column: {col}",
+                "action": "hold",
+                "confidence": 0.0
+            }
+    
+    # Pastikan minimal data cukup untuk perhitungan
+    # Hitung minimal data yang diperlukan berdasarkan indikator terlama
+    min_required_points = max(
+        3 * rsi_period,
+        macd_slow + macd_signal + 10,
+        bb_period + 10,
+        stoch_k + stoch_d + 5,
+        ma_long + 10
+    )
+    
+    # Perubahan di sini: Sesuaikan kebutuhan data berdasarkan trading style
+    # Jika periode MA jangka panjang kurang dari 100, tidak perlu data sangat panjang
+    is_short_term = ma_long <= 100
+    if is_short_term:
+        # Untuk analisis jangka pendek, kurangi kebutuhan data
+        min_required_points = min(min_required_points, 60)
+        logger.info(f"Analisis jangka pendek terdeteksi, kebutuhan data minimum disesuaikan menjadi {min_required_points}")
+    elif ma_long > 100:
+        # Sanity check: minimum 30 days untuk semua analisis
+        min_required_points = max(30, min_required_points)
+    
+    if len(prices_df) < min_required_points:
+        logger.warning(f"Tidak cukup data untuk analisis teknikal yang akurat. Minimal {min_required_points} titik data diperlukan, hanya {len(prices_df)} tersedia.")
+        
+        # Jika terlalu sedikit data, berikan error yang lebih spesifik
+        if len(prices_df) < 20:
+            logger.info(f"Data terlalu sedikit untuk analisis teknikal dasar")
+            return {
+                "error": f"Data tidak cukup untuk analisis. Dibutuhkan minimal 20 titik data, hanya tersedia {len(prices_df)}.",
+                "action": "hold",
+                "confidence": 0.0,
+                "min_days_needed": min_required_points
+            }
+        
+        # Jika data cukup untuk analisis dasar tapi kurang dari ideal, lanjutkan dengan warning
+        logger.info(f"Coba tambahkan parameter 'days' dengan nilai lebih besar (misalnya, {min_required_points + 10})")
+        # Di sini kita lanjutkan dengan perhitungan meskipun data kurang ideal
+    
+    # Use appropriate column names or defaults
+    close_col = 'close'
+    high_col = 'high' if 'high' in prices_df.columns else close_col
+    low_col = 'low' if 'low' in prices_df.columns else close_col
+    
+    # Extract price series
+    close_prices = prices_df[close_col]
+    high_prices = prices_df[high_col]
+    low_prices = prices_df[low_col]
+    
+    # Calculate indicators
+    # 1. RSI
+    rsi = calculate_rsi(close_prices, window=rsi_period)
+    
+    # 2. MACD
+    macd, signal, histogram = calculate_macd(close_prices, 
+                                           fast_period=macd_fast, 
+                                           slow_period=macd_slow, 
+                                           signal_period=macd_signal)
+    
+    # 3. Bollinger Bands
+    upper_band, middle_band, lower_band = calculate_bollinger_bands(close_prices, window=bb_period)
+    
+    # 4. Stochastic Oscillator
+    k, d = calculate_stochastic(close_prices, high_prices, low_prices, 
+                              k_period=stoch_k, d_period=stoch_d)
+    
+    # 5. ADX
+    adx, plus_di, minus_di = calculate_adx(high_prices, low_prices, close_prices)
+    
+    # 6. Moving Averages
+    sma_short = close_prices.rolling(window=ma_short).mean()
+    sma_medium = close_prices.rolling(window=ma_medium).mean()
+    sma_long = close_prices.rolling(window=ma_long).mean()
+    
+    # Calculate Ichimoku Cloud (sebagai indikator tambahan)
+    ichimoku = calculate_ichimoku(prices_df)
+    
+    # Log status perhitungan indikator
+    for indicator_name, indicator_data in [
+        ("RSI", rsi), 
+        ("MACD", macd),
+        ("MACD Signal", signal),
+        ("Bollinger Middle", middle_band),
+        ("Stochastic K", k),
+        ("ADX", adx)
+    ]:
+        valid_points = indicator_data.count()
+        total_points = len(indicator_data)
+        logger.info(f"Indikator {indicator_name}: {valid_points}/{total_points} titik data valid")
+    
+    # Get latest values
+    latest_close = close_prices.iloc[-1]
+    latest_rsi = rsi.iloc[-1] if not pd.isna(rsi.iloc[-1]) else 50  # Default ke netral jika tidak valid
+    latest_macd = macd.iloc[-1] if not pd.isna(macd.iloc[-1]) else 0
+    latest_signal = signal.iloc[-1] if not pd.isna(signal.iloc[-1]) else 0
+    latest_histogram = histogram.iloc[-1] if not pd.isna(histogram.iloc[-1]) else 0
+    latest_upper = upper_band.iloc[-1] if not pd.isna(upper_band.iloc[-1]) else latest_close * 1.05
+    latest_middle = middle_band.iloc[-1] if not pd.isna(middle_band.iloc[-1]) else latest_close
+    latest_lower = lower_band.iloc[-1] if not pd.isna(lower_band.iloc[-1]) else latest_close * 0.95
+    latest_k = k.iloc[-1] if not pd.isna(k.iloc[-1]) else 50
+    latest_d = d.iloc[-1] if not pd.isna(d.iloc[-1]) else 50
+    latest_adx = adx.iloc[-1] if not pd.isna(adx.iloc[-1]) else 15
+    latest_plus_di = plus_di.iloc[-1] if not pd.isna(plus_di.iloc[-1]) else 20
+    latest_minus_di = minus_di.iloc[-1] if not pd.isna(minus_di.iloc[-1]) else 20
+    
+    # Validasi nilai sma
+    latest_sma_short = sma_short.iloc[-1] if not pd.isna(sma_short.iloc[-1]) else latest_close
+    latest_sma_medium = sma_medium.iloc[-1] if not pd.isna(sma_medium.iloc[-1]) else latest_close
+    latest_sma_long = sma_long.iloc[-1] if not pd.isna(sma_long.iloc[-1]) else latest_close
+    
+    # Ichimoku latest values
+    if ichimoku:
+        latest_tenkan = ichimoku['tenkan'].iloc[-1] if not pd.isna(ichimoku['tenkan'].iloc[-1]) else latest_close
+        latest_kijun = ichimoku['kijun'].iloc[-1] if not pd.isna(ichimoku['kijun'].iloc[-1]) else latest_close
+        
+        # Cloud components
+        latest_senkou_a = ichimoku['senkou_a'].iloc[-1] if not pd.isna(ichimoku['senkou_a'].iloc[-1]) else latest_close
+        latest_senkou_b = ichimoku['senkou_b'].iloc[-1] if not pd.isna(ichimoku['senkou_b'].iloc[-1]) else latest_close
+    
+    # Calculate signals
+    signals = {}
+    
+    # RSI signals
+    if latest_rsi < 30:
+        signals['rsi'] = {
+            'signal': 'buy',
+            'strength': min(1.0, (30 - latest_rsi) / 10),
+            'description': f"RSI oversold di level {latest_rsi:.2f} (periode {rsi_period})"
+        }
+    elif latest_rsi > 70:
+        signals['rsi'] = {
+            'signal': 'sell',
+            'strength': min(1.0, (latest_rsi - 70) / 10),
+            'description': f"RSI overbought di level {latest_rsi:.2f} (periode {rsi_period})"
+        }
+    else:
+        # Dalam range menengah, tentukan berdasarkan trend RSI
+        rsi_slope = rsi.diff(3).iloc[-1] if len(rsi) > 3 else 0
+        
+        if rsi_slope > 3 and latest_rsi > 50:  # RSI meningkat dan di atas 50
+            signals['rsi'] = {
+                'signal': 'buy',
+                'strength': 0.5 + min(0.3, abs(rsi_slope) / 10),
+                'description': f"RSI meningkat di level {latest_rsi:.2f} (periode {rsi_period})"
+            }
+        elif rsi_slope < -3 and latest_rsi < 50:  # RSI menurun dan di bawah 50
+            signals['rsi'] = {
+                'signal': 'sell',
+                'strength': 0.5 + min(0.3, abs(rsi_slope) / 10),
+                'description': f"RSI menurun di level {latest_rsi:.2f} (periode {rsi_period})"
+            }
+        else:
+            signals['rsi'] = {
+                'signal': 'hold',
+                'strength': 0.5,
+                'description': f"RSI netral di level {latest_rsi:.2f} (periode {rsi_period})"
+            }
+    
+    # MACD signals - perbaiki pengecekan crossover
+    # Pastikan kita memiliki setidaknya 2 data poin valid
+    valid_macd = macd.dropna()
+    valid_signal = signal.dropna()
+    
+    macd_cross_up = False
+    macd_cross_down = False
+    
+    if len(valid_macd) >= 2 and len(valid_signal) >= 2:
+        macd_cross_up = (valid_macd.iloc[-1] > valid_signal.iloc[-1]) and (valid_macd.iloc[-2] <= valid_signal.iloc[-2])
+        macd_cross_down = (valid_macd.iloc[-1] < valid_signal.iloc[-1]) and (valid_macd.iloc[-2] >= valid_signal.iloc[-2])
+    
+    if macd_cross_up:
+        signals['macd'] = {
+            'signal': 'buy',
+            'strength': 0.8,
+            'description': f"MACD memotong ke atas signal line (bullish) - ({macd_fast}/{macd_slow}/{macd_signal})"
+        }
+    elif macd_cross_down:
+        signals['macd'] = {
+            'signal': 'sell',
+            'strength': 0.8,
+            'description': f"MACD memotong ke bawah signal line (bearish) - ({macd_fast}/{macd_slow}/{macd_signal})"
+        }
+    elif latest_macd > latest_signal:
+        # Periksa juga momentum MACD
+        macd_slope = macd.diff(3).iloc[-1] if len(macd) > 3 else 0
+        
+        if macd_slope > 0:  # MACD naik
+            signals['macd'] = {
+                'signal': 'buy',
+                'strength': 0.6 + min(0.2, abs(macd_slope) / 100),
+                'description': f"MACD di atas signal line dan meningkat (bullish) - ({macd_fast}/{macd_slow}/{macd_signal})"
+            }
+        else:  # MACD turun tapi masih di atas signal
+            signals['macd'] = {
+                'signal': 'buy',
+                'strength': 0.6,
+                'description': f"MACD di atas signal line (bullish) - ({macd_fast}/{macd_slow}/{macd_signal})"
+            }
+    elif latest_macd < latest_signal:
+        # Periksa juga momentum MACD
+        macd_slope = macd.diff(3).iloc[-1] if len(macd) > 3 else 0
+        
+        if macd_slope < 0:  # MACD turun
+            signals['macd'] = {
+                'signal': 'sell',
+                'strength': 0.6 + min(0.2, abs(macd_slope) / 100),
+                'description': f"MACD di bawah signal line dan menurun (bearish) - ({macd_fast}/{macd_slow}/{macd_signal})"
+            }
+        else:  # MACD naik tapi masih di bawah signal
+            signals['macd'] = {
+                'signal': 'sell',
+                'strength': 0.6,
+                'description': f"MACD di bawah signal line (bearish) - ({macd_fast}/{macd_slow}/{macd_signal})"
+            }
+    else:
+        signals['macd'] = {
+            'signal': 'hold',
+            'strength': 0.5,
+            'description': f"MACD netral - ({macd_fast}/{macd_slow}/{macd_signal})"
+        }
+    
+    # Bollinger Bands signals - analisis lebih canggih
+    # Cek apakah nilai Bollinger Bands valid
+    if not pd.isna(latest_upper) and not pd.isna(latest_lower) and latest_upper > latest_lower:
+        bb_percent = (latest_close - latest_lower) / (latest_upper - latest_lower)
+        
+        # Price velocity (kecepatan perubahan harga)
+        price_change = close_prices.pct_change(3).iloc[-1] if len(close_prices) > 3 else 0
+        
+        if latest_close < latest_lower:
+            # Oversold condition - lebih kuat jika harga jatuh cepat
+            signals['bollinger'] = {
+                'signal': 'buy',
+                'strength': 0.7 + min(0.2, abs(price_change) * 5) if price_change < 0 else 0.7,
+                'description': f"Harga di bawah lower Bollinger Band (oversold) - (periode {bb_period})"
+            }
+        elif latest_close > latest_upper:
+            # Overbought condition - lebih kuat jika harga naik cepat
+            signals['bollinger'] = {
+                'signal': 'sell',
+                'strength': 0.7 + min(0.2, abs(price_change) * 5) if price_change > 0 else 0.7,
+                'description': f"Harga di atas upper Bollinger Band (overbought) - (periode {bb_period})"
+            }
+        elif bb_percent > 0.8:
+            # Mendekati upper band - perhatikan arah
+            if price_change > 0:  # Harga masih naik menuju upper band
+                signals['bollinger'] = {
+                    'signal': 'hold',
+                    'strength': 0.5,
+                    'description': f"Harga mendekati upper Bollinger Band (momentum bullish) - (periode {bb_period})"
+                }
+            else:  # Harga berbelok turun dari upper band
+                signals['bollinger'] = {
+                    'signal': 'sell',
+                    'strength': 0.6,
+                    'description': f"Harga berbalik dari upper Bollinger Band (potensi pembalikan) - (periode {bb_period})"
+                }
+        elif bb_percent < 0.2:
+            # Mendekati lower band - perhatikan arah
+            if price_change < 0:  # Harga masih turun menuju lower band
+                signals['bollinger'] = {
+                    'signal': 'hold',
+                    'strength': 0.5,
+                    'description': f"Harga mendekati lower Bollinger Band (momentum bearish) - (periode {bb_period})"
+                }
+            else:  # Harga berbelok naik dari lower band
+                signals['bollinger'] = {
+                    'signal': 'buy',
+                    'strength': 0.6,
+                    'description': f"Harga berbalik dari lower Bollinger Band (potensi pembalikan) - (periode {bb_period})"
+                }
+        else:
+            # Middle area - cek width Bollinger untuk volatilitas
+            if 'bb_std' in prices_df.columns:
+                bb_width = (latest_upper - latest_lower) / latest_middle
+                avg_width = prices_df['bb_std'].rolling(20).mean().iloc[-1] if len(prices_df) > 20 else prices_df['bb_std'].mean()
+                
+                if bb_width < avg_width * 0.7:  # Narrow bands (low volatility)
+                    signals['bollinger'] = {
+                        'signal': 'hold',
+                        'strength': 0.5,
+                        'description': f"Bollinger Bands menyempit (potensi breakout) - (periode {bb_period})"
+                    }
+                else:
+                    signals['bollinger'] = {
+                        'signal': 'hold',
+                        'strength': 0.5,
+                        'description': f"Harga di dalam Bollinger Bands (netral) - (periode {bb_period})"
+                    }
+            else:
+                signals['bollinger'] = {
+                    'signal': 'hold',
+                    'strength': 0.5,
+                    'description': f"Harga di dalam Bollinger Bands (netral) - (periode {bb_period})"
+                }
+    else:
+        signals['bollinger'] = {
+            'signal': 'hold',
+            'strength': 0.5,
+            'description': f"Harga di dalam Bollinger Bands (netral) - (periode {bb_period})"
+        }
+    
+    # Stochastic signals - analisis yang lebih komprehensif
+    valid_k = k.dropna()
+    valid_d = d.dropna()
+    
+    stoch_cross_up = False
+    stoch_cross_down = False
+    
+    if len(valid_k) >= 2 and len(valid_d) >= 2:
+        stoch_cross_up = (valid_k.iloc[-1] > valid_d.iloc[-1]) and (valid_k.iloc[-2] <= valid_d.iloc[-2])
+        stoch_cross_down = (valid_k.iloc[-1] < valid_d.iloc[-1]) and (valid_k.iloc[-2] >= valid_d.iloc[-2])
+    
+    # Stochastic momentum - periksa apakah K sedang naik/turun
+    stoch_momentum = k.diff(2).iloc[-1] if len(k) > 2 else 0
+    
+    if latest_k < 20 and stoch_cross_up:
+        signals['stochastic'] = {
+            'signal': 'buy',
+            'strength': 0.8,
+            'description': f"Stochastic %K memotong ke atas %D di zona oversold (sinyal beli kuat) - ({stoch_k}/{stoch_d})"
+        }
+    elif latest_k > 80 and stoch_cross_down:
+        signals['stochastic'] = {
+            'signal': 'sell',
+            'strength': 0.8,
+            'description': f"Stochastic %K memotong ke bawah %D di zona overbought (sinyal jual kuat) - ({stoch_k}/{stoch_d})"
+        }
+    elif latest_k < 20:
+        # Oversold - lebih kuat jika momentum positif (mulai berbalik)
+        signals['stochastic'] = {
+            'signal': 'buy',
+            'strength': 0.7 + (0.1 if stoch_momentum > 0 else 0),
+            'description': f"Stochastic oscillator oversold di level {latest_k:.2f} - ({stoch_k}/{stoch_d})"
+        }
+    elif latest_k > 80:
+        # Overbought - lebih kuat jika momentum negatif (mulai berbalik)
+        signals['stochastic'] = {
+            'signal': 'sell',
+            'strength': 0.7 + (0.1 if stoch_momentum < 0 else 0),
+            'description': f"Stochastic oscillator overbought di level {latest_k:.2f} - ({stoch_k}/{stoch_d})"
+        }
+    elif stoch_cross_up and latest_k > 50:
+        # Bullish crossover di area bullish
+        signals['stochastic'] = {
+            'signal': 'buy',
+            'strength': 0.6,
+            'description': f"Stochastic %K memotong ke atas %D di area bullish - ({stoch_k}/{stoch_d})"
+        }
+    elif stoch_cross_down and latest_k < 50:
+        # Bearish crossover di area bearish
+        signals['stochastic'] = {
+            'signal': 'sell',
+            'strength': 0.6,
+            'description': f"Stochastic %K memotong ke bawah %D di area bearish - ({stoch_k}/{stoch_d})"
+        }
+    else:
+        # Neutral dengan arah momentum
+        if stoch_momentum > 2:
+            signals['stochastic'] = {
+                'signal': 'buy',
+                'strength': 0.55,
+                'description': f"Stochastic oscillator menunjukkan momentum naik - ({stoch_k}/{stoch_d})"
+            }
+        elif stoch_momentum < -2:
+            signals['stochastic'] = {
+                'signal': 'sell',
+                'strength': 0.55,
+                'description': f"Stochastic oscillator menunjukkan momentum turun - ({stoch_k}/{stoch_d})"
+            }
+        else:
+            signals['stochastic'] = {
+                'signal': 'hold',
+                'strength': 0.5,
+                'description': f"Stochastic oscillator netral - ({stoch_k}/{stoch_d})"
+            }
+    
+    # ADX signals - tren kuat
+    if latest_adx > 25:
+        if latest_plus_di > latest_minus_di:
+            # Tren naik kuat - cek intensitas
+            di_diff = latest_plus_di - latest_minus_di
+            signals['adx'] = {
+                'signal': 'buy',
+                'strength': min(0.9, 0.6 + (di_diff / 50)),
+                'description': f"Tren naik kuat dengan +DI > -DI (ADX: {latest_adx:.2f})"
+            }
+        else:
+            # Tren turun kuat - cek intensitas
+            di_diff = latest_minus_di - latest_plus_di
+            signals['adx'] = {
+                'signal': 'sell',
+                'strength': min(0.9, 0.6 + (di_diff / 50)),
+                'description': f"Tren turun kuat dengan -DI > +DI (ADX: {latest_adx:.2f})"
+            }
+    elif latest_adx > 20:
+        # Tren moderat
+        if latest_plus_di > latest_minus_di:
+            signals['adx'] = {
+                'signal': 'buy',
+                'strength': 0.6,
+                'description': f"Tren naik moderat (ADX: {latest_adx:.2f})"
+            }
+        else:
+            signals['adx'] = {
+                'signal': 'sell',
+                'strength': 0.6,
+                'description': f"Tren turun moderat (ADX: {latest_adx:.2f})"
+            }
+    else:
+        # Tren lemah
+        signals['adx'] = {
+            'signal': 'hold',
+            'strength': 0.5,
+            'description': f"Tren lemah (ADX: {latest_adx:.2f})"
+        }
+    
+    # Moving Average signals - lebih komprehensif
+    # Perbaiki pengecekan golden cross / death cross
+    valid_sma_medium = sma_medium.dropna()
+    valid_sma_long = sma_long.dropna()
+    
+    golden_cross = False
+    death_cross = False
+    
+    if len(valid_sma_medium) >= 2 and len(valid_sma_long) >= 2:
+        golden_cross = (valid_sma_medium.iloc[-1] > valid_sma_long.iloc[-1]) and (valid_sma_medium.iloc[-2] <= valid_sma_long.iloc[-2])
+        death_cross = (valid_sma_medium.iloc[-1] < valid_sma_long.iloc[-1]) and (valid_sma_medium.iloc[-2] >= valid_sma_long.iloc[-2])
+    
+    # Hitung slope MA untuk arah tren
+    ma_short_slope = sma_short.diff(5).iloc[-1] / sma_short.iloc[-1] if len(sma_short) > 5 else 0
+    ma_medium_slope = sma_medium.diff(5).iloc[-1] / sma_medium.iloc[-1] if len(sma_medium) > 5 else 0
+    
+    # Jarak harga dari MA
+    price_to_ma_short = (latest_close - latest_sma_short) / latest_close
+    price_to_ma_medium = (latest_close - latest_sma_medium) / latest_close
+    
+    if golden_cross:
+        signals['moving_avg'] = {
+            'signal': 'buy',
+            'strength': 0.9,
+            'description': f"Golden Cross: MA {ma_medium} hari memotong di atas MA {ma_long} hari (sinyal beli kuat)"
+        }
+    elif death_cross:
+        signals['moving_avg'] = {
+            'signal': 'sell',
+            'strength': 0.9,
+            'description': f"Death Cross: MA {ma_medium} hari memotong di bawah MA {ma_long} hari (sinyal jual kuat)"
+        }
+    elif latest_close > latest_sma_short and latest_sma_short > latest_sma_medium and latest_sma_medium > latest_sma_long:
+        # Alignment bullish sempurna (harga > short MA > medium MA > long MA)
+        signals['moving_avg'] = {
+            'signal': 'buy',
+            'strength': 0.8 + min(0.1, ma_short_slope * 10) if ma_short_slope > 0 else 0.8,
+            'description': f"Harga di atas semua moving average utama (tren bullish kuat) - MA {ma_short}/{ma_medium}/{ma_long}"
+        }
+    elif latest_close < latest_sma_short and latest_sma_short < latest_sma_medium and latest_sma_medium < latest_sma_long:
+        # Alignment bearish sempurna (harga < short MA < medium MA < long MA)
+        signals['moving_avg'] = {
+            'signal': 'sell',
+            'strength': 0.8 + min(0.1, abs(ma_short_slope) * 10) if ma_short_slope < 0 else 0.8,
+            'description': f"Harga di bawah semua moving average utama (tren bearish kuat) - MA {ma_short}/{ma_medium}/{ma_long}"
+        }
+    elif latest_close > latest_sma_short and ma_short_slope > 0:
+        # Harga di atas short MA yang naik (bullish)
+        signals['moving_avg'] = {
+            'signal': 'buy',
+            'strength': 0.6 + min(0.2, price_to_ma_short * 5) + min(0.1, ma_short_slope * 10),
+            'description': f"Harga di atas MA {ma_short} hari yang meningkat (bullish)"
+        }
+    elif latest_close < latest_sma_short and ma_short_slope < 0:
+        # Harga di bawah short MA yang turun (bearish)
+        signals['moving_avg'] = {
+            'signal': 'sell',
+            'strength': 0.6 + min(0.2, abs(price_to_ma_short) * 5) + min(0.1, abs(ma_short_slope) * 10),
+            'description': f"Harga di bawah MA {ma_short} hari yang menurun (bearish)"
+        }
+    elif latest_close > latest_sma_long:
+        # Harga di atas long MA (bullish long term)
+        signals['moving_avg'] = {
+            'signal': 'buy',
+            'strength': 0.6,
+            'description': f"Harga di atas MA {ma_long} hari (bullish jangka panjang)"
+        }
+    elif latest_close < latest_sma_long:
+        # Harga di bawah long MA (bearish long term)
+        signals['moving_avg'] = {
+            'signal': 'sell',
+            'strength': 0.6,
+            'description': f"Harga di bawah MA {ma_long} hari (bearish jangka panjang)"
+        }
+    else:
+        # Mixing signals - less clear
+        signals['moving_avg'] = {
+            'signal': 'hold',
+            'strength': 0.5,
+            'description': f"Mixed moving average signals - MA {ma_short}/{ma_medium}/{ma_long}"
+        }
+    
+    # Ichimoku Cloud signals jika tersedia
+    if ichimoku:
+        # Tenkan-Kijun Cross
+        tenkan_kijun_cross_up = (latest_tenkan > latest_kijun and 
+                                 ichimoku['tenkan'].iloc[-2] <= ichimoku['kijun'].iloc[-2])
+        
+        tenkan_kijun_cross_down = (latest_tenkan < latest_kijun and 
+                                   ichimoku['tenkan'].iloc[-2] >= ichimoku['kijun'].iloc[-2])
+        
+        # Cloud position
+        price_above_cloud = latest_close > max(latest_senkou_a, latest_senkou_b)
+        price_below_cloud = latest_close < min(latest_senkou_a, latest_senkou_b)
+        price_in_cloud = not price_above_cloud and not price_below_cloud
+        
+        # Cloud direction
+        cloud_bullish = latest_senkou_a > latest_senkou_b
+        
+        if tenkan_kijun_cross_up and price_above_cloud:
+            signals['ichimoku'] = {
+                'signal': 'buy',
+                'strength': 0.85,
+                'description': "Ichimoku: Tenkan-sen memotong di atas Kijun-sen di atas cloud (sinyal beli kuat)"
+            }
+        elif tenkan_kijun_cross_down and price_below_cloud:
+            signals['ichimoku'] = {
+                'signal': 'sell',
+                'strength': 0.85,
+                'description': "Ichimoku: Tenkan-sen memotong di bawah Kijun-sen di bawah cloud (sinyal jual kuat)"
+            }
+        elif price_above_cloud and cloud_bullish:
+            signals['ichimoku'] = {
+                'signal': 'buy',
+                'strength': 0.7,
+                'description': "Ichimoku: Harga di atas bullish cloud (tren naik)"
+            }
+        elif price_below_cloud and not cloud_bullish:
+            signals['ichimoku'] = {
+                'signal': 'sell',
+                'strength': 0.7,
+                'description': "Ichimoku: Harga di bawah bearish cloud (tren turun)"
+            }
+        elif price_in_cloud:
+            # Dalam cloud - kurang jelas
+            if cloud_bullish:
+                signals['ichimoku'] = {
+                    'signal': 'hold',
+                    'strength': 0.55,
+                    'description': "Ichimoku: Harga dalam bullish cloud (consolidation menuju bullish)"
+                }
+            else:
+                signals['ichimoku'] = {
+                    'signal': 'hold',
+                    'strength': 0.55,
+                    'description': "Ichimoku: Harga dalam bearish cloud (consolidation menuju bearish)"
+                }
+        else:
+            signals['ichimoku'] = {
+                'signal': 'hold',
+                'strength': 0.5,
+                'description': "Ichimoku: Sinyal netral"
+            }
+    
+    # Gunakan weighted_signal_ensemble untuk menghasilkan sinyal gabungan
+    ensemble_result = weighted_signal_ensemble(signals, market_regime)
+    
+    # Arah tren utama berdasarkan regime
+    trend_direction = "bullish" if "bullish" in market_regime else "bearish" if "bearish" in market_regime else "neutral"
+    
+    # Generate target price if applicable
+    target_price = None
+
+    if 'high' in prices_df.columns and 'low' in prices_df.columns:
+        atr = calculate_atr(high_prices, low_prices, close_prices)
+        latest_atr = atr.iloc[-1] if not pd.isna(atr.iloc[-1]) else (latest_close * 0.02)  # Default to 2% of price
+        
+        if ensemble_result['action'] == "buy":
+            # Target price for buying: berdasarkan regime dan sinyal
+            # Use abs() to ensure positive ATR value
+            if "trending_bullish" in market_regime:
+                # Dalam tren bullish yang kuat, target lebih tinggi
+                target_price = latest_close + (3 * abs(latest_atr))
+            elif "volatile" in market_regime:
+                # Dalam pasar volatil, target lebih konservatif
+                target_price = latest_close + (1.5 * abs(latest_atr))
+            else:
+                # Default
+                target_price = latest_close + (2 * abs(latest_atr))
+        elif ensemble_result['action'] == "sell":
+            # Target price for selling: current price - ATR multiplier
+            if "trending_bearish" in market_regime:
+                # Dalam tren bearish yang kuat, target lebih rendah
+                target_price = latest_close - (3 * abs(latest_atr))
+            elif "volatile" in market_regime:
+                # Dalam pasar volatil, target lebih konservatif
+                target_price = latest_close - (1.5 * abs(latest_atr))
+            else:
+                # Default
+                target_price = latest_close - (2 * abs(latest_atr))
+    
+    # Check if confidence meets threshold
+    strong_signal = ensemble_result['confidence'] >= CONFIDENCE_THRESHOLD
+    
+    # Calculate Bollinger Percent B untuk API response
+    if pd.isna(latest_upper) or pd.isna(latest_lower) or latest_upper == latest_lower:
+        bb_percent_b = 0.5  # Default ke nilai netral
+    else:
+        bb_percent_b = (latest_close - latest_lower) / (latest_upper - latest_lower)
+    
+    # Create evidence list - diurutkan berdasarkan sinyal yang dihasilkan
+    evidence = []
+    
+    # Tambahkan bukti yang mendukung sinyal hasil ensemble
+    for indicator, signal_info in signals.items():
+        if signal_info['signal'] == ensemble_result['action']:
+            evidence.append(signal_info['description'])
+    
+    # Tambahkan bukti netral
+    for indicator, signal_info in signals.items():
+        if signal_info['signal'] == 'hold' and len(evidence) < 5:
+            evidence.append(signal_info['description'])
+    
+    # Tambahkan bukti yang bertentangan (jika evidence masih sedikit)
+    if len(evidence) < 3:
+        for indicator, signal_info in signals.items():
+            if signal_info['signal'] != ensemble_result['action'] and signal_info['signal'] != 'hold':
+                evidence.append(signal_info['description'])
+                if len(evidence) >= 5:
+                    break
+    
+    # Create final recommendation
+    recommendation = {
+        "action": ensemble_result['action'],
+        "confidence": float(ensemble_result['confidence']),
+        "strong_signal": strong_signal,
+        "evidence": evidence,
+        "market_regime": market_regime,
+        "trend_direction": trend_direction,
+        "buy_score": float(ensemble_result['buy_score']),
+        "sell_score": float(ensemble_result['sell_score']),
+        "indicators": {
+            "rsi": float(np.nan_to_num(latest_rsi)),
+            "macd": float(np.nan_to_num(latest_macd)),
+            "macd_signal": float(np.nan_to_num(latest_signal)),
+            "macd_histogram": float(np.nan_to_num(latest_histogram)),
+            "bollinger_percent": float(np.nan_to_num(bb_percent_b)),
+            "stochastic_k": float(np.nan_to_num(latest_k)),
+            "stochastic_d": float(np.nan_to_num(latest_d)),
+            "adx": float(np.nan_to_num(latest_adx)),
+            "plus_di": float(np.nan_to_num(latest_plus_di)),
+            "minus_di": float(np.nan_to_num(latest_minus_di))
+        },
+        "indicator_periods": {
+            "rsi_period": rsi_period,
+            "macd_fast": macd_fast,
+            "macd_slow": macd_slow,
+            "macd_signal": macd_signal,
+            "bb_period": bb_period,
+            "stoch_k": stoch_k,
+            "stoch_d": stoch_d,
+            "ma_short": ma_short,
+            "ma_medium": ma_medium,
+            "ma_long": ma_long
+        }
+    }
+    
+    if target_price is not None and not pd.isna(target_price):
+        recommendation["target_price"] = float(target_price)
+    
+    return recommendation
 
 
 def personalize_signals(signals: Dict[str, Any], 
@@ -1031,7 +1850,7 @@ def personalize_signals(signals: Dict[str, Any],
     
     # Default confidence threshold for different risk profiles
     thresholds = {
-        'low': 0.8,    # Conservative, needs strong signals
+        'low': 0.75,    # Conservative, needs strong signals
         'medium': 0.6,  # Balanced
         'high': 0.4     # Aggressive, acts on weaker signals
     }
@@ -1039,40 +1858,116 @@ def personalize_signals(signals: Dict[str, Any],
     # Apply risk tolerance to confidence
     confidence = signals.get('confidence', 0.5)
     action = signals.get('action', 'hold')
+    market_regime = signals.get('market_regime', 'unknown')
     
-    # Adjust recommendation based on risk tolerance
+    # Customize message based on risk profile and market regime
     if risk_tolerance == 'low':
-        # Conservative: Higher bar for buy/sell actions
-        if confidence < thresholds['low']:
+        # Conservative approach
+        if action != 'hold' and confidence < thresholds['low']:
             personalized['action'] = 'hold'
-            personalized['personalized_message'] = "Sinyal tidak cukup kuat untuk profil risiko konservatif Anda"
-        else:
-            personalized['personalized_message'] = "Sinyal kuat sesuai dengan profil risiko konservatif Anda"
+            personalized['personalized_message'] = "Sinyal tidak cukup kuat untuk profil risiko konservatif Anda. Tunggu konfirmasi lebih lanjut."
+        elif action == 'buy':
+            if 'trending_bullish' in market_regime:
+                personalized['personalized_message'] = "Sinyal beli terdeteksi dalam tren naik, sesuai dengan strategi konservatif untuk mengikuti tren utama."
+            elif 'volatile' in market_regime:
+                personalized['action'] = 'hold'
+                personalized['personalized_message'] = "Meskipun ada sinyal beli, pasar terlalu volatil untuk profil risiko konservatif Anda."
+            else:
+                personalized['personalized_message'] = "Sinyal beli dengan keyakinan cukup untuk strategi konservatif Anda."
+        elif action == 'sell':
+            if 'trending_bearish' in market_regime:
+                personalized['personalized_message'] = "Sinyal jual terdeteksi dalam tren turun, sesuai dengan strategi konservatif Anda untuk menghindari kerugian."
+            else:
+                personalized['personalized_message'] = "Sinyal jual terdeteksi. Dengan profil konservatif, pertimbangkan untuk mengambil keuntungan atau lindungi modal."
+        else:  # hold
+            personalized['personalized_message'] = "Tetap hold sesuai dengan profil konservatif Anda. Tunggu sinyal yang lebih jelas."
             
     elif risk_tolerance == 'high':
-        # Aggressive: Amplify confidence for buy/sell
+        # Aggressive approach
+        # Amplify confidence slightly
         if action != 'hold':
             boosted_confidence = min(1.0, confidence * 1.2)
             personalized['confidence'] = boosted_confidence
-            personalized['personalized_message'] = "Sinyal diperkuat untuk profil risiko agresif Anda"
-        else:
-            # Convert weak buy/sell signals to action for aggressive profiles
-            buy_signals = sum(1 for s in signals.get('evidence', []) if 'buy' in s.lower())
-            sell_signals = sum(1 for s in signals.get('evidence', []) if 'sell' in s.lower())
             
-            if buy_signals > sell_signals and buy_signals > 1:
-                personalized['action'] = 'buy'
-                personalized['confidence'] = 0.5
-                personalized['personalized_message'] = "Dikonversi ke sinyal beli untuk profil risiko agresif Anda"
-            elif sell_signals > buy_signals and sell_signals > 1:
-                personalized['action'] = 'sell'
-                personalized['confidence'] = 0.5
-                personalized['personalized_message'] = "Dikonversi ke sinyal jual untuk profil risiko agresif Anda"
+        if action == 'buy':
+            if 'trending_bullish' in market_regime:
+                personalized['personalized_message'] = "Sinyal beli kuat dalam tren bullish - cocok untuk strategi agresif Anda."
+                personalized['confidence'] = min(1.0, confidence * 1.3)  # Extra confidence boost
+            elif 'volatile' in market_regime:
+                personalized['personalized_message'] = "Sinyal beli dalam pasar volatil - peluang bagus untuk strategi agresif, tapi tetap perhatikan manajemen risiko."
             else:
-                personalized['personalized_message'] = "Tetap hold meskipun profil risiko Anda agresif karena sinyal tidak jelas"
+                personalized['personalized_message'] = "Sinyal beli terdeteksi - sesuai dengan profil agresif Anda untuk memanfaatkan peluang."
+        elif action == 'sell':
+            if 'trending_bearish' in market_regime:
+                personalized['personalized_message'] = "Sinyal jual kuat dalam tren bearish - sesuai dengan strategi agresif Anda."
+                personalized['confidence'] = min(1.0, confidence * 1.3)  # Extra confidence boost
+            else:
+                personalized['personalized_message'] = "Sinyal jual terdeteksi - pertimbangkan untuk mengambil keuntungan atau bersiap untuk reversal."
+        else:  # Original signal is hold
+            # For aggressive profiles, try to extract actionable signals even in unclear conditions
+            buy_score = signals.get('buy_score', 0)
+            sell_score = signals.get('sell_score', 0)
+            
+            if buy_score > 0.4 and buy_score > sell_score:
+                personalized['action'] = 'buy'
+                personalized['confidence'] = buy_score
+                personalized['personalized_message'] = "Meskipun sinyal utama adalah hold, ada indikasi bullish yang dapat dimanfaatkan dengan strategi agresif Anda."
+            elif sell_score > 0.4 and sell_score > buy_score:
+                personalized['action'] = 'sell'
+                personalized['confidence'] = sell_score
+                personalized['personalized_message'] = "Meskipun sinyal utama adalah hold, ada indikasi bearish yang dapat dimanfaatkan dengan strategi agresif Anda."
+            else:
+                personalized['personalized_message'] = "Tidak ada sinyal yang jelas saat ini, bahkan untuk strategi agresif. Tunggu kondisi pasar yang lebih jelas."
                 
-    else:  # medium
-        personalized['personalized_message'] = "Sinyal sesuai dengan profil risiko seimbang Anda"
+    else:  # medium - balanced approach
+        if action == 'buy':
+            if 'trending_bullish' in market_regime:
+                personalized['personalized_message'] = "Sinyal beli yang solid dalam tren bullish - cocok untuk strategi seimbang Anda."
+            elif 'volatile' in market_regime:
+                personalized['personalized_message'] = "Sinyal beli dalam pasar volatil - pertimbangkan untuk masuk bertahap dengan ukuran posisi yang terukur."
+            else:
+                personalized['personalized_message'] = "Sinyal beli terdeteksi dengan keyakinan moderat - sesuai dengan profil seimbang Anda."
+        elif action == 'sell':
+            if 'trending_bearish' in market_regime:
+                personalized['personalized_message'] = "Sinyal jual yang solid dalam tren bearish - sesuai dengan strategi seimbang untuk melindungi modal."
+            else:
+                personalized['personalized_message'] = "Sinyal jual terdeteksi - pertimbangkan untuk mengambil sebagian keuntungan sesuai dengan strategi seimbang."
+        else:  # hold
+            personalized['personalized_message'] = "Tetap hold - indikator tidak memberikan sinyal yang jelas saat ini."
+    
+    # Tambahkan saran target price sesuai profil risiko
+    if 'target_price' in signals:
+        target_price = signals['target_price']
+        current_price = signals.get('indicators', {}).get('current_price', 0)
+        
+        if current_price > 0:
+            price_diff_percent = abs(target_price - current_price) / current_price * 100
+            
+            # Adjust target berdasarkan profil risiko
+            if risk_tolerance == 'low':
+                # Conservative targets (2/3 of original target)
+                adjusted_diff = price_diff_percent * 0.67
+                if action == 'buy':
+                    adjusted_target = current_price * (1 + adjusted_diff/100)
+                else:  # sell
+                    adjusted_target = current_price * (1 - adjusted_diff/100)
+                    
+                personalized['target_price'] = float(adjusted_target)
+                personalized['personalized_message'] += f" Target harga yang lebih konservatif: ${adjusted_target:.2f}"
+                
+            elif risk_tolerance == 'high':
+                # Aggressive targets (4/3 of original target)
+                adjusted_diff = price_diff_percent * 1.33
+                if action == 'buy':
+                    adjusted_target = current_price * (1 + adjusted_diff/100)
+                else:  # sell
+                    adjusted_target = current_price * (1 - adjusted_diff/100)
+                    
+                personalized['target_price'] = float(adjusted_target)
+                personalized['personalized_message'] += f" Target harga yang lebih agresif: ${adjusted_target:.2f}"
+                
+            else:  # medium - keep original target
+                personalized['personalized_message'] += f" Target harga: ${target_price:.2f}"
     
     # Add risk profile info
     personalized['risk_profile'] = risk_tolerance
@@ -1082,7 +1977,8 @@ def personalize_signals(signals: Dict[str, Any],
 
 def detect_market_events(prices_df: pd.DataFrame, 
                         window: int = 20, 
-                        threshold: float = 2.0) -> Dict[str, Any]:
+                        threshold: float = 2.0,
+                        custom_thresholds: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
     """
     Detect market events such as pumps, dumps, high volatility, etc.
     
@@ -1090,10 +1986,27 @@ def detect_market_events(prices_df: pd.DataFrame,
         prices_df: DataFrame with price data
         window: Window size for calculations
         threshold: Standard deviation threshold for event detection
+        custom_thresholds: Dictionary dengan threshold kustom untuk berbagai event
+            - pump: Threshold untuk event pump (default: threshold)
+            - dump: Threshold untuk event dump (default: threshold)
+            - volatility: Threshold untuk volatility (default: threshold)
+            - volume_spike: Threshold untuk lonjakan volume (default: threshold)
         
     Returns:
         dict: Detected market events
     """
+    # Default thresholds
+    thresholds = {
+        'pump': threshold,
+        'dump': threshold,
+        'volatility': threshold,
+        'volume_spike': threshold
+    }
+    
+    # Update with custom thresholds if provided
+    if custom_thresholds:
+        thresholds.update(custom_thresholds)
+    
     # Verify required columns
     required_columns = ['close']
     for col in required_columns:
@@ -1112,51 +2025,97 @@ def detect_market_events(prices_df: pd.DataFrame,
     
     # Use appropriate column names or defaults
     close_col = 'close'
+    volume_col = 'volume' if 'volume' in prices_df.columns else None
     
     # Extract price series
     close_prices = prices_df[close_col]
     
-    # Calculate returns
+    # Calculate returns and volatility
     returns = close_prices.pct_change()
+    volatility = returns.rolling(window=window).std()
     
     # Calculate moving average and standard deviation
     ma = close_prices.rolling(window=window).mean()
     std = close_prices.rolling(window=window).std()
     
-    # Calculate upper and lower bounds
-    upper_bound = ma + (threshold * std)
-    lower_bound = ma - (threshold * std)
+    # Calculate upper and lower bounds for event detection
+    upper_bound = ma + (thresholds['pump'] * std)
+    lower_bound = ma - (thresholds['dump'] * std)
     
-    # Detect events (pastikan data cukup untuk perhitungan)
-    valid_data = ~(close_prices.isna() | ma.isna() | std.isna() | returns.isna())
+    # Define events
+    events = {}
     
-    events = {
-        "pump": (close_prices > upper_bound) & valid_data,
-        "dump": (close_prices < lower_bound) & valid_data,
-        "high_volatility": (returns.abs() > (returns.std() * threshold)) & valid_data
-    }
+    # Pump detection - price significantly above moving average
+    events["pump"] = close_prices > upper_bound
+    
+    # Dump detection - price significantly below moving average
+    events["dump"] = close_prices < lower_bound
+    
+    # High volatility - rolling std of returns exceeds threshold
+    avg_volatility = volatility.mean()
+    std_volatility = volatility.std()
+    events["high_volatility"] = volatility > (avg_volatility + thresholds['volatility'] * std_volatility)
+    
+    # Volume spike detection if volume data available
+    if volume_col and volume_col in prices_df.columns:
+        volume = prices_df[volume_col]
+        volume_ma = volume.rolling(window=window).mean()
+        volume_std = volume.rolling(window=window).std()
+        events["volume_spike"] = volume > (volume_ma + thresholds['volume_spike'] * volume_std)
+    
+    # Market movement patterns
+    # Strong movement days (up or down)
+    mean_abs_return = returns.abs().mean()
+    std_abs_return = returns.abs().std()
+    events["strong_movement"] = returns.abs() > (mean_abs_return + 2 * std_abs_return)
+    
+    # Consecutive days in same direction
+    up_days = returns > 0
+    down_days = returns < 0
+    
+    # Consecutive up/down days (3+)
+    events["consecutive_up"] = up_days & up_days.shift(1) & up_days.shift(2)
+    events["consecutive_down"] = down_days & down_days.shift(1) & down_days.shift(2)
     
     # Count events
-    event_counts = {
-        "pump": events["pump"].sum(),
-        "dump": events["dump"].sum(),
-        "high_volatility": events["high_volatility"].sum()
-    }
+    event_counts = {event_type: events[event_type].sum() for event_type in events}
     
     # Get latest event (if any)
     latest_event = "normal"
     
-    if len(events["pump"]) > 0 and events["pump"].iloc[-1]:
-        latest_event = "pump"
-    elif len(events["dump"]) > 0 and events["dump"].iloc[-1]:
-        latest_event = "dump"
-    elif len(events["high_volatility"]) > 0 and events["high_volatility"].iloc[-1]:
-        latest_event = "high_volatility"
+    # Define event priority (which events take precedence)
+    event_priority = ["pump", "dump", "high_volatility", "volume_spike", 
+                      "consecutive_up", "consecutive_down", "strong_movement"]
+    
+    # Check for the latest event by priority
+    for event_type in event_priority:
+        if event_type in events and len(events[event_type]) > 0 and events[event_type].iloc[-1]:
+            latest_event = event_type
+            break
+    
+    # Find timestamp of recent events (up to last 5 days)
+    recent_events = {}
+    lookback = min(5, len(prices_df))
+    
+    for event_type in events:
+        recent_days = []
+        for i in range(1, lookback + 1):
+            idx = -i
+            if idx < -len(events[event_type]):
+                break
+            if events[event_type].iloc[idx]:
+                if isinstance(prices_df.index[idx], pd.Timestamp):
+                    recent_days.append(prices_df.index[idx].strftime('%Y-%m-%d'))
+                else:
+                    recent_days.append(str(prices_df.index[idx]))
+        if recent_days:
+            recent_events[event_type] = recent_days
     
     return {
-        "event_counts": event_counts,
         "latest_event": latest_event,
-        "events": events
+        "event_counts": event_counts,
+        "recent_events": recent_events,
+        "events": {k: v.astype(int).tolist() for k, v in events.items()}  # Convert to lists for JSON
     }
 
 
@@ -1195,6 +2154,16 @@ if __name__ == "__main__":
         'ma_medium': 50,
         'ma_long': 200
     }
+    
+    # Detect market regime
+    regime = detect_market_regime(df)
+    print(f"Detected market regime: {regime}")
+    
+    # Get optimal parameters for this regime
+    optimal_params = get_optimal_parameters(df, regime)
+    print("\nOptimal parameters for this regime:")
+    for param, value in optimal_params.items():
+        print(f"  {param}: {value}")
     
     # Test jangka pendek
     print("\n=== Test Indikator Jangka Pendek ===")
@@ -1239,6 +2208,7 @@ if __name__ == "__main__":
     print("\n=== Technical Analysis Signals (Standard) ===")
     print(f"Action: {signals['action'].upper()}")
     print(f"Confidence: {signals['confidence']:.2f}")
+    print(f"Market Regime: {signals['market_regime']}")
     
     if 'target_price' in signals:
         print(f"Target Price: ${signals['target_price']:.2f}")
@@ -1251,10 +2221,35 @@ if __name__ == "__main__":
     for indicator, value in signals['indicators'].items():
         print(f"- {indicator}: {value:.2f}")
         
-    # Test personalization
-    personalized = personalize_signals(signals, risk_tolerance='high')
+    # Test ensemble vs simple signals
+    print("\n=== Compare Ensemble vs Individual Signals ===")
+    print(f"Ensemble Action: {signals['action'].upper()}")
+    print(f"Buy Score: {signals['buy_score']:.2f}, Sell Score: {signals['sell_score']:.2f}")
+    print("Individual signals:")
+    for indicator, signal_info in [
+        ('RSI', signals_short.get('rsi', {})),
+        ('MACD', signals_short.get('macd', {})),
+        ('Bollinger', signals_short.get('bollinger', {}))
+    ]:
+        if 'signal' in signal_info:
+            print(f"- {indicator}: {signal_info['signal'].upper()} (strength: {signal_info.get('strength', 0):.2f})")
     
-    print("\n=== Personalized Signals (High Risk) ===")
-    print(f"Action: {personalized['action'].upper()}")
-    print(f"Confidence: {personalized['confidence']:.2f}")
-    print(f"Message: {personalized['personalized_message']}")
+    # Test personalization
+    print("\n=== Personalized Signals ===")
+    for risk in ['low', 'medium', 'high']:
+        personalized = personalize_signals(signals, risk_tolerance=risk)
+        print(f"\nRisk Profile: {risk.upper()}")
+        print(f"Action: {personalized['action'].upper()}")
+        print(f"Confidence: {personalized['confidence']:.2f}")
+        print(f"Message: {personalized['personalized_message']}")
+        
+    # Test backtest
+    print("\n=== Backtest Results ===")
+    backtest_results = backtest_strategy(df, 'macd', indicator_periods)
+    
+    print(f"Total Return: {backtest_results['total_return']:.2%}")
+    print(f"Annual Return: {backtest_results['annual_return']:.2%}")
+    print(f"Max Drawdown: {backtest_results['max_drawdown']:.2%}")
+    print(f"Sharpe Ratio: {backtest_results['sharpe_ratio']:.2f}")
+    print(f"Win Rate: {backtest_results['win_rate']:.2%}")
+    print(f"Number of Trades: {backtest_results['num_trades']}")
