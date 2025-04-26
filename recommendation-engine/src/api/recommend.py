@@ -7,6 +7,8 @@ import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import pandas as pd
+import numpy as np
+import json
 from fastapi import APIRouter, HTTPException, Query, Depends, Body, Path
 from pydantic import BaseModel, Field
 
@@ -273,6 +275,7 @@ def get_cache_key(request: RecommendationRequest) -> str:
 def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
     """
     Clean project data dan memetakan field untuk kompatibilitas API
+    dengan penanganan NumPy array yang komprehensif
     
     Args:
         project_dict: Project data dictionary
@@ -282,12 +285,95 @@ def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
     """
     result = {}
     
+    # Pastikan project_dict adalah dictionary
+    if not isinstance(project_dict, dict):
+        logger.warning(f"Input bukan dictionary: {type(project_dict)}")
+        return {"id": "unknown", "recommendation_score": 0.5}
+    
+    # Process each field carefully
     for key, value in project_dict.items():
-        # Handle NaN values
-        if pd.isna(value):
+        # Nilai tidak perlu diproses - langsung gunakan
+        if value is None:
             result[key] = None
-        else:
-            result[key] = value
+            continue
+        
+        try:
+            # CASE 1: Handle NumPy arrays
+            if isinstance(value, np.ndarray):
+                # Numpy array empty
+                if value.size == 0:
+                    result[key] = None
+                # Numpy array dengan elemen tunggal - konversi ke nilai skalar
+                elif value.size == 1:
+                    # Konversi ke tipe data Python native
+                    if np.issubdtype(value.dtype, np.floating):
+                        result[key] = float(value.item())
+                    elif np.issubdtype(value.dtype, np.integer):
+                        result[key] = int(value.item())
+                    else:
+                        result[key] = value.item()
+                # Numpy array multi-elemen
+                else:
+                    # Check if all values are NaN
+                    if value.dtype.kind == 'f' and np.isnan(value).all():
+                        result[key] = None
+                    else:
+                        # Convert array to Python list
+                        result[key] = value.tolist()
+            
+            # CASE 2: Handle NumPy scalar types
+            elif isinstance(value, np.number):
+                # Convert to Python native type
+                if np.issubdtype(type(value), np.floating):
+                    result[key] = float(value)
+                else:
+                    result[key] = int(value)
+            
+            # CASE 3: Handle pandas NA/NaN values
+            elif pd.api.types.is_scalar(value) and pd.isna(value):
+                result[key] = None
+            
+            # CASE 4: Handle string yang mungkin berisi JSON
+            elif isinstance(value, str) and key in ['category', 'primary_category'] and (value.startswith('[') or value.startswith('"[')):
+                try:
+                    # Clean up potential nested quotes
+                    cleaned_value = value
+                    # Replace double quotes if needed
+                    if cleaned_value.startswith('"[') and cleaned_value.endswith(']"'):
+                        cleaned_value = cleaned_value[1:-1]
+                    
+                    # Parse as JSON
+                    parsed = json.loads(cleaned_value)
+                    if isinstance(parsed, list) and parsed:
+                        # Take only first category for field compatibility
+                        result[key] = parsed[0]
+                    else:
+                        result[key] = cleaned_value
+                except:
+                    # If parsing fails, keep original
+                    result[key] = value
+            
+            # CASE 5: Handle lists that should be strings
+            elif isinstance(value, (list, tuple)) and key in ['category', 'primary_category']:
+                if value:
+                    # Take first element if it's category related
+                    result[key] = value[0]
+                else:
+                    result[key] = 'unknown'
+            
+            # CASE 6: Handle normal values
+            else:
+                result[key] = value
+                
+        except Exception as e:
+            # Log and use safe default for any processing error
+            logger.warning(f"Error processing field {key}: {str(e)}")
+            if key == 'id':
+                result[key] = 'unknown'
+            elif key == 'recommendation_score':
+                result[key] = 0.5
+            else:
+                result[key] = None
     
     # Mapping kolom untuk kompatibilitas API
     # current_price -> price_usd, total_volume -> volume_24h
@@ -296,6 +382,39 @@ def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
         
     if 'total_volume' in result and 'volume_24h' not in result:
         result['volume_24h'] = result['total_volume']
+    
+    # Final safety check for category and primary_category
+    if 'primary_category' in result and isinstance(result['primary_category'], (list, tuple)):
+        if result['primary_category']:
+            result['primary_category'] = result['primary_category'][0]
+        else:
+            result['primary_category'] = 'unknown'
+    
+    if 'category' in result and isinstance(result['category'], (list, tuple)):
+        if result['category']:
+            result['category'] = result['category'][0]
+        else:
+            result['category'] = 'unknown'
+    
+    # Safety check for recommendation_score
+    if 'recommendation_score' in result:
+        if isinstance(result['recommendation_score'], (np.ndarray, list, tuple)):
+            # If array/list, take first element if exists, otherwise default
+            if len(result['recommendation_score']) > 0:
+                value = result['recommendation_score'][0]
+                try:
+                    result['recommendation_score'] = float(value)
+                except:
+                    result['recommendation_score'] = 0.5
+            else:
+                result['recommendation_score'] = 0.5
+        elif result['recommendation_score'] is None:
+            result['recommendation_score'] = 0.5
+        else:
+            try:
+                result['recommendation_score'] = float(result['recommendation_score'])
+            except:
+                result['recommendation_score'] = 0.5
     
     return result
 
@@ -398,28 +517,37 @@ async def recommend_projects(request: RecommendationRequest):
         # Create response with sanitized data
         project_responses = []
         
+        # PERBAIKAN: Tambahkan penanganan error pada loop
         for rec in recommendations:
-            # Sanitize data (handle NaN values)
-            clean_rec = sanitize_project_data(rec)
-            
-            project_responses.append(
-                ProjectResponse(
-                    id=clean_rec.get('id'),
-                    name=clean_rec.get('name'),
-                    symbol=clean_rec.get('symbol'),
-                    image=clean_rec.get('image'),
-                    price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),
-                    price_change_24h=clean_rec.get('price_change_24h'),
-                    price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),
-                    market_cap=clean_rec.get('market_cap'),
-                    volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),
-                    popularity_score=clean_rec.get('popularity_score'),
-                    trend_score=clean_rec.get('trend_score'),
-                    category=clean_rec.get('primary_category', clean_rec.get('category')),
-                    chain=clean_rec.get('chain'),
-                    recommendation_score=clean_rec.get('recommendation_score', 0.5)
+            try:
+                # Sanitize data (handle NaN values)
+                clean_rec = sanitize_project_data(rec)
+                
+                # PERBAIKAN: Pastikan recommendation_score adalah float Python
+                if 'recommendation_score' in clean_rec:
+                    clean_rec['recommendation_score'] = float(clean_rec['recommendation_score'])
+                
+                project_responses.append(
+                    ProjectResponse(
+                        id=clean_rec.get('id'),
+                        name=clean_rec.get('name'),
+                        symbol=clean_rec.get('symbol'),
+                        image=clean_rec.get('image'),
+                        price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),
+                        price_change_24h=clean_rec.get('price_change_24h'),
+                        price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),
+                        market_cap=clean_rec.get('market_cap'),
+                        volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),
+                        popularity_score=clean_rec.get('popularity_score'),
+                        trend_score=clean_rec.get('trend_score'),
+                        category=clean_rec.get('primary_category', clean_rec.get('category')),
+                        chain=clean_rec.get('chain'),
+                        recommendation_score=clean_rec.get('recommendation_score', 0.5)
+                    )
                 )
-            )
+            except Exception as e:
+                logger.warning(f"Error processing recommendation item: {e}. Skipping item.")
+                continue
         
         response = RecommendationResponse(
             user_id=request.user_id,
@@ -464,28 +592,41 @@ async def get_trending_projects(
         # Create response with sanitized data
         project_responses = []
         for rec in trending:
-            # Sanitize data (handle NaN values)
-            clean_rec = sanitize_project_data(rec)
-            
-            project_responses.append(
-                ProjectResponse(
-                    id=clean_rec.get('id'),
-                    name=clean_rec.get('name'),
-                    symbol=clean_rec.get('symbol'),
-                    image=clean_rec.get('image'),  # Tetap gunakan field image
-                    price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),  # Ambil dari current_price jika price_usd tidak ada
-                    price_change_24h=clean_rec.get('price_change_24h'),
-                    price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
-                    market_cap=clean_rec.get('market_cap'),
-                    volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),  # Ambil dari total_volume jika volume_24h tidak ada
-                    popularity_score=clean_rec.get('popularity_score'),
-                    trend_score=clean_rec.get('trend_score'),
-                    category=clean_rec.get('primary_category', clean_rec.get('category')),
-                    chain=clean_rec.get('chain'),
-                    recommendation_score=clean_rec.get('recommendation_score', 0.5)
+            try:
+                # PERBAIKAN: Gunakan try-except untuk menangani error pada setiap item
+                # Sanitize data (handle NaN values)
+                clean_rec = sanitize_project_data(rec)
+                
+                # PERBAIKAN: Pastikan semua nilai numerik adalah float Python native
+                for field in ['price_usd', 'market_cap', 'volume_24h', 'price_change_24h', 
+                            'price_change_percentage_7d_in_currency', 'popularity_score', 
+                            'trend_score', 'recommendation_score']:
+                    if field in clean_rec and clean_rec[field] is not None:
+                        if isinstance(clean_rec[field], np.number):
+                            clean_rec[field] = float(clean_rec[field])
+                
+                project_responses.append(
+                    ProjectResponse(
+                        id=clean_rec.get('id'),
+                        name=clean_rec.get('name'),
+                        symbol=clean_rec.get('symbol'),
+                        image=clean_rec.get('image'),  # Tetap gunakan field image
+                        price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),  # Ambil dari current_price jika price_usd tidak ada
+                        price_change_24h=clean_rec.get('price_change_24h'),
+                        price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
+                        market_cap=clean_rec.get('market_cap'),
+                        volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),  # Ambil dari total_volume jika volume_24h tidak ada
+                        popularity_score=clean_rec.get('popularity_score'),
+                        trend_score=clean_rec.get('trend_score'),
+                        category=clean_rec.get('primary_category', clean_rec.get('category')),
+                        chain=clean_rec.get('chain'),
+                        recommendation_score=clean_rec.get('recommendation_score', 0.5)
+                    )
                 )
-            )
-            
+            except Exception as e:
+                logger.warning(f"Error processing trending item: {e}. Skipping item.")
+                continue
+                
         return project_responses
     
     except Exception as e:
@@ -509,27 +650,40 @@ async def get_popular_projects(
         # Create response with sanitized data
         project_responses = []
         for rec in popular:
-            # Sanitize data (handle NaN values)
-            clean_rec = sanitize_project_data(rec)
-            
-            project_responses.append(
-                ProjectResponse(
-                    id=clean_rec.get('id'),
-                    name=clean_rec.get('name'),
-                    symbol=clean_rec.get('symbol'),
-                    image=clean_rec.get('image'),  # Tetap gunakan field image
-                    price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),  # Ambil dari current_price jika price_usd tidak ada
-                    price_change_24h=clean_rec.get('price_change_24h'),
-                    price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
-                    market_cap=clean_rec.get('market_cap'),
-                    volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),  # Ambil dari total_volume jika volume_24h tidak ada
-                    popularity_score=clean_rec.get('popularity_score'),
-                    trend_score=clean_rec.get('trend_score'),
-                    category=clean_rec.get('primary_category', clean_rec.get('category')),
-                    chain=clean_rec.get('chain'),
-                    recommendation_score=clean_rec.get('recommendation_score', 0.5)
+            try:
+                # PERBAIKAN: Gunakan try-except untuk menangani error pada setiap item
+                # Sanitize data (handle NaN values)
+                clean_rec = sanitize_project_data(rec)
+                
+                # PERBAIKAN: Pastikan semua nilai numerik adalah float Python native
+                for field in ['price_usd', 'market_cap', 'volume_24h', 'price_change_24h', 
+                            'price_change_percentage_7d_in_currency', 'popularity_score', 
+                            'trend_score', 'recommendation_score']:
+                    if field in clean_rec and clean_rec[field] is not None:
+                        if isinstance(clean_rec[field], np.number):
+                            clean_rec[field] = float(clean_rec[field])
+                
+                project_responses.append(
+                    ProjectResponse(
+                        id=clean_rec.get('id'),
+                        name=clean_rec.get('name'),
+                        symbol=clean_rec.get('symbol'),
+                        image=clean_rec.get('image'),  # Tetap gunakan field image
+                        price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),  # Ambil dari current_price jika price_usd tidak ada
+                        price_change_24h=clean_rec.get('price_change_24h'),
+                        price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
+                        market_cap=clean_rec.get('market_cap'),
+                        volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),  # Ambil dari total_volume jika volume_24h tidak ada
+                        popularity_score=clean_rec.get('popularity_score'),
+                        trend_score=clean_rec.get('trend_score'),
+                        category=clean_rec.get('primary_category', clean_rec.get('category')),
+                        chain=clean_rec.get('chain'),
+                        recommendation_score=clean_rec.get('recommendation_score', 0.5)
+                    )
                 )
-            )
+            except Exception as e:
+                logger.warning(f"Error processing popular item: {e}. Skipping item.")
+                continue
             
         return project_responses
     
@@ -560,27 +714,40 @@ async def get_similar_projects(
         # Create response with sanitized data
         project_responses = []
         for rec in similar:
-            # Sanitize data (handle NaN values)
-            clean_rec = sanitize_project_data(rec)
-            
-            project_responses.append(
-                ProjectResponse(
-                    id=clean_rec.get('id'),
-                    name=clean_rec.get('name'),
-                    symbol=clean_rec.get('symbol'),
-                    image=clean_rec.get('image'),  # Tetap gunakan field image
-                    price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),  # Ambil dari current_price jika price_usd tidak ada
-                    price_change_24h=clean_rec.get('price_change_24h'),
-                    price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
-                    market_cap=clean_rec.get('market_cap'),
-                    volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),  # Ambil dari total_volume jika volume_24h tidak ada
-                    popularity_score=clean_rec.get('popularity_score'),
-                    trend_score=clean_rec.get('trend_score'),
-                    category=clean_rec.get('primary_category', clean_rec.get('category')),
-                    chain=clean_rec.get('chain'),
-                    recommendation_score=clean_rec.get('recommendation_score', 0.5)
+            try:
+                # PERBAIKAN: Gunakan try-except untuk menangani error pada setiap item
+                # Sanitize data (handle NaN values)
+                clean_rec = sanitize_project_data(rec)
+                
+                # PERBAIKAN: Pastikan semua nilai numerik adalah float Python native
+                for field in ['price_usd', 'market_cap', 'volume_24h', 'price_change_24h', 
+                            'price_change_percentage_7d_in_currency', 'popularity_score', 
+                            'trend_score', 'recommendation_score', 'similarity_score']:
+                    if field in clean_rec and clean_rec[field] is not None:
+                        if isinstance(clean_rec[field], np.number):
+                            clean_rec[field] = float(clean_rec[field])
+                
+                project_responses.append(
+                    ProjectResponse(
+                        id=clean_rec.get('id'),
+                        name=clean_rec.get('name'),
+                        symbol=clean_rec.get('symbol'),
+                        image=clean_rec.get('image'),  # Tetap gunakan field image
+                        price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),  # Ambil dari current_price jika price_usd tidak ada
+                        price_change_24h=clean_rec.get('price_change_24h'),
+                        price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
+                        market_cap=clean_rec.get('market_cap'),
+                        volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),  # Ambil dari total_volume jika volume_24h tidak ada
+                        popularity_score=clean_rec.get('popularity_score'),
+                        trend_score=clean_rec.get('trend_score'),
+                        category=clean_rec.get('primary_category', clean_rec.get('category')),
+                        chain=clean_rec.get('chain'),
+                        recommendation_score=clean_rec.get('similarity_score', clean_rec.get('recommendation_score', 0.5))
+                    )
                 )
-            )
+            except Exception as e:
+                logger.warning(f"Error processing similar item: {e}. Skipping item.")
+                continue
             
         return project_responses
     
