@@ -126,6 +126,390 @@ def get_optimal_timeframe(price_data: pd.DataFrame, request: Any) -> Tuple[int, 
     # Default jika kolom close tidak ada
     return request.days, '1d'
 
+def _extract_trend_indicators(df: pd.DataFrame, latest_data: Dict[str, Any], 
+                          indicator_periods: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract trend indicators from DataFrame"""
+    ma_short = indicator_periods.get('ma_short', 20)
+    ma_medium = indicator_periods.get('ma_medium', 50)
+    ma_long = indicator_periods.get('ma_long', 200)
+    
+    result = {}
+    
+    # Moving Averages
+    mas = {}
+    for period in [ma_short, ma_medium, ma_long]:
+        sma_key = f'sma_{period}'
+        ema_key = f'ema_{period}'
+        
+        if sma_key in latest_data:
+            mas[f'sma_{period}'] = float(latest_data[sma_key])
+        if ema_key in latest_data:
+            mas[f'ema_{period}'] = float(latest_data[ema_key])
+    
+    result['moving_averages'] = mas
+    
+    # MACD
+    if all(k in latest_data for k in ['macd', 'macd_signal', 'macd_hist']):
+        result['macd'] = {
+            'value': float(latest_data['macd']),
+            'signal': float(latest_data['macd_signal']),
+            'histogram': float(latest_data['macd_hist']),
+            'cross_up': bool(latest_data.get('macd_cross_up', False)),
+            'cross_down': bool(latest_data.get('macd_cross_down', False)),
+            'signal_type': latest_data.get('macd_signal_type', 'neutral')
+        }
+    
+    # ADX
+    if all(k in latest_data for k in ['adx', 'plus_di', 'minus_di']):
+        result['adx'] = {
+            'value': float(latest_data['adx']),
+            'plus_di': float(latest_data['plus_di']),
+            'minus_di': float(latest_data['minus_di']),
+            'trend_strength': "strong" if float(latest_data['adx']) > 25 else "weak",
+            'trend_direction': "bullish" if float(latest_data['plus_di']) > float(latest_data['minus_di']) else "bearish"
+        }
+    
+    # Moving Average Crossovers
+    if 'golden_cross' in latest_data:
+        result['ma_crossovers'] = {
+            'golden_cross': bool(latest_data.get('golden_cross', False)),
+            'death_cross': bool(latest_data.get('death_cross', False)),
+            'short_medium_cross_up': bool(latest_data.get('sma_short_medium_cross_up', False)),
+            'short_medium_cross_down': bool(latest_data.get('sma_short_medium_cross_down', False))
+        }
+    
+    return result
+
+def _extract_momentum_indicators(df: pd.DataFrame, latest_data: Dict[str, Any], 
+                            indicator_periods: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract momentum indicators from DataFrame"""
+    result = {}
+    
+    # RSI
+    if 'rsi' in latest_data:
+        rsi_value = float(latest_data['rsi'])
+        result['rsi'] = {
+            'value': rsi_value,
+            'signal': "oversold" if rsi_value < 30 else "overbought" if rsi_value > 70 else "neutral",
+            'description': f"RSI is at {rsi_value:.2f}",
+            'period': indicator_periods.get('rsi_period', 14)
+        }
+    
+    # Stochastic
+    if all(k in latest_data for k in ['stoch_k', 'stoch_d']):
+        k_value = float(latest_data['stoch_k'])
+        d_value = float(latest_data['stoch_d'])
+        
+        if k_value < 20:
+            stoch_signal = "oversold"
+        elif k_value > 80:
+            stoch_signal = "overbought"
+        else:
+            stoch_signal = "neutral"
+            
+        result['stochastic'] = {
+            'k': k_value,
+            'd': d_value,
+            'signal': stoch_signal,
+            'cross_up': bool(latest_data.get('stoch_cross_up', False)),
+            'cross_down': bool(latest_data.get('stoch_cross_down', False)),
+            'description': f"Stochastic oscillator is {stoch_signal} at {k_value:.2f}",
+            'period_k': indicator_periods.get('stoch_k', 14),
+            'period_d': indicator_periods.get('stoch_d', 3)
+        }
+    
+    # ROC
+    if 'roc' in latest_data:
+        roc_value = float(latest_data['roc'])
+        result['roc'] = {
+            'value': roc_value,
+            'signal': "bullish" if roc_value > 0 else "bearish",
+            'description': f"Rate of Change is {roc_value:.2f}%",
+            'period': indicator_periods.get('roc_period', 10)
+        }
+    
+    # Williams %R
+    if 'willr' in latest_data:
+        willr_value = float(latest_data['willr'])
+        result['willr'] = {
+            'value': willr_value,
+            'signal': "oversold" if willr_value < -80 else "overbought" if willr_value > -20 else "neutral",
+            'description': f"Williams %R is at {willr_value:.2f}",
+            'period': indicator_periods.get('willr_period', 14)
+        }
+    
+    # CCI
+    if 'cci' in latest_data:
+        cci_value = float(latest_data['cci'])
+        result['cci'] = {
+            'value': cci_value,
+            'signal': "oversold" if cci_value < -100 else "overbought" if cci_value > 100 else "neutral",
+            'description': f"CCI is at {cci_value:.2f}",
+            'period': indicator_periods.get('cci_period', 20)
+        }
+    
+    # RSI Divergence
+    if any(k in latest_data for k in ['bullish_divergence', 'bearish_divergence']):
+        result['divergence'] = {
+            'bullish': bool(latest_data.get('bullish_divergence', False)),
+            'bearish': bool(latest_data.get('bearish_divergence', False)),
+            'description': "Divergence detected" if any(latest_data.get(k, False) for k in ['bullish_divergence', 'bearish_divergence']) else "No divergence"
+        }
+        
+    return result
+
+def _extract_volatility_indicators(df: pd.DataFrame, latest_data: Dict[str, Any], 
+                              indicator_periods: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract volatility indicators from DataFrame"""
+    result = {}
+    
+    # Bollinger Bands
+    if all(k in latest_data for k in ['bb_upper', 'bb_middle', 'bb_lower']):
+        upper = float(latest_data['bb_upper'])
+        middle = float(latest_data['bb_middle'])
+        lower = float(latest_data['bb_lower'])
+        close = float(latest_data['close'])
+        
+        # Calculate %B
+        if upper != lower:
+            pct_b = (close - lower) / (upper - lower)
+        else:
+            pct_b = 0.5
+        
+        if pct_b > 1:
+            bb_signal = "overbought"
+        elif pct_b < 0:
+            bb_signal = "oversold"
+        elif pct_b > 0.8:
+            bb_signal = "high"
+        elif pct_b < 0.2:
+            bb_signal = "low"
+        else:
+            bb_signal = "neutral"
+            
+        result['bollinger'] = {
+            'upper': upper,
+            'middle': middle,
+            'lower': lower,
+            'percent_b': pct_b,
+            'bandwidth': float(latest_data.get('bb_bandwidth', (upper - lower) / middle if middle != 0 else 0)),
+            'signal': bb_signal,
+            'description': f"Price is {bb_signal} relative to Bollinger Bands (%B: {pct_b:.2f})",
+            'period': indicator_periods.get('bb_period', 20)
+        }
+    
+    # ATR
+    if 'atr' in latest_data:
+        atr_value = float(latest_data['atr'])
+        atr_pct = float(latest_data.get('atr_pct', atr_value / float(latest_data['close']) * 100 if float(latest_data['close']) != 0 else 0))
+        
+        # Assess volatility
+        if atr_pct > 5:
+            volatility = "very_high"
+        elif atr_pct > 3:
+            volatility = "high"
+        elif atr_pct > 1.5:
+            volatility = "moderate"
+        else:
+            volatility = "low"
+            
+        result['atr'] = {
+            'value': atr_value,
+            'percent': atr_pct,
+            'volatility': volatility,
+            'description': f"{volatility.capitalize()} volatility (ATR: {atr_pct:.2f}% of price)",
+            'period': indicator_periods.get('atr_period', 14)
+        }
+    
+    # Keltner Channels
+    if all(k in latest_data for k in ['keltner_upper', 'keltner_middle', 'keltner_lower']):
+        result['keltner'] = {
+            'upper': float(latest_data['keltner_upper']),
+            'middle': float(latest_data['keltner_middle']),
+            'lower': float(latest_data['keltner_lower']),
+            'width': float(latest_data['keltner_upper']) - float(latest_data['keltner_lower'])
+        }
+        
+    # Volatility Squeeze
+    if 'squeeze_on' in latest_data:
+        result['squeeze'] = {
+            'active': bool(latest_data['squeeze_on']),
+            'starting': bool(latest_data.get('squeeze_starting', False)),
+            'releasing': bool(latest_data.get('squeeze_releasing', False)),
+            'description': "Volatility squeeze active" if latest_data['squeeze_on'] else "No volatility squeeze"
+        }
+        
+    # Historical Volatility
+    if 'volatility_21d' in latest_data:
+        vol_21d = float(latest_data['volatility_21d'])
+        result['historical_volatility'] = {
+            '21d': vol_21d,
+            '63d': float(latest_data.get('volatility_63d', 0)),
+            'annualized': vol_21d * np.sqrt(252),
+            'description': f"21-day historical volatility: {vol_21d * 100:.2f}%"
+        }
+        
+    return result
+
+def _extract_volume_indicators(df: pd.DataFrame, latest_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract volume indicators from DataFrame"""
+    result = {}
+    
+    # Volume
+    if 'volume' in latest_data:
+        volume = float(latest_data['volume'])
+        volume_ratio = float(latest_data.get('volume_ratio', 1.0))
+        
+        if volume_ratio > 2:
+            volume_signal = "very_high"
+        elif volume_ratio > 1.5:
+            volume_signal = "high"
+        elif volume_ratio < 0.5:
+            volume_signal = "low"
+        else:
+            volume_signal = "normal"
+            
+        result['volume'] = {
+            'value': volume,
+            'ratio': volume_ratio,
+            'signal': volume_signal,
+            'description': f"Volume is {volume_ratio:.2f}x average ({volume_signal})"
+        }
+    
+    # OBV
+    if 'obv' in latest_data:
+        result['obv'] = {
+            'value': float(latest_data['obv']),
+            'direction': "up" if latest_data.get('obv_direction', 0) > 0 else "down"
+        }
+    
+    # Money Flow Index
+    if 'mfi' in latest_data:
+        mfi_value = float(latest_data['mfi'])
+        result['mfi'] = {
+            'value': mfi_value,
+            'signal': "oversold" if mfi_value < 20 else "overbought" if mfi_value > 80 else "neutral",
+            'description': f"Money Flow Index is {mfi_value:.2f}"
+        }
+    
+    # Volume Spikes
+    if 'volume_spike' in latest_data:
+        result['volume_spike'] = {
+            'active': bool(latest_data['volume_spike']),
+            'up': bool(latest_data.get('volume_spike_up', False)),
+            'down': bool(latest_data.get('volume_spike_down', False)),
+            'description': "Volume spike detected" if latest_data['volume_spike'] else "No volume spike"
+        }
+        
+    # Volume Divergence
+    if any(k in latest_data for k in ['bullish_vol_div', 'bearish_vol_div']):
+        result['volume_divergence'] = {
+            'bullish': bool(latest_data.get('bullish_vol_div', False)),
+            'bearish': bool(latest_data.get('bearish_vol_div', False)),
+            'description': "Volume divergence detected" if any(latest_data.get(k, False) for k in ['bullish_vol_div', 'bearish_vol_div']) else "No volume divergence"
+        }
+        
+    return result
+
+def _extract_ichimoku_indicators(df: pd.DataFrame, latest_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract Ichimoku Cloud indicators from DataFrame"""
+    if not all(k in latest_data for k in ['tenkan_sen', 'kijun_sen', 'senkou_span_a', 'senkou_span_b']):
+        return {}
+    
+    result = {
+        'tenkan': float(latest_data['tenkan_sen']),
+        'kijun': float(latest_data['kijun_sen']),
+        'senkou_a': float(latest_data['senkou_span_a']),
+        'senkou_b': float(latest_data['senkou_span_b'])
+    }
+    
+    # Chikou Span if available
+    if 'chikou_span' in latest_data:
+        result['chikou'] = float(latest_data['chikou_span'])
+    
+    # Cloud color/type
+    result['cloud_green'] = bool(latest_data.get('cloud_green', False))
+    result['cloud_red'] = bool(latest_data.get('cloud_red', False))
+    
+    # Price position
+    result['price_above_cloud'] = bool(latest_data.get('price_above_cloud', False))
+    result['price_in_cloud'] = bool(latest_data.get('price_in_cloud', False))
+    result['price_below_cloud'] = bool(latest_data.get('price_below_cloud', False))
+    
+    # TK Cross
+    result['tk_cross_bull'] = bool(latest_data.get('tk_cross_bull', False))
+    result['tk_cross_bear'] = bool(latest_data.get('tk_cross_bear', False))
+    
+    # Signal
+    if result['price_above_cloud'] and result['cloud_green']:
+        signal = "strong_bullish"
+    elif result['price_below_cloud'] and result['cloud_red']:
+        signal = "strong_bearish"
+    elif result['price_above_cloud']:
+        signal = "bullish"
+    elif result['price_below_cloud']:
+        signal = "bearish"
+    elif result['price_in_cloud'] and result['cloud_green']:
+        signal = "neutral_bullish"
+    elif result['price_in_cloud'] and result['cloud_red']:
+        signal = "neutral_bearish"
+    else:
+        signal = "neutral"
+        
+    result['signal'] = signal
+    
+    # Description
+    if latest_data.get('tk_cross_bull', False):
+        result['description'] = "Bullish TK Cross detected"
+    elif latest_data.get('tk_cross_bear', False):
+        result['description'] = "Bearish TK Cross detected"
+    else:
+        result['description'] = f"Ichimoku Cloud is {signal.replace('_', ' ')}"
+        
+    return result
+
+def _extract_oscillator_composite(df: pd.DataFrame, latest_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract composite oscillator data from DataFrame"""
+    if 'momentum_composite' not in latest_data:
+        return {}
+    
+    composite_value = float(latest_data['momentum_composite'])
+    
+    if composite_value > 70:
+        signal = "overbought"
+    elif composite_value < 30:
+        signal = "oversold"
+    elif composite_value > 60:
+        signal = "high"
+    elif composite_value < 40:
+        signal = "low"
+    else:
+        signal = "neutral"
+        
+    return {
+        'value': composite_value,
+        'signal': signal,
+        'components': latest_data.get('momentum_signal', 'neutral'),
+        'description': f"Combined oscillator value is {composite_value:.2f} ({signal})"
+    }
+
+def _get_regime_description(market_regime: str) -> str:
+    """Get description for market regime"""
+    descriptions = {
+        "trending_bullish": "Strong uptrend with normal volatility",
+        "trending_bullish_volatile": "Strong uptrend with high volatility",
+        "trending_bearish": "Strong downtrend with normal volatility",
+        "trending_bearish_volatile": "Strong downtrend with high volatility",
+        "trending_neutral": "Market is trending but direction is unclear",
+        "ranging_volatile": "Sideways market with high volatility",
+        "ranging_low_volatility": "Sideways market with low volatility",
+        "volatile_bullish": "Bullish market with very high volatility",
+        "volatile_bearish": "Bearish market with very high volatility",
+        "volatile_sideways": "Sideways market with extremely high volatility"
+    }
+    
+    return descriptions.get(market_regime, "Unknown market conditions")
+
 # Pydantic models
 class IndicatorPeriods(BaseModel):
     rsi_period: int = Field(14, ge=3, le=50, description="Periode RSI (standard: 14)")
@@ -431,35 +815,35 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
         try:
             # 1. Trend Indicators
             if "sma" in request.indicators or "trend" in request.indicators:
-                trend_data = self._extract_trend_indicators(df_with_indicators, latest_data, indicator_periods)
+                trend_data = _extract_trend_indicators(df_with_indicators, latest_data, indicator_periods)
                 indicators_result["trend"] = trend_data
                 
             # 2. Momentum Indicators
             if any(ind in request.indicators for ind in ["rsi", "macd", "stochastic", "momentum"]):
-                momentum_data = self._extract_momentum_indicators(df_with_indicators, latest_data, indicator_periods)
+                momentum_data = _extract_momentum_indicators(df_with_indicators, latest_data, indicator_periods)
                 indicators_result["momentum"] = momentum_data
                 
             # 3. Volatility Indicators
             if any(ind in request.indicators for ind in ["bollinger", "atr", "volatility"]):
-                volatility_data = self._extract_volatility_indicators(df_with_indicators, latest_data, indicator_periods)
+                volatility_data = _extract_volatility_indicators(df_with_indicators, latest_data, indicator_periods)
                 indicators_result["volatility"] = volatility_data
                 
             # 4. Volume Indicators (if available)
             if "volume" in request.indicators and "volume" in price_data.columns:
-                volume_data = self._extract_volume_indicators(df_with_indicators, latest_data)
+                volume_data = _extract_volume_indicators(df_with_indicators, latest_data)
                 indicators_result["volume"] = volume_data
                 
             # 5. Ichimoku Cloud (if requested)
             if "ichimoku" in request.indicators:
-                ichimoku_data = self._extract_ichimoku_indicators(df_with_indicators, latest_data)
+                ichimoku_data = _extract_ichimoku_indicators(df_with_indicators, latest_data)
                 indicators_result["ichimoku"] = ichimoku_data
                 
             # 6. Oscillator Combined
             if "oscillator" in request.indicators or "momentum_composite" in df_with_indicators.columns:
-                oscillator_data = self._extract_oscillator_composite(df_with_indicators, latest_data)
+                oscillator_data = _extract_oscillator_composite(df_with_indicators, latest_data)
                 indicators_result["oscillator_composite"] = oscillator_data
                 
-            # 7. Overall Market Analysis
+            # 7. Market Analysis
             indicators_result["market_analysis"] = {
                 "regime": market_regime,
                 "overall_signal": latest_data.get("overall_signal", "neutral"),
@@ -506,7 +890,7 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
                 "volatility": volatility,
                 "volatility_level": volatility_level,
                 "market_regime": market_regime,
-                "regime_description": self._get_regime_description(market_regime)
+                "regime_description": _get_regime_description(market_regime)
             }
             
         except Exception as e:
@@ -534,390 +918,6 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
         import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-    
-    def _extract_trend_indicators(self, df: pd.DataFrame, latest_data: Dict[str, Any], 
-                              indicator_periods: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract trend indicators from DataFrame"""
-        ma_short = indicator_periods.get('ma_short', 20)
-        ma_medium = indicator_periods.get('ma_medium', 50)
-        ma_long = indicator_periods.get('ma_long', 200)
-        
-        result = {}
-        
-        # Moving Averages
-        mas = {}
-        for period in [ma_short, ma_medium, ma_long]:
-            sma_key = f'sma_{period}'
-            ema_key = f'ema_{period}'
-            
-            if sma_key in latest_data:
-                mas[f'sma_{period}'] = float(latest_data[sma_key])
-            if ema_key in latest_data:
-                mas[f'ema_{period}'] = float(latest_data[ema_key])
-        
-        result['moving_averages'] = mas
-        
-        # MACD
-        if all(k in latest_data for k in ['macd', 'macd_signal', 'macd_hist']):
-            result['macd'] = {
-                'value': float(latest_data['macd']),
-                'signal': float(latest_data['macd_signal']),
-                'histogram': float(latest_data['macd_hist']),
-                'cross_up': bool(latest_data.get('macd_cross_up', False)),
-                'cross_down': bool(latest_data.get('macd_cross_down', False)),
-                'signal_type': latest_data.get('macd_signal_type', 'neutral')
-            }
-        
-        # ADX
-        if all(k in latest_data for k in ['adx', 'plus_di', 'minus_di']):
-            result['adx'] = {
-                'value': float(latest_data['adx']),
-                'plus_di': float(latest_data['plus_di']),
-                'minus_di': float(latest_data['minus_di']),
-                'trend_strength': "strong" if float(latest_data['adx']) > 25 else "weak",
-                'trend_direction': "bullish" if float(latest_data['plus_di']) > float(latest_data['minus_di']) else "bearish"
-            }
-        
-        # Moving Average Crossovers
-        if 'golden_cross' in latest_data:
-            result['ma_crossovers'] = {
-                'golden_cross': bool(latest_data.get('golden_cross', False)),
-                'death_cross': bool(latest_data.get('death_cross', False)),
-                'short_medium_cross_up': bool(latest_data.get('sma_short_medium_cross_up', False)),
-                'short_medium_cross_down': bool(latest_data.get('sma_short_medium_cross_down', False))
-            }
-        
-        return result
-    
-    def _extract_momentum_indicators(self, df: pd.DataFrame, latest_data: Dict[str, Any], 
-                                indicator_periods: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract momentum indicators from DataFrame"""
-        result = {}
-        
-        # RSI
-        if 'rsi' in latest_data:
-            rsi_value = float(latest_data['rsi'])
-            result['rsi'] = {
-                'value': rsi_value,
-                'signal': "oversold" if rsi_value < 30 else "overbought" if rsi_value > 70 else "neutral",
-                'description': f"RSI is at {rsi_value:.2f}",
-                'period': indicator_periods.get('rsi_period', 14)
-            }
-        
-        # Stochastic
-        if all(k in latest_data for k in ['stoch_k', 'stoch_d']):
-            k_value = float(latest_data['stoch_k'])
-            d_value = float(latest_data['stoch_d'])
-            
-            if k_value < 20:
-                stoch_signal = "oversold"
-            elif k_value > 80:
-                stoch_signal = "overbought"
-            else:
-                stoch_signal = "neutral"
-                
-            result['stochastic'] = {
-                'k': k_value,
-                'd': d_value,
-                'signal': stoch_signal,
-                'cross_up': bool(latest_data.get('stoch_cross_up', False)),
-                'cross_down': bool(latest_data.get('stoch_cross_down', False)),
-                'description': f"Stochastic oscillator is {stoch_signal} at {k_value:.2f}",
-                'period_k': indicator_periods.get('stoch_k', 14),
-                'period_d': indicator_periods.get('stoch_d', 3)
-            }
-        
-        # ROC
-        if 'roc' in latest_data:
-            roc_value = float(latest_data['roc'])
-            result['roc'] = {
-                'value': roc_value,
-                'signal': "bullish" if roc_value > 0 else "bearish",
-                'description': f"Rate of Change is {roc_value:.2f}%",
-                'period': indicator_periods.get('roc_period', 10)
-            }
-        
-        # Williams %R
-        if 'willr' in latest_data:
-            willr_value = float(latest_data['willr'])
-            result['willr'] = {
-                'value': willr_value,
-                'signal': "oversold" if willr_value < -80 else "overbought" if willr_value > -20 else "neutral",
-                'description': f"Williams %R is at {willr_value:.2f}",
-                'period': indicator_periods.get('willr_period', 14)
-            }
-        
-        # CCI
-        if 'cci' in latest_data:
-            cci_value = float(latest_data['cci'])
-            result['cci'] = {
-                'value': cci_value,
-                'signal': "oversold" if cci_value < -100 else "overbought" if cci_value > 100 else "neutral",
-                'description': f"CCI is at {cci_value:.2f}",
-                'period': indicator_periods.get('cci_period', 20)
-            }
-        
-        # RSI Divergence
-        if any(k in latest_data for k in ['bullish_divergence', 'bearish_divergence']):
-            result['divergence'] = {
-                'bullish': bool(latest_data.get('bullish_divergence', False)),
-                'bearish': bool(latest_data.get('bearish_divergence', False)),
-                'description': "Divergence detected" if any(latest_data.get(k, False) for k in ['bullish_divergence', 'bearish_divergence']) else "No divergence"
-            }
-            
-        return result
-    
-    def _extract_volatility_indicators(self, df: pd.DataFrame, latest_data: Dict[str, Any], 
-                                  indicator_periods: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract volatility indicators from DataFrame"""
-        result = {}
-        
-        # Bollinger Bands
-        if all(k in latest_data for k in ['bb_upper', 'bb_middle', 'bb_lower']):
-            upper = float(latest_data['bb_upper'])
-            middle = float(latest_data['bb_middle'])
-            lower = float(latest_data['bb_lower'])
-            close = float(latest_data['close'])
-            
-            # Calculate %B
-            if upper != lower:
-                pct_b = (close - lower) / (upper - lower)
-            else:
-                pct_b = 0.5
-            
-            if pct_b > 1:
-                bb_signal = "overbought"
-            elif pct_b < 0:
-                bb_signal = "oversold"
-            elif pct_b > 0.8:
-                bb_signal = "high"
-            elif pct_b < 0.2:
-                bb_signal = "low"
-            else:
-                bb_signal = "neutral"
-                
-            result['bollinger'] = {
-                'upper': upper,
-                'middle': middle,
-                'lower': lower,
-                'percent_b': pct_b,
-                'bandwidth': float(latest_data.get('bb_bandwidth', (upper - lower) / middle if middle != 0 else 0)),
-                'signal': bb_signal,
-                'description': f"Price is {bb_signal} relative to Bollinger Bands (%B: {pct_b:.2f})",
-                'period': indicator_periods.get('bb_period', 20)
-            }
-        
-        # ATR
-        if 'atr' in latest_data:
-            atr_value = float(latest_data['atr'])
-            atr_pct = float(latest_data.get('atr_pct', atr_value / float(latest_data['close']) * 100 if float(latest_data['close']) != 0 else 0))
-            
-            # Assess volatility
-            if atr_pct > 5:
-                volatility = "very_high"
-            elif atr_pct > 3:
-                volatility = "high"
-            elif atr_pct > 1.5:
-                volatility = "moderate"
-            else:
-                volatility = "low"
-                
-            result['atr'] = {
-                'value': atr_value,
-                'percent': atr_pct,
-                'volatility': volatility,
-                'description': f"{volatility.capitalize()} volatility (ATR: {atr_pct:.2f}% of price)",
-                'period': indicator_periods.get('atr_period', 14)
-            }
-        
-        # Keltner Channels
-        if all(k in latest_data for k in ['keltner_upper', 'keltner_middle', 'keltner_lower']):
-            result['keltner'] = {
-                'upper': float(latest_data['keltner_upper']),
-                'middle': float(latest_data['keltner_middle']),
-                'lower': float(latest_data['keltner_lower']),
-                'width': float(latest_data['keltner_upper']) - float(latest_data['keltner_lower'])
-            }
-            
-        # Volatility Squeeze
-        if 'squeeze_on' in latest_data:
-            result['squeeze'] = {
-                'active': bool(latest_data['squeeze_on']),
-                'starting': bool(latest_data.get('squeeze_starting', False)),
-                'releasing': bool(latest_data.get('squeeze_releasing', False)),
-                'description': "Volatility squeeze active" if latest_data['squeeze_on'] else "No volatility squeeze"
-            }
-            
-        # Historical Volatility
-        if 'volatility_21d' in latest_data:
-            vol_21d = float(latest_data['volatility_21d'])
-            result['historical_volatility'] = {
-                '21d': vol_21d,
-                '63d': float(latest_data.get('volatility_63d', 0)),
-                'annualized': vol_21d * np.sqrt(252),
-                'description': f"21-day historical volatility: {vol_21d * 100:.2f}%"
-            }
-            
-        return result
-    
-    def _extract_volume_indicators(self, df: pd.DataFrame, latest_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract volume indicators from DataFrame"""
-        result = {}
-        
-        # Volume
-        if 'volume' in latest_data:
-            volume = float(latest_data['volume'])
-            volume_ratio = float(latest_data.get('volume_ratio', 1.0))
-            
-            if volume_ratio > 2:
-                volume_signal = "very_high"
-            elif volume_ratio > 1.5:
-                volume_signal = "high"
-            elif volume_ratio < 0.5:
-                volume_signal = "low"
-            else:
-                volume_signal = "normal"
-                
-            result['volume'] = {
-                'value': volume,
-                'ratio': volume_ratio,
-                'signal': volume_signal,
-                'description': f"Volume is {volume_ratio:.2f}x average ({volume_signal})"
-            }
-        
-        # OBV
-        if 'obv' in latest_data:
-            result['obv'] = {
-                'value': float(latest_data['obv']),
-                'direction': "up" if latest_data.get('obv_direction', 0) > 0 else "down"
-            }
-        
-        # Money Flow Index
-        if 'mfi' in latest_data:
-            mfi_value = float(latest_data['mfi'])
-            result['mfi'] = {
-                'value': mfi_value,
-                'signal': "oversold" if mfi_value < 20 else "overbought" if mfi_value > 80 else "neutral",
-                'description': f"Money Flow Index is {mfi_value:.2f}"
-            }
-        
-        # Volume Spikes
-        if 'volume_spike' in latest_data:
-            result['volume_spike'] = {
-                'active': bool(latest_data['volume_spike']),
-                'up': bool(latest_data.get('volume_spike_up', False)),
-                'down': bool(latest_data.get('volume_spike_down', False)),
-                'description': "Volume spike detected" if latest_data['volume_spike'] else "No volume spike"
-            }
-            
-        # Volume Divergence
-        if any(k in latest_data for k in ['bullish_vol_div', 'bearish_vol_div']):
-            result['volume_divergence'] = {
-                'bullish': bool(latest_data.get('bullish_vol_div', False)),
-                'bearish': bool(latest_data.get('bearish_vol_div', False)),
-                'description': "Volume divergence detected" if any(latest_data.get(k, False) for k in ['bullish_vol_div', 'bearish_vol_div']) else "No volume divergence"
-            }
-            
-        return result
-    
-    def _extract_ichimoku_indicators(self, df: pd.DataFrame, latest_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract Ichimoku Cloud indicators from DataFrame"""
-        if not all(k in latest_data for k in ['tenkan_sen', 'kijun_sen', 'senkou_span_a', 'senkou_span_b']):
-            return {}
-        
-        result = {
-            'tenkan': float(latest_data['tenkan_sen']),
-            'kijun': float(latest_data['kijun_sen']),
-            'senkou_a': float(latest_data['senkou_span_a']),
-            'senkou_b': float(latest_data['senkou_span_b'])
-        }
-        
-        # Chikou Span if available
-        if 'chikou_span' in latest_data:
-            result['chikou'] = float(latest_data['chikou_span'])
-        
-        # Cloud color/type
-        result['cloud_green'] = bool(latest_data.get('cloud_green', False))
-        result['cloud_red'] = bool(latest_data.get('cloud_red', False))
-        
-        # Price position
-        result['price_above_cloud'] = bool(latest_data.get('price_above_cloud', False))
-        result['price_in_cloud'] = bool(latest_data.get('price_in_cloud', False))
-        result['price_below_cloud'] = bool(latest_data.get('price_below_cloud', False))
-        
-        # TK Cross
-        result['tk_cross_bull'] = bool(latest_data.get('tk_cross_bull', False))
-        result['tk_cross_bear'] = bool(latest_data.get('tk_cross_bear', False))
-        
-        # Signal
-        if result['price_above_cloud'] and result['cloud_green']:
-            signal = "strong_bullish"
-        elif result['price_below_cloud'] and result['cloud_red']:
-            signal = "strong_bearish"
-        elif result['price_above_cloud']:
-            signal = "bullish"
-        elif result['price_below_cloud']:
-            signal = "bearish"
-        elif result['price_in_cloud'] and result['cloud_green']:
-            signal = "neutral_bullish"
-        elif result['price_in_cloud'] and result['cloud_red']:
-            signal = "neutral_bearish"
-        else:
-            signal = "neutral"
-            
-        result['signal'] = signal
-        
-        # Description
-        if latest_data.get('tk_cross_bull', False):
-            result['description'] = "Bullish TK Cross detected"
-        elif latest_data.get('tk_cross_bear', False):
-            result['description'] = "Bearish TK Cross detected"
-        else:
-            result['description'] = f"Ichimoku Cloud is {signal.replace('_', ' ')}"
-            
-        return result
-    
-    def _extract_oscillator_composite(self, df: pd.DataFrame, latest_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract composite oscillator data from DataFrame"""
-        if 'momentum_composite' not in latest_data:
-            return {}
-        
-        composite_value = float(latest_data['momentum_composite'])
-        
-        if composite_value > 70:
-            signal = "overbought"
-        elif composite_value < 30:
-            signal = "oversold"
-        elif composite_value > 60:
-            signal = "high"
-        elif composite_value < 40:
-            signal = "low"
-        else:
-            signal = "neutral"
-            
-        return {
-            'value': composite_value,
-            'signal': signal,
-            'components': latest_data.get('momentum_signal', 'neutral'),
-            'description': f"Combined oscillator value is {composite_value:.2f} ({signal})"
-        }
-    
-    def _get_regime_description(self, market_regime: str) -> str:
-        """Get description for market regime"""
-        descriptions = {
-            "trending_bullish": "Strong uptrend with normal volatility",
-            "trending_bullish_volatile": "Strong uptrend with high volatility",
-            "trending_bearish": "Strong downtrend with normal volatility",
-            "trending_bearish_volatile": "Strong downtrend with high volatility",
-            "trending_neutral": "Market is trending but direction is unclear",
-            "ranging_volatile": "Sideways market with high volatility",
-            "ranging_low_volatility": "Sideways market with low volatility",
-            "volatile_bullish": "Bullish market with very high volatility",
-            "volatile_bearish": "Bearish market with very high volatility",
-            "volatile_sideways": "Sideways market with extremely high volatility"
-        }
-        
-        return descriptions.get(market_regime, "Unknown market conditions")
 
 @router.get("/market-events/{project_id}", response_model=MarketEventResponse)
 async def get_market_events(
@@ -1136,7 +1136,12 @@ async def get_technical_alerts(
         
         # Calculate indicators and generate alerts
         ti = TechnicalIndicators(price_data, indicator_periods)
-        alerts = ti.generate_alerts(lookback_period=lookback)
+        
+        # Perbaikan: Simpan dataframe dengan indikator
+        df_with_indicators = ti.add_indicators()
+        
+        # Perbaikan: Gunakan df_with_indicators untuk generate_alerts
+        alerts = ti.generate_alerts(lookback_period=lookback, df=df_with_indicators)
         
         # Get reversal signals
         reversal_data = ti.generate_reversal_signals()

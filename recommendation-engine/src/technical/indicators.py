@@ -261,11 +261,11 @@ class TechnicalIndicators:
     
     def add_trend_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Tambahkan indikator tren
+        Tambahkan indikator tren dengan penanganan error yang lebih baik
         
         Args:
             df: DataFrame harga
-            
+                
         Returns:
             pd.DataFrame: DataFrame dengan indikator tren
         """
@@ -280,6 +280,11 @@ class TechnicalIndicators:
             if len(df) >= period:
                 df[f'sma_{period}'] = df[self.close_col].rolling(window=period).mean()
                 df[f'ema_{period}'] = df[self.close_col].ewm(span=period, adjust=False).mean()
+            else:
+                # Jika data tidak cukup, dibuat NaN untuk semua baris
+                df[f'sma_{period}'] = np.nan
+                df[f'ema_{period}'] = np.nan
+                logger.warning(f"Not enough data for {period}-period MA. Minimum required: {period}, available: {len(df)}")
         
         # MACD dengan periode dinamis
         macd_fast = self.periods['macd_fast']
@@ -304,6 +309,14 @@ class TechnicalIndicators:
                     self._calculate_macd_pandas(df)
             else:
                 self._calculate_macd_pandas(df)
+        else:
+            # Jika data tidak cukup, buat kolom dengan NaN
+            df['macd'] = np.nan
+            df['macd_signal'] = np.nan
+            df['macd_hist'] = np.nan
+            df['macd_cross_up'] = 0
+            df['macd_cross_down'] = 0
+            logger.warning(f"Not enough data for MACD calculation. Minimum required: {macd_slow}, available: {len(df)}")
         
         # ADX (Average Directional Index)
         adx_period = self.periods['adx_period']
@@ -334,6 +347,15 @@ class TechnicalIndicators:
                     self._calculate_adx_pandas(df)
             else:
                 self._calculate_adx_pandas(df)
+        else:
+            # Jika data tidak cukup, buat kolom dengan NaN atau nilai default
+            df['adx'] = 15.0  # Default value showing weak trend
+            df['plus_di'] = 20.0
+            df['minus_di'] = 20.0
+            if len(df) < adx_period:
+                logger.warning(f"Not enough data for ADX calculation. Minimum required: {adx_period}, available: {len(df)}")
+            if self.high_col not in df.columns or self.low_col not in df.columns:
+                logger.warning(f"Missing required columns for ADX: high/low")
         
         # Parabolic SAR
         if len(df) >= 10 and self.high_col in df.columns and self.low_col in df.columns:
@@ -353,29 +375,34 @@ class TechnicalIndicators:
         
         return df
     
-    def _calculate_macd_pandas(self, df: pd.DataFrame) -> None:
-        """Calculate MACD using pandas"""
-        macd_fast = self.periods['macd_fast']
-        macd_slow = self.periods['macd_slow']
-        macd_signal = self.periods['macd_signal']
-        
+    def _calculate_macd_pandas(self, df: pd.DataFrame, 
+                      fast_period: int = 12, 
+                      slow_period: int = 26, 
+                      signal_period: int = 9) -> None:
+        """Calculate MACD using pandas with better error handling"""
         try:
             # Calculate MACD dengan ewm
-            fast_ema = df[self.close_col].ewm(span=macd_fast, adjust=False).mean()
-            slow_ema = df[self.close_col].ewm(span=macd_slow, adjust=False).mean()
+            fast_ema = df[self.close_col].ewm(span=fast_period, adjust=False).mean()
+            slow_ema = df[self.close_col].ewm(span=slow_period, adjust=False).mean()
             
             df['macd'] = fast_ema - slow_ema
-            df['macd_signal'] = df['macd'].ewm(span=macd_signal, adjust=False).mean()
+            df['macd_signal'] = df['macd'].ewm(span=signal_period, adjust=False).mean()
             df['macd_hist'] = df['macd'] - df['macd_signal']
             
             # Calculate MACD crossover signals
             df['macd_cross_up'] = ((df['macd'] > df['macd_signal']) & 
-                                   (df['macd'].shift(1) <= df['macd_signal'].shift(1))).astype(int)
+                            (df['macd'].shift(1) <= df['macd_signal'].shift(1))).astype(int)
             
             df['macd_cross_down'] = ((df['macd'] < df['macd_signal']) & 
-                                    (df['macd'].shift(1) >= df['macd_signal'].shift(1))).astype(int)
+                                (df['macd'].shift(1) >= df['macd_signal'].shift(1))).astype(int)
         except Exception as e:
             logger.error(f"Error calculating MACD with pandas: {str(e)}")
+            # Handle error by filling with default values
+            df['macd'] = 0
+            df['macd_signal'] = 0
+            df['macd_hist'] = 0
+            df['macd_cross_up'] = 0
+            df['macd_cross_down'] = 0
     
     def _calculate_adx_pandas(self, df: pd.DataFrame) -> None:
         """Calculate ADX using pandas"""
@@ -1254,7 +1281,7 @@ class TechnicalIndicators:
     
     def add_signal_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Tambahkan indikator sinyal/keputusan
+        Tambahkan indikator sinyal/keputusan dengan penanganan error yang lebih baik
         
         Args:
             df: DataFrame harga
@@ -1270,12 +1297,21 @@ class TechnicalIndicators:
                     np.where(df['rsi'] > 70, 'sell', 'neutral')
                 )
             
-            # Add MACD signals
+            # Add MACD signals - perbaikan penanganan error 'macd_cross_up'
             if all(col in df.columns for col in ['macd', 'macd_signal']):
+                # Perbaikan: Hitung macd_cross_up and macd_cross_down secara manual jika belum ada
+                if 'macd_cross_up' not in df.columns:
+                    df['macd_cross_up'] = ((df['macd'] > df['macd_signal']) & 
+                                        (df['macd'].shift(1) <= df['macd_signal'].shift(1))).astype(int)
+                
+                if 'macd_cross_down' not in df.columns:
+                    df['macd_cross_down'] = ((df['macd'] < df['macd_signal']) & 
+                                        (df['macd'].shift(1) >= df['macd_signal'].shift(1))).astype(int)
+                
                 df['macd_signal_type'] = np.where(
                     df['macd_cross_up'] == 1, 'strong_buy',
                     np.where(df['macd_cross_down'] == 1, 'strong_sell',
-                            np.where(df['macd'] > df['macd_signal'], 'buy', 'sell'))
+                        np.where(df['macd'] > df['macd_signal'], 'buy', 'sell'))
                 )
             
             # Add Bollinger Bands signals
@@ -1287,11 +1323,20 @@ class TechnicalIndicators:
             
             # Add Stochastic signals
             if 'stoch_k' in df.columns and 'stoch_d' in df.columns:
+                # Perbaikan: Hitung stoch_cross_up dan stoch_cross_down secara manual jika belum ada
+                if 'stoch_cross_up' not in df.columns:
+                    df['stoch_cross_up'] = ((df['stoch_k'] > df['stoch_d']) & 
+                                        (df['stoch_k'].shift(1) <= df['stoch_d'].shift(1))).astype(int)
+                
+                if 'stoch_cross_down' not in df.columns:
+                    df['stoch_cross_down'] = ((df['stoch_k'] < df['stoch_d']) & 
+                                            (df['stoch_k'].shift(1) >= df['stoch_d'].shift(1))).astype(int)
+                
                 df['stoch_signal'] = np.where(
                     (df['stoch_k'] < 20) & (df['stoch_cross_up'] == 1), 'strong_buy',
                     np.where((df['stoch_k'] > 80) & (df['stoch_cross_down'] == 1), 'strong_sell',
-                            np.where(df['stoch_k'] < 20, 'buy',
-                                    np.where(df['stoch_k'] > 80, 'sell', 'neutral')))
+                        np.where(df['stoch_k'] < 20, 'buy',
+                                np.where(df['stoch_k'] > 80, 'sell', 'neutral')))
                 )
             
             # Add MA signals
@@ -1304,6 +1349,15 @@ class TechnicalIndicators:
             # Check if MA columns exist before using them
             if f'sma_{ma_long}' in df.columns:
                 # Golden/Death Cross
+                if 'golden_cross' not in df.columns and f'sma_{ma_medium}' in df.columns and f'sma_{ma_long}' in df.columns:
+                    # Perbaikan: Hitung golden_cross dan death_cross secara manual jika belum ada
+                    df['golden_cross'] = ((df[f'sma_{ma_medium}'] > df[f'sma_{ma_long}']) & 
+                                        (df[f'sma_{ma_medium}'].shift(1) <= df[f'sma_{ma_long}'].shift(1))).astype(int)
+                    
+                    df['death_cross'] = ((df[f'sma_{ma_medium}'] < df[f'sma_{ma_long}']) & 
+                                    (df[f'sma_{ma_medium}'].shift(1) >= df[f'sma_{ma_long}'].shift(1))).astype(int)
+                
+                # Process signals jika golden_cross dan death_cross ada
                 if 'golden_cross' in df.columns and 'death_cross' in df.columns:
                     df.loc[df['golden_cross'] == 1, 'ma_signal'] = 'strong_buy'
                     df.loc[df['death_cross'] == 1, 'ma_signal'] = 'strong_sell'
@@ -1312,13 +1366,13 @@ class TechnicalIndicators:
                 if all(col in df.columns for col in [f'sma_{ma_short}', f'sma_{ma_medium}', f'sma_{ma_long}']):
                     # Strong bullish alignment: Price > Short MA > Medium MA > Long MA
                     bullish_cond = (df[self.close_col] > df[f'sma_{ma_short}']) & \
-                                  (df[f'sma_{ma_short}'] > df[f'sma_{ma_medium}']) & \
-                                  (df[f'sma_{ma_medium}'] > df[f'sma_{ma_long}'])
+                                (df[f'sma_{ma_short}'] > df[f'sma_{ma_medium}']) & \
+                                (df[f'sma_{ma_medium}'] > df[f'sma_{ma_long}'])
                     
                     # Strong bearish alignment: Price < Short MA < Medium MA < Long MA
                     bearish_cond = (df[self.close_col] < df[f'sma_{ma_short}']) & \
-                                  (df[f'sma_{ma_short}'] < df[f'sma_{ma_medium}']) & \
-                                  (df[f'sma_{ma_medium}'] < df[f'sma_{ma_long}'])
+                                (df[f'sma_{ma_short}'] < df[f'sma_{ma_medium}']) & \
+                                (df[f'sma_{ma_medium}'] < df[f'sma_{ma_long}'])
                     
                     df.loc[bullish_cond, 'ma_signal'] = 'buy'
                     df.loc[bearish_cond, 'ma_signal'] = 'sell'
@@ -1327,26 +1381,39 @@ class TechnicalIndicators:
             if all(col in df.columns for col in ['tenkan_sen', 'kijun_sen']):
                 df['ichimoku_signal'] = 'neutral'
                 
+                # Perbaikan: Hitung tk_cross_bull dan tk_cross_bear secara manual jika belum ada
+                if 'tk_cross_bull' not in df.columns:
+                    df['tk_cross_bull'] = ((df['tenkan_sen'] > df['kijun_sen']) & 
+                                        (df['tenkan_sen'].shift(1) <= df['kijun_sen'].shift(1))).astype(int)
+                
+                if 'tk_cross_bear' not in df.columns:
+                    df['tk_cross_bear'] = ((df['tenkan_sen'] < df['kijun_sen']) & 
+                                        (df['tenkan_sen'].shift(1) >= df['kijun_sen'].shift(1))).astype(int)
+                
                 # TK Cross above cloud (very bullish)
-                tk_cross_bull_above = df['tk_cross_bull'] & df['price_above_cloud']
-                df.loc[tk_cross_bull_above, 'ichimoku_signal'] = 'strong_buy'
-                
-                # TK Cross below cloud (very bearish)
-                tk_cross_bear_below = df['tk_cross_bear'] & df['price_below_cloud']
-                df.loc[tk_cross_bear_below, 'ichimoku_signal'] = 'strong_sell'
-                
-                # Price above green cloud (bullish)
-                price_above_green = df['price_above_cloud'] & df['cloud_green']
-                df.loc[price_above_green, 'ichimoku_signal'] = 'buy'
-                
-                # Price below red cloud (bearish)
-                price_below_red = df['price_below_cloud'] & df['cloud_red']
-                df.loc[price_below_red, 'ichimoku_signal'] = 'sell'
+                if 'price_above_cloud' in df.columns:
+                    tk_cross_bull_above = df['tk_cross_bull'] & df['price_above_cloud']
+                    df.loc[tk_cross_bull_above, 'ichimoku_signal'] = 'strong_buy'
+                    
+                    # TK Cross below cloud (very bearish)
+                    if 'price_below_cloud' in df.columns:
+                        tk_cross_bear_below = df['tk_cross_bear'] & df['price_below_cloud']
+                        df.loc[tk_cross_bear_below, 'ichimoku_signal'] = 'strong_sell'
+                        
+                        # Price above green cloud (bullish)
+                        if 'cloud_green' in df.columns:
+                            price_above_green = df['price_above_cloud'] & df['cloud_green']
+                            df.loc[price_above_green, 'ichimoku_signal'] = 'buy'
+                            
+                            # Price below red cloud (bearish)
+                            if 'cloud_red' in df.columns:
+                                price_below_red = df['price_below_cloud'] & df['cloud_red']
+                                df.loc[price_below_red, 'ichimoku_signal'] = 'sell'
             
             # Combined Signal - weighted voting
             # Count buying and selling signals
             signal_columns = [col for col in df.columns if col.endswith('_signal') 
-                           and not col.endswith('_signal_type')]
+                        and not col.endswith('_signal_type')]
             
             if signal_columns:
                 # Initialize counters
@@ -1380,22 +1447,21 @@ class TechnicalIndicators:
         
         return df
     
-    def generate_alerts(self, lookback_period: int = 5) -> List[Dict[str, Any]]:
+    def generate_alerts(self, lookback_period: int = 5, df: pd.DataFrame = None) -> List[Dict[str, Any]]:
         """
         Generate alerts based on technical indicators
         
         Args:
             lookback_period: Number of periods to look back for alerts
-            
+            df: Optional pre-calculated DataFrame with indicators (jika None, akan menggunakan add_indicators())
+                
         Returns:
             list: List of alert dictionaries
         """
-        # First add indicators if not already added
-        if not hasattr(self, 'df_with_indicators'):
-            self.df_with_indicators = self.add_indicators()
-        else:
-            df = self.df_with_indicators
-            
+        # Use provided dataframe or calculate indicators if not provided
+        if df is None:
+            df = self.add_indicators()
+        
         # Get the last n rows
         try:
             recent_data = df.iloc[-lookback_period:]
@@ -1448,26 +1514,42 @@ class TechnicalIndicators:
                         'strength': min(1.0, (row['rsi'] - 70) / 15)
                     })
             
-            # MACD crosses
-            if 'macd_cross_up' in row and row['macd_cross_up'] == 1:
-                alerts.append({
-                    'date': date,
-                    'type': 'macd_cross_up',
-                    'message': f"MACD memotong ke atas signal line (bullish) - ({self.periods['macd_fast']}/{self.periods['macd_slow']}/{self.periods['macd_signal']})",
-                    'signal': 'buy',
-                    'strength': 0.8
-                })
-            elif 'macd_cross_down' in row and row['macd_cross_down'] == 1:
-                alerts.append({
-                    'date': date,
-                    'type': 'macd_cross_down',
-                    'message': f"MACD memotong ke bawah signal line (bearish) - ({self.periods['macd_fast']}/{self.periods['macd_slow']}/{self.periods['macd_signal']})",
-                    'signal': 'sell',
-                    'strength': 0.8
-                })
+            # MACD crosses - handling missing 'macd_cross_up' error
+            if all(k in row for k in ['macd', 'macd_signal']):
+                # Cek jika hasilnya valid
+                if not pd.isna(row['macd']) and not pd.isna(row['macd_signal']):
+                    # Jika macd_cross_up tidak ada, kita cek manual dari data sebelumnya
+                    if 'macd_cross_up' not in row:
+                        if idx > 0 and len(df) > 1:  # Pastikan ada data sebelumnya
+                            prev_row = df.loc[df.index[df.index.get_loc(idx) - 1]]
+                            macd_cross_up = (row['macd'] > row['macd_signal']) and (prev_row['macd'] <= prev_row['macd_signal'])
+                            macd_cross_down = (row['macd'] < row['macd_signal']) and (prev_row['macd'] >= prev_row['macd_signal'])
+                        else:
+                            macd_cross_up = False
+                            macd_cross_down = False
+                    else:
+                        macd_cross_up = row['macd_cross_up'] == 1
+                        macd_cross_down = row.get('macd_cross_down', 0) == 1
+                    
+                    if macd_cross_up:
+                        alerts.append({
+                            'date': date,
+                            'type': 'macd_cross_up',
+                            'message': f"MACD memotong ke atas signal line (bullish) - ({self.periods['macd_fast']}/{self.periods['macd_slow']}/{self.periods['macd_signal']})",
+                            'signal': 'buy',
+                            'strength': 0.8
+                        })
+                    elif macd_cross_down:
+                        alerts.append({
+                            'date': date,
+                            'type': 'macd_cross_down',
+                            'message': f"MACD memotong ke bawah signal line (bearish) - ({self.periods['macd_fast']}/{self.periods['macd_slow']}/{self.periods['macd_signal']})",
+                            'signal': 'sell',
+                            'strength': 0.8
+                        })
             
             # Bollinger Band breaks
-            if all(band in row for col in ['bb_upper', 'bb_lower']):
+            if all(col in row for col in ['bb_upper', 'bb_lower']):
                 if row[self.close_col] > row['bb_upper']:
                     alerts.append({
                         'date': date,
@@ -1503,7 +1585,7 @@ class TechnicalIndicators:
                     'strength': 0.9
                 })
             
-            # Ichimoku signals
+            # Ichimoku signals - tambahkan pengecekan existensi kolom
             if all(col in row for col in ['tk_cross_bull', 'price_above_cloud']):
                 if row['tk_cross_bull'] and row['price_above_cloud']:
                     alerts.append({
@@ -1513,7 +1595,7 @@ class TechnicalIndicators:
                         'signal': 'buy',
                         'strength': 0.9
                     })
-                elif row['tk_cross_bear'] and row['price_below_cloud']:
+                elif row.get('tk_cross_bear', False) and row.get('price_below_cloud', False):
                     alerts.append({
                         'date': date,
                         'type': 'ichimoku_bearish',
@@ -1522,7 +1604,7 @@ class TechnicalIndicators:
                         'strength': 0.9
                     })
             
-            # Volume spikes with price movement
+            # Volume spikes with price movement - tambahkan pengecekan existensi kolom
             if 'volume_spike_up' in row and row['volume_spike_up']:
                 alerts.append({
                     'date': date,
@@ -1540,7 +1622,7 @@ class TechnicalIndicators:
                     'strength': 0.7
                 })
             
-            # RSI divergence
+            # RSI divergence - tambahkan pengecekan existensi kolom
             if 'bullish_divergence' in row and row['bullish_divergence']:
                 alerts.append({
                     'date': date,
@@ -1558,7 +1640,7 @@ class TechnicalIndicators:
                     'strength': 0.8
                 })
             
-            # Volatility Squeeze releasing
+            # Volatility Squeeze releasing - tambahkan pengecekan existensi kolom
             if 'squeeze_releasing' in row and row['squeeze_releasing']:
                 # Check direction
                 if 'momentum_composite' in row:
