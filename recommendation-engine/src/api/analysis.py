@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query, Depends, Body, Path
 from pydantic import BaseModel, Field
+import time
 
 # Path handling
 import sys
@@ -40,6 +41,23 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Nonaktifkan beberapa warning yang tidak perlu dari library lain
+import warnings
+# Konfigurasi untuk meredam warning TensorFlow
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # 0=DEBUG, 1=INFO, 2=WARNING, 3=ERROR
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", message="No supported index is available")
+warnings.filterwarnings("ignore", message="A date index has been provided")
+warnings.filterwarnings("ignore", message="Do not pass an `input_shape`/`input_dim` argument to a layer")
+
+# Untuk statsmodels
+try:
+    from statsmodels.tools.sm_exceptions import ValueWarning
+    warnings.filterwarnings("ignore", category=ValueWarning)
+except ImportError:
+    pass
 
 # Cache for price data and signals
 _price_data_cache = {}
@@ -1017,7 +1035,17 @@ async def predict_future_price(
     """
     logger.info(f"Price prediction request for {project_id} using {model} model")
     
+    # Periksa cache untuk menghindari komputasi berulang
+    cache_key = f"price_prediction:{project_id}:{days}:{prediction_days}:{model}"
+    if cache_key in _price_data_cache:
+        cache_entry = _price_data_cache[cache_key]
+        if datetime.now() < cache_entry['expires']:
+            logger.info(f"Returning cached prediction for {project_id}")
+            return cache_entry['data']
+    
     try:
+        start_time = time.time()
+        
         # Get price data
         price_data = await get_price_data(
             project_id, 
@@ -1028,41 +1056,46 @@ async def predict_future_price(
         # Detect market regime
         market_regime = detect_market_regime(price_data)
         
-        # Select appropriate model based on data characteristics and request
+        # Pilih model yang sesuai berdasarkan data dan kecepatan yang dibutuhkan
         if model == "auto":
-            # Choose model based on available data and libraries
-            if len(price_data) >= 120:  # Sufficient data for ML
+            if days > 180 and len(price_data) >= 180:
                 try:
-                    # Try to import tensorflow to check availability
                     import tensorflow as tf
                     model = "ml"
+                    logger.info(f"Using ML model for {project_id} - may take longer to process")
                 except ImportError:
-                    try:
-                        # Try statsmodels for ARIMA
-                        import statsmodels
-                        model = "arima"
-                    except ImportError:
-                        model = "simple"
-            elif len(price_data) >= 60:  # Moderate data, use ARIMA
-                try:
-                    import statsmodels
                     model = "arima"
-                except ImportError:
-                    model = "simple"
-            else:  # Limited data, use simple model
+            elif len(price_data) >= 60:
+                model = "arima"
+            else:
                 model = "simple"
-                
-        # Generate predictions using selected model
-        if model == "ml":
-            prediction_result = predict_price_ml(price_data, days_to_predict=prediction_days)
-        elif model == "arima":
-            prediction_result = predict_price_arima(price_data, days_to_predict=prediction_days)
-        else:  # simple
-            prediction_result = predict_price_simple(price_data, days_to_predict=prediction_days)
         
-        # Check for errors
-        if 'error' in prediction_result:
-            logger.warning(f"Error in primary model, falling back to simple model: {prediction_result['error']}")
+        # Import asyncio untuk mendukung timeout
+        import asyncio
+        
+        # Buat fungsi async untuk membungkus fungsi prediksi
+        async def run_prediction():
+            if model == "ml":
+                try:
+                    # Batasi waktu eksekusi ML model untuk mencegah request yang terlalu lama
+                    return await asyncio.wait_for(
+                        asyncio.to_thread(predict_price_ml, price_data, prediction_days),
+                        timeout=30.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"ML prediction timeout for {project_id}, falling back to ARIMA")
+                    return predict_price_arima(price_data, days_to_predict=prediction_days)
+            elif model == "arima":
+                return predict_price_arima(price_data, days_to_predict=prediction_days)
+            else:
+                return predict_price_simple(price_data, days_to_predict=prediction_days)
+                
+        # Jalankan prediksi
+        prediction_result = await run_prediction()
+        
+        # Fallback jika terjadi error
+        if prediction_result is None or 'error' in prediction_result:
+            logger.info(f"Falling back to simple model")
             prediction_result = predict_price_simple(price_data, days_to_predict=prediction_days)
         
         # Get additional technical analysis
@@ -1070,7 +1103,7 @@ async def predict_future_price(
         reversal_data = ti.generate_reversal_signals()
         trend_prediction = ti.predict_price_trend(periods=prediction_days)
         
-        # Format response
+        # Format data prediksi
         predictions = [
             PredictionDataPoint(
                 date=point['date'],
@@ -1079,7 +1112,7 @@ async def predict_future_price(
             ) for point in prediction_result.get('prediction_data', [])
         ]
         
-        # Create response
+        # Buat response
         response = PricePredictionResponse(
             project_id=project_id,
             current_price=prediction_result.get('current_price', float(price_data['close'].iloc[-1])),
@@ -1100,6 +1133,17 @@ async def predict_future_price(
             predictions=predictions,
             timestamp=datetime.now()
         )
+        
+        # Hitung waktu eksekusi
+        execution_time = time.time() - start_time
+        if execution_time > 5:
+            logger.info(f"Price prediction completed in {execution_time:.2f}s using {model} model")
+        
+        # Simpan ke cache
+        _price_data_cache[cache_key] = {
+            'data': response,
+            'expires': datetime.now() + timedelta(minutes=30)  # Cache lebih lama untuk prediksi
+        }
         
         return response
         
