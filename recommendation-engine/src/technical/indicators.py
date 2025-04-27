@@ -30,6 +30,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+pd.set_option('future.no_silent_downcasting', True)
 
 class TechnicalIndicators:
     """
@@ -42,7 +43,7 @@ class TechnicalIndicators:
         
         Args:
             prices_df: DataFrame dengan data harga (harus memiliki kolom 'close',
-                      opsional 'high', 'low', 'volume')
+                    opsional 'high', 'low', 'volume')
             indicator_periods: Dictionary periode indikator kustom
         """
         self.prices_df = prices_df
@@ -91,13 +92,13 @@ class TechnicalIndicators:
         self.close_col = 'close'
         self.high_col = 'high' if 'high' in prices_df.columns else self.close_col
         self.low_col = 'low' if 'low' in prices_df.columns else self.close_col
-        self.open_col = 'open' if 'open' in prices_df.columns else self.close_col  # Tambahkan ini
+        self.open_col = 'open' if 'open' in prices_df.columns else self.close_col
         self.volume_col = 'volume' if 'volume' in prices_df.columns else None
         
         # Log informasi periode yang digunakan
         logger.info(f"TechnicalIndicators initialized with periods: RSI={self.periods['rsi_period']}, "
-                   f"MACD={self.periods['macd_fast']}/{self.periods['macd_slow']}/{self.periods['macd_signal']}, "
-                   f"BB={self.periods['bb_period']}")
+                f"MACD={self.periods['macd_fast']}/{self.periods['macd_slow']}/{self.periods['macd_signal']}, "
+                f"BB={self.periods['bb_period']}")
         
         # Check if we have enough data for calculations
         min_required_points = max(
@@ -108,9 +109,15 @@ class TechnicalIndicators:
             self.periods['ma_long'] + 10
         )
         
+        # Menyesuaikan periode berdasarkan jumlah data yang tersedia
         if len(prices_df) < min_required_points:
+            original_ma_long = self.periods['ma_long']
+            # Mengurangi periode MA jangka panjang jika data tidak cukup
+            self.periods['ma_long'] = min(original_ma_long, len(prices_df) // 3)
+            
             logger.warning(f"DataFrame has only {len(prices_df)} rows, which might not be sufficient for all indicators "
-                         f"with selected periods. Minimum recommended: {min_required_points}")
+                        f"with selected periods. Minimum recommended: {min_required_points}")
+            logger.info(f"Adjusted long MA period from {original_ma_long} to {self.periods['ma_long']} due to limited data")
     
     def _detect_market_regime(self) -> str:
         """
@@ -1013,14 +1020,18 @@ class TechnicalIndicators:
             # Bollinger Bands inside Keltner Channels = Squeeze (low volatility)
             df['squeeze_on'] = (df['bb_upper'] < df['keltner_upper']) & (df['bb_lower'] > df['keltner_lower'])
             
+            # Mencegah warning downcasting dengan metode yang direkomendasikan
+            squeeze_on_shifted = df['squeeze_on'].shift(1)
+            squeeze_on_shifted = squeeze_on_shifted.fillna(False)
+            squeeze_on_shifted = squeeze_on_shifted.infer_objects(copy=False)
+            
             # Squeeze coming on (starting to get constricted)
-            df['squeeze_starting'] = df['squeeze_on'] & (~df['squeeze_on'].shift(1).fillna(False))
+            df['squeeze_starting'] = df['squeeze_on'] & (~squeeze_on_shifted)
             
             # Squeeze releasing (ending constriction)
-            df['squeeze_releasing'] = (~df['squeeze_on']) & (df['squeeze_on'].shift(1).fillna(False))
+            df['squeeze_releasing'] = (~df['squeeze_on']) & squeeze_on_shifted
             
             # Add additional volatility status
-            # Calculate Bollinger Bandwidth quartiles
             if 'bb_bandwidth' in df.columns:
                 bandwidth_median = df['bb_bandwidth'].median()
                 bandwidth_q1 = df['bb_bandwidth'].quantile(0.25)
@@ -1282,170 +1293,125 @@ class TechnicalIndicators:
     def add_signal_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Tambahkan indikator sinyal/keputusan dengan penanganan error yang lebih baik
-        
-        Args:
-            df: DataFrame harga
-            
-        Returns:
-            pd.DataFrame: DataFrame dengan indikator sinyal
         """
         try:
-            # Add RSI signals
-            if 'rsi' in df.columns:
-                df['rsi_signal'] = np.where(
-                    df['rsi'] < 30, 'buy',
-                    np.where(df['rsi'] > 70, 'sell', 'neutral')
+            # Buat salinan DataFrame dulu untuk mencegah fragmentasi
+            result_df = df.copy()
+            
+            # Siapkan dictionary untuk koleksi semua kolom sinyal yang akan ditambahkan
+            new_columns = {}
+            
+            # RSI signals
+            if 'rsi' in result_df.columns:
+                new_columns['rsi_signal'] = np.where(
+                    result_df['rsi'] < 30, 'buy',
+                    np.where(result_df['rsi'] > 70, 'sell', 'neutral')
                 )
             
-            # Add MACD signals - perbaikan penanganan error 'macd_cross_up'
-            if all(col in df.columns for col in ['macd', 'macd_signal']):
-                # Perbaikan: Hitung macd_cross_up and macd_cross_down secara manual jika belum ada
-                if 'macd_cross_up' not in df.columns:
-                    df['macd_cross_up'] = ((df['macd'] > df['macd_signal']) & 
-                                        (df['macd'].shift(1) <= df['macd_signal'].shift(1))).astype(int)
+            # MACD signals
+            if all(col in result_df.columns for col in ['macd', 'macd_signal']):
+                # Calculate crossover dulu
+                macd_cross_up = ((result_df['macd'] > result_df['macd_signal']) & 
+                            (result_df['macd'].shift(1) <= result_df['macd_signal'].shift(1))).astype(int)
+                macd_cross_down = ((result_df['macd'] < result_df['macd_signal']) & 
+                                (result_df['macd'].shift(1) >= result_df['macd_signal'].shift(1))).astype(int)
                 
-                if 'macd_cross_down' not in df.columns:
-                    df['macd_cross_down'] = ((df['macd'] < df['macd_signal']) & 
-                                        (df['macd'].shift(1) >= df['macd_signal'].shift(1))).astype(int)
-                
-                df['macd_signal_type'] = np.where(
-                    df['macd_cross_up'] == 1, 'strong_buy',
-                    np.where(df['macd_cross_down'] == 1, 'strong_sell',
-                        np.where(df['macd'] > df['macd_signal'], 'buy', 'sell'))
+                new_columns['macd_cross_up'] = macd_cross_up
+                new_columns['macd_cross_down'] = macd_cross_down
+                new_columns['macd_signal_type'] = np.where(
+                    macd_cross_up == 1, 'strong_buy',
+                    np.where(macd_cross_down == 1, 'strong_sell',
+                        np.where(result_df['macd'] > result_df['macd_signal'], 'buy', 'sell'))
                 )
             
-            # Add Bollinger Bands signals
-            if all(col in df.columns for col in ['bb_upper', 'bb_lower']):
-                df['bb_signal'] = np.where(
-                    df[self.close_col] < df['bb_lower'], 'buy',
-                    np.where(df[self.close_col] > df['bb_upper'], 'sell', 'neutral')
+            # Bollinger Bands signals
+            if all(col in result_df.columns for col in ['bb_upper', 'bb_lower']):
+                new_columns['bb_signal'] = np.where(
+                    result_df[self.close_col] < result_df['bb_lower'], 'buy',
+                    np.where(result_df[self.close_col] > result_df['bb_upper'], 'sell', 'neutral')
                 )
             
-            # Add Stochastic signals
-            if 'stoch_k' in df.columns and 'stoch_d' in df.columns:
-                # Perbaikan: Hitung stoch_cross_up dan stoch_cross_down secara manual jika belum ada
-                if 'stoch_cross_up' not in df.columns:
-                    df['stoch_cross_up'] = ((df['stoch_k'] > df['stoch_d']) & 
-                                        (df['stoch_k'].shift(1) <= df['stoch_d'].shift(1))).astype(int)
+            # Stochastic signals
+            if 'stoch_k' in result_df.columns and 'stoch_d' in result_df.columns:
+                # Perhitungan crossover
+                stoch_cross_up = ((result_df['stoch_k'] > result_df['stoch_d']) & 
+                            (result_df['stoch_k'].shift(1) <= result_df['stoch_d'].shift(1))).astype(int)
+                stoch_cross_down = ((result_df['stoch_k'] < result_df['stoch_d']) & 
+                                (result_df['stoch_k'].shift(1) >= result_df['stoch_d'].shift(1))).astype(int)
                 
-                if 'stoch_cross_down' not in df.columns:
-                    df['stoch_cross_down'] = ((df['stoch_k'] < df['stoch_d']) & 
-                                            (df['stoch_k'].shift(1) >= df['stoch_d'].shift(1))).astype(int)
-                
-                df['stoch_signal'] = np.where(
-                    (df['stoch_k'] < 20) & (df['stoch_cross_up'] == 1), 'strong_buy',
-                    np.where((df['stoch_k'] > 80) & (df['stoch_cross_down'] == 1), 'strong_sell',
-                        np.where(df['stoch_k'] < 20, 'buy',
-                                np.where(df['stoch_k'] > 80, 'sell', 'neutral')))
+                new_columns['stoch_cross_up'] = stoch_cross_up
+                new_columns['stoch_cross_down'] = stoch_cross_down
+                new_columns['stoch_signal'] = np.where(
+                    (result_df['stoch_k'] < 20) & (stoch_cross_up == 1), 'strong_buy',
+                    np.where((result_df['stoch_k'] > 80) & (stoch_cross_down == 1), 'strong_sell',
+                        np.where(result_df['stoch_k'] < 20, 'buy',
+                                np.where(result_df['stoch_k'] > 80, 'sell', 'neutral')))
                 )
             
-            # Add MA signals
-            df['ma_signal'] = 'neutral'
+            # MA signals
+            new_columns['ma_signal'] = pd.Series('neutral', index=result_df.index)
             
+            # Tambahkan golden cross/death cross jika tersedia
             ma_short = self.periods['ma_short']
             ma_medium = self.periods['ma_medium']
             ma_long = self.periods['ma_long']
             
-            # Check if MA columns exist before using them
-            if f'sma_{ma_long}' in df.columns:
-                # Golden/Death Cross
-                if 'golden_cross' not in df.columns and f'sma_{ma_medium}' in df.columns and f'sma_{ma_long}' in df.columns:
-                    # Perbaikan: Hitung golden_cross dan death_cross secara manual jika belum ada
-                    df['golden_cross'] = ((df[f'sma_{ma_medium}'] > df[f'sma_{ma_long}']) & 
-                                        (df[f'sma_{ma_medium}'].shift(1) <= df[f'sma_{ma_long}'].shift(1))).astype(int)
-                    
-                    df['death_cross'] = ((df[f'sma_{ma_medium}'] < df[f'sma_{ma_long}']) & 
-                                    (df[f'sma_{ma_medium}'].shift(1) >= df[f'sma_{ma_long}'].shift(1))).astype(int)
+            # Ichimoku signals
+            if all(col in result_df.columns for col in ['tenkan_sen', 'kijun_sen']):
+                new_columns['ichimoku_signal'] = pd.Series('neutral', index=result_df.index)
                 
-                # Process signals jika golden_cross dan death_cross ada
-                if 'golden_cross' in df.columns and 'death_cross' in df.columns:
-                    df.loc[df['golden_cross'] == 1, 'ma_signal'] = 'strong_buy'
-                    df.loc[df['death_cross'] == 1, 'ma_signal'] = 'strong_sell'
+                # Hitung TK cross
+                tk_cross_bull = ((result_df['tenkan_sen'] > result_df['kijun_sen']) & 
+                            (result_df['tenkan_sen'].shift(1) <= result_df['kijun_sen'].shift(1))).astype(int)
+                tk_cross_bear = ((result_df['tenkan_sen'] < result_df['kijun_sen']) & 
+                            (result_df['tenkan_sen'].shift(1) >= result_df['kijun_sen'].shift(1))).astype(int)
                 
-                # Price vs MA alignment
-                if all(col in df.columns for col in [f'sma_{ma_short}', f'sma_{ma_medium}', f'sma_{ma_long}']):
-                    # Strong bullish alignment: Price > Short MA > Medium MA > Long MA
-                    bullish_cond = (df[self.close_col] > df[f'sma_{ma_short}']) & \
-                                (df[f'sma_{ma_short}'] > df[f'sma_{ma_medium}']) & \
-                                (df[f'sma_{ma_medium}'] > df[f'sma_{ma_long}'])
-                    
-                    # Strong bearish alignment: Price < Short MA < Medium MA < Long MA
-                    bearish_cond = (df[self.close_col] < df[f'sma_{ma_short}']) & \
-                                (df[f'sma_{ma_short}'] < df[f'sma_{ma_medium}']) & \
-                                (df[f'sma_{ma_medium}'] < df[f'sma_{ma_long}'])
-                    
-                    df.loc[bullish_cond, 'ma_signal'] = 'buy'
-                    df.loc[bearish_cond, 'ma_signal'] = 'sell'
+                new_columns['tk_cross_bull'] = tk_cross_bull
+                new_columns['tk_cross_bear'] = tk_cross_bear
             
-            # Add Ichimoku signals
-            if all(col in df.columns for col in ['tenkan_sen', 'kijun_sen']):
-                df['ichimoku_signal'] = 'neutral'
-                
-                # Perbaikan: Hitung tk_cross_bull dan tk_cross_bear secara manual jika belum ada
-                if 'tk_cross_bull' not in df.columns:
-                    df['tk_cross_bull'] = ((df['tenkan_sen'] > df['kijun_sen']) & 
-                                        (df['tenkan_sen'].shift(1) <= df['kijun_sen'].shift(1))).astype(int)
-                
-                if 'tk_cross_bear' not in df.columns:
-                    df['tk_cross_bear'] = ((df['tenkan_sen'] < df['kijun_sen']) & 
-                                        (df['tenkan_sen'].shift(1) >= df['kijun_sen'].shift(1))).astype(int)
-                
-                # TK Cross above cloud (very bullish)
-                if 'price_above_cloud' in df.columns:
-                    tk_cross_bull_above = df['tk_cross_bull'] & df['price_above_cloud']
-                    df.loc[tk_cross_bull_above, 'ichimoku_signal'] = 'strong_buy'
-                    
-                    # TK Cross below cloud (very bearish)
-                    if 'price_below_cloud' in df.columns:
-                        tk_cross_bear_below = df['tk_cross_bear'] & df['price_below_cloud']
-                        df.loc[tk_cross_bear_below, 'ichimoku_signal'] = 'strong_sell'
-                        
-                        # Price above green cloud (bullish)
-                        if 'cloud_green' in df.columns:
-                            price_above_green = df['price_above_cloud'] & df['cloud_green']
-                            df.loc[price_above_green, 'ichimoku_signal'] = 'buy'
-                            
-                            # Price below red cloud (bearish)
-                            if 'cloud_red' in df.columns:
-                                price_below_red = df['price_below_cloud'] & df['cloud_red']
-                                df.loc[price_below_red, 'ichimoku_signal'] = 'sell'
+            # Counter signals
+            new_columns['buy_signals'] = pd.Series(0, index=result_df.index)
+            new_columns['sell_signals'] = pd.Series(0, index=result_df.index)
+            new_columns['strong_buy_signals'] = pd.Series(0, index=result_df.index)
+            new_columns['strong_sell_signals'] = pd.Series(0, index=result_df.index)
+            new_columns['neutral_signals'] = pd.Series(0, index=result_df.index)
             
-            # Combined Signal - weighted voting
-            # Count buying and selling signals
-            signal_columns = [col for col in df.columns if col.endswith('_signal') 
+            # Gabungkan kolom baru dengan DataFrame hasil
+            for col_name, col_data in new_columns.items():
+                result_df[col_name] = col_data
+            
+            # Hitung buy/sell strength
+            signal_columns = [col for col in result_df.columns if col.endswith('_signal') 
                         and not col.endswith('_signal_type')]
             
             if signal_columns:
-                # Initialize counters
-                df['buy_signals'] = 0
-                df['sell_signals'] = 0
-                df['strong_buy_signals'] = 0
-                df['strong_sell_signals'] = 0
-                df['neutral_signals'] = 0
-                
-                # Count signals with proper weights
-                for signal_col in signal_columns:
-                    df.loc[df[signal_col] == 'buy', 'buy_signals'] += 1
-                    df.loc[df[signal_col] == 'sell', 'sell_signals'] += 1
-                    df.loc[df[signal_col] == 'strong_buy', 'strong_buy_signals'] += 1
-                    df.loc[df[signal_col] == 'strong_sell', 'strong_sell_signals'] += 1
-                    df.loc[df[signal_col] == 'neutral', 'neutral_signals'] += 1
-                
-                # Calculate weighted buy/sell strength
+                # Hitung total sinyal
                 total_signals = len(signal_columns)
                 
-                df['buy_strength'] = (df['buy_signals'] + df['strong_buy_signals'] * 2) / (total_signals * 2)
-                df['sell_strength'] = (df['sell_signals'] + df['strong_sell_signals'] * 2) / (total_signals * 2)
+                # Update jumlah sinyal (lakukan ini setelah menambahkan semua kolom baru)
+                for signal_col in signal_columns:
+                    result_df.loc[result_df[signal_col] == 'buy', 'buy_signals'] += 1
+                    result_df.loc[result_df[signal_col] == 'sell', 'sell_signals'] += 1
+                    result_df.loc[result_df[signal_col] == 'strong_buy', 'strong_buy_signals'] += 1
+                    result_df.loc[result_df[signal_col] == 'strong_sell', 'strong_sell_signals'] += 1
+                    result_df.loc[result_df[signal_col] == 'neutral', 'neutral_signals'] += 1
                 
-                # Overall signal based on weighted strength
-                df['overall_signal'] = np.where(
-                    (df['buy_strength'] > df['sell_strength']) & (df['buy_strength'] > 0.5), 'buy',
-                    np.where((df['sell_strength'] > df['buy_strength']) & (df['sell_strength'] > 0.5), 'sell', 'hold')
+                # Hitung buy/sell strength
+                result_df['buy_strength'] = (result_df['buy_signals'] + result_df['strong_buy_signals'] * 2) / (total_signals * 2)
+                result_df['sell_strength'] = (result_df['sell_signals'] + result_df['strong_sell_signals'] * 2) / (total_signals * 2)
+                
+                # Overall signal
+                result_df['overall_signal'] = np.where(
+                    (result_df['buy_strength'] > result_df['sell_strength']) & (result_df['buy_strength'] > 0.5), 'buy',
+                    np.where((result_df['sell_strength'] > result_df['buy_strength']) & (result_df['sell_strength'] > 0.5), 'sell', 'hold')
                 )
+            
+            return result_df
+            
         except Exception as e:
             logger.error(f"Error adding signal indicators: {str(e)}")
-        
-        return df
+            # Kembalikan DataFrame asli jika terjadi error
+            return df
     
     def generate_alerts(self, lookback_period: int = 5, df: pd.DataFrame = None) -> List[Dict[str, Any]]:
         """
@@ -2106,11 +2072,20 @@ def predict_price_arima(prices_df: pd.DataFrame, days_to_predict: int = 7) -> Di
         price_series = prices_df['close']
         
         # Fit ARIMA model - try simple (1,1,1) for stability
-        model = ARIMA(price_series, order=(1, 1, 1))
-        model_fit = model.fit()
-        
-        # Make forecast
-        forecast = model_fit.forecast(steps=days_to_predict)
+        try:
+            model = ARIMA(price_series, order=(1, 1, 1))
+            model_fit = model.fit()
+            
+            # Make forecast
+            forecast = model_fit.forecast(steps=days_to_predict)
+            
+            # Jika nilai forecast tidak valid, gunakan model sederhana
+            if np.isnan(forecast).any() or np.isinf(forecast).any():
+                logger.error("ARIMA forecast returned NaN or infinite values")
+                return predict_price_simple(prices_df, days_to_predict)
+        except Exception as e:
+            logger.error(f"Error in ARIMA fit/forecast: {str(e)}")
+            return predict_price_simple(prices_df, days_to_predict)
         
         # Create result dictionary
         dates = pd.date_range(
@@ -2152,7 +2127,6 @@ def predict_price_arima(prices_df: pd.DataFrame, days_to_predict: int = 7) -> Di
         logger.error(f"Error in ARIMA price prediction: {str(e)}")
         # Fall back to simple model
         return predict_price_simple(prices_df, days_to_predict)
-
 
 def predict_price_simple(prices_df: pd.DataFrame, days_to_predict: int = 7) -> Dict[str, Any]:
     """

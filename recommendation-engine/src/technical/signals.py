@@ -1156,6 +1156,9 @@ def generate_trading_signals(prices_df: pd.DataFrame,
     """
     logger.info("Generating trading signals")
     
+    # Membuat salinan data untuk menghindari modifikasi pada input asli
+    df = prices_df.copy()
+    
     # Default period jika tidak ada yang disediakan
     if indicator_periods is None:
         indicator_periods = {}
@@ -1166,7 +1169,7 @@ def generate_trading_signals(prices_df: pd.DataFrame,
     
     # Jika tidak ada periode yang diberikan, tentukan yang optimal untuk regime ini
     if not indicator_periods:
-        indicator_periods = get_optimal_parameters(prices_df, market_regime)
+        indicator_periods = get_optimal_parameters(df, market_regime)
         logger.info(f"Using optimized parameters for {market_regime}")
     
     # Ekstrak periode indikator atau gunakan default
@@ -1205,24 +1208,39 @@ def generate_trading_signals(prices_df: pd.DataFrame,
         ma_long + 10
     )
     
-    # Perubahan di sini: Sesuaikan kebutuhan data berdasarkan trading style
-    # Jika periode MA jangka panjang kurang dari 100, tidak perlu data sangat panjang
+    # Cek apakah ada cukup data untuk jenis analisis
     is_short_term = ma_long <= 100
     if is_short_term:
-        # Untuk analisis jangka pendek, kurangi kebutuhan data
-        min_required_points = min(min_required_points, 60)
-        logger.info(f"Analisis jangka pendek terdeteksi, kebutuhan data minimum disesuaikan menjadi {min_required_points}")
-    elif ma_long > 100:
-        # Sanity check: minimum 30 days untuk semua analisis
-        min_required_points = max(30, min_required_points)
+        min_data_needed = 60  # Data minimal untuk analisis jangka pendek
+        logger.info(f"Analisis jangka pendek terdeteksi, kebutuhan data minimum disesuaikan menjadi {min_data_needed}")
+    else:
+        # Minimum data untuk analisis jangka panjang
+        min_data_needed = max(
+            3 * rsi_period,
+            macd_slow + macd_signal + 10,
+            bb_period + 10,
+            stoch_k + stoch_d + 5,
+            ma_long + 10
+        )
     
-    # Jika data tidak cukup, berikan warning tapi tetap coba beri hasil
-    # PERBAIKAN: Jangan return error di sini, tetap berikan hasil terbaik dengan data yang tersedia
-    if len(prices_df) < min_required_points:
-        logger.warning(f"Tidak cukup data untuk analisis teknikal yang akurat. Minimal {min_required_points} titik data diperlukan, hanya {len(prices_df)} tersedia.")
-        logger.info(f"Coba tambahkan parameter 'days' dengan nilai lebih besar (misalnya, {min_required_points + 10})")
-        # Lanjutkan dengan perhitungan meskipun data kurang ideal
+    # Menyesuaikan parameter jika data tidak cukup
+    if len(df) < min_data_needed:
+        # Turunkan periode MA jangka panjang secara proporsional
+        original_ma_long = ma_long
+        ma_long = min(original_ma_long, len(df) // 3)
+        indicator_periods['ma_long'] = ma_long
+        logger.warning(f"Menyesuaikan periode MA jangka panjang dari {original_ma_long} menjadi {ma_long} karena data terbatas")
     
+    # Gunakan class TechnicalIndicators untuk menghitung semua indikator sekaligus
+    # dengan pendekatan yang menghindari fragmentasi
+    from src.technical.indicators import TechnicalIndicators
+    
+    ti = TechnicalIndicators(df, indicator_periods)
+    df_with_indicators = ti.add_indicators()
+    
+    # Ambil data terbaru
+    latest_data = df_with_indicators.iloc[-1].to_dict()
+
     # Use appropriate column names or defaults
     close_col = 'close'
     high_col = 'high' if 'high' in prices_df.columns else close_col
