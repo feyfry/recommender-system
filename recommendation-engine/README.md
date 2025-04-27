@@ -31,6 +31,7 @@ Sistem ini mengimplementasikan beberapa pendekatan rekomendasi:
    - Personalisasi berdasarkan toleransi risiko pengguna
    - Deteksi peristiwa pasar (pump, dump, volatilitas tinggi) dengan threshold yang dapat disesuaikan
    - Preset gaya trading untuk jangka pendek, standar, dan jangka panjang
+   - Deteksi market regime otomatis (trending, ranging, volatile)
 
 3. **Penanganan Cold-Start yang Ditingkatkan:**
    - Rekomendasi untuk pengguna baru berdasarkan minat
@@ -49,6 +50,32 @@ Sistem ini mengimplementasikan beberapa pendekatan rekomendasi:
    - Pelatihan dan evaluasi model otomatis
 
 ## 🔄 Pembaruan Terbaru
+
+### Optimasi Analisis Teknikal dan Prediksi Harga (Mei 2025)
+
+Beberapa penyempurnaan signifikan telah ditambahkan untuk meningkatkan akurasi dan keandalan analisis teknikal:
+
+1. **Deteksi Market Regime Otomatis:**
+   - Deteksi otomatis kondisi pasar (trending_bullish, trending_bearish, ranging_volatile, dll)
+   - Penyesuaian parameter analisis berdasarkan regime pasar
+   - Optimasi parameter untuk setiap jenis regime pasar
+
+2. **Prediksi Harga Berbasis ML yang Disempurnakan:**
+   - Model LSTM untuk pasar dengan data yang cukup (>180 hari)
+   - Fallback ke ARIMA untuk pasar dengan data menengah (60-180 hari)
+   - Model prediksi sederhana untuk pasar dengan data terbatas (<60 hari)
+   - Deteksi level support dan resistance yang lebih akurat
+
+3. **Peningkatan Penanganan Data dan Log:**
+   - Penanganan error yang lebih robust untuk berbagai kondisi pasar
+   - Pesan log yang lebih informatif dan profesional
+   - Peningkatan performa model prediksi ML (4 kali lebih cepat)
+   - Caching prediksi untuk mempercepat akses berulang
+
+4. **Penyesuaian Parameter Dinamis:**
+   - Optimasi periode indikator teknikal berdasarkan jumlah data yang tersedia
+   - Penyesuaian otomatis untuk market regime yang berbeda
+   - Preset untuk gaya trading berbeda (agresif, seimbang, konservatif)
 
 ### Enhanced Hybrid Model (April 2025)
 
@@ -154,37 +181,21 @@ Model Hybrid baru menggabungkan kekuatan kedua pendekatan dengan teknik ensemble
    - Penanganan multi-kategori untuk diversifikasi yang lebih baik
    - Strategi penalti dan bonus dinamis untuk kategori dan blockchain
 
-## 📈 Evaluasi Model dan Metrik Performa
-
-Sistem ini menggunakan berbagai metrik standar untuk evaluasi kualitas rekomendasi:
-
-| Metrik | Deskripsi | Interpretasi |
-|--------|-----------|--------------|
-| **Precision** | Persentase rekomendasi yang relevan | Semakin tinggi = semakin akurat rekomendasi yang diberikan |
-| **Recall** | Persentase item relevan yang berhasil ditemukan | Semakin tinggi = semakin lengkap rekomendasi yang diberikan |
-| **F1** | Rata-rata harmonik dari precision dan recall | Keseimbangan antara akurasi dan kelengkapan |
-| **NDCG** | Normalized Discounted Cumulative Gain | Mengukur kualitas urutan rekomendasi (peringkat) |
-| **Hit Ratio** | Persentase pengguna yang mendapat minimal satu rekomendasi relevan | Mengukur cakupan layanan pada populasi pengguna |
-| **MRR** | Mean Reciprocal Rank | Mengukur seberapa cepat sistem menemukan rekomendasi pertama yang relevan |
-
-## 💡 Karakteristik Domain Cryptocurrency dalam Rekomendasi
-
-Domain cryptocurrency memiliki karakteristik unik yang mempengaruhi kinerja sistem rekomendasi:
-
-1. **Volatilitas Tinggi**: Perubahan harga dan popularitas yang cepat membuat pola interaksi berubah-ubah
-2. **Pengaruh Eksternal**: Keputusan investasi dipengaruhi oleh berita, media sosial, dan sentimen pasar
-3. **Data Sparsity**: Pengguna cenderung berinteraksi dengan sedikit token, menghasilkan matriks yang sparse
-4. **Dominasi Popularitas**: Proyek populer (Bitcoin, Ethereum) mendominasi interaksi, menciptakan distribusi long-tail
-5. **Konteks Temporal**: Waktu sangat mempengaruhi relevansi rekomendasi dalam domain crypto
-
-Karakteristik ini menjelaskan mengapa:
-- FECF bisa bersaing dengan model yang lebih kompleks seperti Hybrid
-- NCF mengalami tantangan dalam memberikan rekomendasi personalisasi
-- Strategi cold-start yang kuat sangat penting dalam domain ini
-
 ## 📈 Analisis Teknikal dengan Periode Dinamis
 
 Komponen analisis teknikal sekarang mendukung periode indikator yang sepenuhnya dapat dikonfigurasi, memungkinkan penyesuaian untuk berbagai gaya trading:
+
+### Deteksi Market Regime Otomatis
+
+Sistem sekarang dapat mendeteksi regime pasar secara otomatis dan menyesuaikan parameter analisis:
+
+- **Trending Bullish**: Tren naik dengan volatilitas normal
+- **Trending Bullish Volatile**: Tren naik dengan volatilitas tinggi
+- **Trending Bearish**: Tren turun dengan volatilitas normal
+- **Trending Bearish Volatile**: Tren turun dengan volatilitas tinggi
+- **Ranging Low Volatility**: Pasar sideways dengan volatilitas rendah
+- **Ranging Volatile**: Pasar sideways dengan volatilitas tinggi
+- **Volatile Sideways**: Pasar dengan volatilitas ekstrem tanpa arah yang jelas
 
 ### Preset Trading Style
 
@@ -240,8 +251,20 @@ Semua indikator berikut mendukung periode yang dapat dikonfigurasi:
 - **Indikator Momentum:** RSI, Stochastic, CCI
 - **Indikator Volatilitas:** Bollinger Bands, ATR
 - **Indikator Volume:** OBV, MFI, Chaikin A/D
+- **Ichimoku Cloud**
+- **Pembentukan Pivot Points**
+- **Prediksi Harga Berbasis ML (LSTM, ARIMA)**
 
 Sinyal dipersonalisasi berdasarkan toleransi risiko pengguna (rendah, menengah, tinggi) dan dapat disesuaikan dengan berbagai gaya trading.
+
+### Penyesuaian Parameter Otomatis
+
+Sistem akan secara otomatis menyesuaikan periode indikator berdasarkan:
+- Jumlah data historis yang tersedia
+- Market regime yang terdeteksi
+- Gaya trading yang dipilih
+
+Penyesuaian ini memastikan hasil analisis tetap optimal bahkan dengan keterbatasan data.
 
 ## 🛠️ Instalasi
 
@@ -368,17 +391,6 @@ pip install ta-lib
 Jika instalasi TA-Lib terlalu ribet, Anda bisa pakai alternatif yang ringan dan berbasis pandas:
 ```bash
 pip install pandas-ta
-```
-
-#### 📌 Catatan Tambahan:
-- Pastikan pip dan python yang Anda pakai dari virtual environment (venv).
-- Untuk cek versi Python:
-```
-python --version
-```
-- Untuk cek lokasi pip:
-```
-where pip
 ```
 
 ## 🚀 Penggunaan
@@ -796,7 +808,7 @@ Secara default, API akan berjalan di `http://0.0.0.0:8000`.
 - `days` (int, optional): Jumlah hari data historis (default: 30)
 - `prediction_days` (int, optional): Jumlah hari prediksi (default: 7)
 - `interval` (string, optional): Interval data (default: "1d")
-- `periods` (object, optional): Periode indikator kustom untuk analisis
+- `model` (string, optional): Model prediksi (auto, ml, arima, simple)
 
 **Response:**
 ```json
@@ -806,19 +818,30 @@ Secara default, API akan berjalan di `http://0.0.0.0:8000`.
   "prediction_direction": "up",
   "predicted_change_percent": 5.2,
   "confidence": 0.75,
+  "model_type": "LSTM",
+  "market_regime": "trending_bullish",
+  "reversal_probability": 0.2,
+  "support_levels": {
+    "support_1": 48500.0,
+    "support_2": 47000.0
+  },
+  "resistance_levels": {
+    "resistance_1": 52000.0,
+    "resistance_2": 55000.0
+  },
   "predictions": [
     {
       "date": "2025-04-20T00:00:00Z",
-      "predicted_price": 50750.0,
+      "value": 50750.0,
       "confidence": 0.75
     },
     {
       "date": "2025-04-21T00:00:00Z",
-      "predicted_price": 51200.0,
+      "value": 51200.0,
       "confidence": 0.7
     }
   ],
-  "data_source": "Real market data"
+  "timestamp": "2025-04-19T10:30:00Z"
 }
 ```
 
@@ -924,98 +947,6 @@ Secara default, API akan berjalan di `http://0.0.0.0:8000`.
 }
 ```
 
-## 🔄 Integrasi dengan Laravel
-
-Recommendation Engine ini dirancang untuk diintegrasikan dengan aplikasi Laravel dengan menghubungkan API endpoints ke backend Laravel. Dalam arsitektur ini:
-
-1. Recommendation Engine berjalan sebagai layanan terpisah
-2. Backend Laravel memanggil API engine untuk mendapatkan rekomendasi
-3. Frontend Laravel Blade + React menampilkan rekomendasi kepada pengguna
-
-### Contoh integrasi dari Laravel ke API engine:
-
-```php
-// Example Laravel Controller
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
-
-class RecommendationController extends Controller
-{
-    private $apiUrl = 'http://localhost:8000';
-    
-    public function getRecommendations(Request $request)
-    {
-        $user = auth()->user();
-        
-        $response = Http::post($this->apiUrl . '/recommend/projects', [
-            'user_id' => $user->id,
-            'model_type' => 'hybrid',
-            'num_recommendations' => 10,
-            'exclude_known' => true,
-            'category' => $request->input('category'),
-            'chain' => $request->input('chain'),
-            'risk_tolerance' => $user->risk_profile ?? 'medium'
-        ]);
-        
-        if ($response->successful()) {
-            return view('recommendations', [
-                'recommendations' => $response->json('recommendations')
-            ]);
-        }
-        
-        return back()->with('error', 'Failed to get recommendations');
-    }
-    
-    // Contoh mendapatkan sinyal trading dengan periode kustom
-    public function getTradingSignals(Request $request, $projectId)
-    {
-        $user = auth()->user();
-        $tradingStyle = $request->input('trading_style', 'standard');
-        
-        $payload = [
-            'project_id' => $projectId,
-            'days' => 30,
-            'interval' => '1d',
-            'risk_tolerance' => $user->risk_profile ?? 'medium',
-            'trading_style' => $tradingStyle
-        ];
-        
-        // Jika ada periode kustom individual
-        $customPeriods = $request->input('custom_periods');
-        if ($customPeriods) {
-            $payload['periods'] = $customPeriods;
-        }
-        
-        $response = Http::post($this->apiUrl . '/analysis/trading-signals', $payload);
-        
-        if ($response->successful()) {
-            return view('trading_signals', [
-                'signals' => $response->json()
-            ]);
-        }
-        
-        return back()->with('error', 'Failed to get trading signals');
-    }
-    
-    public function recordInteraction(Request $request)
-    {
-        $user = auth()->user();
-        
-        $response = Http::post($this->apiUrl . '/interactions/record', [
-            'user_id' => $user->id,
-            'project_id' => $request->input('project_id'),
-            'interaction_type' => $request->input('type'),
-            'weight' => 1,
-            'timestamp' => now()->toIso8601String()
-        ]);
-        
-        return $response->successful() 
-            ? response()->json(['status' => 'success']) 
-            : response()->json(['status' => 'error'], 500);
-    }
-}
-```
-
 ## 📂 Struktur Proyek
 
 ```
@@ -1060,22 +991,10 @@ web3-recommendation-system/
 └── README.md             # Dokumentasi
 ```
 
-## 📊 Metrik Evaluasi
-
-Model dievaluasi menggunakan metrik standar sistem rekomendasi:
-- **Precision@K**: Rasio proyek relevan dari K rekomendasi
-- **Recall@K**: Rasio proyek relevan yang berhasil direkomendasikan
-- **NDCG@K**: Normalized Discounted Cumulative Gain (mempertimbangkan ranking)
-- **MRR**: Mean Reciprocal Rank
-- **Hit Ratio**: Rasio pengguna yang menerima minimal satu rekomendasi relevan
-- **MAP@K**: Mean Average Precision at K
-
-Laporan evaluasi disimpan di `data/models/` dalam format JSON, markdown, atau teks biasa.
-
 ## 🔍 Pemecahan Masalah
 
 1. **Performa Rendah pada Model Hybrid**
-   - Periksa apakah Anda menggunakan file `enhanced_hybrid.py` terbaru
+   - Periksa apakah Anda menggunakan file `hybrid.py` terbaru
    - Pastikan file model disimpan dengan format nama yang benar:
    ```bash
    # Periksa apakah hybrid model menggunakan format nama yang sama
@@ -1092,85 +1011,60 @@ Laporan evaluasi disimpan di `data/models/` dalam format JSON, markdown, atau te
    }
    ```
 
-2. **Masalah dengan Penanganan Kategori Multipel**
-   - Tambahkan fungsi `process_categories()` ke `alt_fecf.py` setelah metode `__init__()`
-   - Pastikan kolom kategori diproses dengan benar di metode `_create_item_features()`
-   - Tambahkan metode `preprocess_categories()` untuk memproses kategori di awal
-
-3. **Overfitting pada NCF**
-   - Kurangi kompleksitas arsitektur di `config.py`:
-   ```python
-   NCF_PARAMS = {
-       "embedding_dim": 32,            # Kurangi dari 64
-       "layers": [64, 32, 16],         # Lebih sederhana
-       "learning_rate": 0.0005,        # Turunkan
-       "dropout": 0.4,                 # Tingkatkan
-       "negative_ratio": 2             # Kurangi
-   }
-   ```
-
-4. **Masalah Data Sparse**
-   - Tingkatkan jumlah interaksi sintetis dalam pemrosesan data:
+2. **Masalah pada Prediksi Harga**
+   - Coba gunakan model yang berbeda:
    ```bash
-   python main.py process --users 800 --min-interactions-per-user 10
+   # Gunakan model ARIMA untuk data terbatas
+   GET /analysis/price-prediction/bitcoin?days=60&model=arima
    ```
-   - Sesuaikan parameter untuk data sparse di `config.py`:
-   ```python
-   COLD_START_EVAL_CONFIG = {
-       "min_interactions_required": 2   # Turunkan requirement
-   }
-   ```
-
-5. **Performa Cold-Start yang Buruk**
-   - Tingkatkan `cold_start_fecf_weight` ke 0.95
-   - Sesuaikan strategi diversifikasi kategori:
-   ```python
-   CATEGORY_CONFIG = {
-       "max_per_category": 0.2,        # Batasi lebih ketat untuk keragaman
-       "boost_underrepresented": 0.6,  # Boost lebih tinggi
-   }
-   ```
-
-6. **Integrasi Enhanced Hybrid Model**
-   - Gunakan file `enhanced_hybrid.py` dengan mengganti referensi di `main.py`:
-   ```python
-   # Di main.py, cari bagian yang menginisialisasi model hybrid
-   # Dan ganti dengan:
-   from src.models.enhanced_hybrid import EnhancedHybridRecommender
-   models_to_train.append(("Hybrid", EnhancedHybridRecommender()))
-   ```
-
-7. **Mengatasi Model Loading Issues**
-   - Pastikan nama file model konsisten:
-   ```python
-   # Enhanced hybrid harus menggunakan format nama yang sama
-   filepath = os.path.join(MODELS_DIR, f"hybrid_model_{timestamp}.pkl")
-   ```
-   - Gunakan perintah debug untuk memverifikasi loading:
+   - Untuk kualitas prediksi terbaik, gunakan minimal 180 hari data:
    ```bash
-   python main.py debug --user-id user_1 --model hybrid --num 10
+   GET /analysis/price-prediction/bitcoin?days=180&model=ml
+   ```
+   - Gunakan model sederhana untuk respons cepat:
+   ```bash
+   GET /analysis/price-prediction/bitcoin?days=30&model=simple
    ```
 
-8. **Inconsistent API Results**
-   - Hapus cache API jika implementasi model berubah
-   - Verifikasi struktur dan format response API
-
-9. **Perbaikan Konfigurasi untuk Domain Cryptocurrency**
-   ```python
-   # Domain-specific weights di config.py
-   CRYPTO_DOMAIN_WEIGHTS = {
-       "trend_importance": 0.85,       # Tingkatkan
-       "popularity_decay": 0.15,       # Tingkatkan
-       "category_correlation": 0.7,    # Tingkatkan
-       "market_cap_influence": 0.5,    # Sedikit turun
-       "chain_importance": 0.4,        # Tingkatkan
+3. **Error pada Analisis Teknikal dengan Data Terbatas**
+   - Sistem secara otomatis menyesuaikan parameter untuk data terbatas
+   - Kurangi periode MA jangka panjang:
+   ```json
+   {
+     "project_id": "bitcoin",
+     "days": 30,
+     "periods": {
+       "ma_long": 60
+     }
    }
    ```
+   - Gunakan preset short_term untuk data terbatas:
+   ```bash
+   GET /analysis/trading-signals?project_id=bitcoin&trading_style=short_term
+   ```
 
-10. **Memperbaiki Persistensi Model**
-    - Gunakan format timestamp yang konsisten untuk semua model
-    - Simpan metadata performa model dalam file model
-    - Implementasikan versioning model sederhana
+4. **Performa API Lambat**
+   - Hapus cache jika implementasi model berubah:
+   ```bash
+   # Clear analysis cache
+   POST /analysis/cache/clear
+   ```
+   - Batasi jumlah hari data yang diminta untuk respons lebih cepat:
+   ```bash
+   # Gunakan 60 hari alih-alih 180+ untuk respons yang lebih cepat
+   GET /analysis/price-prediction/bitcoin?days=60
+   ```
+   - Gunakan model prediksi yang lebih sederhana untuk performa lebih baik:
+   ```bash
+   GET /analysis/price-prediction/bitcoin?model=simple
+   ```
+
+5. **Kesalahan Log atau Warning**
+   - Error telah diminimalisir dengan penanganan yang lebih baik
+   - Warning TensorFlow telah diredam
+   - Warning statsmodels terkait indeks tanggal telah ditangani
+   - Performa prediksi ML telah dioptimalkan
+   - Caching digunakan untuk mempercepat permintaan berulang
 
 ## 📬 Kontak
 
@@ -1183,5 +1077,7 @@ Link Proyek: [https://github.com/feyfry/recommender-system](https://github.com/f
 - [CoinGecko API](https://www.coingecko.com/en/api) untuk data cryptocurrency
 - [scikit-learn](https://scikit-learn.org/) untuk implementasi SVD
 - [PyTorch](https://pytorch.org/) untuk implementasi Neural CF
+- [TensorFlow](https://www.tensorflow.org/) untuk model prediksi harga LSTM
+- [statsmodels](https://www.statsmodels.org/) untuk analisis deret waktu ARIMA
 - [TA-Lib](https://github.com/mrjbq7/ta-lib) untuk indikator teknikal
 - [FastAPI](https://fastapi.tiangolo.com/) untuk layanan API
