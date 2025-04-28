@@ -1061,6 +1061,61 @@ class FeatureEnhancedCF:
         
         return diversified_results[:n]
     
+    def get_cold_start_recommendations(self, 
+                          user_interests: Optional[List[str]] = None,
+                          n: int = 10) -> List[Dict[str, Any]]:
+        """
+        Mendapatkan rekomendasi untuk cold-start user
+        
+        Args:
+            user_interests: Daftar kategori/minat pengguna (opsional)
+            n: Jumlah rekomendasi yang diinginkan
+            
+        Returns:
+            list: Daftar objek proyek yang direkomendasikan
+        """
+        # Mendapatkan rekomendasi dalam bentuk (project_id, score) tuples
+        recommendations = self._get_cold_start_recommendations(n=n)
+        
+        # Membuat filter berdasarkan kategori jika user_interests disediakan
+        filtered_recommendations = []
+        if user_interests and hasattr(self, 'projects_df') and 'primary_category' in self.projects_df.columns:
+            interest_set = set(user_interests)
+            
+            # Filter rekomendasi berdasarkan minat pengguna
+            for project_id, score in recommendations:
+                project_data = self.projects_df[self.projects_df['id'] == project_id]
+                if not project_data.empty:
+                    category = project_data.iloc[0].get('primary_category')
+                    if category in interest_set or not interest_set:
+                        filtered_recommendations.append((project_id, score))
+            
+            # Jika hasil filter terlalu sedikit, tambahkan rekomendasi lain
+            if len(filtered_recommendations) < n//2:
+                for project_id, score in recommendations:
+                    if (project_id, score) not in filtered_recommendations and len(filtered_recommendations) < n:
+                        filtered_recommendations.append((project_id, score))
+        else:
+            filtered_recommendations = recommendations
+        
+        # Konversi ke bentuk dictionary
+        detailed_recommendations = []
+        for project_id, score in filtered_recommendations[:n]:
+            # Cari data proyek
+            project_data = self.projects_df[self.projects_df['id'] == project_id]
+            
+            if not project_data.empty:
+                # Konversi ke dictionary
+                project_dict = project_data.iloc[0].to_dict()
+                
+                # Tambahkan skor rekomendasi
+                project_dict['recommendation_score'] = float(score)
+                
+                # Tambahkan ke hasil
+                detailed_recommendations.append(project_dict)
+        
+        return detailed_recommendations
+    
     def get_trending_projects(self, n: int = 10) -> List[Dict[str, Any]]:
         """
         Get trending projects based on trend score

@@ -454,7 +454,22 @@ async def recommend_projects(request: RecommendationRequest):
         user_interaction_count = 0
         
         if hasattr(model, 'user_item_matrix') and model.user_item_matrix is not None:
+            # Perbaikan: Pastikan user_id adalah format yang benar untuk pengecekan cold-start
+            # UserID bisa dalam format "user_123" atau hanya "123" di matriks
+            
+            # Check dengan format asli
             is_cold_start = request.user_id not in model.user_item_matrix.index
+            
+            # Jika cold start, coba dengan format alternatif
+            if is_cold_start and not request.user_id.startswith('user_'):
+                alternate_id = f"user_{request.user_id}"
+                alt_is_cold_start = alternate_id not in model.user_item_matrix.index
+                
+                # Jika format alternatif ditemukan, update status dan ID
+                if not alt_is_cold_start:
+                    is_cold_start = False
+                    request.user_id = alternate_id
+                    logger.info(f"User found with alternate ID format: {alternate_id}")
             
             if not is_cold_start:
                 # Count user interactions for TTL decisions
@@ -475,14 +490,16 @@ async def recommend_projects(request: RecommendationRequest):
         if is_cold_start:
             logger.info(f"Cold-start user detected: {request.user_id}")
             
-            if request.model_type == "fecf" or request.model_type == "hybrid":
+            # Verifikasi method get_cold_start_recommendations ada
+            if hasattr(model, 'get_cold_start_recommendations'):
                 recommendations = model.get_cold_start_recommendations(
                     user_interests=request.user_interests,
                     n=request.num_recommendations
                 )
-            else:  # NCF doesn't have specialized cold-start handling
-                # Fallback to popular projects
-                recommendations = get_model("fecf").get_popular_projects(n=request.num_recommendations)
+            else:
+                # Fallback jika method tidak ditemukan: gunakan popular_projects
+                logger.warning(f"Model {request.model_type} tidak memiliki method get_cold_start_recommendations, fallback ke popular_projects")
+                recommendations = model.get_popular_projects(n=request.num_recommendations)
         else:
             # Regular recommendations
             if request.category:

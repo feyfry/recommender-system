@@ -1078,6 +1078,76 @@ class HybridRecommender:
         
         return detailed_recommendations
     
+    def get_cold_start_recommendations(self, 
+                          user_interests: Optional[List[str]] = None,
+                          n: int = 10) -> List[Dict[str, Any]]:
+        """
+        Mendapatkan rekomendasi untuk cold-start user
+        
+        Args:
+            user_interests: Daftar kategori/minat pengguna
+            n: Jumlah rekomendasi yang diinginkan
+            
+        Returns:
+            list: Daftar objek proyek yang direkomendasikan
+        """
+        # Untuk HybridRecommender, kita bisa menggunakan dummy user_id untuk _get_cold_start_recommendations
+        # karena method tersebut hanya menggunakan user_id untuk konsistensi interface
+        dummy_user_id = "cold_start_user"
+        
+        # Jika user_interests disediakan, kita perlu menggunakannya untuk meningkatkan rekomendasi
+        enhanced_recommendations = []
+        
+        # Pertama, dapatkan rekomendasi dari method _get_cold_start_recommendations
+        base_recommendations = self._get_cold_start_recommendations(dummy_user_id, n=n*2)
+        
+        # Jika user_interests tersedia, filter dan prioritaskan sesuai minat
+        if user_interests and self.projects_df is not None:
+            # Buat set untuk lookup yang cepat
+            interest_set = set(user_interests)
+            
+            # Pisahkan rekomendasi menjadi yang match minat dan tidak
+            matching_interests = []
+            other_recommendations = []
+            
+            for project_id, score in base_recommendations:
+                project_data = self.projects_df[self.projects_df['id'] == project_id]
+                if not project_data.empty:
+                    # Periksa apakah kategori proyek ada di user_interests
+                    category = None
+                    
+                    if 'primary_category' in project_data.columns:
+                        category = project_data.iloc[0].get('primary_category')
+                        
+                    # Jika kategori cocok, tambahkan ke matching_interests dengan skor lebih tinggi
+                    if category in interest_set:
+                        matching_interests.append((project_id, score * 1.2))  # Boost skor 20%
+                    else:
+                        other_recommendations.append((project_id, score))
+            
+            # Gabungkan, prioritaskan yang match interests
+            enhanced_recommendations = matching_interests + other_recommendations
+        else:
+            enhanced_recommendations = base_recommendations
+        
+        # Konversi ke bentuk dictionary
+        detailed_recommendations = []
+        for project_id, score in enhanced_recommendations[:n]:
+            # Cari data proyek
+            project_data = self.projects_df[self.projects_df['id'] == project_id]
+            
+            if not project_data.empty:
+                # Konversi ke dictionary
+                project_dict = project_data.iloc[0].to_dict()
+                
+                # Tambahkan skor rekomendasi
+                project_dict['recommendation_score'] = float(score)
+                
+                # Tambahkan ke hasil
+                detailed_recommendations.append(project_dict)
+        
+        return detailed_recommendations
+    
     def get_trending_projects(self, n: int = 10) -> List[Dict[str, Any]]:
         """
         Get trending projects
