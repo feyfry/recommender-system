@@ -145,7 +145,7 @@ INTERACTION_DIVERSITY = {
 
 # API settings
 API_HOST = "0.0.0.0"
-API_PORT = 8000
+API_PORT = 8001
 API_CACHE_TTL = 300  # 5 menit dalam detik
 
 # Cold Start Evaluation - EXTREME TUNING

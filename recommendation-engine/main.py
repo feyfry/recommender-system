@@ -1499,7 +1499,7 @@ Examples:
     # api command
     api_parser = subparsers.add_parser("api", help="Start API server")
     api_parser.add_argument("--host", default="0.0.0.0", help="API host")
-    api_parser.add_argument("--port", type=int, default=8000, help="API port")
+    api_parser.add_argument("--port", type=int, default=8001, help="API port")
 
     # debug command
     debug_parser = subparsers.add_parser("debug", help="Debug recommendations for a user")
