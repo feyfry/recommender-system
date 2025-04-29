@@ -6,6 +6,7 @@ use App\Models\ActivityLog;
 use App\Models\Profile;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Validator;
 
 class ProfileController extends Controller
@@ -31,14 +32,19 @@ class ProfileController extends Controller
             []
         );
 
-        // Catat aktivitas
-        ActivityLog::create([
-            'user_id'       => $user->user_id,
-            'activity_type' => 'profile_view',
-            'description'   => 'Melihat halaman profil',
-            'ip_address'    => request()->ip(),
-            'user_agent'    => request()->userAgent(),
-        ]);
+        // DIOPTIMALKAN: Hanya catat aktivitas melihat profil pertama kali dalam 24 jam
+        $lastProfileView = Cache::get("last_profile_view_{$user->id}");
+        if (! $lastProfileView || now()->diffInHours($lastProfileView) > 24) {
+            ActivityLog::create([
+                'user_id'       => $user->user_id,
+                'activity_type' => 'profile_view',
+                'description'   => 'Melihat halaman profil',
+                'ip_address'    => request()->ip(),
+                'user_agent'    => request()->userAgent(),
+            ]);
+
+            Cache::put("last_profile_view_{$user->id}", now(), 60 * 24);
+        }
 
         return view('backend.profile.edit', [
             'user'    => $user,
@@ -102,7 +108,7 @@ class ProfileController extends Controller
             // Simpan perubahan
             $profile->save();
 
-            // Catat aktivitas
+            // Catat aktivitas - Ini adalah aktivitas penting untuk dicatat
             ActivityLog::create([
                 'user_id'       => $user->user_id,
                 'activity_type' => 'profile_update',
@@ -110,6 +116,10 @@ class ProfileController extends Controller
                 'ip_address'    => request()->ip(),
                 'user_agent'    => request()->userAgent(),
             ]);
+
+            // DIOPTIMALKAN: Hapus semua cache terkait rekomendasi untuk user ini
+            // karena preferensi baru bisa mempengaruhi rekomendasi
+            $this->clearUserRecommendationCache($user->user_id);
 
             return redirect()->route('panel.profile.edit')
                 ->with('success', 'Profil berhasil diperbarui.');
@@ -188,7 +198,7 @@ class ProfileController extends Controller
             $profile->notification_settings = $notificationSettings;
             $profile->save();
 
-            // Catat aktivitas
+            // Catat aktivitas - Ini adalah perubahan penting untuk dicatat
             ActivityLog::create([
                 'user_id'       => $user->user_id,
                 'activity_type' => 'notification_settings_update',
@@ -203,6 +213,29 @@ class ProfileController extends Controller
             return redirect()->back()
                 ->with('error', 'Gagal memperbarui pengaturan notifikasi: ' . $e->getMessage())
                 ->withInput();
+        }
+    }
+
+    /**
+     * DIOPTIMALKAN: Metode baru untuk membersihkan cache rekomendasi pengguna
+     */
+    private function clearUserRecommendationCache($userId)
+    {
+        $cacheKeys = [
+            "personal_recommendations_{$userId}_hybrid_10",
+            "personal_recommendations_{$userId}_fecf_10",
+            "personal_recommendations_{$userId}_ncf_10",
+            "rec_personal_{$userId}_10",
+            "rec_personal_hybrid_{$userId}",
+            "rec_personal_fecf_{$userId}",
+            "rec_personal_ncf_{$userId}",
+            "dashboard_personal_recs_{$userId}",
+            "rec_interactions_{$userId}",
+            "dashboard_interactions_{$userId}",
+        ];
+
+        foreach ($cacheKeys as $key) {
+            Cache::forget($key);
         }
     }
 }

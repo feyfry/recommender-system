@@ -68,6 +68,24 @@
             @method('PUT')
             @csrf
 
+            <div class="mb-4">
+                <label for="avatar_url" class="inline-block py-2 mb-2 font-medium">Avatar</label>
+
+                <!-- Tampilkan avatar yang sudah ada jika tersedia -->
+                @if($profile->avatar_url)
+                <div class="mb-2">
+                    <img src="{{ asset($profile->avatar_url) }}" alt="Avatar" class="w-24 h-24 object-cover rounded neo-brutalism-sm">
+                </div>
+                @endif
+
+                <input type="file" name="avatar_url" id="avatar_url"
+                    class="w-full px-4 py-3 border-2 border-black focus:border-brutal-blue focus:outline-none neo-brutalism-sm">
+
+                <p class="text-sm text-gray-600 mt-1">
+                    Upload gambar PNG, JPG, atau SVG. Maksimum 2MB.
+                </p>
+            </div>
+
             <div>
                 <label for="username" class="inline-block py-2 mb-2 font-medium">Username</label>
                 <input type="text" name="username" id="username" value="{{ old('username', $profile->username) }}"

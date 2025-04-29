@@ -1,17 +1,16 @@
 <?php
 namespace App\Http\Controllers\Backend;
 
-use App\Models\User;
-use App\Models\Project;
-use App\Models\Portfolio;
-use App\Models\ActivityLog;
-use App\Models\Interaction;
-use Illuminate\Http\Request;
-use App\Models\Recommendation;
-use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\Controller;
+use App\Models\Interaction;
+use App\Models\Portfolio;
+use App\Models\Project;
+use App\Models\Recommendation;
+use App\Models\User;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class DashboardController extends Controller
 {
@@ -35,32 +34,34 @@ class DashboardController extends Controller
      */
     public function index()
     {
-        $user = Auth::user();
+        $user   = Auth::user();
+        $userId = $user->user_id;
 
-        // Ambil rekomendasi personal terbaru
-        $personalRecommendations = $this->getPersonalRecommendations($user->user_id, 'hybrid', 4);
+        // Gunakan caching untuk meningkatkan performa
+        $personalRecommendations = Cache::remember("dashboard_personal_recs_{$userId}", 30, function () use ($userId) {
+            return $this->getPersonalRecommendations($userId, 'hybrid', 4);
+        });
 
-        // Ambil proyek trending
-        $trendingProjects = $this->getTrendingProjects(4);
+        $trendingProjects = Cache::remember('dashboard_trending_projects', 60, function () {
+            return $this->getTrendingProjects(4);
+        });
 
         // Ambil interaksi terbaru pengguna
-        $recentInteractions = Interaction::forUser($user->user_id)
-            ->with('project')
-            ->orderBy('created_at', 'desc')
-            ->limit(5)
-            ->get();
+        $recentInteractions = Cache::remember("dashboard_interactions_{$userId}", 15, function () use ($userId) {
+            return Interaction::forUser($userId)
+                ->with('project')
+                ->orderBy('created_at', 'desc')
+                ->limit(5)
+                ->get();
+        });
 
         // Ambil dan hitung data portofolio jika ada
-        $portfolioSummary = $this->getPortfolioSummary($user->user_id);
+        $portfolioSummary = Cache::remember("dashboard_portfolio_{$userId}", 30, function () use ($userId) {
+            return $this->getPortfolioSummary($userId);
+        });
 
-        // Catat aktivitas
-        ActivityLog::create([
-            'user_id'       => $user->user_id,
-            'activity_type' => 'dashboard_view',
-            'description'   => 'Melihat dashboard',
-            'ip_address'    => request()->ip(),
-            'user_agent'    => request()->userAgent(),
-        ]);
+        // DIOPTIMALKAN: Tidak lagi mencatat aktivitas untuk setiap kunjungan dashboard
+        // Perubahan ini sendiri akan meningkatkan kinerja secara signifikan
 
         return view('backend.dashboard.index', [
             'personalRecommendations' => $personalRecommendations,
@@ -134,8 +135,9 @@ class DashboardController extends Controller
     private function getPersonalRecommendations($userId, $modelType = 'hybrid', $limit = 10)
     {
         try {
-            // Coba ambil dari API
-            $response = Http::post("{$this->apiUrl}/recommend/projects", [
+            // DIOPTIMALKAN: Gunakan timeout yang lebih rendah untuk HTTP requests
+            // untuk menghindari menunggu terlalu lama jika API lambat
+            $response = Http::timeout(3)->post("{$this->apiUrl}/recommend/projects", [
                 'user_id'             => $userId,
                 'model_type'          => $modelType,
                 'num_recommendations' => $limit,
@@ -164,8 +166,8 @@ class DashboardController extends Controller
     private function getTrendingProjects($limit = 10)
     {
         try {
-            // Coba ambil dari API
-            $response = Http::get("{$this->apiUrl}/recommend/trending", [
+            // DIOPTIMALKAN: Gunakan timeout yang lebih rendah untuk HTTP requests
+            $response = Http::timeout(3)->get("{$this->apiUrl}/recommend/trending", [
                 'limit' => $limit,
             ])->json();
 

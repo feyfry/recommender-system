@@ -8,10 +8,11 @@ use App\Models\ActivityLog;
 use App\Models\Interaction;
 use Illuminate\Http\Request;
 use App\Models\Recommendation;
+use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 
 class RecommendationController extends Controller
 {
@@ -36,26 +37,33 @@ class RecommendationController extends Controller
     public function index()
     {
         $user = Auth::user();
+        $userId = $user->user_id;
 
-        // Ambil rekomendasi personal terbaru
-        $personalRecommendations = $this->getPersonalRecommendations($user->user_id, 'hybrid', 10);
+        // Gunakan sistem cache untuk data yang sering diakses
+        $personalRecommendations = Cache::remember("rec_personal_{$userId}_10", 15, function() use ($userId) {
+            return $this->getPersonalRecommendations($userId, 'hybrid', 10);
+        });
 
-        // Ambil project trending
-        $trendingProjects = $this->getTrendingProjects(8);
+        $trendingProjects = Cache::remember('rec_trending_8', 30, function() {
+            return $this->getTrendingProjects(8);
+        });
 
-        // Ambil project populer
-        $popularProjects = $this->getPopularProjects(8);
+        $popularProjects = Cache::remember('rec_popular_8', 30, function() {
+            return $this->getPopularProjects(8);
+        });
 
-        // Ambil data interaksi pengguna
-        $interactions = Interaction::forUser($user->user_id)
-            ->with('project')
-            ->recent()
-            ->orderBy('created_at', 'desc')
-            ->limit(10)
-            ->get();
+        // DIOPTIMALKAN: Cache hasil query database
+        $interactions = Cache::remember("rec_interactions_{$userId}", 10, function() use ($userId) {
+            return Interaction::forUser($userId)
+                ->with('project')
+                ->recent()
+                ->orderBy('created_at', 'desc')
+                ->limit(10)
+                ->get();
+        });
 
-        // Catat aktivitas
-        ActivityLog::logViewRecommendation($user, request(), 'dashboard');
+        // DIOPTIMALKAN: Tidak mencatat aktivitas view dashboard
+        // Karena ini adalah halaman yang sering dikunjungi
 
         return view('backend.recommendation.index', [
             'personalRecommendations' => $personalRecommendations,
@@ -71,14 +79,22 @@ class RecommendationController extends Controller
     public function personal()
     {
         $user = Auth::user();
+        $userId = $user->user_id;
 
-        // Ambil rekomendasi dari berbagai model
-        $hybridRecommendations = $this->getPersonalRecommendations($user->user_id, 'hybrid', 10);
-        $fecfRecommendations   = $this->getPersonalRecommendations($user->user_id, 'fecf', 10);
-        $ncfRecommendations    = $this->getPersonalRecommendations($user->user_id, 'ncf', 10);
+        // DIOPTIMALKAN: Menggunakan Cache untuk mengurangi beban API
+        $hybridRecommendations = Cache::remember("rec_personal_hybrid_{$userId}", 15, function() use ($userId) {
+            return $this->getPersonalRecommendations($userId, 'hybrid', 10);
+        });
 
-        // Catat aktivitas
-        ActivityLog::logViewRecommendation($user, request(), 'personal');
+        $fecfRecommendations = Cache::remember("rec_personal_fecf_{$userId}", 15, function() use ($userId) {
+            return $this->getPersonalRecommendations($userId, 'fecf', 10);
+        });
+
+        $ncfRecommendations = Cache::remember("rec_personal_ncf_{$userId}", 15, function() use ($userId) {
+            return $this->getPersonalRecommendations($userId, 'ncf', 10);
+        });
+
+        // DIOPTIMALKAN: Tidak catat aktivitas untuk halaman yang sering dikunjungi ini
 
         return view('backend.recommendation.personal', [
             'hybridRecommendations' => $hybridRecommendations,
@@ -93,13 +109,12 @@ class RecommendationController extends Controller
      */
     public function trending()
     {
-        $user = Auth::user();
+        // DIOPTIMALKAN: Cache untuk data yang sering diakses
+        $trendingProjects = Cache::remember('rec_trending_20', 30, function() {
+            return $this->getTrendingProjects(20);
+        });
 
-        // Ambil project trending
-        $trendingProjects = $this->getTrendingProjects(20);
-
-        // Catat aktivitas
-        ActivityLog::logViewRecommendation($user, request(), 'trending');
+        // DIOPTIMALKAN: Tidak catat aktivitas untuk halaman yang sering dikunjungi ini
 
         return view('backend.recommendation.trending', [
             'trendingProjects' => $trendingProjects,
@@ -111,13 +126,12 @@ class RecommendationController extends Controller
      */
     public function popular()
     {
-        $user = Auth::user();
+        // DIOPTIMALKAN: Cache untuk data yang sering diakses
+        $popularProjects = Cache::remember('rec_popular_20', 30, function() {
+            return $this->getPopularProjects(20);
+        });
 
-        // Ambil project populer
-        $popularProjects = $this->getPopularProjects(20);
-
-        // Catat aktivitas
-        ActivityLog::logViewRecommendation($user, request(), 'popular');
+        // DIOPTIMALKAN: Tidak catat aktivitas untuk halaman yang sering dikunjungi ini
 
         return view('backend.recommendation.popular', [
             'popularProjects' => $popularProjects,
@@ -129,17 +143,25 @@ class RecommendationController extends Controller
      */
     public function categories(Request $request)
     {
-        $user     = Auth::user();
+        $user = Auth::user();
+        $userId = $user->user_id;
         $category = $request->input('category', 'defi');
 
-        // Ambil rekomendasi berdasarkan kategori
-        $categoryRecommendations = $this->getCategoryRecommendations($user->user_id, $category, 16);
+        // DIOPTIMALKAN: Cache rekomendasi kategori
+        $cacheKey = "rec_category_{$userId}_{$category}_16";
+        $categoryRecommendations = Cache::remember($cacheKey, 15, function() use ($userId, $category) {
+            return $this->getCategoryRecommendations($userId, $category, 16);
+        });
 
-        // Ambil daftar kategori untuk dropdown
-        $categories = $this->getCategories();
+        // DIOPTIMALKAN: Cache untuk daftar kategori
+        $categories = Cache::remember('all_categories', 1440, function() { // 24 jam
+            return $this->getCategories();
+        });
 
-        // Catat aktivitas
-        ActivityLog::logViewRecommendation($user, request(), 'category-' . $category);
+        // Catat aktivitas hanya untuk kategori yang jarang dikunjungi
+        if (!in_array($category, ['defi', 'gaming', 'layer1', 'nft'])) {
+            ActivityLog::logViewRecommendation($user, request(), 'category-' . $category);
+        }
 
         return view('backend.recommendation.categories', [
             'categoryRecommendations' => $categoryRecommendations,
@@ -153,17 +175,25 @@ class RecommendationController extends Controller
      */
     public function chains(Request $request)
     {
-        $user  = Auth::user();
+        $user = Auth::user();
+        $userId = $user->user_id;
         $chain = $request->input('chain', 'ethereum');
 
-        // Ambil rekomendasi berdasarkan blockchain
-        $chainRecommendations = $this->getChainRecommendations($user->user_id, $chain, 16);
+        // DIOPTIMALKAN: Cache rekomendasi blockchain
+        $cacheKey = "rec_chain_{$userId}_{$chain}_16";
+        $chainRecommendations = Cache::remember($cacheKey, 15, function() use ($userId, $chain) {
+            return $this->getChainRecommendations($userId, $chain, 16);
+        });
 
-        // Ambil daftar blockchain untuk dropdown
-        $chains = $this->getChains();
+        // DIOPTIMALKAN: Cache untuk daftar blockchain
+        $chains = Cache::remember('all_chains', 1440, function() { // 24 jam
+            return $this->getChains();
+        });
 
-        // Catat aktivitas
-        ActivityLog::logViewRecommendation($user, request(), 'chain-' . $chain);
+        // Catat aktivitas hanya untuk chain yang jarang dikunjungi
+        if (!in_array($chain, ['ethereum', 'binance-smart-chain', 'polygon', 'solana'])) {
+            ActivityLog::logViewRecommendation($user, request(), 'chain-' . $chain);
+        }
 
         return view('backend.recommendation.chains', [
             'chainRecommendations' => $chainRecommendations,
@@ -173,25 +203,35 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Menampilkan detail proyek
+     * Menampilkan detail proyek - INTERAKSI PENTING UNTUK SISTEM REKOMENDASI
      */
     public function projectDetail($projectId)
     {
         $user = Auth::user();
+        $userId = $user->user_id;
 
         // Ambil detail proyek
         $project = Project::findOrFail($projectId);
 
-        // Ambil proyek serupa
-        $similarProjects = $this->getSimilarProjects($projectId, 8);
+        // DIOPTIMALKAN: Cache hasil untuk proyek serupa
+        $similarProjects = Cache::remember("similar_projects_{$projectId}_8", 60, function() use ($projectId) {
+            return $this->getSimilarProjects($projectId, 8);
+        });
 
-        // Ambil sinyal trading
-        $tradingSignals = $this->getTradingSignals($projectId, $user->risk_tolerance ?? 'medium');
+        // DIOPTIMALKAN: Cache hasil untuk sinyal trading
+        $tradingSignals = Cache::remember(
+            "trading_signals_{$projectId}_{$user->risk_tolerance}",
+            30,
+            function() use ($projectId, $user) {
+                return $this->getTradingSignals($projectId, $user->risk_tolerance ?? 'medium');
+            }
+        );
 
-        // Catat interaksi view
-        $this->recordInteraction($user->user_id, $projectId, 'view');
+        // PENTING: Catat interaksi view karena ini penting untuk sistem rekomendasi
+        $this->recordInteraction($userId, $projectId, 'view');
 
-        // Catat aktivitas
+        // PENTING: Interaksi view pada project penting untuk sistem rekomendasi
+        // jadi kita tetap mencatat aktivitas ini ke log
         ActivityLog::logInteraction($user, request(), $projectId, 'view');
 
         return view('backend.recommendation.project_detail', [
@@ -202,34 +242,34 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Tambahkan ke favorit
+     * Tambahkan ke favorit - INTERAKSI PENTING UNTUK SISTEM REKOMENDASI
      */
     public function addToFavorites(Request $request)
     {
-        $user      = Auth::user();
+        $user = Auth::user();
         $projectId = $request->input('project_id');
 
-        // Catat interaksi favorite
+        // PENTING: Catat interaksi favorite karena ini penting untuk sistem rekomendasi
         $this->recordInteraction($user->user_id, $projectId, 'favorite');
 
-        // Catat aktivitas
+        // PENTING: Interaksi favorite adalah aktivitas penting untuk log dan sistem rekomendasi
         ActivityLog::logInteraction($user, request(), $projectId, 'favorite');
 
         return redirect()->back()->with('success', 'Proyek berhasil ditambahkan ke favorit.');
     }
 
     /**
-     * Menambahkan interaksi pengguna
+     * Menambahkan interaksi pengguna - FUNGSI CORE UNTUK REKOMENDASI
      */
     private function recordInteraction($userId, $projectId, $interactionType, $weight = 1)
     {
         // Validasi tipe interaksi
-        if (! in_array($interactionType, Interaction::$validTypes)) {
+        if (!in_array($interactionType, Interaction::$validTypes)) {
             throw new \InvalidArgumentException("Tipe interaksi tidak valid: {$interactionType}");
         }
 
         // Catat interaksi di database lokal
-        Interaction::create([
+        $interaction = Interaction::create([
             'user_id'          => $userId,
             'project_id'       => $projectId,
             'interaction_type' => $interactionType,
@@ -240,9 +280,10 @@ class RecommendationController extends Controller
             ],
         ]);
 
-        // Kirim interaksi ke API
+        // Kirim interaksi ke API dengan penanganan error yang lebih baik
         try {
-            Http::post("{$this->apiUrl}/interactions/record", [
+            // DIOPTIMALKAN: Gunakan timeout yang lebih rendah (2 detik)
+            Http::timeout(2)->post("{$this->apiUrl}/interactions/record", [
                 'user_id'          => $userId,
                 'project_id'       => $projectId,
                 'interaction_type' => $interactionType,
@@ -257,7 +298,23 @@ class RecommendationController extends Controller
             Log::error("Gagal mengirim interaksi ke API: " . $e->getMessage());
         }
 
-        return true;
+        // DIOPTIMALKAN: Hapus cache yang terkait saat ada interaksi baru
+        // untuk memastikan rekomendasi berikutnya merefleksikan interaksi ini
+        $cacheKeys = [
+            "rec_personal_{$userId}_10",
+            "rec_personal_hybrid_{$userId}",
+            "rec_personal_fecf_{$userId}",
+            "rec_personal_ncf_{$userId}",
+            "rec_interactions_{$userId}",
+            "dashboard_personal_recs_{$userId}",
+            "dashboard_interactions_{$userId}"
+        ];
+
+        foreach ($cacheKeys as $key) {
+            Cache::forget($key);
+        }
+
+        return $interaction;
     }
 
     /**
@@ -266,7 +323,7 @@ class RecommendationController extends Controller
     private function getPersonalRecommendations($userId, $modelType = 'hybrid', $limit = 10)
     {
         // Cek cache terlebih dahulu
-        $cacheKey   = "personal_recommendations_{$userId}_{$modelType}_{$limit}";
+        $cacheKey = "personal_recommendations_{$userId}_{$modelType}_{$limit}";
         $cachedData = ApiCache::findMatch($cacheKey, []);
 
         if ($cachedData) {
@@ -275,7 +332,8 @@ class RecommendationController extends Controller
 
         // Ambil data dari API jika tidak ada cache
         try {
-            $response = Http::post("{$this->apiUrl}/recommend/projects", [
+            // DIOPTIMALKAN: Gunakan timeout yang lebih rendah
+            $response = Http::timeout(3)->post("{$this->apiUrl}/recommend/projects", [
                 'user_id'             => $userId,
                 'model_type'          => $modelType,
                 'num_recommendations' => $limit,
@@ -306,7 +364,7 @@ class RecommendationController extends Controller
     private function getTrendingProjects($limit = 10)
     {
         // Cek cache terlebih dahulu
-        $cacheKey   = "trending_projects_{$limit}";
+        $cacheKey = "trending_projects_{$limit}";
         $cachedData = ApiCache::findMatch($cacheKey, []);
 
         if ($cachedData) {
@@ -315,7 +373,8 @@ class RecommendationController extends Controller
 
         // Ambil data dari API jika tidak ada cache
         try {
-            $response = Http::get("{$this->apiUrl}/recommend/trending", [
+            // DIOPTIMALKAN: Gunakan timeout untuk menghindari penantian yang terlalu lama
+            $response = Http::timeout(3)->get("{$this->apiUrl}/recommend/trending", [
                 'limit' => $limit,
             ])->json();
 
@@ -339,7 +398,7 @@ class RecommendationController extends Controller
     private function getPopularProjects($limit = 10)
     {
         // Cek cache terlebih dahulu
-        $cacheKey   = "popular_projects_{$limit}";
+        $cacheKey = "popular_projects_{$limit}";
         $cachedData = ApiCache::findMatch($cacheKey, []);
 
         if ($cachedData) {
@@ -348,7 +407,8 @@ class RecommendationController extends Controller
 
         // Ambil data dari API jika tidak ada cache
         try {
-            $response = Http::get("{$this->apiUrl}/recommend/popular", [
+            // DIOPTIMALKAN: Gunakan timeout
+            $response = Http::timeout(3)->get("{$this->apiUrl}/recommend/popular", [
                 'limit' => $limit,
             ])->json();
 
@@ -372,7 +432,7 @@ class RecommendationController extends Controller
     private function getSimilarProjects($projectId, $limit = 8)
     {
         // Cek cache terlebih dahulu
-        $cacheKey   = "similar_projects_{$projectId}_{$limit}";
+        $cacheKey = "similar_projects_{$projectId}_{$limit}";
         $cachedData = ApiCache::findMatch($cacheKey, []);
 
         if ($cachedData) {
@@ -381,7 +441,8 @@ class RecommendationController extends Controller
 
         // Ambil data dari API jika tidak ada cache
         try {
-            $response = Http::get("{$this->apiUrl}/recommend/similar/{$projectId}", [
+            // DIOPTIMALKAN: Gunakan timeout
+            $response = Http::timeout(3)->get("{$this->apiUrl}/recommend/similar/{$projectId}", [
                 'limit' => $limit,
             ])->json();
 
@@ -394,7 +455,7 @@ class RecommendationController extends Controller
 
             // Fallback ke data dari database lokal
             $project = Project::find($projectId);
-            if (! $project) {
+            if (!$project) {
                 return [];
             }
 
@@ -415,7 +476,7 @@ class RecommendationController extends Controller
     private function getTradingSignals($projectId, $riskTolerance = 'medium')
     {
         // Cek cache terlebih dahulu
-        $cacheKey   = "trading_signals_{$projectId}_{$riskTolerance}";
+        $cacheKey = "trading_signals_{$projectId}_{$riskTolerance}";
         $cachedData = ApiCache::findMatch($cacheKey, []);
 
         if ($cachedData) {
@@ -424,7 +485,8 @@ class RecommendationController extends Controller
 
         // Ambil data dari API jika tidak ada cache
         try {
-            $response = Http::post("{$this->apiUrl}/analysis/trading-signals", [
+            // DIOPTIMALKAN: Gunakan timeout
+            $response = Http::timeout(3)->post("{$this->apiUrl}/analysis/trading-signals", [
                 'project_id'     => $projectId,
                 'days'           => 30,
                 'interval'       => '1d',
@@ -459,7 +521,7 @@ class RecommendationController extends Controller
     private function getCategoryRecommendations($userId, $category, $limit = 16)
     {
         // Cek cache terlebih dahulu
-        $cacheKey   = "category_recommendations_{$userId}_{$category}_{$limit}";
+        $cacheKey = "category_recommendations_{$userId}_{$category}_{$limit}";
         $cachedData = ApiCache::findMatch($cacheKey, []);
 
         if ($cachedData) {
@@ -468,7 +530,8 @@ class RecommendationController extends Controller
 
         // Ambil data dari API jika tidak ada cache
         try {
-            $response = Http::post("{$this->apiUrl}/recommend/projects", [
+            // DIOPTIMALKAN: Gunakan timeout
+            $response = Http::timeout(3)->post("{$this->apiUrl}/recommend/projects", [
                 'user_id'             => $userId,
                 'model_type'          => 'hybrid',
                 'num_recommendations' => $limit,
@@ -499,7 +562,7 @@ class RecommendationController extends Controller
     private function getChainRecommendations($userId, $chain, $limit = 16)
     {
         // Cek cache terlebih dahulu
-        $cacheKey   = "chain_recommendations_{$userId}_{$chain}_{$limit}";
+        $cacheKey = "chain_recommendations_{$userId}_{$chain}_{$limit}";
         $cachedData = ApiCache::findMatch($cacheKey, []);
 
         if ($cachedData) {
@@ -508,7 +571,8 @@ class RecommendationController extends Controller
 
         // Ambil data dari API jika tidak ada cache
         try {
-            $response = Http::post("{$this->apiUrl}/recommend/projects", [
+            // DIOPTIMALKAN: Gunakan timeout
+            $response = Http::timeout(3)->post("{$this->apiUrl}/recommend/projects", [
                 'user_id'             => $userId,
                 'model_type'          => 'hybrid',
                 'num_recommendations' => $limit,
@@ -539,7 +603,7 @@ class RecommendationController extends Controller
     private function getCategories()
     {
         // Cek cache terlebih dahulu
-        $cacheKey   = "categories_list";
+        $cacheKey = "categories_list";
         $cachedData = ApiCache::findMatch($cacheKey, []);
 
         if ($cachedData) {
@@ -566,7 +630,7 @@ class RecommendationController extends Controller
     private function getChains()
     {
         // Cek cache terlebih dahulu
-        $cacheKey   = "chains_list";
+        $cacheKey = "chains_list";
         $cachedData = ApiCache::findMatch($cacheKey, []);
 
         if ($cachedData) {

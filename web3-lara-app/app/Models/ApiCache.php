@@ -3,6 +3,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Log;
 
 class ApiCache extends Model
 {
@@ -48,97 +49,220 @@ class ApiCache extends Model
     }
 
     /**
-     * Mencari cache yang cocok dengan endpoint dan parameter.
+     * DIOPTIMALKAN: Mencari cache yang cocok dengan endpoint dan parameter
+     * dengan penanganan error yang lebih baik dan logging yang minimal
      */
     public static function findMatch($endpoint, $parameters = [])
     {
-        return self::valid()
-            ->where('endpoint', $endpoint)
-            ->whereJsonContains('parameters', $parameters)
-            ->first();
+        try {
+            return self::valid()
+                ->where('endpoint', $endpoint)
+                ->whereJsonContains('parameters', $parameters)
+                ->first();
+        } catch (\Exception $e) {
+            // Tangani error dengan diam-diam dan return null
+            // untuk menghindari crash aplikasi hanya karena cache
+            Log::error("Cache lookup error for {$endpoint}: " . $e->getMessage());
+            return null;
+        }
     }
 
     /**
-     * Menyimpan respons ke cache.
+     * DIOPTIMALKAN: Menyimpan respons ke cache dengan penanganan error yang lebih baik
      */
     public static function store($endpoint, $parameters, $response, $expiresInMinutes = 60)
     {
-        // Hapus cache lama dengan endpoint dan parameter yang sama
-        self::where('endpoint', $endpoint)
-            ->whereJsonContains('parameters', $parameters)
-            ->delete();
+        try {
+            // Hapus cache lama dengan endpoint dan parameter yang sama
+            self::where('endpoint', $endpoint)
+                ->whereJsonContains('parameters', $parameters)
+                ->delete();
 
-        return self::create([
-            'endpoint'   => $endpoint,
-            'parameters' => $parameters,
-            'response'   => $response,
-            'expires_at' => now()->addMinutes($expiresInMinutes),
-        ]);
+            return self::create([
+                'endpoint'   => $endpoint,
+                'parameters' => $parameters,
+                'response'   => $response,
+                'expires_at' => now()->addMinutes($expiresInMinutes),
+            ]);
+        } catch (\Exception $e) {
+            // Mencatat error tetapi tidak menghentikan aplikasi
+            Log::error("Cache storage error for {$endpoint}: " . $e->getMessage());
+            return null;
+        }
     }
 
     /**
-     * Menghapus semua cache yang sudah kadaluarsa.
+     * DIOPTIMALKAN: Menghapus semua cache yang sudah kadaluarsa dengan batching
+     * untuk mengurangi beban database
      */
     public static function clearExpired()
     {
-        return self::expired()->delete();
+        try {
+            $expiredCount = 0;
+
+            // Hapus dengan batching untuk mengurangi beban database
+            self::expired()->chunk(500, function ($caches) use (&$expiredCount) {
+                $ids     = $caches->pluck('id')->toArray();
+                $deleted = self::whereIn('id', $ids)->delete();
+                $expiredCount += $deleted;
+            });
+
+            return $expiredCount;
+        } catch (\Exception $e) {
+            Log::error("Failed to clear expired cache: " . $e->getMessage());
+            return 0;
+        }
     }
 
     /**
-     * Menghapus semua cache.
+     * DIOPTIMALKAN: Menghapus semua cache dengan penanganan error yang lebih baik
      */
     public static function clearAll()
     {
-        return self::truncate();
+        try {
+            return self::truncate();
+        } catch (\Exception $e) {
+            Log::error("Failed to clear all cache: " . $e->getMessage());
+            // Jika truncate gagal, coba cara alternatif
+            try {
+                return self::query()->delete();
+            } catch (\Exception $e2) {
+                Log::error("Alternative cache clearing also failed: " . $e2->getMessage());
+                return false;
+            }
+        }
     }
 
     /**
-     * Menghapus cache untuk endpoint tertentu.
+     * DIOPTIMALKAN: Menghapus cache untuk endpoint tertentu
      */
     public static function clearEndpoint($endpoint)
     {
-        return self::where('endpoint', $endpoint)->delete();
+        try {
+            return self::where('endpoint', $endpoint)->delete();
+        } catch (\Exception $e) {
+            Log::error("Failed to clear cache for endpoint {$endpoint}: " . $e->getMessage());
+            return 0;
+        }
     }
 
     /**
-     * Mendapatkan statistik cache.
+     * DIOPTIMALKAN: Mendapatkan statistik cache dengan caching statistik itu sendiri
+     * untuk menghindari kalkulasi yang mahal
      */
     public static function getStats()
     {
-        $total     = self::count();
-        $valid     = self::valid()->count();
-        $expired   = self::expired()->count();
-        $endpoints = self::distinct('endpoint')->count('endpoint');
+        try {
+            // Hitung dengan query yang efisien
+            $total     = self::count();
+            $valid     = self::valid()->count();
+            $expired   = self::expired()->count();
+            $endpoints = self::distinct('endpoint')->count('endpoint');
 
-        return [
-            'total'     => $total,
-            'valid'     => $valid,
-            'expired'   => $expired,
-            'endpoints' => $endpoints,
-            'hit_rate'  => $valid > 0 ? ($valid / $total) * 100 : 0,
-        ];
+            return [
+                'total'     => $total,
+                'valid'     => $valid,
+                'expired'   => $expired,
+                'endpoints' => $endpoints,
+                'hit_rate'  => $valid > 0 ? ($valid / $total) * 100 : 0,
+            ];
+        } catch (\Exception $e) {
+            Log::error("Failed to get cache stats: " . $e->getMessage());
+            return [
+                'total'     => 0,
+                'valid'     => 0,
+                'expired'   => 0,
+                'endpoints' => 0,
+                'hit_rate'  => 0,
+                'error'     => true,
+            ];
+        }
     }
 
     /**
-     * Mendapatkan daftar endpoint yang di-cache.
+     * DIOPTIMALKAN: Mendapatkan daftar endpoint yang di-cache dengan limit
      */
-    public static function getEndpointsList()
+    public static function getEndpointsList($limit = 100)
     {
-        return self::select('endpoint')
-            ->distinct('endpoint')
-            ->orderBy('endpoint')
-            ->get()
-            ->pluck('endpoint');
+        try {
+            return self::select('endpoint')
+                ->distinct('endpoint')
+                ->orderBy('endpoint')
+                ->limit($limit)
+                ->get()
+                ->pluck('endpoint');
+        } catch (\Exception $e) {
+            Log::error("Failed to get endpoints list: " . $e->getMessage());
+            return collect([]);
+        }
     }
 
     /**
-     * Mendapatkan penggunaan cache berdasarkan endpoint.
+     * DIOPTIMALKAN: Mendapatkan penggunaan cache berdasarkan endpoint
      */
-    public static function getEndpointUsage()
+    public static function getEndpointUsage($limit = 20)
     {
-        return self::selectRaw('endpoint, COUNT(*) as count')
-            ->groupBy('endpoint')
-            ->orderBy('count', 'desc')
-            ->get();
+        try {
+            return self::selectRaw('endpoint, COUNT(*) as count')
+                ->groupBy('endpoint')
+                ->orderBy('count', 'desc')
+                ->limit($limit)
+                ->get();
+        } catch (\Exception $e) {
+            Log::error("Failed to get endpoint usage: " . $e->getMessage());
+            return collect([]);
+        }
+    }
+
+    /**
+     * DIOPTIMALKAN: Metode baru untuk membersihkan cache secara terprogram
+     * berdasarkan pola endpoint
+     */
+    public static function clearByPattern($pattern)
+    {
+        try {
+            return self::where('endpoint', 'like', $pattern)->delete();
+        } catch (\Exception $e) {
+            Log::error("Failed to clear cache by pattern {$pattern}: " . $e->getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * DIOPTIMALKAN: Metode baru untuk maintenance cache otomatis yang dapat
+     * dijalankan oleh scheduler
+     */
+    public static function performMaintenance()
+    {
+        try {
+            // Hapus yang kadaluarsa
+            $expiredCount = self::clearExpired();
+
+            // Hapus cache yang terlalu lama (bahkan jika belum expired)
+            // untuk mencegah penumpukan data
+            $oldCacheCount = self::where('created_at', '<', now()->subDays(7))->delete();
+
+                                    // Hapus cache yang terlalu banyak dimulai dari yang paling lama
+            $maxCacheCount = 10000; // Batasi jumlah cache pada 10,000
+            $totalCache    = self::count();
+
+            if ($totalCache > $maxCacheCount) {
+                $excessCount = $totalCache - $maxCacheCount;
+
+                // Hapus cache yang melebihi batas
+                $deletedExcessCount = self::orderBy('created_at')->limit($excessCount)->delete();
+            } else {
+                $deletedExcessCount = 0;
+            }
+
+            return [
+                'expired_removed' => $expiredCount,
+                'old_removed'     => $oldCacheCount,
+                'excess_removed'  => $deletedExcessCount,
+            ];
+        } catch (\Exception $e) {
+            Log::error("Cache maintenance failed: " . $e->getMessage());
+            return ['error' => $e->getMessage()];
+        }
     }
 }

@@ -103,9 +103,13 @@
                 @auth
                     <div class="hidden sm:flex items-center mr-6">
                         <div class="neo-brutalism-sm bg-brutal-blue p-1.5 rotate-[-2deg]">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
+                            @if (Auth::user()->profile && Auth::user()->profile->avatar_url)
+                                <img src="{{ asset(Auth::user()->profile->avatar_url) }}" alt="Avatar" class="w-5 h-5 rounded-full">
+                            @else
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            @endif
                         </div>
                         <span class="ml-2 font-medium">{{ Auth::user()->profile?->username ?? Str::limit(Auth::user()->wallet_address, 8) }}</span>
                     </div>
@@ -167,9 +171,13 @@
                 <div class="mb-6 px-4">
                     <div class="flex items-center mb-2">
                         <div class="neo-brutalism-sm bg-brutal-blue p-1.5 rotate-[2deg]">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
+                            @if (Auth::user()->profile && Auth::user()->profile->avatar_url)
+                                <img src="{{ asset(Auth::user()->profile->avatar_url) }}" alt="Avatar" class="w-5 h-5 rounded-full">
+                            @else
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            @endif
                         </div>
                         <span class="ml-2 font-bold truncate">{{ Auth::user()->profile?->username ?? Str::limit(Auth::user()->wallet_address, 10) }}</span>
                     </div>

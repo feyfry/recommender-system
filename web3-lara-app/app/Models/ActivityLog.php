@@ -62,6 +62,24 @@ class ActivityLog extends Model
     }
 
     /**
+     * DIOPTIMALKAN: Flag untuk mengontrol apakah akan mencatat aktivitas view/normal
+     * Berguna untuk menghindari pencatatan aktivitas yang terlalu sering
+     *
+     * @var bool
+     */
+    protected static $shouldLogViews = false;
+
+    /**
+     * DIOPTIMALKAN: Toggle apakah akan mencatat aktivitas view biasa
+     *
+     * @param bool $shouldLog
+     */
+    public static function shouldLogViewActivities($shouldLog = true)
+    {
+        self::$shouldLogViews = $shouldLog;
+    }
+
+    /**
      * Mencatat aktivitas login.
      */
     public static function logLogin($user, $request)
@@ -90,10 +108,20 @@ class ActivityLog extends Model
     }
 
     /**
-     * Mencatat aktivitas melihat rekomendasi.
+     * DIOPTIMALKAN: Mencatat aktivitas melihat rekomendasi hanya jika penting.
      */
     public static function logViewRecommendation($user, $request, $recommendationType)
     {
+        // Hanya catat aktivitas view jika flag diaktifkan atau untuk tipe tertentu yang lebih penting
+        if (!self::$shouldLogViews && $recommendationType === 'dashboard') {
+            return null;
+        }
+
+        // Tidak catat aktivitas view pada halaman yang sering dikunjungi
+        if (in_array($recommendationType, ['trending', 'popular', 'personal'])) {
+            return null;
+        }
+
         return self::create([
             'user_id'       => $user->user_id,
             'activity_type' => 'recommendation_view',
@@ -104,11 +132,20 @@ class ActivityLog extends Model
     }
 
     /**
-     * Mencatat aktivitas interaksi dengan project.
+     * DIOPTIMALKAN: Mencatat aktivitas interaksi dengan project.
+     * Hanya mencatat interaksi yang benar-benar penting untuk sistem rekomendasi.
      */
     public static function logInteraction($user, $request, $projectId, $interactionType)
     {
-        $project     = Project::find($projectId);
+        // Hanya catat interaksi yang benar-benar penting untuk rekomendasi
+        // Ini adalah interaksi yang ingin kita analisis dan gunakan dalam engine rekomendasi
+        $relevantInteractions = ['view', 'favorite', 'portfolio_add', 'research', 'click'];
+
+        if (!in_array($interactionType, $relevantInteractions)) {
+            return null;
+        }
+
+        $project = Project::find($projectId);
         $projectName = $project ? "{$project->name} ({$project->symbol})" : "Project ID: {$projectId}";
 
         return self::create([
@@ -140,7 +177,7 @@ class ActivityLog extends Model
     }
 
     /**
-     * Mencatat aktivitas update profil.
+     * DIOPTIMALKAN: Mencatat aktivitas update profil.
      */
     public static function logProfileUpdate($user, $request)
     {
@@ -154,10 +191,16 @@ class ActivityLog extends Model
     }
 
     /**
-     * Mencatat aktivitas admin.
+     * DIOPTIMALKAN: Mencatat aktivitas admin hanya untuk tindakan penting.
      */
     public static function logAdminAction($user, $request, $action, $details = null)
     {
+        // Jangan catat aktivitas admin untuk aktivitas view sederhana
+        $viewActions = ['view_dashboard', 'view_users', 'view_projects', 'view_data_sync', 'view_activity_logs'];
+        if (in_array($action, $viewActions) && empty($details)) {
+            return null;
+        }
+
         $description = "Tindakan admin: {$action}";
 
         if ($details) {

@@ -7,6 +7,7 @@ use App\Models\Profile;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -107,7 +108,7 @@ class Web3AuthController extends Controller
             // Login user
             Auth::login($user);
 
-            // Catat aktivitas login
+            // PENTING: Catat aktivitas login - ini penting untuk keamanan sistem
             ActivityLog::create([
                 'user_id'       => $user->user_id,
                 'activity_type' => 'login',
@@ -115,6 +116,9 @@ class Web3AuthController extends Controller
                 'ip_address'    => $request->ip(),
                 'user_agent'    => $request->userAgent(),
             ]);
+
+            // DIOPTIMALKAN: Hapus cache user-specific setelah login
+            Cache::forget("last_profile_view_{$user->id}");
 
             return response()->json([
                 'success' => true,
@@ -184,7 +188,7 @@ class Web3AuthController extends Controller
             // Login user
             Auth::login($user);
 
-            // Catat aktivitas login
+            // PENTING: Catat aktivitas login - ini penting untuk keamanan sistem
             ActivityLog::create([
                 'user_id'       => $user->user_id,
                 'activity_type' => 'login',
@@ -192,6 +196,9 @@ class Web3AuthController extends Controller
                 'ip_address'    => $request->ip(),
                 'user_agent'    => $request->userAgent(),
             ]);
+
+            // DIOPTIMALKAN: Hapus cache user-specific setelah login
+            Cache::forget("last_profile_view_{$user->id}");
 
             return response()->json([
                 'success' => true,
@@ -216,7 +223,7 @@ class Web3AuthController extends Controller
      */
     public function logout(Request $request)
     {
-        // Catat aktivitas logout sebelum menghancurkan sesi
+        // PENTING: Catat aktivitas logout sebelum menghancurkan sesi - ini penting untuk keamanan
         if (Auth::check()) {
             ActivityLog::create([
                 'user_id'       => Auth::user()->user_id,
@@ -225,6 +232,22 @@ class Web3AuthController extends Controller
                 'ip_address'    => $request->ip(),
                 'user_agent'    => $request->userAgent(),
             ]);
+        }
+
+        // DIOPTIMALKAN: Hapus cache user-specific sebelum logout
+        if (Auth::check()) {
+            $userId       = Auth::user()->id;
+            $userIdString = Auth::user()->user_id;
+
+            // Hapus cache profile view
+            Cache::forget("last_profile_view_{$userId}");
+
+            // Hapus cache rekomendasi personal
+            Cache::forget("personal_recommendations_{$userIdString}_hybrid_10");
+            Cache::forget("personal_recommendations_{$userIdString}_fecf_10");
+            Cache::forget("personal_recommendations_{$userIdString}_ncf_10");
+            Cache::forget("rec_personal_{$userIdString}_10");
+            Cache::forget("dashboard_personal_recs_{$userIdString}");
         }
 
         Auth::logout();
