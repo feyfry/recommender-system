@@ -160,11 +160,10 @@
             x-transition:leave-start="opacity-100 translate-x-0"
             x-transition:leave-end="opacity-0 -translate-x-full"
             @click.away="sidebarOpen = false"
-            class="fixed top-0 left-0 h-full w-64 z-40 mt-24">
+            class="fixed top-0 left-4 h-full w-64 z-40 mt-24">
 
             <div class="neo-brutalism bg-white h-full py-4 px-2 overflow-y-auto">
                 <!-- User Profile Summary (if authenticated) -->
-                @auth
                 <div class="mb-6 px-4">
                     <div class="flex items-center mb-2">
                         <div class="neo-brutalism-sm bg-brutal-blue p-1.5 rotate-[2deg]">
@@ -190,7 +189,6 @@
                         </div>
                     </div>
                 </div>
-                @endauth
 
                 <!-- Sidebar Menu -->
                 <div class="space-y-1 px-2">
