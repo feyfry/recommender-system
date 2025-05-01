@@ -1,141 +1,58 @@
 <?php
 namespace App\Http\Controllers\Auth;
 
-use App\Http\Controllers\Controller;
-use App\Models\ActivityLog;
-use App\Models\Profile;
+use Elliptic\EC;
 use App\Models\User;
+use kornrunner\Keccak;
+use App\Models\Profile;
+use App\Models\ActivityLog;
+use Illuminate\Support\Str;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 
 class Web3AuthController extends Controller
 {
     /**
-     * Tampilkan halaman login
+     * Menampilkan halaman login
      */
     public function showLoginForm()
     {
         if (Auth::check()) {
             return redirect()->route('panel.dashboard');
         }
-
         return view('auth.web3login');
     }
 
     /**
-     * Menghasilkan nonce untuk wallet address
+     * Mendapatkan nonce untuk wallet address
      */
     public function getNonce(Request $request)
     {
-        $request->validate([
-            'wallet_address' => 'required|string',
-        ]);
-
+        $request->validate(['wallet_address' => 'required|string']);
         $walletAddress = strtolower($request->wallet_address);
 
-        // Cari atau buat user berdasarkan wallet address
-        $user = User::where('wallet_address', $walletAddress)->first();
+        $user = User::firstOrCreate(
+            ['wallet_address' => $walletAddress],
+            [
+                'user_id' => 'user_' . Str::random(10),
+                'role'    => 'community',
+            ]
+        );
 
-        if (! $user) {
-            // User baru, generate user_id dan buat record
-            $user                 = new User();
-            $user->user_id        = 'user_' . Str::random(10);
-            $user->wallet_address = $walletAddress;
-            $user->role           = 'community'; // Default role
-            $user->save();
+        // Pastikan ada profile
+        Profile::firstOrCreate(['user_id' => $user->id]);
 
-            // Buat profil kosong untuk user baru
-            Profile::create([
-                'user_id' => $user->id,
-            ]);
-        }
-
-        // Generate nonce baru untuk autentikasi
-        $this->generateNonce($user);
+        // Generate nonce baru
+        $user->nonce = bin2hex(random_bytes(16));
+        $user->save();
 
         return response()->json([
             'nonce'   => $user->nonce,
             'message' => 'Please sign this message to verify your identity. Nonce: ' . $user->nonce,
         ]);
-    }
-
-    /**
-     * Bantuan generate nonce
-     */
-    private function generateNonce($user)
-    {
-        $user->nonce = bin2hex(random_bytes(16));
-        $user->save();
-        return $user->nonce;
-    }
-
-    /**
-     * Direct authentication without verification (temporary solution)
-     */
-    public function directAuth(Request $request)
-    {
-        $request->validate([
-            'wallet_address' => 'required|string',
-            'nonce'          => 'required|string',
-        ]);
-
-        $walletAddress = strtolower($request->wallet_address);
-        $requestNonce  = $request->nonce;
-
-        // Cari user berdasarkan wallet address
-        $user = User::where('wallet_address', $walletAddress)->first();
-
-        if (! $user) {
-            return response()->json(['error' => 'User not found'], 404);
-        }
-
-        // Validasi nonce
-        if ($user->nonce !== $requestNonce) {
-            return response()->json(['error' => 'Invalid nonce'], 401);
-        }
-
-        try {
-            // Perbarui nonce untuk mencegah replay attack
-            $this->generateNonce($user);
-
-            // Update last_login dengan waktu sekarang
-            $user->last_login = now();
-            $user->save();
-
-            // Login user
-            Auth::login($user);
-
-            // PENTING: Catat aktivitas login - ini penting untuk keamanan sistem
-            ActivityLog::create([
-                'user_id'       => $user->user_id,
-                'activity_type' => 'login',
-                'description'   => 'Login dengan wallet ' . substr($user->wallet_address, 0, 10) . '...',
-                'ip_address'    => $request->ip(),
-                'user_agent'    => $request->userAgent(),
-            ]);
-
-            // DIOPTIMALKAN: Hapus cache user-specific setelah login
-            Cache::forget("last_profile_view_{$user->id}");
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Authentication successful',
-                'user'    => [
-                    'id'             => $user->id,
-                    'user_id'        => $user->user_id,
-                    'username'       => $user->profile?->username,
-                    'wallet_address' => $user->wallet_address,
-                    'last_login'     => $user->last_login->format('d/m/Y H:i:s'),
-                ],
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Authentication error: ' . $e->getMessage());
-            return response()->json(['error' => 'Authentication failed: ' . $e->getMessage()], 500);
-        }
     }
 
     /**
@@ -148,56 +65,58 @@ class Web3AuthController extends Controller
             'signature'      => 'required|string',
         ]);
 
-        $walletAddress = strtolower($request->wallet_address);
+        $wallet = strtolower($request->wallet_address);
+        $sigHex = substr($request->signature, 2); // strip '0x'
 
-        // Cari user berdasarkan wallet address
-        $user = User::where('wallet_address', $walletAddress)->first();
-
+        // Ambil user dan pesan nonce
+        $user = User::where('wallet_address', $wallet)->first();
         if (! $user) {
             return response()->json(['error' => 'User not found'], 404);
         }
+        $message = "Please sign this message to verify your identity. Nonce: {$user->nonce}";
 
         try {
-            // Pesan yang ditandatangani oleh user
-            $message = "Please sign this message to verify your identity. Nonce: {$user->nonce}";
+            // 1. Pisahkan r, s, v
+            $r = '0x' . substr($sigHex, 0, 64);
+            $s = '0x' . substr($sigHex, 64, 64);
+            $v = hexdec(substr($sigHex, 128, 2));
 
-            // Verifikasi tanda tangan menggunakan library Web3
-            // Note: Verifikasi tanda tangan ini memerlukan library tambahan seperti Web3.php
-            // Kode di bawah ini adalah contoh dan perlu disesuaikan dengan library yang digunakan
-            /*
-            $web3 = new Web3('https://mainnet.infura.io/v3/YOUR_INFURA_KEY');
-            $personal = $web3->personal;
-            $isValid = $personal->ecRecover($message, $request->signature) === $walletAddress;
-            */
+            // 2. Buat pesan ter-prefixed sesuai EIP-191
+            $prefix    = "\x19Ethereum Signed Message:\n" . strlen($message);
+            $prefixed  = $prefix . $message;
+            $msgHash   = Keccak::hash($prefixed, 256);
 
-            // Karena implementasi di atas memerlukan library tambahan,
-            // untuk sementara kita anggap tanda tangan selalu valid
-            $isValid = true;
+            // 3. Recover public key
+            $ec    = new EC('secp256k1');
+            $pub   = $ec->recoverPubKey($msgHash, ['r' => $r, 's' => $s], $v - 27);
+            $uncompressed = $pub->encode('hex', false);
 
-            if (! $isValid) {
+            // 4. Hitung address dari public key
+            $pubKeyHex = substr($uncompressed, 2); // strip '04'
+            $addrHash  = Keccak::hash(hex2bin($pubKeyHex), 256);
+            $recovered = '0x' . substr($addrHash, 24);
+            $recovered = strtolower($recovered);
+
+            Log::info("Recovered: {$recovered}, Expected: {$wallet}");
+
+            if ($recovered !== $wallet) {
                 return response()->json(['error' => 'Invalid signature'], 401);
             }
 
-            // Perbarui nonce untuk mencegah replay attack
-            $this->generateNonce($user);
-
-            // Update last_login dengan waktu sekarang
+            // — lanjutkan login —
+            $user->nonce      = bin2hex(random_bytes(16));
             $user->last_login = now();
             $user->save();
-
-            // Login user
             Auth::login($user);
 
-            // PENTING: Catat aktivitas login - ini penting untuk keamanan sistem
             ActivityLog::create([
                 'user_id'       => $user->user_id,
                 'activity_type' => 'login',
-                'description'   => 'Login dengan wallet ' . substr($user->wallet_address, 0, 10) . '...',
+                'description'   => 'Login dengan wallet ' . substr($wallet, 0, 10) . '...',
                 'ip_address'    => $request->ip(),
                 'user_agent'    => $request->userAgent(),
             ]);
 
-            // DIOPTIMALKAN: Hapus cache user-specific setelah login
             Cache::forget("last_profile_view_{$user->id}");
 
             return response()->json([
@@ -207,14 +126,14 @@ class Web3AuthController extends Controller
                     'id'             => $user->id,
                     'user_id'        => $user->user_id,
                     'username'       => $user->profile?->username,
-                    'wallet_address' => $user->wallet_address,
+                    'wallet_address' => $wallet,
                     'last_login'     => $user->last_login->format('d/m/Y H:i:s'),
                 ],
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Authentication error: ' . $e->getMessage());
-            return response()->json(['error' => 'Authentication failed: ' . $e->getMessage()], 500);
+            Log::error('Signature recovery error: ' . $e->getMessage());
+            return response()->json(['error' => 'Authentication failed'], 500);
         }
     }
 

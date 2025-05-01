@@ -149,29 +149,29 @@
                             <td class="py-3 px-4">{{ $index + 1 }}</td>
                             <td class="py-3 px-4 font-medium">
                                 <div class="flex items-center">
-                                    @if($project->image)
-                                        <img src="{{ $project->image }}" alt="{{ $project->symbol }}" class="w-6 h-6 mr-2 rounded-full">
+                                    @if(isset($project['image']) && $project['image'])
+                                        <img src="{{ $project['image'] }}" alt="{{ $project['symbol'] }}" class="w-6 h-6 mr-2 rounded-full">
                                     @endif
-                                    {{ $project->name }} ({{ $project->symbol }})
+                                    {{ $project['name'] }} ({{ $project['symbol'] }})
                                 </div>
                             </td>
-                            <td class="py-3 px-4">{{ $project->formatted_price ?? '$'.number_format($project->price_usd, 2) }}</td>
-                            <td class="py-3 px-4 {{ $project->price_change_percentage_24h > 0 ? 'text-success' : 'text-danger' }}">
-                                {{ $project->price_change_percentage_24h > 0 ? '+' : '' }}{{ number_format($project->price_change_percentage_24h, 2) }}%
+                            <td class="py-3 px-4">{{ $project['formatted_price'] ?? '$'.number_format($project['price_usd'], 2) }}</td>
+                            <td class="py-3 px-4 {{ ($project['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
+                                {{ ($project['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}{{ number_format($project['price_change_percentage_24h'] ?? 0, 2) }}%
                             </td>
-                            <td class="py-3 px-4 {{ $project->price_change_percentage_7d > 0 ? 'text-success' : 'text-danger' }}">
-                                {{ $project->price_change_percentage_7d > 0 ? '+' : '' }}{{ number_format($project->price_change_percentage_7d, 2) }}%
+                            <td class="py-3 px-4 {{ ($project['price_change_percentage_7d'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
+                                {{ ($project['price_change_percentage_7d'] ?? 0) > 0 ? '+' : '' }}{{ number_format($project['price_change_percentage_7d'] ?? 0, 2) }}%
                             </td>
                             <td class="py-3 px-4">
                                 <div class="flex items-center">
                                     <div class="w-16 h-2 clay-progress overflow-hidden rounded-full mr-2">
-                                        <div class="h-full bg-warning" style="width: {{ $project->trend_score }}%;"></div>
+                                        <div class="h-full bg-warning" style="width: {{ $project['trend_score'] ?? 0 }}%;"></div>
                                     </div>
-                                    <span>{{ number_format($project->trend_score, 1) }}</span>
+                                    <span>{{ number_format($project['trend_score'] ?? 0, 1) }}</span>
                                 </div>
                             </td>
                             <td class="py-3 px-4">
-                                <a href="{{ route('panel.recommendations.project', $project->id) }}" class="clay-button clay-button-warning py-1 px-2 text-xs">
+                                <a href="{{ route('panel.recommendations.project', $project['id']) }}" class="clay-button clay-button-warning py-1 px-2 text-xs">
                                     <i class="fas fa-info-circle mr-1"></i> Detail
                                 </a>
                             </td>

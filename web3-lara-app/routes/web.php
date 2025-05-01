@@ -17,7 +17,7 @@ Route::get('/', function () {
 // Rute autentikasi Web3
 Route::get('/login', [Web3AuthController::class, 'showLoginForm'])->name('login');
 Route::post('/web3/nonce', [Web3AuthController::class, 'getNonce'])->name('web3.nonce');
-Route::post('/web3/direct-auth', [Web3AuthController::class, 'directAuth'])->name('web3.direct-auth');
+// Verifikasi signature
 Route::post('/web3/verify', [Web3AuthController::class, 'verifySignature'])->name('web3.verify');
 Route::post('/logout', [Web3AuthController::class, 'logout'])->name('logout');
 

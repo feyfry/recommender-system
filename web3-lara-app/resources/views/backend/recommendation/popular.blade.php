@@ -115,37 +115,37 @@
                         <td class="py-3 px-4 font-bold">{{ $index + 1 }}</td>
                         <td class="py-3 px-4">
                             <div class="flex items-center">
-                                @if($project->image)
-                                    <img src="{{ $project->image }}" alt="{{ $project->symbol }}" class="w-8 h-8 rounded-full mr-3">
+                                @if(isset($project['image']) && $project['image'])
+                                    <img src="{{ $project['image'] }}" alt="{{ $project['symbol'] }}" class="w-8 h-8 rounded-full mr-3">
                                 @endif
                                 <div>
-                                    <div class="font-medium">{{ $project->name }}</div>
-                                    <div class="text-xs text-gray-500">{{ $project->symbol }}</div>
+                                    <div class="font-medium">{{ $project['name'] }}</div>
+                                    <div class="text-xs text-gray-500">{{ $project['symbol'] }}</div>
                                 </div>
                             </div>
                         </td>
-                        <td class="py-3 px-4 font-medium">${{ $project->formatted_price ?? '$' . number_format($project->price_usd, 2) }}</td>
-                        <td class="py-3 px-4 {{ $project->price_change_percentage_24h > 0 ? 'text-success' : 'text-danger' }}">
-                            {{ $project->price_change_percentage_24h > 0 ? '+' : '' }}{{ number_format($project->price_change_percentage_24h, 2) }}%
+                        <td class="py-3 px-4 font-medium">{{ $project['formatted_price'] ?? '$'.number_format($project['price_usd'], 2) }}</td>
+                        <td class="py-3 px-4 {{ ($project['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
+                            {{ ($project['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}{{ number_format($project['price_change_percentage_24h'] ?? 0, 2) }}%
                         </td>
-                        <td class="py-3 px-4">${{ number_format($project->volume_24h) }}</td>
-                        <td class="py-3 px-4">${{ number_format($project->market_cap) }}</td>
+                        <td class="py-3 px-4">${{ number_format($project['volume_24h'] ?? 0) }}</td>
+                        <td class="py-3 px-4">${{ number_format($project['market_cap'] ?? 0) }}</td>
                         <td class="py-3 px-4">
                             <div class="flex items-center">
-                                <span class="font-medium mr-2">{{ number_format($project->popularity_score, 1) }}</span>
+                                <span class="font-medium mr-2">{{ number_format($project['popularity_score'] ?? 0, 1) }}</span>
                                 <div class="clay-progress w-16 h-2">
-                                    <div class="clay-progress-bar clay-progress-success" style="width: {{ min(100, $project->popularity_score) }}%"></div>
+                                    <div class="clay-progress-bar clay-progress-success" style="width: {{ min(100, $project['popularity_score'] ?? 0) }}%"></div>
                                 </div>
                             </div>
                         </td>
                         <td class="py-3 px-4">
                             <div class="flex space-x-2">
-                                <a href="{{ route('panel.recommendations.project', $project->id) }}" class="clay-badge clay-badge-info py-1 px-2 text-xs">
+                                <a href="{{ route('panel.recommendations.project', $project['id']) }}" class="clay-badge clay-badge-info py-1 px-2 text-xs">
                                     <i class="fas fa-info-circle"></i> Detail
                                 </a>
                                 <form method="POST" action="{{ route('panel.recommendations.add-favorite') }}" class="inline">
                                     @csrf
-                                    <input type="hidden" name="project_id" value="{{ $project->id }}">
+                                    <input type="hidden" name="project_id" value="{{ $project['id'] }}">
                                     <button type="submit" class="clay-badge clay-badge-secondary py-1 px-2 text-xs">
                                         <i class="fas fa-heart"></i>
                                     </button>

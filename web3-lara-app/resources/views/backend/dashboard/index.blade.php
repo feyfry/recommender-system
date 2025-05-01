@@ -135,6 +135,44 @@
         </div>
     </div>
 
+    <!-- Admin Panel Access (jika pengguna adalah admin) -->
+    @if(Auth::user()->isAdmin())
+        <div class="clay-card p-6 mb-8">
+            <h2 class="text-2xl font-bold mb-6 flex items-center">
+                <div class="bg-secondary/20 p-2 clay-badge mr-3">
+                    <i class="fas fa-shield-alt text-secondary"></i>
+                </div>
+                Panel Admin
+            </h2>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                <a href="{{ route('admin.dashboard') }}" class="clay-card bg-secondary/10 p-4 text-center hover:translate-y-[-5px] transition-transform">
+                    <div class="font-bold"><i class="fas fa-tachometer-alt mb-2 text-xl"></i></div>
+                    <div>Dashboard Admin</div>
+                    <div class="text-xs mt-1">Panel utama admin</div>
+                </a>
+
+                <a href="{{ route('admin.users') }}" class="clay-card bg-warning/10 p-4 text-center hover:translate-y-[-5px] transition-transform">
+                    <div class="font-bold"><i class="fas fa-users mb-2 text-xl"></i></div>
+                    <div>Manajemen Pengguna</div>
+                    <div class="text-xs mt-1">Kelola pengguna sistem</div>
+                </a>
+
+                <a href="{{ route('admin.projects') }}" class="clay-card bg-success/10 p-4 text-center hover:translate-y-[-5px] transition-transform">
+                    <div class="font-bold"><i class="fas fa-project-diagram mb-2 text-xl"></i></div>
+                    <div>Manajemen Proyek</div>
+                    <div class="text-xs mt-1">Kelola data proyek</div>
+                </a>
+
+                <a href="{{ route('admin.data-sync') }}" class="clay-card bg-info/10 p-4 text-center hover:translate-y-[-5px] transition-transform">
+                    <div class="font-bold"><i class="fas fa-sync mb-2 text-xl"></i></div>
+                    <div>Sinkronisasi Data</div>
+                    <div class="text-xs mt-1">Update dan sinkronisasi</div>
+                </a>
+            </div>
+        </div>
+    @endif
+
     <!-- Trending Projects Section -->
     <div class="clay-card p-6 mb-8">
         <div class="flex justify-between items-center mb-6">
@@ -161,25 +199,26 @@
                         <th class="py-2 px-4 text-left">Aksi</th>
                     </tr>
                 </thead>
+                <!-- filepath: c:\laragon\www\web3-recommendation-system\web3-lara-app\resources\views\backend\dashboard\index.blade.php -->
                 <tbody>
                     @forelse($trendingProjects ?? [] as $index => $project)
                     <tr>
                         <td class="py-2 px-4">{{ $index + 1 }}</td>
                         <td class="py-2 px-4 font-medium">
                             <div class="flex items-center">
-                                @if($project->image)
-                                    <img src="{{ $project->image }}" alt="{{ $project->symbol }}" class="w-6 h-6 mr-2 rounded-full">
+                                @if(isset($project['image']) && $project['image'])
+                                    <img src="{{ $project['image'] }}" alt="{{ $project['symbol'] }}" class="w-6 h-6 mr-2 rounded-full">
                                 @endif
-                                {{ $project->name }} ({{ $project->symbol }})
+                                {{ $project['name'] }} ({{ $project['symbol'] }})
                             </div>
                         </td>
-                        <td class="py-2 px-4">{{ $project->formatted_price ?? '$'.number_format($project->price_usd, 2) }}</td>
-                        <td class="py-2 px-4 {{ $project->price_change_percentage_24h > 0 ? 'text-clay-success' : 'text-clay-danger' }}">
-                            {{ $project->price_change_percentage_24h > 0 ? '+' : '' }}{{ number_format($project->price_change_percentage_24h, 2) }}%
+                        <td class="py-2 px-4">{{ $project['formatted_price'] ?? '$'.number_format($project['price_usd'], 2) }}</td>
+                        <td class="py-2 px-4 {{ ($project['price_change_percentage_24h'] ?? 0) > 0 ? 'text-clay-success' : 'text-clay-danger' }}">
+                            {{ ($project['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}{{ number_format($project['price_change_percentage_24h'] ?? 0, 2) }}%
                         </td>
-                        <td class="py-2 px-4">{{ $project->primary_category }}</td>
+                        <td class="py-2 px-4">{{ $project['primary_category'] ?? 'N/A' }}</td>
                         <td class="py-2 px-4">
-                            <a href="{{ route('panel.recommendations.project', $project->id) }}" class="clay-button clay-button-info py-1 px-2 text-xs">
+                            <a href="{{ route('panel.recommendations.project', $project['id']) }}" class="clay-button clay-button-info py-1 px-2 text-xs">
                                 <i class="fas fa-info-circle mr-1"></i> Detail
                             </a>
                         </td>
@@ -437,43 +476,5 @@
             @endif
         </div>
     </div>
-
-    <!-- Admin Panel Access (jika pengguna adalah admin) -->
-    @if(Auth::user()->isAdmin())
-        <div class="clay-card p-6 mb-8">
-            <h2 class="text-2xl font-bold mb-6 flex items-center">
-                <div class="bg-secondary/20 p-2 clay-badge mr-3">
-                    <i class="fas fa-shield-alt text-secondary"></i>
-                </div>
-                Panel Admin
-            </h2>
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                <a href="{{ route('admin.dashboard') }}" class="clay-card bg-secondary/10 p-4 text-center hover:translate-y-[-5px] transition-transform">
-                    <div class="font-bold"><i class="fas fa-tachometer-alt mb-2 text-xl"></i></div>
-                    <div>Dashboard Admin</div>
-                    <div class="text-xs mt-1">Panel utama admin</div>
-                </a>
-
-                <a href="{{ route('admin.users') }}" class="clay-card bg-warning/10 p-4 text-center hover:translate-y-[-5px] transition-transform">
-                    <div class="font-bold"><i class="fas fa-users mb-2 text-xl"></i></div>
-                    <div>Manajemen Pengguna</div>
-                    <div class="text-xs mt-1">Kelola pengguna sistem</div>
-                </a>
-
-                <a href="{{ route('admin.projects') }}" class="clay-card bg-success/10 p-4 text-center hover:translate-y-[-5px] transition-transform">
-                    <div class="font-bold"><i class="fas fa-project-diagram mb-2 text-xl"></i></div>
-                    <div>Manajemen Proyek</div>
-                    <div class="text-xs mt-1">Kelola data proyek</div>
-                </a>
-
-                <a href="{{ route('admin.data-sync') }}" class="clay-card bg-info/10 p-4 text-center hover:translate-y-[-5px] transition-transform">
-                    <div class="font-bold"><i class="fas fa-sync mb-2 text-xl"></i></div>
-                    <div>Sinkronisasi Data</div>
-                    <div class="text-xs mt-1">Update dan sinkronisasi</div>
-                </a>
-            </div>
-        </div>
-    @endif
 </div>
 @endsection

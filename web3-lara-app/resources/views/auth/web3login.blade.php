@@ -151,21 +151,17 @@
             },
 
             async login() {
-                this.error = '';
+                this.error   = '';
                 this.loading = true;
 
                 try {
-                    // Buat pesan yang akan ditandatangani
-                    const message = `Please sign this message to verify your identity. Nonce: ${this.nonce}`;
-
-                    // Dapatkan tanda tangan dari MetaMask
+                    const message   = `Please sign this message to verify your identity. Nonce: ${this.nonce}`;
                     const signature = await window.ethereum.request({
                         method: 'personal_sign',
                         params: [message, this.walletAddress]
                     });
 
-                    // Kirim signature langsung ke server tanpa verifikasi client-side
-                    const response = await fetch('{{ route("web3.direct-auth") }}', {
+                    const res = await fetch('{{ route("web3.verify") }}', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -173,25 +169,19 @@
                         },
                         body: JSON.stringify({
                             wallet_address: this.walletAddress,
-                            nonce: this.nonce
+                            signature: signature
                         })
                     });
 
-                    const data = await response.json();
-
-                    if (!response.ok) {
+                    const data = await res.json();
+                    if (!res.ok) {
                         throw new Error(data.error || 'Verifikasi gagal');
                     }
 
-                    // Autentikasi berhasil
-                    this.authenticated = true;
-
-                    // Redirect ke dashboard
                     window.location.href = '{{ route("panel.dashboard") }}';
-
-                } catch (error) {
-                    console.error('Error during login:', error);
-                    this.error = error.message || 'Login gagal. Silakan coba lagi.';
+                } catch (err) {
+                    console.error(err);
+                    this.error = err.message;
                 } finally {
                     this.loading = false;
                 }
