@@ -27,6 +27,13 @@ return Application::configure(basePath: dirname(__DIR__))
             SetCacheHeaders::class,
         ]);
     })
+    ->withCommands([
+        // Daftar perintah artisan yang akan digunakan
+        App\Console\Commands\ImportRecommendationData::class,
+        App\Console\Commands\SyncRecommendationData::class,
+        App\Console\Commands\ClearApiCache::class
+    ])
+    ->withSchedule(dirname(__DIR__ . '/bootstrap/scheduler.php'))
     ->withExceptions(function (Exceptions $exceptions) {
         // Konfigurasi exception handling
         $exceptions->dontReport([

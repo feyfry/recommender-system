@@ -1,9 +1,11 @@
 <?php
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 class Interaction extends Model
 {
@@ -125,5 +127,56 @@ class Interaction extends Model
         }
 
         return $query->get();
+    }
+
+    /**
+     * Kirim interaksi ke engine rekomendasi
+     */
+    public function sendToRecommendationEngine(): bool
+    {
+        $apiUrl = env('RECOMMENDATION_API_URL', 'http://localhost:8001');
+
+        try {
+            // Siapkan data untuk dikirim
+            $data = [
+                'user_id' => $this->user_id,
+                'project_id' => $this->project_id,
+                'interaction_type' => $this->interaction_type,
+                'weight' => $this->weight,
+                'context' => $this->context,
+                'timestamp' => $this->created_at->toIso8601String(),
+            ];
+
+            // Kirim ke API dengan timeout
+            $response = Http::timeout(2)->post("{$apiUrl}/interactions/record", $data);
+
+            if ($response->successful()) {
+                return true;
+            } else {
+                Log::warning("Gagal mengirim interaksi ke engine: " . $response->body());
+                return false;
+            }
+        } catch (\Exception $e) {
+            Log::error("Error mengirim interaksi ke engine: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Override method save untuk mengirim interaksi ke engine rekomendasi
+     */
+    public function save(array $options = [])
+    {
+        $result = parent::save($options);
+
+        // Kirim ke engine rekomendasi setelah disimpan di database
+        // Gunakan try-catch untuk menjaga aplikasi tetap berjalan
+        try {
+            $this->sendToRecommendationEngine();
+        } catch (\Exception $e) {
+            Log::error("Gagal mengirim interaksi ke engine rekomendasi: " . $e->getMessage());
+        }
+
+        return $result;
     }
 }
