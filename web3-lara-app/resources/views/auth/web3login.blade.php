@@ -137,11 +137,6 @@
             <a href="/" class="neo-brutalism-sm bg-white inline-block py-2 px-4 font-medium hover:bg-brutal-yellow transition rotate-[-1deg] hover:rotate-[1deg]">
                 ← Kembali ke Beranda
             </a>
-
-            <p class="mt-6 text-sm font-medium">
-                <span class="bg-black text-white px-2 py-0.5 mr-2 inline-block neo-brutalism-sm">SKRIPSI</span>
-                Sistem Rekomendasi Berbasis Web3
-            </p>
         </div>
     </div>
 </div>
