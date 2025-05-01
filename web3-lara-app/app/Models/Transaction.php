@@ -165,11 +165,11 @@ class Transaction extends Model
             ->selectRaw('followed_recommendation, COUNT(*) as count,
                         SUM(total_value) as total_value,
                         AVG(CASE
-                            WHEN transaction_type = "buy" THEN price
+                            WHEN transaction_type = \'buy\' THEN price
                             ELSE NULL
                         END) as avg_buy_price,
                         AVG(CASE
-                            WHEN transaction_type = "sell" THEN price
+                            WHEN transaction_type = \'sell\' THEN price
                             ELSE NULL
                         END) as avg_sell_price');
 
