@@ -35,26 +35,14 @@
                 <div x-show="activeTab === 'hybrid'">
                     <h3 class="font-bold text-lg mb-2">Enhanced Hybrid Model</h3>
                     <p>Kombinasi dari dua pendekatan rekomendasi (FECF dan NCF) menggunakan teknik ensemble canggih, memberikan rekomendasi yang lebih presisi.</p>
-                    <div class="flex items-center mt-2">
-                        <div class="clay-badge clay-badge-success mr-2">Hit Ratio: 0.8788</div>
-                        <div class="clay-badge clay-badge-primary">NDCG: 0.2954</div>
-                    </div>
                 </div>
                 <div x-show="activeTab === 'fecf'">
                     <h3 class="font-bold text-lg mb-2">Feature-Enhanced Collaborative Filtering</h3>
                     <p>Model yang menggunakan SVD (Singular Value Decomposition) dan menggabungkannya dengan informasi fitur proyek (kategori, chain, dll).</p>
-                    <div class="flex items-center mt-2">
-                        <div class="clay-badge clay-badge-success mr-2">Hit Ratio: 0.8148</div>
-                        <div class="clay-badge clay-badge-primary">NDCG: 0.2945</div>
-                    </div>
                 </div>
                 <div x-show="activeTab === 'ncf'">
                     <h3 class="font-bold text-lg mb-2">Neural Collaborative Filtering</h3>
                     <p>Model deep learning yang menangkap pola kompleks dalam interaksi antara pengguna dan proyek cryptocurrency.</p>
-                    <div class="flex items-center mt-2">
-                        <div class="clay-badge clay-badge-success mr-2">Hit Ratio: 0.7138</div>
-                        <div class="clay-badge clay-badge-primary">NDCG: 0.1986</div>
-                    </div>
                 </div>
             </div>
 

@@ -35,10 +35,6 @@
 
             <div class="space-y-3">
                 <div>
-                    <label class="text-sm text-gray-600">User ID:</label>
-                    <p class="font-medium">{{ Auth::user()->user_id }}</p>
-                </div>
-                <div>
                     <label class="text-sm text-gray-600">Wallet Address:</label>
                     <p class="font-mono text-sm break-all">{{ Auth::user()->wallet_address }}</p>
                 </div>

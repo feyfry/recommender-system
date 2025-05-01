@@ -273,9 +273,6 @@
                 <p class="text-sm mb-3">
                     Model berbasis SVD yang menggabungkan matrix factorization dengan content-based filtering berdasarkan fitur proyek.
                 </p>
-                <div class="clay-badge clay-badge-primary px-2 py-1 text-xs">
-                    Hit Ratio: 0.8148
-                </div>
             </div>
 
             <div class="clay-card bg-secondary/10 p-4">
@@ -286,9 +283,6 @@
                 <p class="text-sm mb-3">
                     Deep learning model yang menangkap pola kompleks dalam interaksi user-item menggunakan jaringan neural.
                 </p>
-                <div class="clay-badge clay-badge-secondary px-2 py-1 text-xs">
-                    Hit Ratio: 0.7138
-                </div>
             </div>
 
             <div class="clay-card bg-success/10 p-4">
@@ -299,9 +293,6 @@
                 <p class="text-sm mb-3">
                     Gabungan kedua model dengan teknik ensemble canggih untuk hasil rekomendasi yang lebih akurat.
                 </p>
-                <div class="clay-badge clay-badge-success px-2 py-1 text-xs">
-                    Hit Ratio: 0.8788
-                </div>
             </div>
         </div>
 
