@@ -690,50 +690,98 @@
     // API Connection Test
     document.addEventListener('DOMContentLoaded', function() {
         const apiUrl = "{{ env('RECOMMENDATION_API_URL', 'http://localhost:8001') }}";
-        const tests = [
-            {
-                endpoint: 'popular',
-                url: `${apiUrl}/recommend/popular`,
-                method: 'GET',
-                data: { limit: 1 }
-            },
-            {
-                endpoint: 'projects',
-                url: `${apiUrl}/recommend/projects`,
-                method: 'POST',
-                data: { user_id: 'test_user', model_type: 'hybrid', num_recommendations: 1 }
-            },
-            {
-                endpoint: 'trading-signals',
-                url: `${apiUrl}/analysis/trading-signals`,
-                method: 'POST',
-                data: { project_id: 'bitcoin', days: 30, interval: '1d', risk_tolerance: 'medium' }
-            }
-        ];
 
-        tests.forEach(test => {
-            const element = document.querySelector(`.api-test[data-endpoint="${test.endpoint}"] .status-indicator`);
+        // Fungsi untuk menguji endpoint dan memperbarui UI
+        function testEndpoint(endpoint, url, method, data = null) {
+            const element = document.querySelector(`.api-test[data-endpoint="${endpoint}"] .status-indicator`);
+            if (!element) return;
 
-            fetch(test.url, {
-                method: test.method,
+            const options = {
+                method: method,
                 headers: {
                     'Content-Type': 'application/json',
+                    'Accept': 'application/json'
                 },
-                body: test.method === 'POST' ? JSON.stringify(test.data) : undefined
-            })
-            .then(response => {
-                if (response.ok) {
-                    element.innerHTML = `<i class="fas fa-check-circle text-3xl text-success mb-2"></i>`;
-                } else {
+                // Tambahkan body hanya jika method adalah POST/PUT
+                ...(method !== 'GET' && data ? { body: JSON.stringify(data) } : {})
+            };
+
+            // Menambahkan timeout yang lebih lama (10 detik)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            options.signal = controller.signal;
+
+            fetch(url, options)
+                .then(response => {
+                    clearTimeout(timeoutId);
+                    if (response.ok) {
+                        element.innerHTML = `<i class="fas fa-check-circle text-3xl text-success mb-2"></i>`;
+                    } else {
+                        element.innerHTML = `<i class="fas fa-exclamation-circle text-3xl text-danger mb-2"></i>`;
+                        console.error(`Error ${method} ${url}: ${response.status} ${response.statusText}`);
+                    }
+                    return response.text().then(text => {
+                        try {
+                            return text ? JSON.parse(text) : {};
+                        } catch (e) {
+                            return {};
+                        }
+                    });
+                })
+                .catch(error => {
+                    clearTimeout(timeoutId);
+                    console.error(`Error testing ${endpoint} (${url}):`, error);
                     element.innerHTML = `<i class="fas fa-exclamation-circle text-3xl text-danger mb-2"></i>`;
-                }
-                return response.json();
-            })
-            .catch(error => {
-                console.error(`Error testing ${test.endpoint}:`, error);
-                element.innerHTML = `<i class="fas fa-exclamation-circle text-3xl text-danger mb-2"></i>`;
-            });
+                });
+        }
+
+        // Tes untuk semua endpoint
+        // 1. Core endpoints
+        testEndpoint('root', `${apiUrl}/`, 'GET');
+        testEndpoint('health', `${apiUrl}/health`, 'GET');
+
+        // 2. Recommendation endpoints
+        testEndpoint('trending', `${apiUrl}/recommend/trending?limit=5`, 'GET');
+        testEndpoint('popular', `${apiUrl}/recommend/popular?limit=5`, 'GET');
+        testEndpoint('projects', `${apiUrl}/recommend/projects`, 'POST', {
+            user_id: 'test_user',
+            model_type: 'hybrid',
+            num_recommendations: 5
         });
+        testEndpoint('similar', `${apiUrl}/recommend/similar/bitcoin?limit=5`, 'GET');
+
+        // 3. Analysis endpoints
+        testEndpoint('trading-signals', `${apiUrl}/analysis/trading-signals`, 'POST', {
+            project_id: 'bitcoin',
+            days: 30,
+            interval: '1d',
+            risk_tolerance: 'medium'
+        });
+        testEndpoint('indicators', `${apiUrl}/analysis/indicators`, 'POST', {
+            project_id: 'bitcoin',
+            days: 30,
+            interval: '1d'
+        });
+        testEndpoint('market-events', `${apiUrl}/analysis/market-events/bitcoin?days=30`, 'GET');
+        testEndpoint('alerts', `${apiUrl}/analysis/alerts/bitcoin?days=30`, 'GET');
+        testEndpoint('price-prediction', `${apiUrl}/analysis/price-prediction/bitcoin?days=30`, 'GET');
+
+        // 4. Admin & data endpoints
+        testEndpoint('record-interaction', `${apiUrl}/interactions/record`, 'POST', {
+            user_id: 'test_user',
+            project_id: 'bitcoin',
+            interaction_type: 'view',
+            weight: 1
+        });
+        testEndpoint('train-models', `${apiUrl}/admin/train-models`, 'POST', {
+            models: ['fecf'],
+            save_model: false
+        });
+        testEndpoint('sync-data', `${apiUrl}/admin/sync-data`, 'POST', {
+            projects_updated: false
+        });
+        testEndpoint('rec-cache-clear', `${apiUrl}/recommend/cache/clear`, 'POST');
+        testEndpoint('analysis-cache-clear', `${apiUrl}/analysis/cache/clear`, 'POST');
     });
 </script>
 @endpush

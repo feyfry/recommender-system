@@ -28,7 +28,7 @@ class RecommendationController extends Controller
      */
     public function __construct()
     {
-        $this->apiUrl = env('RECOMMENDATION_API_URL', 'http://localhost:8000');
+        $this->apiUrl = env('RECOMMENDATION_API_URL', 'http://localhost:8001');
     }
 
     /**
@@ -340,21 +340,29 @@ class RecommendationController extends Controller
                 'exclude_known'       => true,
                 'risk_tolerance'      => Auth::user()->risk_tolerance ?? 'medium',
                 'investment_style'    => Auth::user()->investment_style ?? 'balanced',
-            ])->json();
+            ]);
 
             // Simpan ke cache untuk 30 menit
             ApiCache::store($cacheKey, [], $response, 30);
 
-            return $response['recommendations'] ?? [];
+            // Apakah respons berhasil dan memiliki format yang benar
+            if ($response->successful() && isset($response['recommendations'])) {
+                return $response['recommendations'];
+            } else {
+                // Log kesalahan dan kembalikan array kosong jika data tidak sesuai format
+                Log::warning("Format respons API tidak valid: " . $response->body());
+                return [];
+            }
         } catch (\Exception $e) {
             Log::error("Gagal mendapatkan rekomendasi personal: " . $e->getMessage());
 
-            // Fallback ke rekomendasi dari database lokal
+            // Fallback ke data dari database lokal
             return Recommendation::where('user_id', $userId)
                 ->where('recommendation_type', $modelType)
                 ->orderBy('rank')
                 ->limit($limit)
-                ->get();
+                ->get()
+                ->toArray();
         }
     }
 

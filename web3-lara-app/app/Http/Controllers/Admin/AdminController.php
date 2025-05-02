@@ -31,7 +31,7 @@ class AdminController extends Controller
      */
     public function __construct()
     {
-        $this->apiUrl = env('RECOMMENDATION_API_URL', 'http://localhost:8000');
+        $this->apiUrl = env('RECOMMENDATION_API_URL', 'http://localhost:8001');
     }
 
     /**
@@ -568,18 +568,36 @@ class AdminController extends Controller
     private function getTradingSignals($projectId, $riskTolerance = 'medium')
     {
         try {
-            // DIOPTIMALKAN: Gunakan timeout
-            $response = Http::timeout(3)->post("{$this->apiUrl}/analysis/trading-signals", [
+            // DIOPTIMALKAN: Gunakan timeout yang lebih lama (5 detik) untuk endpoint yang kompleks
+            $response = Http::timeout(5)->post("{$this->apiUrl}/analysis/trading-signals", [
                 'project_id'     => $projectId,
                 'days'           => 30,
                 'interval'       => '1d',
                 'risk_tolerance' => $riskTolerance,
                 'trading_style'  => 'standard',
-            ])->json();
+            ]);
 
-            return $response;
+            // Cek respons HTTP secara eksplisit
+            if ($response->successful()) {
+                return $response->json();
+            } else {
+                Log::warning("Gagal mendapatkan sinyal trading. Status: " . $response->status() .
+                            ", Response: " . $response->body());
+
+                // Fallback ke data placeholder
+                return [
+                    'project_id'           => $projectId,
+                    'action'               => 'hold',
+                    'confidence'           => 0.5,
+                    'evidence'             => [
+                        'Data tidak tersedia saat ini',
+                        'Coba lagi nanti',
+                    ],
+                    'personalized_message' => 'Data analisis teknikal tidak tersedia saat ini.',
+                ];
+            }
         } catch (\Exception $e) {
-            Log::error("Gagal mendapatkan sinyal trading: " . $e->getMessage());
+            Log::error("Exception mendapatkan sinyal trading: " . $e->getMessage());
 
             // Fallback ke data placeholder
             return [
