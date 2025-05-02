@@ -395,6 +395,66 @@ class AdminController extends Controller
     }
 
     /**
+     * Mendapatkan data evaluasi model terbaru
+     *
+     * @return array
+     */
+    private function getLatestModelEvaluation()
+    {
+        $basePath = base_path('../recommendation-engine/data/models/');
+        $pattern = $basePath . 'evaluation_report_*.markdown';
+
+        // Dapatkan semua file yang cocok dengan pattern
+        $files = glob($pattern);
+
+        // Nilai default jika tidak ada file evaluasi
+        $defaultEvaluation = [
+            'fecf' => ['ndcg' => 0.2945, 'hit_ratio' => 0.8148],
+            'ncf' => ['ndcg' => 0.1986, 'hit_ratio' => 0.7138],
+            'hybrid' => ['ndcg' => 0.2954, 'hit_ratio' => 0.8788]
+        ];
+
+        if (empty($files)) {
+            // Kembalikan nilai default jika tidak ada file evaluasi
+            return $defaultEvaluation;
+        }
+
+        // Urutkan file berdasarkan waktu modifikasi (terbaru dulu)
+        usort($files, function($a, $b) {
+            return filemtime($b) - filemtime($a);
+        });
+
+        // Ambil file terbaru
+        $latestFile = $files[0];
+
+        // Baca isi file
+        $content = file_get_contents($latestFile);
+
+        // Inisialisasi dengan nilai default
+        $evaluation = $defaultEvaluation;
+
+        // Pattern untuk FECF
+        if (preg_match('/\| fecf \| .* \| .* \| .* \| ([0-9\.]+) \| ([0-9\.]+) \| .* \|/m', $content, $matches)) {
+            $evaluation['fecf']['ndcg'] = $matches[1];
+            $evaluation['fecf']['hit_ratio'] = $matches[2];
+        }
+
+        // Pattern untuk NCF
+        if (preg_match('/\| ncf \| .* \| .* \| .* \| ([0-9\.]+) \| ([0-9\.]+) \| .* \|/m', $content, $matches)) {
+            $evaluation['ncf']['ndcg'] = $matches[1];
+            $evaluation['ncf']['hit_ratio'] = $matches[2];
+        }
+
+        // Pattern untuk hybrid
+        if (preg_match('/\| hybrid \| .* \| .* \| .* \| ([0-9\.]+) \| ([0-9\.]+) \| .* \|/m', $content, $matches)) {
+            $evaluation['hybrid']['ndcg'] = $matches[1];
+            $evaluation['hybrid']['hit_ratio'] = $matches[2];
+        }
+
+        return $evaluation;
+    }
+
+    /**
      * Menampilkan halaman sinkronisasi data
      */
     public function dataSyncDashboard()
@@ -416,13 +476,45 @@ class AdminController extends Controller
             return ApiCache::getEndpointUsage();
         });
 
+        // Dapatkan data evaluasi model terbaru
+        $modelEvaluation = $this->getLatestModelEvaluation();
+
         // DIOPTIMALKAN: Tidak catat aktivitas untuk halaman yang sering dikunjungi admin
 
         return view('admin.data_sync', [
-            'projectStats'  => $projectStats,
-            'cacheStats'    => $cacheStats,
-            'endpointUsage' => $endpointUsage,
+            'projectStats'    => $projectStats,
+            'cacheStats'      => $cacheStats,
+            'endpointUsage'   => $endpointUsage,
+            'modelEvaluation' => $modelEvaluation,
         ]);
+    }
+
+    /**
+     * Menjalankan perintah import dari UI
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function runImportCommand(Request $request)
+    {
+        $command = $request->input('command');
+
+        if (empty($command)) {
+            return redirect()->back()->with('error', 'Perintah tidak valid.');
+        }
+
+        // Jalankan perintah Artisan
+        try {
+            \Illuminate\Support\Facades\Artisan::call($command);
+            $output = \Illuminate\Support\Facades\Artisan::output();
+
+            // Log aktivitas
+            ActivityLog::logAdminAction(Auth::user(), request(), 'run_command', "Command: {$command}");
+
+            return redirect()->back()->with('success', 'Perintah berhasil dijalankan: ' . $output);
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', 'Gagal menjalankan perintah: ' . $e->getMessage());
+        }
     }
 
     /**
@@ -497,6 +589,7 @@ class AdminController extends Controller
             $response = Http::timeout(30)->post("{$this->apiUrl}/admin/train-models", [
                 'models'     => $models,
                 'save_model' => true,
+                'force'      => true,  // flag force untuk bypass konfirmasi
             ])->json();
 
             // Log aktivitas - ini adalah aktivitas penting untuk sistem

@@ -132,7 +132,7 @@
                 <ol class="list-decimal list-inside space-y-2 pl-4">
                     <li><strong>Feature-Enhanced Collaborative Filtering</strong> menggunakan scikit-learn SVD</li>
                     <li><strong>Neural Collaborative Filtering</strong> menggunakan PyTorch</li>
-                    <li><strong>Enhanced Hybrid Model</strong> yang menggabungkan kedua pendekatan dengan teknik ensemble canggih</li>
+                    <li><strong>Hybrid Model</strong> yang menggabungkan kedua pendekatan dengan teknik ensemble canggih</li>
                 </ol>
             </div>
 
@@ -165,7 +165,7 @@
 
                     <!-- Hybrid Model -->
                     <div class="clay-card bg-secondary/10 p-6">
-                        <h3 class="text-xl font-bold mb-2">Enhanced Hybrid Model</h3>
+                        <h3 class="text-xl font-bold mb-2">Hybrid Model</h3>
                         <p class="mb-4">Model yang menggabungkan kekuatan kedua pendekatan dengan teknik ensemble.</p>
                         <ul class="space-y-1 text-sm">
                             <li class="flex items-center"><i class="fas fa-check-circle text-success mr-2"></i> Normalisasi skor dengan transformasi sigmoid</li>

@@ -74,6 +74,9 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         Route::post('/data-sync/clear-cache', [AdminController::class, 'clearApiCache'])->name('admin.clear-api-cache');
         Route::post('/data-sync/train-models', [AdminController::class, 'trainModels'])->name('admin.train-models');
 
+        // Import/Export Command
+        Route::post('/import-command', [AdminController::class, 'runImportCommand'])->name('admin.import-command');
+
         // Log Aktivitas
         Route::get('/activity-logs', [AdminController::class, 'activityLogs'])->name('admin.activity-logs');
     });

@@ -344,18 +344,18 @@
                 <div class="grid grid-cols-3 gap-2 text-center text-xs">
                     <div class="clay-card bg-secondary/10 p-2">
                         <div class="font-bold">FECF</div>
-                        <div>NDCG: 0.2945</div>
-                        <div>Hit Ratio: 0.8148</div>
+                        <div>NDCG: {{ number_format($modelEvaluation['fecf']['ndcg'], 4) }}</div>
+                        <div>Hit Ratio: {{ number_format($modelEvaluation['fecf']['hit_ratio'], 4) }}</div>
                     </div>
                     <div class="clay-card bg-secondary/10 p-2">
                         <div class="font-bold">NCF</div>
-                        <div>NDCG: 0.1986</div>
-                        <div>Hit Ratio: 0.7138</div>
+                        <div>NDCG: {{ number_format($modelEvaluation['ncf']['ndcg'], 4) }}</div>
+                        <div>Hit Ratio: {{ number_format($modelEvaluation['ncf']['hit_ratio'], 4) }}</div>
                     </div>
                     <div class="clay-card bg-secondary/10 p-2">
                         <div class="font-bold">Hybrid</div>
-                        <div>NDCG: 0.2954</div>
-                        <div>Hit Ratio: 0.8788</div>
+                        <div>NDCG: {{ number_format($modelEvaluation['hybrid']['ndcg'], 4) }}</div>
+                        <div>Hit Ratio: {{ number_format($modelEvaluation['hybrid']['hit_ratio'], 4) }}</div>
                     </div>
                 </div>
             </div>
