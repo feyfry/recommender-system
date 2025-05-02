@@ -112,8 +112,7 @@ def train_models(args):
     
     try:
         # Cek apakah data yang diproses ada
-        processed_files = [f for f in os.listdir(PROCESSED_DIR) 
-                          if f in ["projects.csv", "interactions.csv", "features.csv"]]
+        processed_files = [f for f in os.listdir(PROCESSED_DIR) if f in ["projects.csv", "interactions.csv", "features.csv"]]
         if len(processed_files) < 3:
             logger.error("Missing processed data files")
             print("❌ Missing processed data files. Please run data processing first with: python main.py process")
@@ -121,10 +120,20 @@ def train_models(args):
         
         # Analisis data sebelum training untuk memeriksa kualitas
         validation_passed = _validate_data_quality()
-        if not validation_passed:
+        
+        # PERBAIKAN: Tambahkan lebih banyak logging untuk debug
+        force_flag = getattr(args, 'force', False)
+        print(f"Force flag status: {force_flag}")
+        logger.info(f"Force flag status: {force_flag}")
+        
+        if not validation_passed and not force_flag:
             user_input = input("⚠️ Data quality validation failed. Continue with training anyway? (y/n): ")
             if user_input.lower() != 'y':
                 return False
+        elif not validation_passed and force_flag:
+            # Jika force=True, lanjutkan meskipun validasi gagal
+            logger.info("Data quality validation failed but continuing due to force flag")
+            print("⚠️ Data quality validation failed but continuing due to force flag")
                 
         # Pastikan direktori model ada
         models_dir = MODELS_DIR

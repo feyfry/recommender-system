@@ -132,24 +132,40 @@ async def record_interaction(interaction: InteractionRecord):
 
 # Router untuk admin endpoints
 @app.post("/admin/train-models", tags=["admin"])
-async def admin_train_models(request: TrainModelsRequest = Body(...)):
+async def admin_train_models(request: Request):
     """
     Train recommendation models (admin endpoint)
     """
     try:
-        logger.info(f"Training models: {request.models}")
+        # Baca raw JSON untuk debug
+        body = await request.json()
+        logger.info(f"Raw request body: {body}")
+        
+        # Ekstrak parameter dengan default
+        models = body.get('models', ["fecf", "ncf", "hybrid"])
+        save_model = body.get('save_model', True)
+        
+        # PERBAIKAN: Selalu set force ke True terlepas dari nilai yg diterima
+        force = True
+        
+        logger.info(f"Training models: {models}, force: {force}")
         
         # Buat objek args untuk diteruskan ke train_models
-        # yang mereplikasi command line arguments
         class Args:
-            pass
+            def __init__(self):
+                self.fecf = False
+                self.ncf = False
+                self.hybrid = False
+                self.include_all = False
+                self.force = True  # PERBAIKAN: Selalu set True
         
         args = Args()
-        args.fecf = "fecf" in request.models
-        args.ncf = "ncf" in request.models
-        args.hybrid = "hybrid" in request.models
-        args.include_all = False
-        args.force = request.force
+        args.fecf = "fecf" in models
+        args.ncf = "ncf" in models
+        args.hybrid = "hybrid" in models
+        args.force = True  # PERBAIKAN: Override parameter dengan True
+        
+        logger.info(f"Args created with force={args.force}")
         
         # Panggil fungsi train_models dari main.py
         result = train_models(args)
@@ -157,7 +173,7 @@ async def admin_train_models(request: TrainModelsRequest = Body(...)):
         if result:
             return {
                 "status": "success", 
-                "message": f"Models trained successfully: {request.models}"
+                "message": f"Models trained successfully: {models}"
             }
         else:
             return {
