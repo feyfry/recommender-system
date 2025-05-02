@@ -10,6 +10,13 @@ class ApiCache extends Model
     use HasFactory;
 
     /**
+     * Nama tabel model.
+     *
+     * @var string
+     */
+    protected $table = 'api_caches';
+
+    /**
      * Atribut yang dapat diisi secara massal.
      *
      * @var array<string>
