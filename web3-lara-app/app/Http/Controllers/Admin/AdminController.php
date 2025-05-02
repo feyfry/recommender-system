@@ -589,8 +589,14 @@ class AdminController extends Controller
             $response = Http::timeout(30)->post("{$this->apiUrl}/admin/train-models", [
                 'models'     => $models,
                 'save_model' => true,
-                'force'      => true,  // flag force untuk bypass konfirmasi
-            ])->json();
+                'force'      => true,  // Pastikan ini true
+            ]);
+
+            // Log detail response untuk debugging
+            Log::info("Train models response:", [
+                'status' => $response->status(),
+                'body' => $response->body()
+            ]);
 
             // Log aktivitas - ini adalah aktivitas penting untuk sistem
             ActivityLog::logAdminAction(Auth::user(), request(), 'train_models', "Models: " . implode(', ', $models));

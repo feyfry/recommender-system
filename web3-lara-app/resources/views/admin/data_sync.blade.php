@@ -427,7 +427,7 @@
                     Import data proyek dari file CSV engine rekomendasi ke database Laravel.
                 </p>
                 <div class="text-center">
-                    <form action="{{ url('panel/admin/import-command') }}" method="POST">
+                    <form action="{{ route('admin.import-command') }}" method="POST">
                         @csrf
                         <input type="hidden" name="command" value="recommend:import --projects">
                         <button type="submit" class="clay-button clay-button-primary py-1.5 px-3 text-sm">
