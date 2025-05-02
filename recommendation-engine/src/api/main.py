@@ -90,6 +90,7 @@ class InteractionRecord(BaseModel):
 class TrainModelsRequest(BaseModel):
     models: List[str] = Field(["fecf", "ncf", "hybrid"], description="Models to train")
     save_model: bool = Field(True, description="Whether to save the trained models")
+    force: bool = Field(False, description="Whether to force training despite data quality issues")
 
 # Router untuk interaksi pengguna
 @app.post("/interactions/record", tags=["interactions"])
@@ -148,6 +149,7 @@ async def admin_train_models(request: TrainModelsRequest = Body(...)):
         args.ncf = "ncf" in request.models
         args.hybrid = "hybrid" in request.models
         args.include_all = False
+        args.force = request.force
         
         # Panggil fungsi train_models dari main.py
         result = train_models(args)

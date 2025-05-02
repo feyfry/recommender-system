@@ -950,45 +950,148 @@ Secara default, API akan berjalan di `http://0.0.0.0:8001`.
 ## 📂 Struktur Proyek
 
 ```
-web3-recommendation-system/
-├── data/
-│   ├── raw/              # Data mentah dari API
-│   │   ├── *.json        # Data dalam format JSON
-│   │   └── *.csv         # Data dalam format CSV (otomatis dikonversi)
-│   ├── processed/        # Data yang sudah diproses
-│   └── models/           # Model terlatih
+web3-recommender-system/
+├──recommendation-engine/
+│	├── data/
+│	│   ├── raw/              # Data mentah dari API
+│	│   │   ├── *.json        # Data dalam format JSON
+│	│   │   └── *.csv         # Data dalam format CSV (otomatis dikonversi)
+│	│   ├── processed/        # Data yang sudah diproses
+│	│   └── models/           # Model terlatih
+│	│
+│	├── src/
+│	│   ├── data/             # Pengumpulan dan pemrosesan data
+│	│   │   ├── collector.py  # Pengumpulan data API
+│	│   │   └── processor.py  # Pemrosesan data
+│	│   │
+│	│   ├── features/         # Feature engineering dengan dukungan periode dinamis
+│	│   │   ├── market_features.py     # Fitur berbasis market dengan periode kustom
+│	│   │   └── technical_features.py  # Fitur teknikal dengan periode kustom
+│	│   │
+│	│   ├── models/           # Model rekomendasi
+│	│   │   ├── fecf.py       # Original Feature-Enhanced CF (LightFM implementation)
+│	│   │   ├── alt_fecf.py   # Alternative FECF menggunakan scikit-learn
+│	│   │   ├── ncf.py        # Neural CF
+│	│   │   ├── hybrid.py     # Model Hybrid
+│	│   │   ├── enhanced_hybrid.py  # Enhanced Hybrid Model (New!)
+│	│   │   └── eval.py       # Evaluasi model
+│	│   │
+│	│   ├── technical/        # Analisis teknikal dengan dukungan periode dinamis
+│	│   │   ├── indicators.py # Indikator teknikal dengan periode kustom
+│	│   │   └── signals.py    # Interpretasi sinyal dengan periode kustom
+│	│   │
+│	│   └── api/              # Endpoint API dengan dukungan parameter periode dinamis
+│	│       ├── main.py       # Entrypoint API
+│	│       ├── recommend.py  # Endpoint rekomendasi
+│	│       └── analysis.py   # Endpoint analisis dengan dukungan periode kustom
+│	│
+│	├── logs/                 # File log
+│	├── config.py             # Konfigurasi sistem
+│	├── main.py               # Entrypoint utama dengan dukungan parameter periode kustom
+│	├── requirements.txt      # Dependensi
+│	└── README.md             # Dokumentasi
+├── web3-lara-app/                 # Aplikasi Laravel untuk frontend/backend
+│   ├── app/                       # Kode PHP aplikasi
+│   │   ├── Console/
+│   │   │   └── Commands/          # Command CLI custom
+│   │   │       └── ClearApiCache.php
+│   │   │
+│   │   ├── Http/
+│   │   │   ├── Controllers/       # Controller untuk menangani request
+│   │   │   │   ├── Admin/         # Controller untuk panel admin
+│   │   │   │   │   └── AdminController.php
+│   │   │   │   │
+│   │   │   │   ├── Auth/          # Controller untuk autentikasi
+│   │   │   │   │   └── Web3AuthController.php
+│   │   │   │   │
+│   │   │   │   ├── Backend/       # Controller untuk panel pengguna
+│   │   │   │   │   ├── DashboardController.php
+│   │   │   │   │   ├── PortfolioController.php
+│   │   │   │   │   ├── ProfileController.php
+│   │   │   │   │   └── RecommendationController.php
+│   │   │   │   │
+│   │   │   │   └── Controller.php  # Controller abstrak dasar
+│   │   │   │
+│   │   │   └── Middleware/        # Middleware aplikasi
+│   │   │       ├── CacheHeadersMiddleware.php
+│   │   │       └── CheckRoleMiddleware.php
+│   │   │
+│   │   └── Models/                # Model database
+│   │       ├── ActivityLog.php
+│   │       ├── ApiCache.php
+│   │       ├── HistoricalPrice.php
+│   │       ├── Interaction.php
+│   │       ├── Notification.php
+│   │       ├── Portfolio.php
+│   │       ├── PriceAlert.php
+│   │       ├── Profile.php
+│   │       ├── Project.php
+│   │       ├── Recommendation.php
+│   │       ├── Transaction.php
+│   │       └── User.php
+│   │
+│   ├── bootstrap/
+│   │   └── app.php               # Bootstrap aplikasi Laravel
+│   │
+│   ├── database/
+│   │   └── migrations/           # Migrasi database
+│   │       ├── 0001_01_01_000000_create_users_table.php
+│   │       ├── 0001_01_01_000001_create_cache_table.php
+│   │       ├── 0001_01_01_000002_create_jobs_table.php
+│   │       ├── 2025_04_28_193939_create_profiles_table.php
+│   │       ├── 2025_04_29_071448_create_projects_table.php
+│   │       ├── 2025_04_29_071635_create_interactions_table.php
+│   │       ├── 2025_04_29_071753_create_recommendations_table.php
+│   │       ├── 2025_04_29_071858_create_portfolios_table.php
+│   │       ├── 2025_04_29_071950_create_transactions_table.php
+│   │       ├── 2025_04_29_072507_create_api_cache_table.php
+│   │       ├── 2025_04_29_072547_create_price_alerts_table.php
+│   │       ├── 2025_04_29_072627_create_notifications_table.php
+│   │       ├── 2025_04_29_072725_create_activity_logs_table.php
+│   │       └── 2025_04_29_072824_create_historical_prices_table.php
+│   │
+│   ├── public/
+│   │   └── backend/
+│   │       └── assets/
+│   │           └── css/
+│   │               └── claymorphism.css  # CSS untuk tema claymorphism
+│   │
+│   ├── resources/
+│   │   └── views/
+│   │       ├── auth/
+│   │       │   └── web3login.blade.php  # Halaman login Web3 wallet
+│   │       │
+│   │       ├── backend/
+│   │       │   ├── dashboard/
+│   │       │   │   └── index.blade.php  # Dashboard utama pengguna
+│   │       │   │
+│   │       │   ├── portfolio/
+│   │       │   │   ├── index.blade.php            # Halaman overview portfolio
+│   │       │   │   ├── transactions.blade.php     # Halaman riwayat transaksi
+│   │       │   │   └── price_alerts.blade.php     # Halaman price alerts
+│   │       │   │
+│   │       │   ├── profile/
+│   │       │   │   ├── edit.blade.php                 # Halaman edit profil
+│   │       │   │   └── notification_settings.blade.php # Pengaturan notifikasi
+│   │       │   │
+│   │       │   └── recommendation/
+│   │       │       ├── index.blade.php            # Overview rekomendasi
+│   │       │       ├── personal.blade.php         # Rekomendasi personal
+│   │       │       ├── trending.blade.php         # Proyek trending
+│   │       │       ├── popular.blade.php          # Proyek populer
+│   │       │       ├── categories.blade.php       # Filter berdasarkan kategori
+│   │       │       ├── chains.blade.php           # Filter berdasarkan blockchain
+│   │       │       └── project_detail.blade.php   # Detail proyek
+│   │       │
+│   │       ├── layouts/
+│   │       │   └── app.blade.php                  # Layout utama aplikasi
+│   │       │
+│   │       └── welcome.blade.php                  # Halaman landing page
+│   │
+│   └── routes/
+│       └── web.php                               # Definisi route web
 │
-├── src/
-│   ├── data/             # Pengumpulan dan pemrosesan data
-│   │   ├── collector.py  # Pengumpulan data API
-│   │   └── processor.py  # Pemrosesan data
-│   │
-│   ├── features/         # Feature engineering dengan dukungan periode dinamis
-│   │   ├── market_features.py     # Fitur berbasis market dengan periode kustom
-│   │   └── technical_features.py  # Fitur teknikal dengan periode kustom
-│   │
-│   ├── models/           # Model rekomendasi
-│   │   ├── fecf.py       # Original Feature-Enhanced CF (LightFM implementation)
-│   │   ├── alt_fecf.py   # Alternative FECF menggunakan scikit-learn
-│   │   ├── ncf.py        # Neural CF
-│   │   ├── hybrid.py     # Model Hybrid
-│   │   ├── enhanced_hybrid.py  # Enhanced Hybrid Model (New!)
-│   │   └── eval.py       # Evaluasi model
-│   │
-│   ├── technical/        # Analisis teknikal dengan dukungan periode dinamis
-│   │   ├── indicators.py # Indikator teknikal dengan periode kustom
-│   │   └── signals.py    # Interpretasi sinyal dengan periode kustom
-│   │
-│   └── api/              # Endpoint API dengan dukungan parameter periode dinamis
-│       ├── main.py       # Entrypoint API
-│       ├── recommend.py  # Endpoint rekomendasi
-│       └── analysis.py   # Endpoint analisis dengan dukungan periode kustom
-│
-├── logs/                 # File log
-├── config.py             # Konfigurasi sistem
-├── main.py               # Entrypoint utama dengan dukungan parameter periode kustom
-├── requirements.txt      # Dependensi
-└── README.md             # Dokumentasi
+└── README.md                                     # Dokumentasi proyek keseluruhan
 ```
 
 ## 🔍 Pemecahan Masalah
