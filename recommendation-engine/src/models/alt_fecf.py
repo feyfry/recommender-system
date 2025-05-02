@@ -622,8 +622,9 @@ class FeatureEnhancedCF:
                 # Further sort by a blend of popularity and trend for better cold-start
                 if 'popularity_score' in category_projects.columns and 'trend_score' in category_projects.columns:
                     # For crypto: Trend has higher weight than general popularity
+                    category_projects = category_projects.copy()
                     category_projects['combined_score'] = (
-                        category_projects['popularity_score'] * 0.4 + 
+                        category_projects['popularity_score'] * 0.3 + 
                         category_projects['trend_score'] * 0.6
                     )
                     category_projects = category_projects.sort_values('combined_score', ascending=False)
