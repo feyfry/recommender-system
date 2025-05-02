@@ -236,7 +236,7 @@
             @if(isset($personalRecommendations) && count($personalRecommendations) > 0)
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     @foreach($personalRecommendations as $recommendation)
-                        <a href="{{ route('panel.recommendations.project', $recommendation['project_id']) }}" class="clay-card hover:shadow-lg transition-shadow p-4">
+                        <a href="{{ route('panel.recommendations.project', $recommendation['project_id'] ?? $recommendation['id'] ?? 0) }}" class="clay-card hover:shadow-lg transition-shadow p-4">
                             <div class="flex justify-between items-center mb-3">
                                 <div class="flex items-center">
                                     @if(isset($recommendation['image']) && $recommendation['image'])
