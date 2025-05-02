@@ -255,13 +255,18 @@ class RecommendationController extends Controller
                     if ($matchingProject) {
                         $projectData = $matchingProject;
                         Log::info("Found exact matching project in similar results");
-                    } elseif (!empty($similarResponse) && isset($similarResponse[0])) {
-                        // 3. Jika tidak ada yang cocok persis, gunakan yang pertama tapi log peringatan
-                        $projectData = $similarResponse[0];
-                        Log::warning("No exact match found, using first similar result: " .
-                                    ($projectData['id'] ?? 'unknown') . " for requested {$projectId}");
                     } else {
-                        throw new \Exception("No project data found via API");
+                        // PERBAIKAN: Jangan gunakan proyek serupa yang tidak cocok
+                        // Atur $project ke null sehingga halaman menampilkan "Project Not Found"
+                        $project = null;
+                        Log::warning("No exact match found for project ID: {$projectId}");
+                        return view('backend.recommendation.project_detail', [
+                            'project' => null,
+                            'similarProjects' => [],
+                            'tradingSignals' => null,
+                            'isColdStart' => $isColdStart,
+                            'projectInDb' => false
+                        ]);
                     }
                 }
 
@@ -285,14 +290,10 @@ class RecommendationController extends Controller
                 // Tandai proyek ini sebagai data dari API, bukan dari database
                 $project->exists = false;
                 $project->is_from_api = true;
-
-                // PERBAIKAN: Cek konsistensi dan tampilkan peringatan jika ada
-                if ($projectData['id'] != $projectId) {
-                    Log::warning("Project ID mismatch: Requested {$projectId} but API returned " .
-                                ($projectData['id'] ?? 'unknown'));
-                }
             } catch (\Exception $e) {
                 Log::error("Gagal mendapatkan info proyek dari API: " . $e->getMessage());
+                // PERBAIKAN: Atur $project ke null jika terjadi error
+                $project = null;
             }
         }
 
@@ -323,11 +324,11 @@ class RecommendationController extends Controller
         }
 
         return view('backend.recommendation.project_detail', [
-            'project'         => $project,
+            'project' => $project,
             'similarProjects' => $similarProjects,
-            'tradingSignals'  => $tradingSignals,
-            'isColdStart'     => $isColdStart,
-            'projectInDb'     => $projectExistsInDatabase
+            'tradingSignals' => $tradingSignals,
+            'isColdStart' => $isColdStart,
+            'projectInDb' => $projectExistsInDatabase
         ]);
     }
 
