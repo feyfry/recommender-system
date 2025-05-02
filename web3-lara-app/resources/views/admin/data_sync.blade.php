@@ -149,37 +149,146 @@
             Tes Koneksi API
         </h2>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="mb-6">
+            <div class="clay-card bg-primary/5 p-4">
+                <h3 class="font-bold mb-3">Status API Engine</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="clay-card bg-primary/10 p-3 text-center api-test" data-endpoint="root">
+                        <div class="status-indicator">
+                            <i class="fas fa-circle-notch fa-spin text-2xl text-primary mb-2"></i>
+                        </div>
+                        <div class="font-bold">Root Endpoint</div>
+                        <p class="text-xs mt-1">GET /</p>
+                    </div>
+                    <div class="clay-card bg-success/10 p-3 text-center api-test" data-endpoint="health">
+                        <div class="status-indicator">
+                            <i class="fas fa-circle-notch fa-spin text-2xl text-success mb-2"></i>
+                        </div>
+                        <div class="font-bold">Health Check</div>
+                        <p class="text-xs mt-1">GET /health</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h3 class="text-lg font-bold mb-4">Recommendation Endpoints</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <div class="clay-card bg-primary/10 p-4 text-center api-test" data-endpoint="trending">
                 <div class="status-indicator">
-                    <i class="fas fa-circle-notch fa-spin text-3xl text-primary mb-2"></i>
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-primary mb-2"></i>
                 </div>
                 <div class="font-bold">Trending</div>
-                <p class="text-sm mt-1">GET /recommend/trending</p>
+                <p class="text-xs mt-1">GET /recommend/trending</p>
             </div>
 
             <div class="clay-card bg-success/10 p-4 text-center api-test" data-endpoint="popular">
                 <div class="status-indicator">
-                    <i class="fas fa-circle-notch fa-spin text-3xl text-success mb-2"></i>
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-success mb-2"></i>
                 </div>
                 <div class="font-bold">Popular</div>
-                <p class="text-sm mt-1">GET /recommend/popular</p>
+                <p class="text-xs mt-1">GET /recommend/popular</p>
             </div>
 
             <div class="clay-card bg-warning/10 p-4 text-center api-test" data-endpoint="projects">
                 <div class="status-indicator">
-                    <i class="fas fa-circle-notch fa-spin text-3xl text-warning mb-2"></i>
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-warning mb-2"></i>
                 </div>
                 <div class="font-bold">Recommendations</div>
-                <p class="text-sm mt-1">POST /recommend/projects</p>
+                <p class="text-xs mt-1">POST /recommend/projects</p>
             </div>
 
+            <div class="clay-card bg-info/10 p-4 text-center api-test" data-endpoint="similar">
+                <div class="status-indicator">
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-info mb-2"></i>
+                </div>
+                <div class="font-bold">Similar Projects</div>
+                <p class="text-xs mt-1">GET /recommend/similar/{id}</p>
+            </div>
+        </div>
+
+        <h3 class="text-lg font-bold mb-4">Analysis Endpoints</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
             <div class="clay-card bg-secondary/10 p-4 text-center api-test" data-endpoint="trading-signals">
                 <div class="status-indicator">
-                    <i class="fas fa-circle-notch fa-spin text-3xl text-secondary mb-2"></i>
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-secondary mb-2"></i>
                 </div>
                 <div class="font-bold">Trading Signals</div>
-                <p class="text-sm mt-1">POST /analysis/trading-signals</p>
+                <p class="text-xs mt-1">POST /analysis/trading-signals</p>
+            </div>
+
+            <div class="clay-card bg-primary/10 p-4 text-center api-test" data-endpoint="indicators">
+                <div class="status-indicator">
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-primary mb-2"></i>
+                </div>
+                <div class="font-bold">Technical Indicators</div>
+                <p class="text-xs mt-1">POST /analysis/indicators</p>
+            </div>
+
+            <div class="clay-card bg-success/10 p-4 text-center api-test" data-endpoint="market-events">
+                <div class="status-indicator">
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-success mb-2"></i>
+                </div>
+                <div class="font-bold">Market Events</div>
+                <p class="text-xs mt-1">GET /analysis/market-events/{id}</p>
+            </div>
+
+            <div class="clay-card bg-warning/10 p-4 text-center api-test" data-endpoint="alerts">
+                <div class="status-indicator">
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-warning mb-2"></i>
+                </div>
+                <div class="font-bold">Price Alerts</div>
+                <p class="text-xs mt-1">GET /analysis/alerts/{id}</p>
+            </div>
+
+            <div class="clay-card bg-info/10 p-4 text-center api-test" data-endpoint="price-prediction">
+                <div class="status-indicator">
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-info mb-2"></i>
+                </div>
+                <div class="font-bold">Price Prediction</div>
+                <p class="text-xs mt-1">GET /analysis/price-prediction/{id}</p>
+            </div>
+        </div>
+
+        <h3 class="text-lg font-bold mb-4">Admin & Data Endpoints</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div class="clay-card bg-primary/10 p-4 text-center api-test" data-endpoint="record-interaction">
+                <div class="status-indicator">
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-primary mb-2"></i>
+                </div>
+                <div class="font-bold">Record Interaction</div>
+                <p class="text-xs mt-1">POST /interactions/record</p>
+            </div>
+
+            <div class="clay-card bg-success/10 p-4 text-center api-test" data-endpoint="train-models">
+                <div class="status-indicator">
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-success mb-2"></i>
+                </div>
+                <div class="font-bold">Train Models</div>
+                <p class="text-xs mt-1">POST /admin/train-models</p>
+            </div>
+
+            <div class="clay-card bg-warning/10 p-4 text-center api-test" data-endpoint="sync-data">
+                <div class="status-indicator">
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-warning mb-2"></i>
+                </div>
+                <div class="font-bold">Sync Data</div>
+                <p class="text-xs mt-1">POST /admin/sync-data</p>
+            </div>
+
+            <div class="clay-card bg-info/10 p-4 text-center api-test" data-endpoint="rec-cache-clear">
+                <div class="status-indicator">
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-info mb-2"></i>
+                </div>
+                <div class="font-bold">Clear Recommendation Cache</div>
+                <p class="text-xs mt-1">POST /recommend/cache/clear</p>
+            </div>
+
+            <div class="clay-card bg-secondary/10 p-4 text-center api-test" data-endpoint="analysis-cache-clear">
+                <div class="status-indicator">
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-secondary mb-2"></i>
+                </div>
+                <div class="font-bold">Clear Analysis Cache</div>
+                <p class="text-xs mt-1">POST /analysis/cache/clear</p>
             </div>
         </div>
     </div>
