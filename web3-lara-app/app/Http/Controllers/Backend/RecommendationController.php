@@ -210,35 +210,95 @@ class RecommendationController extends Controller
         $user = Auth::user();
         $userId = $user->user_id;
 
-        // Ambil detail proyek
-        $project = Project::findOrFail($projectId);
+        // Coba cari proyek di database lokal terlebih dahulu
+        $project = Project::find($projectId);
+        $similarProjects = [];
+        $tradingSignals = null;
+        $isColdStart = false;
+        $projectExistsInDatabase = $project ? true : false;
 
-        // DIOPTIMALKAN: Cache hasil untuk proyek serupa
-        $similarProjects = Cache::remember("similar_projects_{$projectId}_8", 60, function() use ($projectId) {
-            return $this->getSimilarProjects($projectId, 8);
-        });
+        // Cek apakah pengguna adalah cold-start user
+        $interactionCount = Interaction::where('user_id', $userId)->count();
+        $isColdStart = $interactionCount < 5; // Pengguna dianggap cold-start jika memiliki kurang dari 5 interaksi
 
-        // DIOPTIMALKAN: Cache hasil untuk sinyal trading
-        $tradingSignals = Cache::remember(
-            "trading_signals_{$projectId}_{$user->risk_tolerance}",
-            30,
-            function() use ($projectId, $user) {
-                return $this->getTradingSignals($projectId, $user->risk_tolerance ?? 'medium');
+        // Jika proyek tidak ditemukan di database lokal, coba ambil dari API
+        if (!$project) {
+            try {
+                // DIOPTIMALKAN: Gunakan timeout yang lebih rendah
+                $response = Http::timeout(3)->get("{$this->apiUrl}/recommend/similar/{$projectId}", [
+                    'limit' => 1,
+                ])->json();
+
+                if (!empty($response) && isset($response[0])) {
+                    // Buat objek Project sementara dari respons API
+                    $projectData = $response[0];
+                    $project = new Project();
+                    $project->id = $projectId;
+                    $project->name = $projectData['name'] ?? 'Unknown Project';
+                    $project->symbol = $projectData['symbol'] ?? 'N/A';
+                    $project->image = $projectData['image'] ?? null;
+                    $project->price_usd = $projectData['price_usd'] ?? $projectData['current_price'] ?? 0;
+                    $project->price_change_percentage_24h = $projectData['price_change_24h'] ?? 0;
+                    $project->price_change_percentage_7d = $projectData['price_change_7d'] ?? 0;
+                    $project->market_cap = $projectData['market_cap'] ?? 0;
+                    $project->volume_24h = $projectData['volume_24h'] ?? $projectData['total_volume'] ?? 0;
+                    $project->primary_category = $projectData['primary_category'] ?? $projectData['category'] ?? 'Uncategorized';
+                    $project->chain = $projectData['chain'] ?? 'Unknown';
+                    $project->description = $projectData['description'] ?? 'No description available.';
+                    $project->popularity_score = $projectData['popularity_score'] ?? 0;
+                    $project->trend_score = $projectData['trend_score'] ?? 0;
+
+                    // Tandai proyek ini sebagai data dari API, bukan dari database
+                    $project->exists = false;
+                    $project->is_from_api = true;
+                }
+            } catch (\Exception $e) {
+                Log::error("Gagal mendapatkan info proyek dari API: " . $e->getMessage());
             }
-        );
+        }
 
-        // PENTING: Catat interaksi view karena ini penting untuk sistem rekomendasi
-        $this->recordInteraction($userId, $projectId, 'view');
+        // Jika project ditemukan (baik dari database atau API), ambil similarProjects dan tradingSignals
+        if ($project) {
+            // DIOPTIMALKAN: Cache hasil untuk proyek serupa
+            $similarProjects = Cache::remember("similar_projects_{$projectId}_8", 60, function() use ($projectId) {
+                return $this->getSimilarProjects($projectId, 8);
+            });
 
-        // PENTING: Interaksi view pada project penting untuk sistem rekomendasi
-        // jadi kita tetap mencatat aktivitas ini ke log
-        ActivityLog::logInteraction($user, request(), $projectId, 'view');
+            // DIOPTIMALKAN: Cache hasil untuk sinyal trading
+            $tradingSignals = Cache::remember(
+                "trading_signals_{$projectId}_{$user->risk_tolerance}",
+                30,
+                function() use ($projectId, $user) {
+                    return $this->getTradingSignals($projectId, $user->risk_tolerance ?? 'medium');
+                }
+            );
+
+            // PENTING: Catat interaksi view HANYA jika proyek ada di database
+            // Ini untuk mencegah foreign key violation
+            if ($projectExistsInDatabase) {
+                $this->recordInteraction($userId, $projectId, 'view');
+                ActivityLog::logInteraction($user, request(), $projectId, 'view');
+            } else {
+                Log::info("Interaksi view tidak dicatat untuk '{$projectId}' karena proyek tidak ada di database");
+            }
+        }
 
         return view('backend.recommendation.project_detail', [
             'project'         => $project,
             'similarProjects' => $similarProjects,
             'tradingSignals'  => $tradingSignals,
+            'isColdStart'     => $isColdStart,
+            'projectInDb'     => $projectExistsInDatabase
         ]);
+    }
+
+    /**
+     * Memeriksa apakah pengguna adalah cold-start user
+     */
+    private function isUserColdStart($userId)
+    {
+        $interactionCount = Interaction::where('user_id', $userId)->count();
+        return $interactionCount < 3; // Pengguna dianggap cold-start jika memiliki kurang dari 3 interaksi
     }
 
     /**
@@ -266,6 +326,15 @@ class RecommendationController extends Controller
         // Validasi tipe interaksi
         if (!in_array($interactionType, Interaction::$validTypes)) {
             throw new \InvalidArgumentException("Tipe interaksi tidak valid: {$interactionType}");
+        }
+
+        // PENTING: Verifikasi dulu apakah proyek ada di database sebelum mencatat interaksi
+        // untuk mencegah foreign key violation
+        $projectExists = Project::where('id', $projectId)->exists();
+
+        if (!$projectExists) {
+            Log::warning("Tidak dapat mencatat interaksi '{$interactionType}' untuk proyek '{$projectId}': Proyek tidak ditemukan di database");
+            return null;
         }
 
         // Catat interaksi di database lokal
