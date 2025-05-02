@@ -54,31 +54,31 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             @forelse($chainRecommendations ?? [] as $recommendation)
             <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
-                <div class="font-bold text-lg mb-2">{{ $recommendation->name ?? $recommendation['name'] }} ({{ $recommendation->symbol ?? $recommendation['symbol'] }})</div>
+                <div class="font-bold text-lg mb-2">{{ $recommendation['name'] ?? 'Unknown Project' }} ({{ $recommendation['symbol'] ?? 'N/A' }})</div>
                 <div class="text-sm mb-2">
-                    {{ $recommendation->formatted_price ?? '$'.number_format($recommendation->price_usd ?? $recommendation['price_usd'], 2) }}
-                    <span class="{{ ($recommendation->price_change_percentage_24h ?? $recommendation['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
-                        {{ ($recommendation->price_change_percentage_24h ?? $recommendation['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}
-                        {{ number_format($recommendation->price_change_percentage_24h ?? $recommendation['price_change_percentage_24h'] ?? 0, 2) }}%
+                    {{ '$'.number_format($recommendation['price_usd'] ?? 0, 2) }}
+                    <span class="{{ ($recommendation['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
+                        {{ ($recommendation['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}
+                        {{ number_format($recommendation['price_change_percentage_24h'] ?? 0, 2) }}%
                     </span>
                 </div>
                 <div class="clay-badge clay-badge-primary mb-3">
-                    {{ $recommendation->primary_category ?? $recommendation['primary_category'] ?? 'General' }}
+                    {{ $recommendation['primary_category'] ?? 'General' }}
                 </div>
                 <p class="text-sm mb-3 line-clamp-2">
-                    {{ $recommendation->description ?? $recommendation['description'] ?? 'Tidak ada deskripsi' }}
+                    {{ $recommendation['description'] ?? 'Tidak ada deskripsi' }}
                 </p>
                 <div class="flex justify-between items-center">
                     <div class="text-xs font-medium">Score: <span class="text-primary">
-                        {{ number_format($recommendation->recommendation_score ?? $recommendation['recommendation_score'] ?? 0, 2) }}
+                        {{ number_format($recommendation['recommendation_score'] ?? 0, 2) }}
                     </span></div>
                     <div class="flex space-x-2">
-                        <a href="{{ route('panel.recommendations.project', $recommendation->id ?? $recommendation['id']) }}" class="clay-badge clay-badge-primary py-1 px-2 text-xs">
+                        <a href="{{ route('panel.recommendations.project', $recommendation['id'] ?? 'unknown') }}" class="clay-badge clay-badge-primary py-1 px-2 text-xs">
                             <i class="fas fa-info-circle"></i>
                         </a>
                         <form method="POST" action="{{ route('panel.recommendations.add-favorite') }}" class="inline">
                             @csrf
-                            <input type="hidden" name="project_id" value="{{ $recommendation->id ?? $recommendation['id'] }}">
+                            <input type="hidden" name="project_id" value="{{ $recommendation['id'] ?? 'unknown' }}">
                             <button type="submit" class="clay-badge clay-badge-secondary py-1 px-2 text-xs">
                                 <i class="fas fa-heart"></i>
                             </button>

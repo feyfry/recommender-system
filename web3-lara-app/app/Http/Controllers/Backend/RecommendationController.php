@@ -74,7 +74,7 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Menampilkan halaman rekomendasi personal
+     * Mendapatkan rekomendasi personal untuk pengguna
      */
     public function personal()
     {
@@ -83,15 +83,15 @@ class RecommendationController extends Controller
 
         // DIOPTIMALKAN: Menggunakan Cache untuk mengurangi beban API
         $hybridRecommendations = Cache::remember("rec_personal_hybrid_{$userId}", 15, function() use ($userId) {
-            return $this->getPersonalRecommendations($userId, 'hybrid', 10);
+            return $this->normalizeRecommendationData($this->getPersonalRecommendations($userId, 'hybrid', 10));
         });
 
         $fecfRecommendations = Cache::remember("rec_personal_fecf_{$userId}", 15, function() use ($userId) {
-            return $this->getPersonalRecommendations($userId, 'fecf', 10);
+            return $this->normalizeRecommendationData($this->getPersonalRecommendations($userId, 'fecf', 10));
         });
 
         $ncfRecommendations = Cache::remember("rec_personal_ncf_{$userId}", 15, function() use ($userId) {
-            return $this->getPersonalRecommendations($userId, 'ncf', 10);
+            return $this->normalizeRecommendationData($this->getPersonalRecommendations($userId, 'ncf', 10));
         });
 
         // DIOPTIMALKAN: Tidak catat aktivitas untuk halaman yang sering dikunjungi ini
@@ -150,7 +150,7 @@ class RecommendationController extends Controller
         // DIOPTIMALKAN: Cache rekomendasi kategori
         $cacheKey = "rec_category_{$userId}_{$category}_16";
         $categoryRecommendations = Cache::remember($cacheKey, 15, function() use ($userId, $category) {
-            return $this->getCategoryRecommendations($userId, $category, 16);
+            return $this->normalizeRecommendationData($this->getCategoryRecommendations($userId, $category, 16));
         });
 
         // DIOPTIMALKAN: Cache untuk daftar kategori
@@ -182,7 +182,7 @@ class RecommendationController extends Controller
         // DIOPTIMALKAN: Cache rekomendasi blockchain
         $cacheKey = "rec_chain_{$userId}_{$chain}_16";
         $chainRecommendations = Cache::remember($cacheKey, 15, function() use ($userId, $chain) {
-            return $this->getChainRecommendations($userId, $chain, 16);
+            return $this->normalizeRecommendationData($this->getChainRecommendations($userId, $chain, 16));
         });
 
         // DIOPTIMALKAN: Cache untuk daftar blockchain
@@ -315,6 +315,59 @@ class RecommendationController extends Controller
         }
 
         return $interaction;
+    }
+
+    /**
+     * Menormalisasi data rekomendasi untuk memastikan format konsisten
+     *
+     * @param mixed $recommendations Data rekomendasi dari berbagai sumber
+     * @return array Data yang sudah dinormalisasi
+     */
+    private function normalizeRecommendationData($recommendations)
+    {
+        if (empty($recommendations)) {
+            return [];
+        }
+
+        // Jika string, kembalikan array kosong dan log warning
+        if (is_string($recommendations)) {
+            Log::warning("Data rekomendasi berupa string: {$recommendations}");
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($recommendations as $key => $item) {
+            // Jika item adalah string, skip item ini
+            if (is_string($item)) {
+                Log::warning("Item rekomendasi berupa string, dilewati: {$item}");
+                continue;
+            }
+
+            // Konversi object ke array jika diperlukan
+            $data = is_object($item) ? (array) $item : $item;
+
+            // Pastikan semua property yang diperlukan ada
+            $normalized[] = [
+                'id' => $data['id'] ?? ($data->id ?? "unknown-{$key}"),
+                'name' => $data['name'] ?? ($data->name ?? 'Unknown'),
+                'symbol' => $data['symbol'] ?? ($data->symbol ?? 'N/A'),
+                'image' => $data['image'] ?? ($data->image ?? null),
+                'price_usd' => $data['price_usd'] ?? ($data->price_usd ?? $data['current_price'] ?? ($data->current_price ?? 0)),
+                'price_change_percentage_24h' => $data['price_change_percentage_24h'] ?? ($data->price_change_percentage_24h ?? 0),
+                'price_change_percentage_7d' => $data['price_change_percentage_7d'] ?? ($data->price_change_percentage_7d ?? 0),
+                'market_cap' => $data['market_cap'] ?? ($data->market_cap ?? 0),
+                'volume_24h' => $data['volume_24h'] ?? ($data->volume_24h ?? $data['total_volume'] ?? ($data->total_volume ?? 0)),
+                'primary_category' => $data['primary_category'] ?? ($data->primary_category ?? $data['category'] ?? ($data->category ?? 'Uncategorized')),
+                'chain' => $data['chain'] ?? ($data->chain ?? 'Multiple'),
+                'description' => $data['description'] ?? ($data->description ?? null),
+                'popularity_score' => $data['popularity_score'] ?? ($data->popularity_score ?? 0),
+                'trend_score' => $data['trend_score'] ?? ($data->trend_score ?? 0),
+                'recommendation_score' => $data['recommendation_score'] ?? ($data->recommendation_score ?? $data['similarity_score'] ?? ($data->similarity_score ?? 0.5)),
+            ];
+        }
+
+        return $normalized;
     }
 
     /**
