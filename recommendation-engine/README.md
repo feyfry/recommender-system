@@ -510,7 +510,7 @@ Sistem ini menyediakan RESTful API yang komprehensif menggunakan FastAPI. Server
 python main.py api
 ```
 
-Secara default, API akan berjalan di `http://0.0.0.0:8000`.
+Secara default, API akan berjalan di `http://0.0.0.0:8001`.
 
 ### Endpoint Rekomendasi
 
