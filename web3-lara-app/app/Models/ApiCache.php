@@ -80,6 +80,12 @@ class ApiCache extends Model
     public static function store($endpoint, $parameters, $response, $expiresInMinutes = 60)
     {
         try {
+            // PERBAIKAN: Periksa apakah respons valid (tidak kosong/null)
+            if (empty($response) || (is_array($response) && count($response) == 0)) {
+                Log::warning("Mencoba menyimpan respons kosong ke cache untuk endpoint: {$endpoint}");
+                return null;
+            }
+
             // Hapus cache lama dengan endpoint dan parameter yang sama
             self::where('endpoint', $endpoint)
                 ->whereJsonContains('parameters', $parameters)
@@ -262,14 +268,48 @@ class ApiCache extends Model
                 $deletedExcessCount = 0;
             }
 
+            // PERBAIKAN: Bersihkan cache yang tidak valid
+            $invalidCacheCount = self::cleanInvalidCache();
+
             return [
                 'expired_removed' => $expiredCount,
                 'old_removed'     => $oldCacheCount,
                 'excess_removed'  => $deletedExcessCount,
+                'invalid_removed' => $invalidCacheCount,
             ];
         } catch (\Exception $e) {
             Log::error("Cache maintenance failed: " . $e->getMessage());
             return ['error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * PERBAIKAN: Metode baru untuk membersihkan cache yang tidak valid
+     */
+    public static function cleanInvalidCache()
+    {
+        try {
+            // Hapus cache dengan respons kosong atau null
+            $nullResponseCount = self::whereNull('response')->delete();
+
+            // Hapus cache dengan array kosong (lebih kompleks karena disimpan sebagai JSON)
+            $emptyResponseCount = self::where(function($query) {
+                $query->whereRaw("JSON_LENGTH(response) = 0")
+                      ->orWhereRaw("response = '[]'")
+                      ->orWhereRaw("response = '{}'");
+            })->delete();
+
+            $totalRemoved = $nullResponseCount + $emptyResponseCount;
+
+            // Log hasil
+            if ($totalRemoved > 0) {
+                Log::info("Cleaned {$totalRemoved} invalid cache entries ({$nullResponseCount} null, {$emptyResponseCount} empty)");
+            }
+
+            return $totalRemoved;
+        } catch (\Exception $e) {
+            Log::error("Error cleaning invalid cache: " . $e->getMessage());
+            return 0;
         }
     }
 }

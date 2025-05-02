@@ -217,40 +217,79 @@ class RecommendationController extends Controller
         $isColdStart = false;
         $projectExistsInDatabase = $project ? true : false;
 
+        // PERBAIKAN: Log untuk debugging
+        Log::info("Loading project detail for ID: {$projectId}, exists in DB: " . ($projectExistsInDatabase ? 'Yes' : 'No'));
+
         // Cek apakah pengguna adalah cold-start user
         $interactionCount = Interaction::where('user_id', $userId)->count();
-        $isColdStart = $interactionCount < 5; // Pengguna dianggap cold-start jika memiliki kurang dari 5 interaksi
+        $isColdStart = $interactionCount < 5;
 
         // Jika proyek tidak ditemukan di database lokal, coba ambil dari API
         if (!$project) {
             try {
-                // DIOPTIMALKAN: Gunakan timeout yang lebih rendah
-                $response = Http::timeout(3)->get("{$this->apiUrl}/recommend/similar/{$projectId}", [
-                    'limit' => 1,
-                ])->json();
+                // PERBAIKAN: Coba API endpoints berbeda dan validasi ID
+                // 1. Pertama coba endpoint spesifik untuk project (jika ada)
+                $directResponse = Http::timeout(5)->get("{$this->apiUrl}/project/{$projectId}")->json();
 
-                if (!empty($response) && isset($response[0])) {
-                    // Buat objek Project sementara dari respons API
-                    $projectData = $response[0];
-                    $project = new Project();
-                    $project->id = $projectId;
-                    $project->name = $projectData['name'] ?? 'Unknown Project';
-                    $project->symbol = $projectData['symbol'] ?? 'N/A';
-                    $project->image = $projectData['image'] ?? null;
-                    $project->price_usd = $projectData['price_usd'] ?? $projectData['current_price'] ?? 0;
-                    $project->price_change_percentage_24h = $projectData['price_change_24h'] ?? 0;
-                    $project->price_change_percentage_7d = $projectData['price_change_7d'] ?? 0;
-                    $project->market_cap = $projectData['market_cap'] ?? 0;
-                    $project->volume_24h = $projectData['volume_24h'] ?? $projectData['total_volume'] ?? 0;
-                    $project->primary_category = $projectData['primary_category'] ?? $projectData['category'] ?? 'Uncategorized';
-                    $project->chain = $projectData['chain'] ?? 'Unknown';
-                    $project->description = $projectData['description'] ?? 'No description available.';
-                    $project->popularity_score = $projectData['popularity_score'] ?? 0;
-                    $project->trend_score = $projectData['trend_score'] ?? 0;
+                if (!empty($directResponse) && isset($directResponse['id']) && $directResponse['id'] == $projectId) {
+                    $projectData = $directResponse;
+                    Log::info("Found project via direct API");
+                } else {
+                    // 2. Jika tidak berhasil, coba endpoint similar
+                    Log::info("Direct project API failed, trying similar endpoint");
+                    $similarResponse = Http::timeout(5)->get("{$this->apiUrl}/recommend/similar/{$projectId}", [
+                        'limit' => 5, // Ambil lebih banyak untuk memfilter
+                    ])->json();
 
-                    // Tandai proyek ini sebagai data dari API, bukan dari database
-                    $project->exists = false;
-                    $project->is_from_api = true;
+                    // PERBAIKAN: Cari yang ID-nya benar-benar cocok di antara similar projects
+                    $matchingProject = null;
+                    if (!empty($similarResponse) && is_array($similarResponse)) {
+                        foreach ($similarResponse as $item) {
+                            if (isset($item['id']) && $item['id'] == $projectId) {
+                                $matchingProject = $item;
+                                break;
+                            }
+                        }
+                    }
+
+                    if ($matchingProject) {
+                        $projectData = $matchingProject;
+                        Log::info("Found exact matching project in similar results");
+                    } elseif (!empty($similarResponse) && isset($similarResponse[0])) {
+                        // 3. Jika tidak ada yang cocok persis, gunakan yang pertama tapi log peringatan
+                        $projectData = $similarResponse[0];
+                        Log::warning("No exact match found, using first similar result: " .
+                                    ($projectData['id'] ?? 'unknown') . " for requested {$projectId}");
+                    } else {
+                        throw new \Exception("No project data found via API");
+                    }
+                }
+
+                // Buat objek Project sementara dari respons API yang ditemukan
+                $project = new Project();
+                $project->id = $projectId; // PENTING: Tetap gunakan ID yang diminta
+                $project->name = $projectData['name'] ?? 'Unknown Project';
+                $project->symbol = $projectData['symbol'] ?? 'N/A';
+                $project->image = $projectData['image'] ?? null;
+                $project->price_usd = $projectData['price_usd'] ?? $projectData['current_price'] ?? 0;
+                $project->price_change_percentage_24h = $projectData['price_change_24h'] ?? 0;
+                $project->price_change_percentage_7d = $projectData['price_change_7d'] ?? 0;
+                $project->market_cap = $projectData['market_cap'] ?? 0;
+                $project->volume_24h = $projectData['volume_24h'] ?? $projectData['total_volume'] ?? 0;
+                $project->primary_category = $projectData['primary_category'] ?? $projectData['category'] ?? 'Uncategorized';
+                $project->chain = $projectData['chain'] ?? 'Unknown';
+                $project->description = $projectData['description'] ?? 'No description available.';
+                $project->popularity_score = $projectData['popularity_score'] ?? 0;
+                $project->trend_score = $projectData['trend_score'] ?? 0;
+
+                // Tandai proyek ini sebagai data dari API, bukan dari database
+                $project->exists = false;
+                $project->is_from_api = true;
+
+                // PERBAIKAN: Cek konsistensi dan tampilkan peringatan jika ada
+                if ($projectData['id'] != $projectId) {
+                    Log::warning("Project ID mismatch: Requested {$projectId} but API returned " .
+                                ($projectData['id'] ?? 'unknown'));
                 }
             } catch (\Exception $e) {
                 Log::error("Gagal mendapatkan info proyek dari API: " . $e->getMessage());
@@ -449,13 +488,27 @@ class RecommendationController extends Controller
         $cachedData = ApiCache::findMatch($cacheKey, []);
 
         if ($cachedData) {
-            return $cachedData->response;
+            // PERBAIKAN: Pastikan cache tidak kosong atau tidak valid
+            if (!empty($cachedData->response) && isset($cachedData->response[0]['id'])) {
+                return $cachedData->response;
+            } else {
+                // Cache tidak valid, hapus
+                ApiCache::where('endpoint', $cacheKey)->delete();
+            }
         }
 
-        // Ambil data dari API jika tidak ada cache
         try {
-            // DIOPTIMALKAN: Gunakan timeout yang lebih rendah
-            $response = Http::timeout(3)->post("{$this->apiUrl}/recommend/projects", [
+            // PERBAIKAN: Tambahkan retry logic dan timeout yang lebih lama untuk cold-start users
+            $interactionCount = Interaction::where('user_id', $userId)->count();
+            $isColdStart = $interactionCount < 5;
+
+            // Tingkatkan timeout untuk cold-start users agar API punya waktu meload model
+            $timeout = $isColdStart ? 10 : 3; // 10 detik untuk cold-start, 3 detik untuk regular
+
+            // Log tambahan untuk debugging
+            Log::info("Requesting recommendations for user {$userId} (isColdStart: " . ($isColdStart ? 'Yes' : 'No') . ")");
+
+            $response = Http::timeout($timeout)->post("{$this->apiUrl}/recommend/projects", [
                 'user_id'             => $userId,
                 'model_type'          => $modelType,
                 'num_recommendations' => $limit,
@@ -464,19 +517,38 @@ class RecommendationController extends Controller
                 'investment_style'    => Auth::user()->investment_style ?? 'balanced',
             ]);
 
-            // Simpan ke cache untuk 30 menit
-            ApiCache::store($cacheKey, [], $response, 30);
-
             // Apakah respons berhasil dan memiliki format yang benar
-            if ($response->successful() && isset($response['recommendations'])) {
+            if ($response->successful() && isset($response['recommendations']) && !empty($response['recommendations'])) {
+                // PERBAIKAN: Simpan ke cache hanya jika responsenya valid
+                ApiCache::store($cacheKey, [], $response['recommendations'], 30);
+
+                // Log hasil untuk debugging
+                Log::info("Successfully received {$modelType} recommendations for user {$userId}: " .
+                        count($response['recommendations']) . " items");
+
                 return $response['recommendations'];
             } else {
                 // Log kesalahan dan kembalikan array kosong jika data tidak sesuai format
-                Log::warning("Format respons API tidak valid: " . $response->body());
+                Log::warning("Format respons API tidak valid atau kosong: " . $response->body());
+
+                // PERBAIKAN: Jika respons tidak valid tapi user adalah cold-start,
+                // coba ambil rekomendasi trending sebagai fallback
+                if ($isColdStart) {
+                    Log::info("Trying to get trending projects for cold-start user");
+                    return $this->getTrendingProjects($limit);
+                }
+
                 return [];
             }
         } catch (\Exception $e) {
             Log::error("Gagal mendapatkan rekomendasi personal: " . $e->getMessage());
+
+            // PERBAIKAN: Untuk cold-start, kembalikan trending sebagai fallback
+            $interactionCount = Interaction::where('user_id', $userId)->count();
+            if ($interactionCount < 5) {
+                Log::info("Using trending projects as fallback for cold-start user");
+                return $this->getTrendingProjects($limit);
+            }
 
             // Fallback ke data dari database lokal
             return Recommendation::where('user_id', $userId)

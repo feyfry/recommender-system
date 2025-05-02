@@ -15,6 +15,21 @@
         </p>
     </div>
 
+    <!-- PERBAIKAN: Tambahkan pesan khusus untuk pengguna cold-start -->
+    @php
+        $interactionCount = \App\Models\Interaction::where('user_id', Auth::user()->user_id)->count();
+        $isColdStart = $interactionCount < 5;
+    @endphp
+
+    @if($isColdStart)
+    <div class="clay-alert clay-alert-info mb-6">
+        <p class="flex items-center">
+            <i class="fas fa-info-circle mr-2"></i>
+            Anda terdeteksi sebagai pengguna baru (cold-start). Rekomendasi yang ditampilkan berikut adalah rekomendasi awal berdasarkan tren dan popularitas. Rekomendasi akan menjadi lebih personal setelah Anda berinteraksi dengan lebih banyak proyek.
+        </p>
+    </div>
+    @endif
+
     <!-- Model Tabs -->
     <div class="clay-card p-6 mb-8">
         <div x-data="{ activeTab: 'hybrid' }">
@@ -46,20 +61,28 @@
                 </div>
             </div>
 
+            <!-- PERBAIKAN: Tambahkan spinner loading untuk indikasi visual -->
+            <div id="loading-recommendations" class="hidden text-center py-4">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                <p class="mt-2">Memuat rekomendasi...</p>
+            </div>
+
             <!-- Recommendation List -->
             <div x-show="activeTab === 'hybrid'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 @forelse($hybridRecommendations ?? [] as $recommendation)
+                <!-- PERBAIKAN: Tambahkan cek data lebih ketat -->
+                @if(isset($recommendation['id']) && isset($recommendation['name']) && isset($recommendation['recommendation_score']))
                 <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
                     <div class="font-bold text-lg mb-2">{{ $recommendation['name'] ?? 'Unknown Project' }} ({{ $recommendation['symbol'] ?? 'N/A' }})</div>
                     <div class="text-sm mb-2">
                         {{ '$'.number_format($recommendation['price_usd'] ?? 0, 2) }}
-                        <span class="{{ ($recommendation['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
-                            {{ ($recommendation['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}
-                            {{ number_format($recommendation['price_change_percentage_24h'] ?? 0, 2) }}%
+                        <span class="{{ ($recommendation['price_change_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
+                            {{ ($recommendation['price_change_24h'] ?? 0) > 0 ? '+' : '' }}
+                            {{ number_format($recommendation['price_change_24h'] ?? 0, 2) }}%
                         </span>
                     </div>
                     <div class="clay-badge clay-badge-info mb-3">
-                        {{ $recommendation['primary_category'] ?? 'Umum' }}
+                        {{ $recommendation['primary_category'] ?? $recommendation['category'] ?? 'Umum' }}
                     </div>
                     <p class="text-sm mb-3 line-clamp-2">
                         {{ $recommendation['description'] ?? 'Tidak ada deskripsi' }}
@@ -73,11 +96,19 @@
                         </a>
                     </div>
                 </div>
+                @endif
                 @empty
                 <div class="col-span-full text-center py-8">
                     <div class="clay-alert clay-alert-info">
                         <p>Tidak ada rekomendasi hybrid yang tersedia saat ini.</p>
                         <p class="text-sm mt-2">Mulai berinteraksi dengan proyek untuk mendapatkan rekomendasi yang lebih baik.</p>
+
+                        <!-- PERBAIKAN: Tombol refresh manual untuk cold-start user -->
+                        @if($isColdStart)
+                        <button onclick="window.location.reload()" class="clay-button clay-button-primary mt-4">
+                            <i class="fas fa-sync-alt mr-1"></i> Coba Muat Ulang
+                        </button>
+                        @endif
                     </div>
                 </div>
                 @endforelse
@@ -85,35 +116,71 @@
 
             <div x-show="activeTab === 'fecf'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 @forelse($fecfRecommendations ?? [] as $recommendation)
+                <!-- PERBAIKAN: Standarisasi format data dari berbagai sumber -->
+                @php
+                    // Ubah dari object atau array menjadi array standar
+                    $rec = is_object($recommendation) ? (array)$recommendation : $recommendation;
+
+                    // Pastikan key-key utama ada
+                    if (!isset($rec['id']) && isset($rec->id)) $rec['id'] = $rec->id;
+                    if (!isset($rec['name']) && isset($rec->name)) $rec['name'] = $rec->name;
+                    if (!isset($rec['symbol']) && isset($rec->symbol)) $rec['symbol'] = $rec->symbol;
+
+                    // Pastikan price_usd ada
+                    if (!isset($rec['price_usd']) && isset($rec['current_price'])) {
+                        $rec['price_usd'] = $rec['current_price'];
+                    } elseif (!isset($rec['price_usd']) && isset($rec->price_usd)) {
+                        $rec['price_usd'] = $rec->price_usd;
+                    } elseif (!isset($rec['price_usd']) && isset($rec->current_price)) {
+                        $rec['price_usd'] = $rec->current_price;
+                    }
+
+                    // Pastikan score ada
+                    if (!isset($rec['recommendation_score']) && isset($rec->recommendation_score)) {
+                        $rec['recommendation_score'] = $rec->recommendation_score;
+                    }
+
+                    // Pastikan category/primary_category ada
+                    $category = $rec['primary_category'] ?? $rec['category'] ?? $rec->primary_category ?? $rec->category ?? 'Umum';
+                @endphp
+
+                @if(isset($rec['id']) && isset($rec['name']))
                 <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
-                    <div class="font-bold text-lg mb-2">{{ $recommendation->name ?? $recommendation['name'] }} ({{ $recommendation->symbol ?? $recommendation['symbol'] }})</div>
+                    <div class="font-bold text-lg mb-2">{{ $rec['name'] }} ({{ $rec['symbol'] ?? 'N/A' }})</div>
                     <div class="text-sm mb-2">
-                        {{ $recommendation->formatted_price ?? '$'.number_format($recommendation->price_usd ?? $recommendation['price_usd'], 2) }}
-                        <span class="{{ ($recommendation->price_change_percentage_24h ?? $recommendation['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
-                            {{ ($recommendation->price_change_percentage_24h ?? $recommendation['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}
-                            {{ number_format($recommendation->price_change_percentage_24h ?? $recommendation['price_change_percentage_24h'] ?? 0, 2) }}%
+                        {{ '$'.number_format($rec['price_usd'] ?? 0, 2) }}
+                        <span class="{{ ($rec['price_change_24h'] ?? $rec['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
+                            {{ ($rec['price_change_24h'] ?? $rec['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}
+                            {{ number_format($rec['price_change_24h'] ?? $rec['price_change_percentage_24h'] ?? 0, 2) }}%
                         </span>
                     </div>
                     <div class="clay-badge clay-badge-info mb-3">
-                        {{ $recommendation->primary_category ?? $recommendation['primary_category'] ?? 'Umum' }}
+                        {{ $category }}
                     </div>
                     <p class="text-sm mb-3 line-clamp-2">
-                        {{ $recommendation->description ?? $recommendation['description'] ?? 'Tidak ada deskripsi' }}
+                        {{ $rec['description'] ?? 'Tidak ada deskripsi' }}
                     </p>
                     <div class="flex justify-between items-center">
                         <div class="text-xs font-medium">Score: <span class="text-primary">
-                            {{ number_format($recommendation->recommendation_score ?? $recommendation['recommendation_score'] ?? 0, 2) }}
+                            {{ number_format($rec['recommendation_score'] ?? 0, 2) }}
                         </span></div>
-                        <a href="{{ route('panel.recommendations.project', $recommendation->id ?? $recommendation['id']) }}" class="clay-badge clay-badge-secondary px-2 py-1 text-xs">
+                        <a href="{{ route('panel.recommendations.project', $rec['id']) }}" class="clay-badge clay-badge-secondary px-2 py-1 text-xs">
                             <i class="fas fa-info-circle mr-1"></i> Detail
                         </a>
                     </div>
                 </div>
+                @endif
                 @empty
                 <div class="col-span-full text-center py-8">
                     <div class="clay-alert clay-alert-info">
                         <p>Tidak ada rekomendasi FECF yang tersedia saat ini.</p>
                         <p class="text-sm mt-2">Mulai berinteraksi dengan proyek untuk mendapatkan rekomendasi yang lebih baik.</p>
+
+                        @if($isColdStart)
+                        <button onclick="window.location.reload()" class="clay-button clay-button-primary mt-4">
+                            <i class="fas fa-sync-alt mr-1"></i> Coba Muat Ulang
+                        </button>
+                        @endif
                     </div>
                 </div>
                 @endforelse
@@ -121,35 +188,71 @@
 
             <div x-show="activeTab === 'ncf'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 @forelse($ncfRecommendations ?? [] as $recommendation)
+                <!-- PERBAIKAN: Standarisasi format data dari berbagai sumber -->
+                @php
+                    // Ubah dari object atau array menjadi array standar
+                    $rec = is_object($recommendation) ? (array)$recommendation : $recommendation;
+
+                    // Pastikan key-key utama ada
+                    if (!isset($rec['id']) && isset($rec->id)) $rec['id'] = $rec->id;
+                    if (!isset($rec['name']) && isset($rec->name)) $rec['name'] = $rec->name;
+                    if (!isset($rec['symbol']) && isset($rec->symbol)) $rec['symbol'] = $rec->symbol;
+
+                    // Pastikan price_usd ada
+                    if (!isset($rec['price_usd']) && isset($rec['current_price'])) {
+                        $rec['price_usd'] = $rec['current_price'];
+                    } elseif (!isset($rec['price_usd']) && isset($rec->price_usd)) {
+                        $rec['price_usd'] = $rec->price_usd;
+                    } elseif (!isset($rec['price_usd']) && isset($rec->current_price)) {
+                        $rec['price_usd'] = $rec->current_price;
+                    }
+
+                    // Pastikan score ada
+                    if (!isset($rec['recommendation_score']) && isset($rec->recommendation_score)) {
+                        $rec['recommendation_score'] = $rec->recommendation_score;
+                    }
+
+                    // Pastikan category/primary_category ada
+                    $category = $rec['primary_category'] ?? $rec['category'] ?? $rec->primary_category ?? $rec->category ?? 'Umum';
+                @endphp
+
+                @if(isset($rec['id']) && isset($rec['name']))
                 <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
-                    <div class="font-bold text-lg mb-2">{{ $recommendation->name ?? $recommendation['name'] }} ({{ $recommendation->symbol ?? $recommendation['symbol'] }})</div>
+                    <div class="font-bold text-lg mb-2">{{ $rec['name'] }} ({{ $rec['symbol'] ?? 'N/A' }})</div>
                     <div class="text-sm mb-2">
-                        {{ $recommendation->formatted_price ?? '$'.number_format($recommendation->price_usd ?? $recommendation['price_usd'], 2) }}
-                        <span class="{{ ($recommendation->price_change_percentage_24h ?? $recommendation['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
-                            {{ ($recommendation->price_change_percentage_24h ?? $recommendation['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}
-                            {{ number_format($recommendation->price_change_percentage_24h ?? $recommendation['price_change_percentage_24h'] ?? 0, 2) }}%
+                        {{ '$'.number_format($rec['price_usd'] ?? 0, 2) }}
+                        <span class="{{ ($rec['price_change_24h'] ?? $rec['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
+                            {{ ($rec['price_change_24h'] ?? $rec['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}
+                            {{ number_format($rec['price_change_24h'] ?? $rec['price_change_percentage_24h'] ?? 0, 2) }}%
                         </span>
                     </div>
                     <div class="clay-badge clay-badge-info mb-3">
-                        {{ $recommendation->primary_category ?? $recommendation['primary_category'] ?? 'Umum' }}
+                        {{ $category }}
                     </div>
                     <p class="text-sm mb-3 line-clamp-2">
-                        {{ $recommendation->description ?? $recommendation['description'] ?? 'Tidak ada deskripsi' }}
+                        {{ $rec['description'] ?? 'Tidak ada deskripsi' }}
                     </p>
                     <div class="flex justify-between items-center">
                         <div class="text-xs font-medium">Score: <span class="text-primary">
-                            {{ number_format($recommendation->recommendation_score ?? $recommendation['recommendation_score'] ?? 0, 2) }}
+                            {{ number_format($rec['recommendation_score'] ?? 0, 2) }}
                         </span></div>
-                        <a href="{{ route('panel.recommendations.project', $recommendation->id ?? $recommendation['id']) }}" class="clay-badge clay-badge-secondary px-2 py-1 text-xs">
+                        <a href="{{ route('panel.recommendations.project', $rec['id']) }}" class="clay-badge clay-badge-secondary px-2 py-1 text-xs">
                             <i class="fas fa-info-circle mr-1"></i> Detail
                         </a>
                     </div>
                 </div>
+                @endif
                 @empty
                 <div class="col-span-full text-center py-8">
                     <div class="clay-alert clay-alert-info">
                         <p>Tidak ada rekomendasi NCF yang tersedia saat ini.</p>
                         <p class="text-sm mt-2">Mulai berinteraksi dengan proyek untuk mendapatkan rekomendasi yang lebih baik.</p>
+
+                        @if($isColdStart)
+                        <button onclick="window.location.reload()" class="clay-button clay-button-primary mt-4">
+                            <i class="fas fa-sync-alt mr-1"></i> Coba Muat Ulang
+                        </button>
+                        @endif
                     </div>
                 </div>
                 @endforelse
@@ -257,10 +360,11 @@
                     <tr>
                         <td class="py-2 px-4 font-medium">
                             <div class="flex items-center">
-                                @if($interaction->project->image)
+                                @if($interaction->project && $interaction->project->image)
                                     <img src="{{ $interaction->project->image }}" alt="{{ $interaction->project->symbol }}" class="w-6 h-6 mr-2 rounded-full">
                                 @endif
-                                {{ $interaction->project->name }} ({{ $interaction->project->symbol }})
+                                {{ $interaction->project ? $interaction->project->name : 'Unknown' }}
+                                ({{ $interaction->project ? $interaction->project->symbol : '?' }})
                             </div>
                         </td>
                         <td class="py-2 px-4">
@@ -283,7 +387,16 @@
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="4" class="py-4 px-4 text-center">Belum ada interaksi yang tercatat</td>
+                        <td colspan="4" class="py-4 px-4 text-center">
+                            Belum ada interaksi yang tercatat
+
+                            <!-- PERBAIKAN: Tambahkan tombol untuk mulai menjelajah -->
+                            <div class="mt-3">
+                                <a href="{{ route('panel.recommendations.trending') }}" class="clay-button clay-button-warning py-1.5 px-3 text-sm">
+                                    <i class="fas fa-fire mr-1"></i> Jelajahi Proyek Trending
+                                </a>
+                            </div>
+                        </td>
                     </tr>
                     @endforelse
                 </tbody>
@@ -316,4 +429,34 @@
         </div>
     </div>
 </div>
+
+<!-- PERBAIKAN: Auto-refresh untuk memastikan rekomendasi cold-start dimuat -->
+@if($isColdStart)
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const loadingIndicator = document.getElementById('loading-recommendations');
+
+        // Tampilkan loading indicator
+        if (loadingIndicator) {
+            loadingIndicator.classList.remove('hidden');
+        }
+
+        // Jika tidak ada rekomendasi, coba muat ulang setelah 5 detik
+        const hasHybridRecommendations = {{ !empty($hybridRecommendations) ? 'true' : 'false' }};
+        const hasFecfRecommendations = {{ !empty($fecfRecommendations) ? 'true' : 'false' }};
+        const hasNcfRecommendations = {{ !empty($ncfRecommendations) ? 'true' : 'false' }};
+
+        if (!hasHybridRecommendations && !hasFecfRecommendations && !hasNcfRecommendations) {
+            setTimeout(function() {
+                window.location.reload();
+            }, 5000);
+        } else {
+            // Sembunyikan loading indicator jika sudah ada rekomendasi
+            if (loadingIndicator) {
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+    });
+</script>
+@endif
 @endsection
