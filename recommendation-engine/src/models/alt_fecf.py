@@ -823,8 +823,8 @@ class FeatureEnhancedCF:
                 project_dict['recommendation_score'] = float(score)
                 
                 # Ensure critical fields are available (even if null)
-                required_fields = ['id', 'name', 'symbol', 'image', 'price_usd', 'market_cap', 
-                                'volume_24h', 'price_change_24h', 'price_change_7d', 
+                required_fields = ['id', 'name', 'symbol', 'image', 'current_price', 'market_cap', 
+                                'total_volume', 'price_change_24h', 'price_change_percentage_7d_in_currency', 
                                 'popularity_score', 'trend_score', 'primary_category', 'chain']
                 
                 for field in required_fields:
@@ -1003,8 +1003,8 @@ class FeatureEnhancedCF:
                 project_dict['recommendation_score'] = float(enhanced_score)  # For API consistency
                 
                 # Ensure critical fields are available (even if null)
-                required_fields = ['id', 'name', 'symbol', 'image', 'price_usd', 'market_cap', 
-                                'volume_24h', 'price_change_24h', 'price_change_7d', 
+                required_fields = ['id', 'name', 'symbol', 'image', 'current_price', 'market_cap', 
+                                'total_volume', 'price_change_24h', 'price_change_percentage_7d_in_currency', 
                                 'popularity_score', 'trend_score', 'primary_category', 'chain']
                 
                 for field in required_fields:
@@ -1146,8 +1146,8 @@ class FeatureEnhancedCF:
                 project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0))
                 
                 # Ensure critical fields are available (even if null)
-                required_fields = ['id', 'name', 'symbol', 'image', 'price_usd', 'market_cap', 
-                                'volume_24h', 'price_change_24h', 'price_change_7d', 
+                required_fields = ['id', 'name', 'symbol', 'image', 'current_price', 'market_cap', 
+                                'total_volume', 'price_change_24h', 'price_change_percentage_7d_in_currency', 
                                 'popularity_score', 'trend_score', 'primary_category', 'chain']
                 
                 for field in required_fields:
@@ -1218,8 +1218,8 @@ class FeatureEnhancedCF:
                     project_dict['recommendation_score'] = float(project_dict.get('crypto_score', 0))
                     
                     # Ensure all required fields
-                    required_fields = ['id', 'name', 'symbol', 'image', 'price_usd', 'market_cap', 
-                                'volume_24h', 'price_change_24h', 'price_change_7d']
+                    required_fields = ['id', 'name', 'symbol', 'image', 'current_price', 'market_cap', 
+                                'total_volume', 'price_change_24h', 'price_change_percentage_7d_in_currency']
                     
                     for field in required_fields:
                         if field not in project_dict:

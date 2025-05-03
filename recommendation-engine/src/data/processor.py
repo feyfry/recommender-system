@@ -367,11 +367,6 @@ class DataProcessor:
                 market_df = market_df.drop_duplicates(subset='id')
                 logger.info(f"After removing duplicates: {len(market_df)} entries")
                 
-                # Hapus kolom sparkline_in_7d jika ada
-                if 'sparkline_in_7d' in market_df.columns:
-                    logger.info("Removing sparkline_in_7d column from combined data")
-                    market_df = market_df.drop(columns=['sparkline_in_7d'])
-                
             except Exception as e:
                 logger.error(f"Error loading combined file: {e}")
                 market_df = None
@@ -407,11 +402,6 @@ class DataProcessor:
                                 for item in data:
                                     if 'query_category' not in item:
                                         item['query_category'] = category
-                            
-                            # Hapus sparkline_in_7d jika ada
-                            for item in data:
-                                if 'sparkline_in_7d' in item:
-                                    del item['sparkline_in_7d']
                             
                             all_market_data.extend(data)
                 except Exception as e:
@@ -735,11 +725,6 @@ class DataProcessor:
         # Buat salinan untuk dimodifikasi
         df = projects_df.copy()
         
-        # Hapus kolom sparkline_in_7d jika ada
-        if 'sparkline_in_7d' in df.columns:
-            logger.info("Removing sparkline_in_7d column")
-            df = df.drop(columns=['sparkline_in_7d'])
-        
         # Tangani nilai NaN dengan nilai default
         df['market_cap'] = df['market_cap'].fillna(0)
         df['total_volume'] = df['total_volume'].fillna(0)
@@ -753,7 +738,7 @@ class DataProcessor:
             else:
                 df[col] = 0
         
-        # Tangani kolom sosial dengan nilai default - HAPUS reddit_subscribers dan discord_members
+        # Tangani kolom sosial dengan nilai default
         for col in ['twitter_followers', 'github_stars', 
                 'github_subscribers', 'github_forks', 'telegram_channel_user_count']:
             if col in df.columns:
@@ -2302,35 +2287,6 @@ class DataProcessor:
         
         # Create a copy for CSV export
         projects_df_csv = projects_df.copy()
-        
-        # Hapus kolom redundan dan tidak diperlukan
-        columns_to_remove = []
-        
-        # Hapus kolom redundan price_usd dan volume_24h
-        if 'price_usd' in projects_df_csv.columns:
-            columns_to_remove.append('price_usd')
-            
-        if 'volume_24h' in projects_df_csv.columns:
-            columns_to_remove.append('volume_24h')
-        
-        # Hapus primary_categories karena sudah digabung dalam primary_category
-        if 'primary_categories' in projects_df_csv.columns:
-            columns_to_remove.append('primary_categories')
-            
-        # Hapus kolom deskripsi yang tidak diperlukan
-        for col in ['description_length_raw', 'description_word_count', 'description_avg_word_length']:
-            if col in projects_df_csv.columns:
-                columns_to_remove.append(col)
-                
-        # Hapus kolom sosial yang tidak diperlukan
-        for col in ['reddit_subscribers', 'discord_members', 'facebook_likes']:
-            if col in projects_df_csv.columns:
-                columns_to_remove.append(col)
-        
-        # Hapus kolom sekaligus
-        if columns_to_remove:
-            logger.info(f"Removing unnecessary columns: {columns_to_remove}")
-            projects_df_csv = projects_df_csv.drop(columns=columns_to_remove)
         
         # Properly handle 'platforms' column
         if 'platforms' in projects_df_csv.columns:

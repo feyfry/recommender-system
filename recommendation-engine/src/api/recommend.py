@@ -74,11 +74,11 @@ class ProjectResponse(BaseModel):
     name: Optional[str] = None
     symbol: Optional[str] = None
     image: Optional[str] = None  # Menggunakan image, bukan image_url
-    price_usd: Optional[float] = None
+    current_price: Optional[float] = None
     price_change_24h: Optional[float] = None
-    price_change_7d: Optional[float] = None
+    price_change_percentage_7d_in_currency: Optional[float] = None
     market_cap: Optional[float] = None
-    volume_24h: Optional[float] = None
+    total_volume: Optional[float] = None
     popularity_score: Optional[float] = None
     trend_score: Optional[float] = None
     category: Optional[str] = None
@@ -375,14 +375,6 @@ def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 result[key] = None
     
-    # Mapping kolom untuk kompatibilitas API
-    # current_price -> price_usd, total_volume -> volume_24h
-    if 'current_price' in result and 'price_usd' not in result:
-        result['price_usd'] = result['current_price']
-        
-    if 'total_volume' in result and 'volume_24h' not in result:
-        result['volume_24h'] = result['total_volume']
-    
     # Final safety check for category and primary_category
     if 'primary_category' in result and isinstance(result['primary_category'], (list, tuple)):
         if result['primary_category']:
@@ -550,11 +542,11 @@ async def recommend_projects(request: RecommendationRequest):
                         name=clean_rec.get('name'),
                         symbol=clean_rec.get('symbol'),
                         image=clean_rec.get('image'),
-                        price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),
+                        current_price=clean_rec.get('current_price'),
                         price_change_24h=clean_rec.get('price_change_24h'),
-                        price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),
+                        price_change_percentage_7d_in_currency=clean_rec.get('price_change_percentage_7d_in_currency'),
                         market_cap=clean_rec.get('market_cap'),
-                        volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),
+                        total_volume=clean_rec.get('total_volume'),
                         popularity_score=clean_rec.get('popularity_score'),
                         trend_score=clean_rec.get('trend_score'),
                         category=clean_rec.get('primary_category', clean_rec.get('category')),
@@ -615,7 +607,7 @@ async def get_trending_projects(
                 clean_rec = sanitize_project_data(rec)
                 
                 # PERBAIKAN: Pastikan semua nilai numerik adalah float Python native
-                for field in ['price_usd', 'market_cap', 'volume_24h', 'price_change_24h', 
+                for field in ['current_price', 'market_cap', 'total_volume', 'price_change_24h', 
                             'price_change_percentage_7d_in_currency', 'popularity_score', 
                             'trend_score', 'recommendation_score']:
                     if field in clean_rec and clean_rec[field] is not None:
@@ -628,11 +620,11 @@ async def get_trending_projects(
                         name=clean_rec.get('name'),
                         symbol=clean_rec.get('symbol'),
                         image=clean_rec.get('image'),  # Tetap gunakan field image
-                        price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),  # Ambil dari current_price jika price_usd tidak ada
+                        current_price=clean_rec.get('current_price'),
                         price_change_24h=clean_rec.get('price_change_24h'),
-                        price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
+                        price_change_percentage_7d_in_currency=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
                         market_cap=clean_rec.get('market_cap'),
-                        volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),  # Ambil dari total_volume jika volume_24h tidak ada
+                        total_volume=clean_rec.get('total_volume'),
                         popularity_score=clean_rec.get('popularity_score'),
                         trend_score=clean_rec.get('trend_score'),
                         category=clean_rec.get('primary_category', clean_rec.get('category')),
@@ -673,7 +665,7 @@ async def get_popular_projects(
                 clean_rec = sanitize_project_data(rec)
                 
                 # PERBAIKAN: Pastikan semua nilai numerik adalah float Python native
-                for field in ['price_usd', 'market_cap', 'volume_24h', 'price_change_24h', 
+                for field in ['current_price', 'market_cap', 'total_volume', 'price_change_24h', 
                             'price_change_percentage_7d_in_currency', 'popularity_score', 
                             'trend_score', 'recommendation_score']:
                     if field in clean_rec and clean_rec[field] is not None:
@@ -686,11 +678,11 @@ async def get_popular_projects(
                         name=clean_rec.get('name'),
                         symbol=clean_rec.get('symbol'),
                         image=clean_rec.get('image'),  # Tetap gunakan field image
-                        price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),  # Ambil dari current_price jika price_usd tidak ada
+                        current_price=clean_rec.get('current_price'),
                         price_change_24h=clean_rec.get('price_change_24h'),
-                        price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
+                        price_change_percentage_7d_in_currency=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
                         market_cap=clean_rec.get('market_cap'),
-                        volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),  # Ambil dari total_volume jika volume_24h tidak ada
+                        total_volume=clean_rec.get('total_volume'),
                         popularity_score=clean_rec.get('popularity_score'),
                         trend_score=clean_rec.get('trend_score'),
                         category=clean_rec.get('primary_category', clean_rec.get('category')),
@@ -737,7 +729,7 @@ async def get_similar_projects(
                 clean_rec = sanitize_project_data(rec)
                 
                 # PERBAIKAN: Pastikan semua nilai numerik adalah float Python native
-                for field in ['price_usd', 'market_cap', 'volume_24h', 'price_change_24h', 
+                for field in ['current_price', 'market_cap', 'total_volume', 'price_change_24h', 
                             'price_change_percentage_7d_in_currency', 'popularity_score', 
                             'trend_score', 'recommendation_score', 'similarity_score']:
                     if field in clean_rec and clean_rec[field] is not None:
@@ -750,11 +742,11 @@ async def get_similar_projects(
                         name=clean_rec.get('name'),
                         symbol=clean_rec.get('symbol'),
                         image=clean_rec.get('image'),  # Tetap gunakan field image
-                        price_usd=clean_rec.get('price_usd', clean_rec.get('current_price')),  # Ambil dari current_price jika price_usd tidak ada
+                        current_price=clean_rec.get('current_price'),
                         price_change_24h=clean_rec.get('price_change_24h'),
-                        price_change_7d=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
+                        price_change_percentage_7d_in_currency=clean_rec.get('price_change_percentage_7d_in_currency'),  # Gunakan field asli
                         market_cap=clean_rec.get('market_cap'),
-                        volume_24h=clean_rec.get('volume_24h', clean_rec.get('total_volume')),  # Ambil dari total_volume jika volume_24h tidak ada
+                        total_volume=clean_rec.get('total_volume'),
                         popularity_score=clean_rec.get('popularity_score'),
                         trend_score=clean_rec.get('trend_score'),
                         category=clean_rec.get('primary_category', clean_rec.get('category')),

@@ -177,7 +177,7 @@ class FeatureEnhancedCF:
                 item_features.extend([f"chain:{chain}" for chain in chains if pd.notna(chain)])
                 
             # Add price range features
-            if 'price_usd' in self.projects_df.columns:
+            if 'current_price' in self.projects_df.columns:
                 price_ranges = ["low_price", "medium_price", "high_price", "very_high_price"]
                 item_features.extend([f"price:{price}" for price in price_ranges])
                 
@@ -377,8 +377,8 @@ class FeatureEnhancedCF:
                 item_features_dict[(item_idx, feature_name)] = 1.0
                 
             # Add price feature
-            if 'price_usd' in project and pd.notna(project['price_usd']):
-                price = project['price_usd']
+            if 'current_price' in project and pd.notna(project['current_price']):
+                price = project['current_price']
                 if price < 1:
                     price_range = "low_price"
                 elif price < 100:

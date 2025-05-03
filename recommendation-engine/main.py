@@ -728,7 +728,7 @@ def recommend(args):
             name = rec.get('name', rec.get('id', 'Unknown'))
             symbol = rec.get('symbol', '')
             category = rec.get('primary_category', rec.get('category', 'unknown'))
-            price = rec.get('price_usd', 0)
+            price = rec.get('current_price', 0)
             score = rec.get('recommendation_score', 0)
             
             # Print recommendation

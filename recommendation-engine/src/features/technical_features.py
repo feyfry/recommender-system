@@ -104,8 +104,8 @@ class TechnicalAnalyzer:
                           open_col: str = 'open',
                           high_col: str = 'high',
                           low_col: str = 'low',
-                          close_col: str = 'price_usd',
-                          volume_col: Optional[str] = 'volume_24h') -> pd.DataFrame:
+                          close_col: str = 'current_price',
+                          volume_col: Optional[str] = 'total_volume') -> pd.DataFrame:
         """
         Tambahkan semua indikator teknikal ke data
         
@@ -699,8 +699,8 @@ def generate_trading_signals(price_data: pd.DataFrame, indicator_periods: Option
         elif latest.get('macd_cross_down', False):
             explanation.append(f"MACD memotong ke bawah signal line (bearish) - ({macd_fast}/{macd_slow}/{macd_signal_period})")
             
-    if all(col in df_with_indicators.columns for col in ['bb_upper', 'bb_lower', 'price_usd']):
-        price = latest['price_usd']
+    if all(col in df_with_indicators.columns for col in ['bb_upper', 'bb_lower', 'current_price']):
+        price = latest['current_price']
         bb_period = analyzer.periods['bb_period']
         
         if price > latest['bb_upper']:
@@ -715,7 +715,7 @@ def generate_trading_signals(price_data: pd.DataFrame, indicator_periods: Option
     
     # Target price calculation (simple implementation)
     target_price = None
-    current_price = latest.get('price_usd', None)
+    current_price = latest.get('current_price', None)
     atr = latest.get('atr', None)
     
     if current_price is not None and atr is not None:
@@ -757,8 +757,8 @@ if __name__ == "__main__":
         'Open': 'open',
         'High': 'high',
         'Low': 'low',
-        'Close': 'price_usd',
-        'Volume': 'volume_24h'
+        'Close': 'current_price',
+        'Volume': 'total_volume'
     })
     
     # Test dengan periode standar

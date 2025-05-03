@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 def calculate_market_metrics(price_df: pd.DataFrame, 
-                            price_col: str = 'price_usd',
-                            volume_col: Optional[str] = 'volume_24h',
+                            price_col: str = 'current_price',
+                            volume_col: Optional[str] = 'total_volume',
                             market_cap_col: Optional[str] = 'market_cap',
                             date_col: str = 'timestamp',
                             window_sizes: List[int] = [7, 14, 30],
@@ -270,9 +270,9 @@ def calculate_market_sentiment(data: pd.DataFrame,
     
     # 4. Price vs MA
     ma_col = f"ma_{periods['ma_short']}d"
-    if ma_col in data.columns and 'price_usd' in data.columns:
+    if ma_col in data.columns and 'current_price' in data.columns:
         # Price > MA (bullish), Price < MA (bearish)
-        price_vs_ma = (data['price_usd'] / data[ma_col]).fillna(1)
+        price_vs_ma = (data['current_price'] / data[ma_col]).fillna(1)
         price_ma_score = 50 + 50 * (price_vs_ma - 1)
         # Clip to reasonable range
         price_ma_score = price_ma_score.clip(0, 100)
@@ -323,8 +323,8 @@ def calculate_market_sentiment(data: pd.DataFrame,
 
 
 def detect_market_events(price_df: pd.DataFrame,
-                        price_col: str = 'price_usd',
-                        volume_col: Optional[str] = 'volume_24h',
+                        price_col: str = 'current_price',
+                        volume_col: Optional[str] = 'total_volume',
                         date_col: str = 'timestamp',
                         window_size: int = 14,
                         threshold_std: float = 2.0,
