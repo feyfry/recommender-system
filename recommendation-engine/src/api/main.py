@@ -85,12 +85,15 @@ class InteractionRecord(BaseModel):
     weight: int = Field(1, ge=1, le=10, description="Weight/strength of the interaction")
     context: Optional[Dict[str, Any]] = None
     timestamp: Optional[str] = None
+    test_only: bool = Field(False, description="Flag to mark request as testing only")
 
 # Model untuk pelatihan model
 class TrainModelsRequest(BaseModel):
     models: List[str] = Field(["fecf", "ncf", "hybrid"], description="Models to train")
     save_model: bool = Field(True, description="Whether to save the trained models")
     force: bool = Field(False, description="Whether to force training despite data quality issues")
+    test_only: bool = Field(False, description="Flag to mark request as testing only")
+    fecf_params: Optional[Dict[str, Any]] = Field(None, description="Parameters specific to FECF model")
 
 # Router untuk interaksi pengguna
 @app.post("/interactions/record", tags=["interactions"])
@@ -98,6 +101,10 @@ async def record_interaction(interaction: InteractionRecord):
     """
     Record a user interaction for real-time updates to recommendations
     """
+    # Cek apakah ini hanya request testing
+    if interaction.test_only:
+        return {"status": "success", "message": "Test mode - Interaction not recorded"}
+        
     try:
         # Buat path ke csv file
         interactions_path = os.path.join("data", "processed", "interactions.csv")
@@ -132,23 +139,20 @@ async def record_interaction(interaction: InteractionRecord):
 
 # Router untuk admin endpoints
 @app.post("/admin/train-models", tags=["admin"])
-async def admin_train_models(request: Request):
+async def admin_train_models(request: TrainModelsRequest = Body(...)):
     """
     Train recommendation models (admin endpoint)
     """
     try:
-        # Baca raw JSON untuk debug
-        body = await request.json()
-        logger.info(f"Raw request body: {body}")
-        
-        # Ekstrak parameter dengan default
-        models = body.get('models', ["fecf", "ncf", "hybrid"])
-        save_model = body.get('save_model', True)
-        
-        # PERBAIKAN: Selalu set force ke True terlepas dari nilai yg diterima
-        force = True
-        
-        logger.info(f"Training models: {models}, force: {force}")
+        # Jika mode test_only, kembalikan response sukses tanpa melatih model
+        if request.test_only:
+            return {
+                "status": "success",
+                "message": "Test mode - Model training simulation successful"
+            }
+            
+        # Log request
+        logger.info(f"Training models: {request.models}, force: {request.force}")
         
         # Buat objek args untuk diteruskan ke train_models
         class Args:
@@ -157,15 +161,19 @@ async def admin_train_models(request: Request):
                 self.ncf = False
                 self.hybrid = False
                 self.include_all = False
-                self.force = True  # PERBAIKAN: Selalu set True
+                self.force = request.force
         
         args = Args()
-        args.fecf = "fecf" in models
-        args.ncf = "ncf" in models
-        args.hybrid = "hybrid" in models
-        args.force = True  # PERBAIKAN: Override parameter dengan True
+        args.fecf = "fecf" in request.models
+        args.ncf = "ncf" in request.models
+        args.hybrid = "hybrid" in request.models
         
-        logger.info(f"Args created with force={args.force}")
+        # Jika FECF dilatih dan ada parameter FECF spesifik
+        if args.fecf and request.fecf_params:
+            # Tambahkan parameter ke enviroment sehingga bisa diakses oleh model FECF
+            for key, value in request.fecf_params.items():
+                os.environ[f"FECF_{key.upper()}"] = str(value)
+                logger.info(f"Setting FECF parameter {key} = {value}")
         
         # Panggil fungsi train_models dari main.py
         result = train_models(args)
@@ -173,7 +181,7 @@ async def admin_train_models(request: Request):
         if result:
             return {
                 "status": "success", 
-                "message": f"Models trained successfully: {models}"
+                "message": f"Models trained successfully: {request.models}"
             }
         else:
             return {
@@ -189,12 +197,20 @@ async def admin_train_models(request: Request):
 class SyncDataRequest(BaseModel):
     projects_updated: bool = Field(False, description="Whether projects data has been updated")
     users_count: Optional[int] = Field(None, description="Number of synthetic users to generate if needed")
+    test_only: bool = Field(False, description="Flag to mark request as testing only")
 
 @app.post("/admin/sync-data", tags=["admin"])
 async def admin_sync_data(request: SyncDataRequest = Body(...)):
     """
     Sync data from database to recommendation engine (admin endpoint)
     """
+    # Jika hanya test mode, kembalikan respons sukses tanpa melakukan perubahan
+    if request.test_only:
+        return {
+            "status": "success",
+            "message": "Test mode - Data sync simulation successful"
+        }
+        
     try:
         logger.info("Syncing data from PostgreSQL to recommendation engine CSV files")
         

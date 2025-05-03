@@ -121,7 +121,7 @@ def train_models(args):
         # Analisis data sebelum training untuk memeriksa kualitas
         validation_passed = _validate_data_quality()
         
-        # PERBAIKAN: Tambahkan lebih banyak logging untuk debug
+        # Logging untuk debug
         force_flag = getattr(args, 'force', False)
         print(f"Force flag status: {force_flag}")
         logger.info(f"Force flag status: {force_flag}")
@@ -191,6 +191,20 @@ def train_models(args):
                         "error": "Failed to load data"
                     }
                     continue
+                
+                # PATCH: Set nilai minimum untuk no_components pada FECF model jika berasal dari environment
+                if model_name == "FECF" and hasattr(model, 'params') and 'no_components' in model.params:
+                    # Ensure n_components is at least 1
+                    if model.params['no_components'] <= 0:
+                        logger.info(f"Setting minimum no_components=1 for FECF model (was {model.params['no_components']})")
+                        model.params['no_components'] = 1
+                
+                # Cek environment variable untuk parameter FECF
+                if model_name == "FECF" and "FECF_NO_COMPONENTS" in os.environ:
+                    no_components = int(os.environ.get("FECF_NO_COMPONENTS", "1"))
+                    if hasattr(model, 'params'):
+                        model.params['no_components'] = max(1, no_components)  # Pastikan minimal 1
+                        logger.info(f"Using no_components={model.params['no_components']} from environment variable")
                 
                 # Train model
                 model_start_time = time.time()

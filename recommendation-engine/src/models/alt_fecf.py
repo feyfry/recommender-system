@@ -229,8 +229,14 @@ class FeatureEnhancedCF:
             # Tentukan jumlah komponen yang optimal
             # Recommend tidak melebihi 10% dari dimensi terkecil
             min_dimension = min(user_item_array.shape)
-            n_components = min(48, min_dimension // 10)
-            logger.info(f"Applying SVD with {n_components} components (auto-sized based on data)")
+            n_components = self.params.get('no_components', 0)
+            if n_components <= 0:
+                # Jika n_components <= 0, gunakan auto-sizing berdasarkan data
+                n_components = min(user_item_array.shape[0], user_item_array.shape[1])
+                # Pastikan minimal 1
+                n_components = max(1, n_components)
+                self.params['no_components'] = n_components
+                logger.info(f"Applying SVD with {n_components} components (auto-sized based on data)")
             
             # Gunakan TruncatedSVD dengan parameter yang lebih baik
             self.model = TruncatedSVD(
