@@ -692,9 +692,18 @@
         const apiUrl = "{{ env('RECOMMENDATION_API_URL', 'http://localhost:8001') }}";
 
         // Fungsi untuk menguji endpoint dan memperbarui UI
-        function testEndpoint(endpoint, url, method, data = null) {
+        function testEndpoint(endpoint, url, method, data = null, isDestructive = false) {
             const element = document.querySelector(`.api-test[data-endpoint="${endpoint}"] .status-indicator`);
             if (!element) return;
+
+            // PERUBAHAN: Jika endpoint destructive (berbahaya), jangan lakukan test otomatis
+            if (isDestructive) {
+                element.innerHTML = `<button onclick="manualTestEndpoint('${endpoint}', '${url}', '${method}')"
+                    class="clay-button clay-button-primary py-1 px-2 text-xs">
+                    Tes Manual
+                </button>`;
+                return;
+            }
 
             const options = {
                 method: method,
@@ -735,53 +744,104 @@
                 });
         }
 
+        // TAMBAHAN: Fungsi untuk test manual endpoint berbahaya
+        window.manualTestEndpoint = function(endpoint, url, method) {
+            if (!confirm(`Anda yakin ingin menguji endpoint ${endpoint}? Endpoint ini dapat menyebabkan perubahan pada sistem.`)) {
+                return;
+            }
+
+            const element = document.querySelector(`.api-test[data-endpoint="${endpoint}"] .status-indicator`);
+            if (!element) return;
+
+            element.innerHTML = `<i class="fas fa-circle-notch fa-spin text-2xl text-primary mb-2"></i>`;
+
+            // Penanganan khusus untuk endpoint tertentu
+            let data = {};
+            if (endpoint === 'train-models') {
+                data = {
+                    models: ['fecf'],
+                    save_model: false,
+                    force: false,
+                    test_only: true  // Flag khusus untuk testing
+                };
+            } else if (endpoint === 'record-interaction') {
+                data = {
+                    user_id: 'test_user',
+                    project_id: 'bitcoin',
+                    interaction_type: 'view',
+                    weight: 1,
+                    test_only: true  // Flag khusus untuk testing
+                };
+            } else if (endpoint === 'sync-data') {
+                data = {
+                    projects_updated: false,
+                    test_only: true  // Flag khusus untuk testing
+                };
+            }
+
+            fetch(url, {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => {
+                if (response.ok) {
+                    element.innerHTML = `<i class="fas fa-check-circle text-3xl text-success mb-2"></i>`;
+                } else {
+                    element.innerHTML = `<i class="fas fa-exclamation-circle text-3xl text-danger mb-2"></i>`;
+                }
+            })
+            .catch(error => {
+                element.innerHTML = `<i class="fas fa-exclamation-circle text-3xl text-danger mb-2"></i>`;
+            });
+        }
+
         // Tes untuk semua endpoint
-        // 1. Core endpoints
+        // 1. Core endpoints (aman)
         testEndpoint('root', `${apiUrl}/`, 'GET');
         testEndpoint('health', `${apiUrl}/health`, 'GET');
 
-        // 2. Recommendation endpoints
+        // 2. Recommendation endpoints (aman untuk GET, hati-hati untuk POST)
         testEndpoint('trending', `${apiUrl}/recommend/trending?limit=5`, 'GET');
         testEndpoint('popular', `${apiUrl}/recommend/popular?limit=5`, 'GET');
-        testEndpoint('projects', `${apiUrl}/recommend/projects`, 'POST', {
-            user_id: 'test_user',
-            model_type: 'hybrid',
-            num_recommendations: 5
-        });
         testEndpoint('similar', `${apiUrl}/recommend/similar/bitcoin?limit=5`, 'GET');
 
-        // 3. Analysis endpoints
-        testEndpoint('trading-signals', `${apiUrl}/analysis/trading-signals`, 'POST', {
-            project_id: 'bitcoin',
-            days: 30,
-            interval: '1d',
-            risk_tolerance: 'medium'
-        });
-        testEndpoint('indicators', `${apiUrl}/analysis/indicators`, 'POST', {
-            project_id: 'bitcoin',
-            days: 30,
-            interval: '1d'
-        });
+        // Endpoint yang bisa mengubah data - tandai sebagai destructive
+        testEndpoint('projects', `${apiUrl}/recommend/projects`, 'POST', {
+            user_id: 'user_1',
+            model_type: 'fecf',
+            num_recommendations: 5,
+            exclude_known: true,
+            test_only: true
+        }, true);
+
+        // 3. Analysis endpoints (aman untuk GET)
         testEndpoint('market-events', `${apiUrl}/analysis/market-events/bitcoin?days=30`, 'GET');
         testEndpoint('alerts', `${apiUrl}/analysis/alerts/bitcoin?days=30`, 'GET');
         testEndpoint('price-prediction', `${apiUrl}/analysis/price-prediction/bitcoin?days=30`, 'GET');
 
-        // 4. Admin & data endpoints
-        testEndpoint('record-interaction', `${apiUrl}/interactions/record`, 'POST', {
-            user_id: 'test_user',
+        // Endpoint yang bisa berat prosesnya - tandai sebagai destructive
+        testEndpoint('trading-signals', `${apiUrl}/analysis/trading-signals`, 'POST', {
             project_id: 'bitcoin',
-            interaction_type: 'view',
-            weight: 1
-        });
-        testEndpoint('train-models', `${apiUrl}/admin/train-models`, 'POST', {
-            models: ['fecf'],
-            save_model: false
-        });
-        testEndpoint('sync-data', `${apiUrl}/admin/sync-data`, 'POST', {
-            projects_updated: false
-        });
-        testEndpoint('rec-cache-clear', `${apiUrl}/recommend/cache/clear`, 'POST');
-        testEndpoint('analysis-cache-clear', `${apiUrl}/analysis/cache/clear`, 'POST');
+            days: 30,
+            risk_tolerance: 'medium',
+            test_only: true
+        }, true);
+        testEndpoint('indicators', `${apiUrl}/analysis/indicators`, 'POST', {
+            project_id: 'bitcoin',
+            days: 30,
+            test_only: true
+        }, true);
+
+        // 4. Admin & data endpoints - SEMUA destructive
+        testEndpoint('record-interaction', `${apiUrl}/interactions/record`, 'POST', null, true);
+        testEndpoint('train-models', `${apiUrl}/admin/train-models`, 'POST', null, true);
+        testEndpoint('sync-data', `${apiUrl}/admin/sync-data`, 'POST', null, true);
+        testEndpoint('rec-cache-clear', `${apiUrl}/recommend/cache/clear`, 'POST', null, true);
+        testEndpoint('analysis-cache-clear', `${apiUrl}/analysis/cache/clear`, 'POST', null, true);
     });
 </script>
 @endpush
