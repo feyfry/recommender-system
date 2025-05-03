@@ -22,10 +22,10 @@ return new class extends Migration
             $table->decimal('volume_24h', 30, 2)->nullable();
             $table->decimal('price_usd', 30, 10)->nullable();
             $table->decimal('price_change_24h', 30, 10)->nullable();
-            $table->decimal('price_change_percentage_24h', 10, 2)->nullable();
-            $table->decimal('price_change_percentage_7d', 10, 2)->nullable();
-            $table->decimal('price_change_percentage_1h', 10, 2)->nullable();
-            $table->decimal('price_change_percentage_30d', 10, 2)->nullable();
+            $table->decimal('price_change_percentage_24h', 30, 10)->nullable();
+            $table->decimal('price_change_percentage_7d', 30, 10)->nullable();
+            $table->decimal('price_change_percentage_1h', 30, 10)->nullable();
+            $table->decimal('price_change_percentage_30d', 30, 10)->nullable();
             $table->string('image')->nullable();
             $table->decimal('popularity_score', 10, 2)->nullable();
             $table->decimal('trend_score', 10, 2)->nullable();
