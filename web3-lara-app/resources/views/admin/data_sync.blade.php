@@ -882,8 +882,7 @@
             user_id: 'user_1',
             model_type: 'fecf',
             num_recommendations: 5,
-            exclude_known: true,
-            test_only: true
+            test_only: true  // Flag khusus untuk testing
         }, true);
 
         // 3. Analysis endpoints (aman untuk GET)
@@ -894,14 +893,11 @@
         // Endpoint yang bisa berat prosesnya - tandai sebagai destructive
         testEndpoint('trading-signals', `${apiUrl}/analysis/trading-signals`, 'POST', {
             project_id: 'bitcoin',
-            days: 30,
-            risk_tolerance: 'medium',
-            test_only: true
+            test_only: true // Flag khusus untuk testing
         }, true);
         testEndpoint('indicators', `${apiUrl}/analysis/indicators`, 'POST', {
             project_id: 'bitcoin',
-            days: 30,
-            test_only: true
+            test_only: true // Flag khusus untuk testing
         }, true);
 
         // 4. Admin & data endpoints - SEMUA destructive
