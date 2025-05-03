@@ -774,7 +774,7 @@ def evaluate_cold_start(model: Any,
         cold_start_users = min(len(eligible_users), cold_start_users)
     
     # Create a more varied RNG seed
-    seed = int(time.time() % 10000) + hash(model_name) % 1000
+    seed = EVAL_RANDOM_SEED
     rng = np.random.default_rng(seed)
 
     # OPTIMIZATION: Simpler user selection

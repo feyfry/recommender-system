@@ -14,7 +14,7 @@ import sys
 
 # Tambahkan path root ke sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from config import RAW_DIR, PROCESSED_DIR, USER_PERSONAS
+from config import RAW_DIR, PROCESSED_DIR, USER_PERSONAS, EVAL_RANDOM_SEED
 
 # Setup logging
 logging.basicConfig(
@@ -1304,7 +1304,7 @@ class DataProcessor:
         logger.info(f"Creating synthetic interactions for {n_users} users")
         
         # Create global RNG instance with fixed seed for reproducibility
-        base_seed = 42
+        base_seed = EVAL_RANDOM_SEED
         global_rng = np.random.default_rng(base_seed)
         
         # Create total time range for all interactions (now - max_days_ago to now)
