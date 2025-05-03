@@ -1345,22 +1345,22 @@ class DataProcessor:
         # Define user activity profiles
         activity_profiles = {
             'very_casual': {
-                'interaction_count_range': (1, 5),
+                'interaction_count_range': (5, 8),  # MINIMUM DINAIKKAN MENJADI 5!
                 'session_patterns': ['single_session'],
                 'exploration_rate': (0.05, 0.15),
                 'popularity_bias': (0.7, 0.9),
                 'category_focus': (0.8, 0.95),
                 'weight_boost': (0.8, 1.2),
-                'probs': 0.20  # 20% of users are very casual
+                'probs': 0.15  # 15% of users are very casual (dikurangi)
             },
             'casual': {
-                'interaction_count_range': (5, 15),
+                'interaction_count_range': (8, 15),  # MINIMUM DINAIKKAN
                 'session_patterns': ['single_session', 'few_sessions'],
                 'exploration_rate': (0.1, 0.25),
                 'popularity_bias': (0.6, 0.8),
                 'category_focus': (0.7, 0.9),
                 'weight_boost': (0.9, 1.3),
-                'probs': 0.30  # 30% of users are casual
+                'probs': 0.25  # 25% of users are casual (dikurangi)
             },
             'regular': {
                 'interaction_count_range': (15, 40),
@@ -1369,7 +1369,7 @@ class DataProcessor:
                 'popularity_bias': (0.5, 0.7),
                 'category_focus': (0.6, 0.8),
                 'weight_boost': (1.0, 1.5),
-                'probs': 0.25  # 25% of users are regular
+                'probs': 0.30  # 30% of users are regular (dinaikkan)
             },
             'active': {
                 'interaction_count_range': (40, 80),
@@ -1378,7 +1378,7 @@ class DataProcessor:
                 'popularity_bias': (0.4, 0.6),
                 'category_focus': (0.5, 0.7),
                 'weight_boost': (1.2, 1.8),
-                'probs': 0.15  # 15% of users are active
+                'probs': 0.20  # 20% of users are active (dinaikkan)
             },
             'power_user': {
                 'interaction_count_range': (80, 150),
@@ -1434,6 +1434,9 @@ class DataProcessor:
                 mean = (min_count + max_count) / 2
                 std = (max_count - min_count) / 4
                 n_interactions = max(min_count, min(max_count, int(user_rng.normal(mean, std))))
+            
+            # TAMBAHAN: Pastikan minimum 5 interaksi
+            n_interactions = max(5, n_interactions)
             
             # More varied preferences based on persona with added randomness
             preferred_categories = persona_data['categories']
@@ -2018,6 +2021,17 @@ class DataProcessor:
             interactions_df = interactions_df.sort_values('timestamp')
             # Convert back to string format
             interactions_df['timestamp'] = interactions_df['timestamp'].dt.strftime('%Y-%m-%dT%H:%M:%S')
+        
+        # TAMBAHAN: Verifikasi minimum interaksi
+        user_interaction_counts = interactions_df.groupby('user_id').size()
+        min_interactions = user_interaction_counts.min()
+        
+        logger.info(f"Minimum interactions per user: {min_interactions}")
+        logger.info(f"Maximum interactions per user: {user_interaction_counts.max()}")
+        logger.info(f"Average interactions per user: {user_interaction_counts.mean():.2f}")
+        
+        if min_interactions < 5:
+            logger.warning(f"Some users still have less than 5 interactions! Minimum: {min_interactions}")
         
         return interactions_df
     
