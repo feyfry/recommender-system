@@ -251,9 +251,9 @@
                                     {{ number_format($recommendation['score'] ?? 0, 2) }}
                                 </div>
                             </div>
-                            @if(isset($recommendation['price_usd']))
+                            @if(isset($recommendation['current_price']))
                                 <div class="flex justify-between text-sm">
-                                    <span>${{ number_format($recommendation['price_usd'], 2) }}</span>
+                                    <span>${{ number_format($recommendation['current_price'], 2) }}</span>
                                     <span class="{{ isset($recommendation['price_change_24h']) && $recommendation['price_change_24h'] >= 0 ? 'text-success' : 'text-danger' }}">
                                         {{ isset($recommendation['price_change_24h']) ? (($recommendation['price_change_24h'] >= 0 ? '+' : '') . number_format($recommendation['price_change_24h'], 2) . '%') : '' }}
                                     </span>
@@ -302,9 +302,9 @@
                                     Trending
                                 </div>
                             </div>
-                            @if(isset($project['price_usd']))
+                            @if(isset($project['current_price']))
                                 <div class="flex justify-between text-sm">
-                                    <span>${{ number_format($project['price_usd'], 2) }}</span>
+                                    <span>${{ number_format($project['current_price'], 2) }}</span>
                                     <span class="{{ isset($project['price_change_percentage_24h']) && $project['price_change_percentage_24h'] >= 0 ? 'text-success' : 'text-danger' }}">
                                         {{ isset($project['price_change_percentage_24h']) ? (($project['price_change_percentage_24h'] >= 0 ? '+' : '') . number_format($project['price_change_percentage_24h'], 2) . '%') : '' }}
                                     </span>

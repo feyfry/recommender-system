@@ -125,14 +125,14 @@
                                 </div>
                             </div>
                         </td>
-                        <td class="py-3 px-4 font-medium">{{ $project['formatted_price'] ?? '$'.number_format($project['price_usd'], 2) }}</td>
+                        <td class="py-3 px-4 font-medium">{{ $project['formatted_price'] ?? '$'.number_format($project['current_price'], 2) }}</td>
                         <td class="py-3 px-4 {{ ($project['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
                             {{ ($project['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}{{ number_format($project['price_change_percentage_24h'] ?? 0, 2) }}%
                         </td>
-                        <td class="py-3 px-4 {{ ($project['price_change_percentage_7d'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
-                            {{ ($project['price_change_percentage_7d'] ?? 0) > 0 ? '+' : '' }}{{ number_format($project['price_change_percentage_7d'] ?? 0, 2) }}%
+                        <td class="py-3 px-4 {{ ($project['price_change_percentage_7d_in_currency'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
+                            {{ ($project['price_change_percentage_7d_in_currency'] ?? 0) > 0 ? '+' : '' }}{{ number_format($project['price_change_percentage_7d_in_currency'] ?? 0, 2) }}%
                         </td>
-                        <td class="py-3 px-4">${{ number_format($project['volume_24h'] ?? 0) }}</td>
+                        <td class="py-3 px-4">${{ number_format($project['total_volume'] ?? 0) }}</td>
                         <td class="py-3 px-4">${{ number_format($project['market_cap'] ?? 0) }}</td>
                         <td class="py-3 px-4">
                             <div class="flex items-center">

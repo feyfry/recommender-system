@@ -38,44 +38,56 @@ class Project extends Model
      */
     protected $fillable = [
         'id',
-        'name',
         'symbol',
-        'categories',
-        'platforms',
-        'roi',
+        'name',
+        'image',
+        'current_price',
         'market_cap',
-        'volume_24h',
-        'price_usd',
+        'market_cap_rank',
+        'fully_diluted_valuation',
+        'total_volume',
+        'high_24h',
+        'low_24h',
         'price_change_24h',
         'price_change_percentage_24h',
-        'price_change_percentage_7d',
-        'price_change_percentage_1h',
-        'price_change_percentage_30d',
-        'image',
-        'popularity_score',
-        'trend_score',
-        'social_score',
-        'social_engagement_score',
-        'developer_activity_score',
-        'maturity_score',
-        'sentiment_positive',
-        'description',
-        'twitter_followers',
-        'telegram_channel_user_count',
-        'github_stars',
-        'github_forks',
-        'github_subscribers',
-        'chain',
-        'primary_category',
-        'genesis_date',
-        'all_time_high',
-        'all_time_high_date',
-        'all_time_low',
-        'all_time_low_date',
+        'market_cap_change_24h',
+        'market_cap_change_percentage_24h',
         'circulating_supply',
         'total_supply',
         'max_supply',
-        'fully_diluted_valuation',
+        'ath',
+        'ath_change_percentage',
+        'ath_date',
+        'atl',
+        'atl_change_percentage',
+        'atl_date',
+        'roi',
+        'last_updated',
+        'price_change_percentage_1h_in_currency',
+        'price_change_percentage_24h_in_currency',
+        'price_change_percentage_30d_in_currency',
+        'price_change_percentage_7d_in_currency',
+        'query_category',
+        'platforms',
+        'categories',
+        'twitter_followers',
+        'github_stars',
+        'github_subscribers',
+        'github_forks',
+        'description',
+        'genesis_date',
+        'sentiment_votes_up_percentage',
+        'telegram_channel_user_count',
+        'primary_category',
+        'chain',
+        'popularity_score',
+        'trend_score',
+        'developer_activity_score',
+        'social_engagement_score',
+        'description_length',
+        'age_days',
+        'maturity_score',
+        'is_trending',
     ];
 
     /**
@@ -84,11 +96,14 @@ class Project extends Model
      * @var array<string, string>
      */
     protected $casts = [
-        'categories'         => 'array',
-        'platforms'          => 'array',
-        'genesis_date'       => 'date',
-        'all_time_high_date' => 'datetime',
-        'all_time_low_date'  => 'datetime',
+        'categories'    => 'array',
+        'platforms'     => 'array',
+        'roi'           => 'array',
+        'genesis_date'  => 'date',
+        'ath_date'      => 'datetime',
+        'atl_date'      => 'datetime',
+        'last_updated'  => 'datetime',
+        'is_trending'   => 'boolean',
     ];
 
     /**
@@ -190,19 +205,19 @@ class Project extends Model
      */
     public function getFormattedPriceAttribute(): string
     {
-        if (is_null($this->price_usd)) {
+        if (is_null($this->current_price)) {
             return 'Tidak diketahui';
         }
 
         // Format harga berdasarkan besar nilainya
-        if ($this->price_usd < 0.00001) {
-            return '$' . number_format($this->price_usd, 8);
-        } else if ($this->price_usd < 0.01) {
-            return '$' . number_format($this->price_usd, 6);
-        } else if ($this->price_usd < 1) {
-            return '$' . number_format($this->price_usd, 4);
+        if ($this->current_price < 0.00001) {
+            return '$' . number_format($this->current_price, 8);
+        } else if ($this->current_price < 0.01) {
+            return '$' . number_format($this->current_price, 6);
+        } else if ($this->current_price < 1) {
+            return '$' . number_format($this->current_price, 4);
         } else {
-            return '$' . number_format($this->price_usd, 2);
+            return '$' . number_format($this->current_price, 2);
         }
     }
 

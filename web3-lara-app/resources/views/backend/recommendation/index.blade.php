@@ -85,7 +85,7 @@
                 <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
                     <div class="font-bold text-lg mb-2">{{ $recommendation->name ?? $recommendation['name'] }} ({{ $recommendation->symbol ?? $recommendation['symbol'] }})</div>
                     <div class="text-sm mb-2">
-                        {{ $recommendation->formatted_price ?? '$'.number_format($recommendation->price_usd ?? $recommendation['price_usd'], 2) }}
+                        {{ $recommendation->formatted_price ?? '$'.number_format($recommendation->current_price ?? $recommendation['current_price'], 2) }}
                         <span class="{{ ($recommendation->price_change_percentage_24h ?? $recommendation['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
                             {{ ($recommendation->price_change_percentage_24h ?? $recommendation['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}
                             {{ number_format($recommendation->price_change_percentage_24h ?? $recommendation['price_change_percentage_24h'] ?? 0, 2) }}%
@@ -155,12 +155,12 @@
                                     {{ $project['name'] }} ({{ $project['symbol'] }})
                                 </div>
                             </td>
-                            <td class="py-3 px-4">{{ $project['formatted_price'] ?? '$'.number_format($project['price_usd'], 2) }}</td>
+                            <td class="py-3 px-4">{{ $project['formatted_price'] ?? '$'.number_format($project['current_price'], 2) }}</td>
                             <td class="py-3 px-4 {{ ($project['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
                                 {{ ($project['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}{{ number_format($project['price_change_percentage_24h'] ?? 0, 2) }}%
                             </td>
-                            <td class="py-3 px-4 {{ ($project['price_change_percentage_7d'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
-                                {{ ($project['price_change_percentage_7d'] ?? 0) > 0 ? '+' : '' }}{{ number_format($project['price_change_percentage_7d'] ?? 0, 2) }}%
+                            <td class="py-3 px-4 {{ ($project['price_change_percentage_7d_in_currency'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
+                                {{ ($project['price_change_percentage_7d_in_currency'] ?? 0) > 0 ? '+' : '' }}{{ number_format($project['price_change_percentage_7d_in_currency'] ?? 0, 2) }}%
                             </td>
                             <td class="py-3 px-4">
                                 <div class="flex items-center">

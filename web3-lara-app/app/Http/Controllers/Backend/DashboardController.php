@@ -105,7 +105,7 @@ class DashboardController extends Controller
                 'image'  => $portfolio->project->image,
                 'value'  => $currentValue,
                 'amount' => $portfolio->amount,
-                'price'  => $portfolio->project->price_usd,
+                'price'  => $portfolio->project->current_price,
             ];
         }
 

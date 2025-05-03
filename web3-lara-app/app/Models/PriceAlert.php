@@ -145,7 +145,7 @@ class PriceAlert extends Model
     public function getNotificationMessageAttribute()
     {
         $type         = $this->alert_type === 'above' ? 'naik di atas' : 'turun di bawah';
-        $currentPrice = $this->project->price_usd;
+        $currentPrice = $this->project->current_price;
 
         return "Harga {$this->project->name} ({$this->project->symbol}) telah {$type} target Anda \${$this->target_price}. Harga saat ini: \${$currentPrice}.";
     }
@@ -155,7 +155,7 @@ class PriceAlert extends Model
      */
     public function getPercentageToTargetAttribute()
     {
-        $currentPrice = $this->project->price_usd;
+        $currentPrice = $this->project->current_price;
 
         if ($currentPrice == 0) {
             return 0;

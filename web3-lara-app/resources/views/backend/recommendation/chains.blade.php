@@ -56,7 +56,7 @@
             <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
                 <div class="font-bold text-lg mb-2">{{ $recommendation['name'] ?? 'Unknown Project' }} ({{ $recommendation['symbol'] ?? 'N/A' }})</div>
                 <div class="text-sm mb-2">
-                    {{ '$'.number_format($recommendation['price_usd'] ?? 0, 2) }}
+                    {{ '$'.number_format($recommendation['current_price'] ?? 0, 2) }}
                     <span class="{{ ($recommendation['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
                         {{ ($recommendation['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}
                         {{ number_format($recommendation['price_change_percentage_24h'] ?? 0, 2) }}%

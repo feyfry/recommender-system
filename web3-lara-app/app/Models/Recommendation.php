@@ -173,8 +173,8 @@ class Recommendation extends Model
             ->selectRaw('action_type,
                 COUNT(*) as total,
                 SUM(CASE
-                    WHEN action_type = "buy" AND projects.price_usd <= target_price THEN 1
-                    WHEN action_type = "sell" AND projects.price_usd >= target_price THEN 1
+                    WHEN action_type = "buy" AND projects.current_price <= target_price THEN 1
+                    WHEN action_type = "sell" AND projects.current_price >= target_price THEN 1
                     ELSE 0
                 END) as success_count');
 

@@ -52,7 +52,7 @@ class Portfolio extends Model
      */
     public function getCurrentValueAttribute()
     {
-        return $this->amount * $this->project->price_usd;
+        return $this->amount * $this->project->current_price;
     }
 
     /**
@@ -114,7 +114,7 @@ class Portfolio extends Model
         return self::forUser($userId)
             ->join('projects', 'portfolios.project_id', '=', 'projects.id')
             ->selectRaw('projects.primary_category,
-                        SUM(portfolios.amount * projects.price_usd) as value,
+                        SUM(portfolios.amount * projects.current_price) as value,
                         COUNT(*) as project_count')
             ->groupBy('projects.primary_category')
             ->get();
@@ -128,7 +128,7 @@ class Portfolio extends Model
         return self::forUser($userId)
             ->join('projects', 'portfolios.project_id', '=', 'projects.id')
             ->selectRaw('projects.chain,
-                        SUM(portfolios.amount * projects.price_usd) as value,
+                        SUM(portfolios.amount * projects.current_price) as value,
                         COUNT(*) as project_count')
             ->groupBy('projects.chain')
             ->get();

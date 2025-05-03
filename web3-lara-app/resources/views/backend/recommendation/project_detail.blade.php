@@ -90,7 +90,7 @@
                 <div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
                     <div class="clay-card bg-primary/10 p-3">
                         <div class="text-sm text-gray-600">Harga Saat Ini</div>
-                        <div class="text-xl font-bold">{{ $project->formatted_price ?? '$'.number_format($project->price_usd, 2) }}</div>
+                        <div class="text-xl font-bold">{{ $project->formatted_price ?? '$'.number_format($project->current_price, 2) }}</div>
                     </div>
                     <div class="clay-card bg-{{ $project->price_change_percentage_24h >= 0 ? 'success' : 'danger' }}/10 p-3">
                         <div class="text-sm text-gray-600">Perubahan 24h</div>
@@ -100,8 +100,8 @@
                     </div>
                     <div class="clay-card bg-secondary/10 p-3">
                         <div class="text-sm text-gray-600">Perubahan 7d</div>
-                        <div class="text-xl font-bold {{ $project->price_change_percentage_7d >= 0 ? 'text-success' : 'text-danger' }}">
-                            {{ $project->price_change_percentage_7d >= 0 ? '+' : '' }}{{ number_format($project->price_change_percentage_7d, 2) }}%
+                        <div class="text-xl font-bold {{ $project->price_change_percentage_7d_in_currency >= 0 ? 'text-success' : 'text-danger' }}">
+                            {{ $project->price_change_percentage_7d_in_currency >= 0 ? '+' : '' }}{{ number_format($project->price_change_percentage_7d_in_currency, 2) }}%
                         </div>
                     </div>
                 </div>
@@ -113,7 +113,7 @@
                     </div>
                     <div>
                         <div class="text-sm text-gray-600">Volume 24h</div>
-                        <div class="font-medium">${{ number_format($project->volume_24h, 0) }}</div>
+                        <div class="font-medium">${{ number_format($project->total_volume, 0) }}</div>
                     </div>
                     <div>
                         <div class="text-sm text-gray-600">Popularitas</div>
@@ -172,7 +172,7 @@
                             <div class="font-bold truncate">{{ $similarProject['name'] ?? $similarProject->name }} ({{ $similarProject['symbol'] ?? $similarProject->symbol }})</div>
                         </div>
                         <div class="text-sm mb-2 flex justify-between">
-                            <span>{{ isset($similarProject['price_usd']) ? '$'.number_format($similarProject['price_usd'], 2) : '' }}</span>
+                            <span>{{ isset($similarProject['current_price']) ? '$'.number_format($similarProject['current_price'], 2) : '' }}</span>
                             @if(isset($similarProject['price_change_percentage_24h']))
                             <span class="{{ $similarProject['price_change_percentage_24h'] >= 0 ? 'text-success' : 'text-danger' }}">
                                 {{ $similarProject['price_change_percentage_24h'] >= 0 ? '+' : '' }}{{ number_format($similarProject['price_change_percentage_24h'], 2) }}%
@@ -275,7 +275,7 @@
 
                         <div>
                             <label for="target_price" class="text-sm">Target Price ($)</label>
-                            <input type="number" name="target_price" id="target_price" step="0.000001" min="0" class="clay-input mt-1" placeholder="{{ $project->price_usd }}">
+                            <input type="number" name="target_price" id="target_price" step="0.000001" min="0" class="clay-input mt-1" placeholder="{{ $project->current_price }}">
                         </div>
 
                         <div>

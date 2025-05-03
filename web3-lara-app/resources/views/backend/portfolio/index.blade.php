@@ -92,7 +92,7 @@
                                 </td>
                                 <td class="py-3 px-4 font-medium">{{ number_format($portfolio->amount, 6) }}</td>
                                 <td class="py-3 px-4">${{ number_format($portfolio->average_buy_price, 4) }}</td>
-                                <td class="py-3 px-4">${{ number_format($portfolio->project->price_usd, 4) }}</td>
+                                <td class="py-3 px-4">${{ number_format($portfolio->project->current_price, 4) }}</td>
                                 <td class="py-3 px-4 font-medium">${{ number_format($portfolio->current_value, 2) }}</td>
                                 <td class="py-3 px-4 {{ $portfolio->profit_loss_value >= 0 ? 'text-success' : 'text-danger' }}">
                                     {{ $portfolio->profit_loss_value >= 0 ? '+' : '' }}${{ number_format($portfolio->profit_loss_value, 2) }}

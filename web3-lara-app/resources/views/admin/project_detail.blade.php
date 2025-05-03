@@ -81,7 +81,7 @@
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Perubahan 24 Jam</label>
+                        <label class="block text-sm text-gray-600">Persentase Perubahan 24 Jam</label>
                         <div class="font-medium {{ $project->price_change_percentage_24h >= 0 ? 'text-success' : 'text-danger' }}">
                             {{ $project->formatted_price_change }}
                         </div>
@@ -468,10 +468,10 @@
                                 </div>
                                 @endif
 
-                                @if($project->volume_24h)
+                                @if($project->total_volume)
                                 <div class="flex justify-between">
                                     <span>Volume 24h:</span>
-                                    <span class="font-medium">${{ number_format($project->volume_24h, 0) }}</span>
+                                    <span class="font-medium">${{ number_format($project->total_volume, 0) }}</span>
                                 </div>
                                 @endif
 
@@ -501,13 +501,6 @@
                         <div class="clay-card bg-secondary/10 p-4">
                             <h4 class="font-bold mb-2">Metrik Sosial:</h4>
                             <div class="space-y-2 text-sm">
-                                @if($project->social_score)
-                                <div class="flex justify-between">
-                                    <span>Social Score:</span>
-                                    <span class="font-medium">{{ number_format($project->social_score, 1) }}</span>
-                                </div>
-                                @endif
-
                                 @if($project->social_engagement_score)
                                 <div class="flex justify-between">
                                     <span>Engagement Score:</span>

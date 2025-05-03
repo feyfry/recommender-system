@@ -207,8 +207,8 @@
                         <select name="project_id" id="project_id" class="clay-select" required>
                             <option value="">-- Pilih Proyek --</option>
                             @foreach(\App\Models\Project::orderBy('name')->get() as $project)
-                                <option value="{{ $project->id }}" data-price="{{ $project->price_usd }}">
-                                    {{ $project->name }} ({{ $project->symbol }}) - ${{ number_format($project->price_usd, 4) }}
+                                <option value="{{ $project->id }}" data-price="{{ $project->current_price }}">
+                                    {{ $project->name }} ({{ $project->symbol }}) - ${{ number_format($project->current_price, 4) }}
                                 </option>
                             @endforeach
                         </select>
@@ -305,10 +305,10 @@
                             @endif
                         </td>
                         <td class="py-3 px-4 font-medium">${{ number_format($alert->target_price, 4) }}</td>
-                        <td class="py-3 px-4">${{ number_format($alert->project->price_usd, 4) }}</td>
+                        <td class="py-3 px-4">${{ number_format($alert->project->current_price, 4) }}</td>
                         <td class="py-3 px-4">
                             @php
-                                $percentToTarget = (($alert->target_price - $alert->project->price_usd) / $alert->project->price_usd) * 100;
+                                $percentToTarget = (($alert->target_price - $alert->project->current_price) / $alert->project->current_price) * 100;
                                 $distance = abs($percentToTarget);
                                 $direction = $percentToTarget > 0 ? 'naik' : 'turun';
                             @endphp

@@ -75,7 +75,7 @@
                 <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
                     <div class="font-bold text-lg mb-2">{{ $recommendation['name'] ?? 'Unknown Project' }} ({{ $recommendation['symbol'] ?? 'N/A' }})</div>
                     <div class="text-sm mb-2">
-                        {{ '$'.number_format($recommendation['price_usd'] ?? 0, 2) }}
+                        {{ '$'.number_format($recommendation['current_price'] ?? 0, 2) }}
                         <span class="{{ ($recommendation['price_change_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
                             {{ ($recommendation['price_change_24h'] ?? 0) > 0 ? '+' : '' }}
                             {{ number_format($recommendation['price_change_24h'] ?? 0, 2) }}%
@@ -126,13 +126,13 @@
                     if (!isset($rec['name']) && isset($rec->name)) $rec['name'] = $rec->name;
                     if (!isset($rec['symbol']) && isset($rec->symbol)) $rec['symbol'] = $rec->symbol;
 
-                    // Pastikan price_usd ada
-                    if (!isset($rec['price_usd']) && isset($rec['current_price'])) {
-                        $rec['price_usd'] = $rec['current_price'];
-                    } elseif (!isset($rec['price_usd']) && isset($rec->price_usd)) {
-                        $rec['price_usd'] = $rec->price_usd;
-                    } elseif (!isset($rec['price_usd']) && isset($rec->current_price)) {
-                        $rec['price_usd'] = $rec->current_price;
+                    // Pastikan current_price ada
+                    if (!isset($rec['current_price']) && isset($rec['current_price'])) {
+                        $rec['current_price'] = $rec['current_price'];
+                    } elseif (!isset($rec['current_price']) && isset($rec->current_price)) {
+                        $rec['current_price'] = $rec->current_price;
+                    } elseif (!isset($rec['current_price']) && isset($rec->current_price)) {
+                        $rec['current_price'] = $rec->current_price;
                     }
 
                     // Pastikan score ada
@@ -148,7 +148,7 @@
                 <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
                     <div class="font-bold text-lg mb-2">{{ $rec['name'] }} ({{ $rec['symbol'] ?? 'N/A' }})</div>
                     <div class="text-sm mb-2">
-                        {{ '$'.number_format($rec['price_usd'] ?? 0, 2) }}
+                        {{ '$'.number_format($rec['current_price'] ?? 0, 2) }}
                         <span class="{{ ($rec['price_change_24h'] ?? $rec['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
                             {{ ($rec['price_change_24h'] ?? $rec['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}
                             {{ number_format($rec['price_change_24h'] ?? $rec['price_change_percentage_24h'] ?? 0, 2) }}%
@@ -198,13 +198,13 @@
                     if (!isset($rec['name']) && isset($rec->name)) $rec['name'] = $rec->name;
                     if (!isset($rec['symbol']) && isset($rec->symbol)) $rec['symbol'] = $rec->symbol;
 
-                    // Pastikan price_usd ada
-                    if (!isset($rec['price_usd']) && isset($rec['current_price'])) {
-                        $rec['price_usd'] = $rec['current_price'];
-                    } elseif (!isset($rec['price_usd']) && isset($rec->price_usd)) {
-                        $rec['price_usd'] = $rec->price_usd;
-                    } elseif (!isset($rec['price_usd']) && isset($rec->current_price)) {
-                        $rec['price_usd'] = $rec->current_price;
+                    // Pastikan current_price ada
+                    if (!isset($rec['current_price']) && isset($rec['current_price'])) {
+                        $rec['current_price'] = $rec['current_price'];
+                    } elseif (!isset($rec['current_price']) && isset($rec->current_price)) {
+                        $rec['current_price'] = $rec->current_price;
+                    } elseif (!isset($rec['current_price']) && isset($rec->current_price)) {
+                        $rec['current_price'] = $rec->current_price;
                     }
 
                     // Pastikan score ada
@@ -220,7 +220,7 @@
                 <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
                     <div class="font-bold text-lg mb-2">{{ $rec['name'] }} ({{ $rec['symbol'] ?? 'N/A' }})</div>
                     <div class="text-sm mb-2">
-                        {{ '$'.number_format($rec['price_usd'] ?? 0, 2) }}
+                        {{ '$'.number_format($rec['current_price'] ?? 0, 2) }}
                         <span class="{{ ($rec['price_change_24h'] ?? $rec['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
                             {{ ($rec['price_change_24h'] ?? $rec['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}
                             {{ number_format($rec['price_change_24h'] ?? $rec['price_change_percentage_24h'] ?? 0, 2) }}%

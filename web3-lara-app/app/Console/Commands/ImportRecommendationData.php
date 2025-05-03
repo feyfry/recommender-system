@@ -37,25 +37,6 @@ class ImportRecommendationData extends Command
         }
     }
 
-    // Mapping kolom dari CSV ke database
-    protected function getColumnMapping()
-    {
-        return [
-            'current_price'                           => 'price_usd',
-            'total_volume'                            => 'volume_24h',
-            'ath'                                     => 'all_time_high',
-            'ath_date'                                => 'all_time_high_date',
-            'atl'                                     => 'all_time_low',
-            'atl_date'                                => 'all_time_low_date',
-            'price_change_percentage_1h_in_currency'  => 'price_change_percentage_1h',
-            'price_change_percentage_30d_in_currency' => 'price_change_percentage_30d',
-            'price_change_percentage_7d_in_currency'  => 'price_change_percentage_7d',
-            'sentiment_votes_up_percentage'           => 'sentiment_positive',
-            // Mapping untuk interactions
-            'timestamp'                               => 'created_at',
-        ];
-    }
-
     protected function importProjects()
     {
         $csvPath = base_path('../recommendation-engine/data/processed/projects.csv');
@@ -106,7 +87,6 @@ class ImportRecommendationData extends Command
 
             $successCount  = 0;
             $failedCount   = 0;
-            $columnMapping = $this->getColumnMapping();
             $rowNumber     = 0;
 
             while (($row = fgetcsv($handle)) !== false) {
@@ -126,25 +106,50 @@ class ImportRecommendationData extends Command
                 // Gunakan transaction terpisah untuk setiap record
                 DB::beginTransaction();
                 try {
-                    // Lakukan mapping kolom
-                    $mappedRecord = [];
-                    foreach ($record as $key => $value) {
-                        $newKey                = $columnMapping[$key] ?? $key;
-                        $mappedRecord[$newKey] = $value;
+                    // Proses field ROI - perbaikan parsing JSON
+                    if (isset($record['roi'])) {
+                        if (empty($record['roi']) || $record['roi'] === '?') {
+                            $record['roi'] = null;
+                        } else {
+                            // Hapus quotes yang mungkin ada di sekitar JSON
+                            $roiData = trim($record['roi'], '"\'');
+                            // Ganti single quotes dengan double quotes untuk JSON valid
+                            $roiData = str_replace("'", '"', $roiData);
+
+                            $jsonDecoded = json_decode($roiData, true);
+                            if (json_last_error() === JSON_ERROR_NONE) {
+                                $record['roi'] = json_encode($jsonDecoded);
+                            } else {
+                                if ($this->debug) {
+                                    $this->warn("Invalid ROI JSON in row {$rowNumber}: " . $record['roi']);
+                                }
+                                $record['roi'] = null;
+                            }
+                        }
                     }
 
-                    // Proses fields JSON
-                    $jsonFields = ['platforms', 'categories', 'roi'];
+                    // Proses fields JSON lainnya
+                    $jsonFields = ['platforms', 'categories'];
                     foreach ($jsonFields as $field) {
-                        if (isset($mappedRecord[$field])) {
-                            if (empty($mappedRecord[$field]) || $mappedRecord[$field] === '?' || $mappedRecord[$field] === '[]') {
-                                $mappedRecord[$field] = null;
+                        if (isset($record[$field])) {
+                            if (empty($record[$field]) || $record[$field] === '?' || $record[$field] === '[]') {
+                                $record[$field] = null;
                             } else {
-                                $jsonDecoded = json_decode($mappedRecord[$field], true);
+                                // Hapus quotes yang mungkin ada di sekitar JSON
+                                $jsonData = trim($record[$field], '"');
+                                // Ganti quotes ganda dengan single untuk platforms yang menggunakan format berbeda
+                                if ($field === 'platforms') {
+                                    $jsonData = str_replace('""', '"', $jsonData);
+                                }
+
+                                $jsonDecoded = json_decode($jsonData, true);
                                 if (json_last_error() === JSON_ERROR_NONE) {
-                                    $mappedRecord[$field] = json_encode($jsonDecoded);
+                                    $record[$field] = json_encode($jsonDecoded);
                                 } else {
-                                    $mappedRecord[$field] = null;
+                                    if ($this->debug) {
+                                        $this->warn("Invalid {$field} JSON in row {$rowNumber}: " . $record[$field]);
+                                    }
+                                    $record[$field] = null;
                                 }
                             }
                         }
@@ -152,58 +157,53 @@ class ImportRecommendationData extends Command
 
                     // Konversi nilai numerik yang kosong ke null
                     $numericFields = [
-                        'fully_diluted_valuation', 'max_supply', 'sentiment_positive',
-                        'telegram_channel_user_count', 'twitter_followers', 'github_stars',
-                        'github_subscribers', 'github_forks', 'developer_activity_score',
-                        'social_engagement_score', 'price_usd', 'market_cap',
-                        'volume_24h', 'price_change_24h',
-                        'price_change_percentage_24h', 'circulating_supply', 'total_supply',
-                        'all_time_high', 'all_time_low',
-                        'price_change_percentage_1h', 'price_change_percentage_24h',
-                        'price_change_percentage_30d', 'price_change_percentage_7d',
+                        'current_price', 'market_cap', 'market_cap_rank', 'fully_diluted_valuation',
+                        'total_volume', 'high_24h', 'low_24h', 'price_change_24h',
+                        'price_change_percentage_24h', 'market_cap_change_24h',
+                        'market_cap_change_percentage_24h', 'circulating_supply',
+                        'total_supply', 'max_supply', 'ath', 'ath_change_percentage',
+                        'atl', 'atl_change_percentage', 'price_change_percentage_1h_in_currency',
+                        'price_change_percentage_24h_in_currency', 'price_change_percentage_30d_in_currency',
+                        'price_change_percentage_7d_in_currency', 'twitter_followers',
+                        'github_stars', 'github_subscribers', 'github_forks',
+                        'sentiment_votes_up_percentage', 'telegram_channel_user_count',
                         'popularity_score', 'trend_score', 'developer_activity_score',
-                        'social_engagement_score', 'maturity_score',
+                        'social_engagement_score', 'description_length', 'age_days',
+                        'maturity_score'
                     ];
 
                     foreach ($numericFields as $field) {
-                        if (isset($mappedRecord[$field])) {
-                            if ($mappedRecord[$field] === '' || $mappedRecord[$field] === 'null' || $mappedRecord[$field] === '?') {
-                                $mappedRecord[$field] = null;
+                        if (isset($record[$field])) {
+                            if ($record[$field] === '' || $record[$field] === 'null' || $record[$field] === '?') {
+                                $record[$field] = null;
                             } else {
-                                $mappedRecord[$field] = floatval($mappedRecord[$field]);
+                                $record[$field] = floatval($record[$field]);
                             }
                         }
                     }
 
                     // Konversi tanggal yang kosong ke null
-                    $dateFields = ['genesis_date', 'all_time_high_date', 'all_time_low_date'];
+                    $dateFields = ['genesis_date', 'ath_date', 'atl_date', 'last_updated'];
                     foreach ($dateFields as $field) {
-                        if (isset($mappedRecord[$field]) && ($mappedRecord[$field] === '' || $mappedRecord[$field] === 'null' || $mappedRecord[$field] === '?')) {
-                            $mappedRecord[$field] = null;
+                        if (isset($record[$field]) && ($record[$field] === '' || $record[$field] === 'null' || $record[$field] === '?')) {
+                            $record[$field] = null;
                         }
                     }
 
-                    // Tambahkan field yang dibutuhkan database tapi tidak ada di CSV
-                    $mappedRecord['created_at'] = now();
-                    $mappedRecord['updated_at'] = now();
-
-                    // Hapus field yang tidak ada di database
-                    $fieldsToRemove = [
-                        'market_cap_rank', 'high_24h', 'low_24h', 'market_cap_change_24h',
-                        'market_cap_change_percentage_24h', 'ath_change_percentage',
-                        'atl_change_percentage', 'last_updated', 'price_change_percentage_24h_in_currency',
-                        'query_category', 'description_length', 'age_days', 'is_trending',
-                    ];
-
-                    foreach ($fieldsToRemove as $field) {
-                        unset($mappedRecord[$field]);
+                    // Konversi boolean field
+                    if (isset($record['is_trending'])) {
+                        $record['is_trending'] = filter_var($record['is_trending'], FILTER_VALIDATE_BOOLEAN);
                     }
+
+                    // Tambahkan field yang dibutuhkan database tapi tidak ada di CSV
+                    $record['created_at'] = now();
+                    $record['updated_at'] = now();
 
                     // Insert atau update ke database
                     DB::table('projects')
                         ->updateOrInsert(
-                            ['id' => $mappedRecord['id']],
-                            $mappedRecord
+                            ['id' => $record['id']],
+                            $record
                         );
 
                     DB::commit();
