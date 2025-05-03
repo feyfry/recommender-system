@@ -417,6 +417,41 @@
             Import/Export Data
         </h2>
 
+        <!-- Tampilkan status file CSV -->
+        @php
+            $basePath = base_path('../recommendation-engine/data/processed/');
+            $projectsCsvExists = file_exists($basePath . 'projects.csv');
+            $interactionsCsvExists = file_exists($basePath . 'interactions.csv');
+            $projectsCsvDate = $projectsCsvExists ? date("Y-m-d H:i:s", filemtime($basePath . 'projects.csv')) : null;
+            $interactionsCsvDate = $interactionsCsvExists ? date("Y-m-d H:i:s", filemtime($basePath . 'interactions.csv')) : null;
+        @endphp
+
+        <div class="clay-card bg-info/10 p-4 mb-6">
+            <h3 class="font-bold mb-2">Status File CSV:</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <p><strong>projects.csv:</strong>
+                        @if($projectsCsvExists)
+                            <span class="text-success">✓ Ada</span>
+                            <small class="text-gray-600">(Terakhir diupdate: {{ $projectsCsvDate }})</small>
+                        @else
+                            <span class="text-danger">✗ Tidak Ada</span>
+                        @endif
+                    </p>
+                </div>
+                <div>
+                    <p><strong>interactions.csv:</strong>
+                        @if($interactionsCsvExists)
+                            <span class="text-success">✓ Ada</span>
+                            <small class="text-gray-600">(Terakhir diupdate: {{ $interactionsCsvDate }})</small>
+                        @else
+                            <span class="text-danger">✗ Tidak Ada</span>
+                        @endif
+                    </p>
+                </div>
+            </div>
+        </div>
+
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div class="clay-card bg-primary/5 p-4">
                 <h3 class="font-bold mb-3 flex items-center">
@@ -427,13 +462,19 @@
                     Import data proyek dari file CSV engine rekomendasi ke database Laravel.
                 </p>
                 <div class="text-center">
-                    <form action="{{ route('admin.import-command') }}" method="POST">
+                    <form action="{{ route('admin.import-command') }}" method="POST" id="import-projects-form">
                         @csrf
                         <input type="hidden" name="command" value="recommend:import --projects">
-                        <button type="submit" class="clay-button clay-button-primary py-1.5 px-3 text-sm">
+                        <button type="submit"
+                                class="clay-button clay-button-primary py-1.5 px-3 text-sm import-button"
+                                {{ !$projectsCsvExists ? 'disabled' : '' }}>
+                            <i class="fas fa-spinner fa-spin mr-2 hidden"></i>
                             Import Proyek
                         </button>
                     </form>
+                    @if(!$projectsCsvExists)
+                        <p class="text-xs text-danger mt-2">File projects.csv tidak ditemukan!</p>
+                    @endif
                 </div>
             </div>
 
@@ -446,13 +487,19 @@
                     Import data interaksi dari file CSV engine rekomendasi ke database Laravel.
                 </p>
                 <div class="text-center">
-                    <form action="{{ url('panel/admin/import-command') }}" method="POST">
+                    <form action="{{ route('admin.import-command') }}" method="POST" id="import-interactions-form">
                         @csrf
                         <input type="hidden" name="command" value="recommend:import --interactions">
-                        <button type="submit" class="clay-button clay-button-warning py-1.5 px-3 text-sm">
+                        <button type="submit"
+                                class="clay-button clay-button-warning py-1.5 px-3 text-sm import-button"
+                                {{ !$interactionsCsvExists ? 'disabled' : '' }}>
+                            <i class="fas fa-spinner fa-spin mr-2 hidden"></i>
                             Import Interaksi
                         </button>
                     </form>
+                    @if(!$interactionsCsvExists)
+                        <p class="text-xs text-danger mt-2">File interactions.csv tidak ditemukan!</p>
+                    @endif
                 </div>
             </div>
 
@@ -465,10 +512,11 @@
                     Export data dari database Laravel ke file CSV untuk engine rekomendasi.
                 </p>
                 <div class="text-center">
-                    <form action="{{ url('panel/admin/import-command') }}" method="POST">
+                    <form action="{{ route('admin.import-command') }}" method="POST" id="export-data-form">
                         @csrf
                         <input type="hidden" name="command" value="recommend:sync --full">
-                        <button type="submit" class="clay-button clay-button-info py-1.5 px-3 text-sm">
+                        <button type="submit" class="clay-button clay-button-info py-1.5 px-3 text-sm import-button">
+                            <i class="fas fa-spinner fa-spin mr-2 hidden"></i>
                             Export Semua Data
                         </button>
                     </form>
@@ -686,6 +734,26 @@
             endpointList.style.display = 'none';
         }
     }
+
+    // Loading indicator untuk form import/export
+    document.addEventListener('DOMContentLoaded', function() {
+        // Handle form submission dengan loading indicator
+        const forms = document.querySelectorAll('form');
+        forms.forEach(form => {
+            form.addEventListener('submit', function(e) {
+                const submitButton = form.querySelector('button[type="submit"]');
+                const spinner = submitButton.querySelector('.fa-spinner');
+
+                if (submitButton && !submitButton.disabled) {
+                    submitButton.disabled = true;
+                    if (spinner) {
+                        spinner.classList.remove('hidden');
+                    }
+                    submitButton.textContent = ' Memproses...';
+                }
+            });
+        });
+    });
 
     // API Connection Test
     document.addEventListener('DOMContentLoaded', function() {

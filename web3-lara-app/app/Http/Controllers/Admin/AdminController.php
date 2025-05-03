@@ -490,31 +490,94 @@ class AdminController extends Controller
     }
 
     /**
-     * Menjalankan perintah import dari UI
+     * Menjalankan perintah import dari UI dengan validasi yang lebih baik
      *
      * @param Request $request
      * @return \Illuminate\Http\RedirectResponse
      */
     public function runImportCommand(Request $request)
     {
+        // Validasi request
+        $request->validate([
+            'command' => 'required|string'
+        ]);
+
         $command = $request->input('command');
 
-        if (empty($command)) {
-            return redirect()->back()->with('error', 'Perintah tidak valid.');
+        // Validasi command yang diizinkan
+        $allowedCommands = [
+            'recommend:import --projects',
+            'recommend:import --interactions',
+            'recommend:import --features',
+            'recommend:sync --full',
+            'recommend:sync --projects',
+            'recommend:sync --interactions',
+            'recommend:sync --train',
+        ];
+
+        if (!in_array($command, $allowedCommands)) {
+            return redirect()->back()
+                ->with('error', 'Perintah tidak valid atau tidak diizinkan.');
         }
 
         // Jalankan perintah Artisan
         try {
-            \Illuminate\Support\Facades\Artisan::call($command);
-            $output = \Illuminate\Support\Facades\Artisan::output();
-
-            // Log aktivitas
-            ActivityLog::logAdminAction(Auth::user(), request(), 'run_command', "Command: {$command}");
-
-            return redirect()->back()->with('success', 'Perintah berhasil dijalankan: ' . $output);
-        } catch (\Exception $e) {
-            return redirect()->back()->with('error', 'Gagal menjalankan perintah: ' . $e->getMessage());
+        // Cek apakah file CSV ada sebelum menjalankan import
+        if (str_contains($command, 'import')) {
+            if (! $this->validateImportFiles($command)) {
+                return redirect()->back()
+                    ->with('error', 'File CSV tidak ditemukan. Pastikan file sudah ada di folder recommendation-engine/data/processed/');
+            }
         }
+
+        // Menambahkan flag --force untuk import interaksi saat dijalankan dari web
+        if (str_contains($command, 'import --interactions')) {
+            $command .= ' --force';
+        }
+
+        // Jalankan command dengan buffer output
+        \Illuminate\Support\Facades\Artisan::call($command);
+        $output = \Illuminate\Support\Facades\Artisan::output();
+
+        // Log aktivitas
+        ActivityLog::logAdminAction(Auth::user(), request(), 'run_command', "Command: {$command}");
+
+        // Log output untuk debugging
+        Log::info("Command output: " . $output);
+
+        // Cek apakah ada error dalam output
+        if (str_contains(strtolower($output), 'error') || str_contains(strtolower($output), 'gagal')) {
+            return redirect()->back()
+                ->with('error', 'Perintah mengalami error: ' . $output);
+        }
+
+        return redirect()->back()
+            ->with('success', 'Perintah berhasil dijalankan. ' . $output);
+
+    } catch (\Exception $e) {
+        Log::error('Error menjalankan command: ' . $e->getMessage());
+        return redirect()->back()
+            ->with('error', 'Gagal menjalankan perintah: ' . $e->getMessage());
+    }
+
+    }
+
+    /**
+     * Validasi keberadaan file CSV sebelum import
+     */
+    private function validateImportFiles($command)
+    {
+        $basePath = base_path('../recommendation-engine/data/processed/');
+
+        if (str_contains($command, '--projects')) {
+            return file_exists($basePath . 'projects.csv');
+        } elseif (str_contains($command, '--interactions')) {
+            return file_exists($basePath . 'interactions.csv');
+        } elseif (str_contains($command, '--features')) {
+            return file_exists($basePath . 'features.csv');
+        }
+
+        return true;
     }
 
     /**
