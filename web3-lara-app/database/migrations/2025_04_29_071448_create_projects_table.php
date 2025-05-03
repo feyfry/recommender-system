@@ -17,6 +17,7 @@ return new class extends Migration
             $table->string('symbol', 50)->nullable(false);
             $table->jsonb('categories')->nullable();
             $table->jsonb('platforms')->nullable();
+            $table->jsonb('roi')->nullable();
             $table->decimal('market_cap', 30, 2)->nullable();
             $table->decimal('volume_24h', 30, 2)->nullable();
             $table->decimal('price_usd', 30, 10)->nullable();

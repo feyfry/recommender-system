@@ -42,6 +42,7 @@ class Project extends Model
         'symbol',
         'categories',
         'platforms',
+        'roi',
         'market_cap',
         'volume_24h',
         'price_usd',

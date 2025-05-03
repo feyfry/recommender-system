@@ -522,44 +522,57 @@ class AdminController extends Controller
 
         // Jalankan perintah Artisan
         try {
-        // Cek apakah file CSV ada sebelum menjalankan import
-        if (str_contains($command, 'import')) {
-            if (! $this->validateImportFiles($command)) {
-                return redirect()->back()
-                    ->with('error', 'File CSV tidak ditemukan. Pastikan file sudah ada di folder recommendation-engine/data/processed/');
+            // Cek apakah file CSV ada sebelum menjalankan import
+            if (str_contains($command, 'import')) {
+                if (! $this->validateImportFiles($command)) {
+                    return redirect()->back()
+                        ->with('error', 'File CSV tidak ditemukan. Pastikan file sudah ada di folder recommendation-engine/data/processed/');
+                }
             }
-        }
 
-        // Menambahkan flag --force untuk import interaksi saat dijalankan dari web
-        if (str_contains($command, 'import --interactions')) {
-            $command .= ' --force';
-        }
+            // Menambahkan flag --force untuk import interaksi saat dijalankan dari web
+            if (str_contains($command, 'import --interactions')) {
+                $command .= ' --force';
+            }
 
-        // Jalankan command dengan buffer output
-        \Illuminate\Support\Facades\Artisan::call($command);
-        $output = \Illuminate\Support\Facades\Artisan::output();
+            // Jalankan command dengan buffer output
+            \Illuminate\Support\Facades\Artisan::call($command);
+            $output = \Illuminate\Support\Facades\Artisan::output();
 
-        // Log aktivitas
-        ActivityLog::logAdminAction(Auth::user(), request(), 'run_command', "Command: {$command}");
+            // Log aktivitas
+            ActivityLog::logAdminAction(Auth::user(), request(), 'run_command', "Command: {$command}");
 
-        // Log output untuk debugging
-        Log::info("Command output: " . $output);
+            // Log output untuk debugging
+            Log::info("Command output: " . $output);
 
-        // Cek apakah ada error dalam output
-        if (str_contains(strtolower($output), 'error') || str_contains(strtolower($output), 'gagal')) {
+            // Check if there was an error in the output
+            if (str_contains(strtolower($output), 'gagal') || str_contains(strtolower($output), 'error')) {
+                // Extract the specific error message if possible
+                preg_match('/error[^:]*:(.+)/i', $output, $matches);
+                $errorMessage = $matches[1] ?? 'Terjadi kesalahan saat menjalankan perintah.';
+
+                return redirect()->back()
+                    ->with('error', trim($errorMessage));
+            }
+
+            // Extract success/fail counts if available
+            preg_match('/Berhasil: (\d+), Gagal: (\d+)/', $output, $matches);
+            $successCount = $matches[1] ?? 0;
+            $failCount = $matches[2] ?? 0;
+
+            if ($successCount > 0 || $failCount == 0) {
+                return redirect()->back()
+                    ->with('success', "Perintah berhasil dijalankan. Berhasil: {$successCount}, Gagal: {$failCount}");
+            } else {
+                return redirect()->back()
+                    ->with('warning', "Perintah dijalankan dengan beberapa kegagalan. Berhasil: {$successCount}, Gagal: {$failCount}");
+            }
+
+        } catch (\Exception $e) {
+            Log::error('Error menjalankan command: ' . $e->getMessage());
             return redirect()->back()
-                ->with('error', 'Perintah mengalami error: ' . $output);
+                ->with('error', 'Gagal menjalankan perintah: ' . $e->getMessage());
         }
-
-        return redirect()->back()
-            ->with('success', 'Perintah berhasil dijalankan. ' . $output);
-
-    } catch (\Exception $e) {
-        Log::error('Error menjalankan command: ' . $e->getMessage());
-        return redirect()->back()
-            ->with('error', 'Gagal menjalankan perintah: ' . $e->getMessage());
-    }
-
     }
 
     /**

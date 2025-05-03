@@ -80,79 +80,101 @@ class ImportRecommendationData extends Command
             DB::beginTransaction();
 
             try {
-                // Proses per batch
-                $batchSize    = 100;
-                $batches      = array_chunk($csv, $batchSize);
                 $successCount = 0;
                 $failedCount  = 0;
 
-                foreach ($batches as $batch) {
-                    foreach ($batch as $row) {
-                        if (count($row) !== count($headers)) {
-                            $this->warn("Baris tidak valid, dilewati");
-                            $failedCount++;
-                            continue;
-                        }
+                foreach ($csv as $row) {
+                    if (count($row) !== count($headers)) {
+                        $this->warn("Baris tidak valid, dilewati");
+                        $failedCount++;
+                        $bar->advance();
+                        continue;
+                    }
 
-                        $record = array_combine($headers, $row);
+                    $record = array_combine($headers, $row);
 
-                        try {
-                            // Proses fields JSON dengan penanganan yang lebih baik
-                            $jsonFields = ['platforms', 'categories', 'roi'];
-                            foreach ($jsonFields as $field) {
-                                if (isset($record[$field])) {
-                                    // Cek apakah field kosong atau "?"
-                                    if (empty($record[$field]) || $record[$field] === '?' || $record[$field] === '[]') {
-                                        $record[$field] = null;
+                    try {
+                        // PERBAIKAN: Proses fields JSON dengan benar
+                        $jsonFields = ['platforms', 'categories', 'roi'];
+                        foreach ($jsonFields as $field) {
+                            if (isset($record[$field])) {
+                                // Cek apakah field kosong atau "?"
+                                if (empty($record[$field]) || $record[$field] === '?' || $record[$field] === '[]') {
+                                    $record[$field] = null;
+                                } else {
+                                    // Parse JSON, jika gagal set null
+                                    $jsonDecoded = json_decode($record[$field], true);
+                                    if (json_last_error() === JSON_ERROR_NONE) {
+                                        // PERBAIKAN: Encode kembali ke JSON string untuk disimpan
+                                        $record[$field] = json_encode($jsonDecoded);
                                     } else {
-                                        // Parse JSON, jika gagal set null
-                                        $jsonDecoded    = json_decode($record[$field], true);
-                                        $record[$field] = json_last_error() === JSON_ERROR_NONE ? $jsonDecoded : null;
+                                        $record[$field] = null;
                                     }
                                 }
                             }
-
-                            // Konversi nilai numerik yang kosong ke null
-                            $numericFields = [
-                                'fully_diluted_valuation', 'max_supply', 'sentiment_votes_up_percentage',
-                                'telegram_channel_user_count', 'twitter_followers', 'github_stars',
-                                'github_subscribers', 'github_forks', 'developer_activity_score',
-                                'social_engagement_score',
-                            ];
-                            foreach ($numericFields as $field) {
-                                if (isset($record[$field]) && ($record[$field] === '' || $record[$field] === 'null')) {
-                                    $record[$field] = null;
-                                }
-                            }
-
-                            // Konversi tanggal yang kosong ke null
-                            $dateFields = ['genesis_date', 'ath_date', 'atl_date'];
-                            foreach ($dateFields as $field) {
-                                if (isset($record[$field]) && ($record[$field] === '' || $record[$field] === 'null')) {
-                                    $record[$field] = null;
-                                }
-                            }
-
-                            // Pastikan field timestamp ada
-                            $record['created_at'] = $record['created_at'] ?? now();
-                            $record['updated_at'] = $record['updated_at'] ?? now();
-
-                            // Insert atau update ke database
-                            DB::table('projects')
-                                ->updateOrInsert(
-                                    ['id' => $record['id']],
-                                    $record
-                                );
-
-                            $successCount++;
-                        } catch (\Exception $e) {
-                            $this->error("Error importing project {$record['id']}: " . $e->getMessage());
-                            Log::error("Error importing project {$record['id']}: " . $e->getMessage());
-                            $failedCount++;
                         }
 
-                        $bar->advance();
+                        // Konversi nilai numerik yang kosong ke null
+                        $numericFields = [
+                            'fully_diluted_valuation', 'max_supply', 'sentiment_votes_up_percentage',
+                            'telegram_channel_user_count', 'twitter_followers', 'github_stars',
+                            'github_subscribers', 'github_forks', 'developer_activity_score',
+                            'social_engagement_score', 'current_price', 'market_cap', 'market_cap_rank',
+                            'total_volume', 'high_24h', 'low_24h', 'price_change_24h',
+                            'price_change_percentage_24h', 'market_cap_change_24h',
+                            'market_cap_change_percentage_24h', 'circulating_supply', 'total_supply',
+                            'ath', 'ath_change_percentage', 'atl', 'atl_change_percentage',
+                            'price_change_percentage_1h_in_currency', 'price_change_percentage_24h_in_currency',
+                            'price_change_percentage_30d_in_currency', 'price_change_percentage_7d_in_currency',
+                            'popularity_score', 'trend_score', 'developer_activity_score',
+                            'social_engagement_score', 'description_length', 'age_days', 'maturity_score'
+                        ];
+
+                        foreach ($numericFields as $field) {
+                            if (isset($record[$field])) {
+                                if ($record[$field] === '' || $record[$field] === 'null' || $record[$field] === '?') {
+                                    $record[$field] = null;
+                                } else {
+                                    $record[$field] = floatval($record[$field]);
+                                }
+                            }
+                        }
+
+                        // Konversi tanggal yang kosong ke null
+                        $dateFields = ['genesis_date', 'ath_date', 'atl_date', 'last_updated'];
+                        foreach ($dateFields as $field) {
+                            if (isset($record[$field]) && ($record[$field] === '' || $record[$field] === 'null' || $record[$field] === '?')) {
+                                $record[$field] = null;
+                            }
+                        }
+
+                        // Konversi boolean fields
+                        $booleanFields = ['is_trending'];
+                        foreach ($booleanFields as $field) {
+                            if (isset($record[$field])) {
+                                $record[$field] = filter_var($record[$field], FILTER_VALIDATE_BOOLEAN);
+                            }
+                        }
+
+                        // Pastikan field timestamp ada
+                        $record['created_at'] = $record['created_at'] ?? now();
+                        $record['updated_at'] = $record['updated_at'] ?? now();
+
+                        // Insert atau update ke database
+                        DB::table('projects')
+                            ->updateOrInsert(
+                                ['id' => $record['id']],
+                                $record
+                            );
+
+                        $successCount++;
+                    } catch (\Exception $e) {
+                        $this->error("Error importing project {$record['id']}: " . $e->getMessage());
+                        Log::error("Error importing project {$record['id']}: " . $e->getMessage());
+                        $failedCount++;
                     }
+
+                    $bar->advance();
                 }
 
                 DB::commit();
@@ -215,11 +237,6 @@ class ImportRecommendationData extends Command
             // Hapus interaksi lama jika --force digunakan atau dijalankan dari web
             $shouldClearOldData = $this->option('force') || $this->runningFromWeb;
 
-            if (! $shouldClearOldData && ! $this->runningFromWeb) {
-                // Hanya tanya konfirmasi jika dari CLI dan tidak ada --force
-                $shouldClearOldData = $this->confirm('Apakah Anda ingin menghapus semua interaksi yang ada sebelum mengimpor yang baru?', true);
-            }
-
             if ($shouldClearOldData) {
                 DB::table('interactions')->truncate();
                 $this->info('Interaksi lama dihapus');
@@ -229,64 +246,99 @@ class ImportRecommendationData extends Command
             DB::beginTransaction();
 
             try {
-                // Proses per batch
-                $batchSize    = 500;
-                $batches      = array_chunk($csv, $batchSize);
                 $successCount = 0;
                 $failedCount  = 0;
+                $usersMissing = [];
 
-                foreach ($batches as $batch) {
-                    $records = [];
+                foreach ($csv as $row) {
+                    if (count($row) !== count($headers)) {
+                        $this->warn("Baris tidak valid, dilewati");
+                        $failedCount++;
+                        $bar->advance();
+                        continue;
+                    }
 
-                    foreach ($batch as $row) {
-                        if (count($row) !== count($headers)) {
-                            $this->warn("Baris tidak valid, dilewati");
+                    $record = array_combine($headers, $row);
+
+                    try {
+                        // PERBAIKAN: Cek apakah user ada, jika tidak buat
+                        $userExists = DB::table('users')->where('user_id', $record['user_id'])->exists();
+
+                        if (!$userExists) {
+                            // Buat user baru jika tidak ada
+                            DB::table('users')->insert([
+                                'user_id' => $record['user_id'],
+                                'wallet_address' => 'synthetic_' . $record['user_id'],
+                                'role' => 'community',
+                                'created_at' => now(),
+                                'updated_at' => now(),
+                            ]);
+
+                            $usersMissing[] = $record['user_id'];
+                        }
+
+                        // Cek apakah project ada
+                        $projectExists = DB::table('projects')->where('id', $record['project_id'])->exists();
+
+                        if (!$projectExists) {
+                            Log::warning("Project tidak ditemukan: {$record['project_id']}");
                             $failedCount++;
+                            $bar->advance();
                             continue;
                         }
 
-                        $record = array_combine($headers, $row);
-
-                        try {
-                            // Konversi timestamp
-                            if (isset($record['timestamp'])) {
-                                $record['created_at'] = $record['timestamp'];
-                                $record['updated_at'] = $record['timestamp'];
-                                unset($record['timestamp']);
-                            } else {
-                                $record['created_at'] = $record['created_at'] ?? now();
-                                $record['updated_at'] = $record['updated_at'] ?? now();
-                            }
-
-                            // Konversi context jika ada
-                            if (isset($record['context']) && ! empty($record['context'])) {
-                                $jsonContext       = json_decode($record['context'], true);
-                                $record['context'] = json_last_error() === JSON_ERROR_NONE ? $jsonContext : null;
-                            } else {
-                                $record['context'] = null;
-                            }
-
-                            $records[] = $record;
-                            $successCount++;
-                        } catch (\Exception $e) {
-                            $this->error("Error processing interaction: " . $e->getMessage());
-                            Log::error("Error processing interaction: " . $e->getMessage());
-                            $failedCount++;
+                        // Konversi timestamp
+                        if (isset($record['timestamp'])) {
+                            $record['created_at'] = $record['timestamp'];
+                            $record['updated_at'] = $record['timestamp'];
+                            unset($record['timestamp']);
+                        } else {
+                            $record['created_at'] = $record['created_at'] ?? now();
+                            $record['updated_at'] = $record['updated_at'] ?? now();
                         }
 
-                        $bar->advance();
+                        // Konversi context jika ada
+                        if (isset($record['context']) && ! empty($record['context'])) {
+                            if ($record['context'] === '?' || $record['context'] === '') {
+                                $record['context'] = null;
+                            } else {
+                                $jsonContext = json_decode($record['context'], true);
+                                if (json_last_error() === JSON_ERROR_NONE) {
+                                    $record['context'] = json_encode($jsonContext);
+                                } else {
+                                    $record['context'] = null;
+                                }
+                            }
+                        } else {
+                            $record['context'] = null;
+                        }
+
+                        // Konversi weight ke integer
+                        if (isset($record['weight'])) {
+                            $record['weight'] = intval($record['weight']);
+                        }
+
+                        // Insert data
+                        DB::table('interactions')->insert($record);
+                        $successCount++;
+
+                    } catch (\Exception $e) {
+                        $this->error("Error processing interaction: " . $e->getMessage());
+                        Log::error("Error processing interaction: " . $e->getMessage());
+                        $failedCount++;
                     }
 
-                    // Insert batch
-                    if (! empty($records)) {
-                        DB::table('interactions')->insert($records);
-                    }
+                    $bar->advance();
                 }
 
                 DB::commit();
                 $bar->finish();
                 $this->info("\nImport interaksi selesai!");
                 $this->info("Berhasil: {$successCount}, Gagal: {$failedCount}");
+
+                if (!empty($usersMissing)) {
+                    $this->info("Synthetic users yang dibuat: " . count($usersMissing));
+                }
 
             } catch (\Exception $e) {
                 DB::rollBack();
