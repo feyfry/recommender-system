@@ -1342,52 +1342,52 @@ class DataProcessor:
         category_freq = pd.Series(all_categories).value_counts(normalize=True).to_dict()
         unique_categories = list(category_freq.keys())
         
-        # Define user activity profiles
+        # Define user activity profiles - UPDATED WITH MINIMUM 5 INTERACTIONS
         activity_profiles = {
             'very_casual': {
-                'interaction_count_range': (5, 8),  # MINIMUM DINAIKKAN MENJADI 5!
+                'interaction_count_range': (5, 10),  # MINIMUM DINAIKKAN MENJADI 5!
                 'session_patterns': ['single_session'],
                 'exploration_rate': (0.05, 0.15),
                 'popularity_bias': (0.7, 0.9),
                 'category_focus': (0.8, 0.95),
                 'weight_boost': (0.8, 1.2),
-                'probs': 0.15  # 15% of users are very casual (dikurangi)
+                'probs': 0.10  # Dikurangi dari 0.15
             },
             'casual': {
-                'interaction_count_range': (8, 15),  # MINIMUM DINAIKKAN
+                'interaction_count_range': (10, 20),  # MINIMUM DINAIKKAN
                 'session_patterns': ['single_session', 'few_sessions'],
                 'exploration_rate': (0.1, 0.25),
                 'popularity_bias': (0.6, 0.8),
                 'category_focus': (0.7, 0.9),
                 'weight_boost': (0.9, 1.3),
-                'probs': 0.25  # 25% of users are casual (dikurangi)
+                'probs': 0.20  # Dikurangi dari 0.25
             },
             'regular': {
-                'interaction_count_range': (15, 40),
+                'interaction_count_range': (20, 50),
                 'session_patterns': ['few_sessions', 'regular_sessions'],
                 'exploration_rate': (0.2, 0.35),
                 'popularity_bias': (0.5, 0.7),
                 'category_focus': (0.6, 0.8),
                 'weight_boost': (1.0, 1.5),
-                'probs': 0.30  # 30% of users are regular (dinaikkan)
+                'probs': 0.35  # Dinaikkan dari 0.30
             },
             'active': {
-                'interaction_count_range': (40, 80),
+                'interaction_count_range': (50, 100),
                 'session_patterns': ['regular_sessions', 'random_spread'],
                 'exploration_rate': (0.3, 0.45),
                 'popularity_bias': (0.4, 0.6),
                 'category_focus': (0.5, 0.7),
                 'weight_boost': (1.2, 1.8),
-                'probs': 0.20  # 20% of users are active (dinaikkan)
+                'probs': 0.25  # Dinaikkan dari 0.20
             },
             'power_user': {
-                'interaction_count_range': (80, 150),
+                'interaction_count_range': (100, 150),
                 'session_patterns': ['random_spread', 'regular_sessions'],
                 'exploration_rate': (0.4, 0.6),
                 'popularity_bias': (0.3, 0.5),
                 'category_focus': (0.4, 0.6),
                 'weight_boost': (1.5, 2.2),
-                'probs': 0.10  # 10% of users are power users
+                'probs': 0.10  # Tetap 10%
             }
         }
         
@@ -1422,15 +1422,16 @@ class DataProcessor:
             activity_profile = activity_profiles[activity_type]
             
             # Generate interaction count with extreme variability
+            min_count, max_count = activity_profile['interaction_count_range']
+            
             if activity_type == 'power_user':
                 # Power users follow a different distribution - sometimes have extreme numbers
                 if user_rng.random() < 0.2:  # 20% chance of super-user
                     n_interactions = user_rng.integers(150, 300)
                 else:
-                    n_interactions = user_rng.integers(*activity_profile['interaction_count_range'])
+                    n_interactions = user_rng.integers(min_count, max_count + 1)
             else:
                 # Normal distribution centered in the range
-                min_count, max_count = activity_profile['interaction_count_range']
                 mean = (min_count + max_count) / 2
                 std = (max_count - min_count) / 4
                 n_interactions = max(min_count, min(max_count, int(user_rng.normal(mean, std))))

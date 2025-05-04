@@ -549,12 +549,14 @@ def evaluate_all_models(models: Dict[str, Any],
                        min_interactions: int = 5,
                        k_values: List[int] = EVAL_K_VALUES,
                        save_results: bool = True,
-                       max_test_users: int = 100,          # OPTIMIZATION: Limit test users
-                       max_users_per_batch: int = 50,      # OPTIMIZATION: Process in batches
-                       use_parallel: bool = False,         # OPTIMIZATION: Parallelization option 
-                       num_workers: int = 4) -> Dict[str, Dict[str, Any]]:
+                       max_test_users: int = 100,
+                       max_users_per_batch: int = 50,
+                       use_parallel: bool = False,
+                       num_workers: int = 4,
+                       eval_cold_start: bool = True,
+                       cold_start_runs: int = 5) -> Dict[str, Dict[str, Any]]:
     """
-    Evaluate multiple recommender models with improved methodology - OPTIMIZED
+    Evaluate multiple recommender models with improved methodology
     
     Args:
         models: Dictionary of model name to model instance
@@ -567,6 +569,8 @@ def evaluate_all_models(models: Dict[str, Any],
         max_users_per_batch: Maximum users to evaluate in one batch
         use_parallel: Whether to use parallel processing 
         num_workers: Number of workers for parallel processing
+        eval_cold_start: Whether to evaluate cold start scenarios
+        cold_start_runs: Number of runs for cold-start evaluation
         
     Returns:
         dict: Evaluation results by model
@@ -577,20 +581,17 @@ def evaluate_all_models(models: Dict[str, Any],
         test_ratio=test_ratio,
         min_interactions=min_interactions,
         random_seed=EVAL_RANDOM_SEED,
-        max_test_users=max_test_users  # OPTIMIZATION: Limit test users
+        max_test_users=max_test_users
     )
     
     logger.info(f"Prepared test data with {len(test_users)} users and {sum(len(items) for items in test_interactions.values())} test interactions")
     
-    # IMPROVED: Ensure models are loaded
+    # Ensure models are loaded
     for model_name, model in models.items():
-        # Check if model needs to be loaded
         if hasattr(model, 'model') and model.model is None:
             logger.info(f"Model {model_name} not loaded, trying to load from saved file...")
             
-            # Find model file based on model type
             if model_name == 'fecf':
-                # Find latest FECF model file
                 fecf_files = [f for f in os.listdir(MODELS_DIR) 
                             if f.startswith("fecf_model_") and f.endswith(".pkl")]
                 if fecf_files:
@@ -600,14 +601,12 @@ def evaluate_all_models(models: Dict[str, Any],
                     model.load_model(model_path)
             
             elif model_name == 'ncf':
-                # Try NCF default path
                 model_path = os.path.join(MODELS_DIR, "ncf_model.pkl")
                 if os.path.exists(model_path):
                     logger.info(f"Loading {model_name} from {model_path}")
                     model.load_model(model_path)
             
             elif model_name == 'hybrid':
-                # Find latest hybrid model
                 hybrid_files = [f for f in os.listdir(MODELS_DIR) 
                             if f.startswith("hybrid_model_") and f.endswith(".pkl")]
                 if hybrid_files:
@@ -616,26 +615,24 @@ def evaluate_all_models(models: Dict[str, Any],
                     logger.info(f"Loading {model_name} from {model_path}")
                     model.load_model(model_path)
     
-    # OPTIMIZATION: Reduce number of runs for faster evaluation
-    num_runs = 3
+    # Regular evaluation with multiple runs
+    num_runs = 5
     all_results = {model_name: [] for model_name in models.keys()}
     
     for run in range(num_runs):
         logger.info(f"Starting evaluation run {run+1}/{num_runs}")
         
-        # For each run, create a slightly different test set
         run_seed = EVAL_RANDOM_SEED + run * 100
         test_users_run, test_interactions_run = prepare_test_data(
             user_item_matrix, 
             test_ratio=test_ratio,
             min_interactions=min_interactions,
             random_seed=run_seed,
-            max_test_users=max_test_users  # OPTIMIZATION: Limit test users
+            max_test_users=max_test_users
         )
         
         # Evaluate each model
         for model_name, model in models.items():
-            # Verify model is loaded
             if hasattr(model, 'model') and model.model is None:
                 logger.error(f"Model {model_name} could not be loaded for evaluation")
                 all_results[model_name].append({
@@ -653,8 +650,8 @@ def evaluate_all_models(models: Dict[str, Any],
                 test_users=test_users_run,
                 test_interactions=test_interactions_run,
                 k_values=k_values,
-                max_users_per_batch=max_users_per_batch,  # OPTIMIZATION: Process in batches
-                use_parallel=use_parallel,                # OPTIMIZATION: Parallelization option
+                max_users_per_batch=max_users_per_batch,
+                use_parallel=use_parallel,
                 num_workers=num_workers
             )
             
@@ -667,7 +664,6 @@ def evaluate_all_models(models: Dict[str, Any],
         if not run_results:
             continue
             
-        # Initialize with first run's metadata
         aggregated = {
             'model': model_name,
             'num_users': run_results[0].get('num_users', 0),
@@ -691,8 +687,30 @@ def evaluate_all_models(models: Dict[str, Any],
                 aggregated[metric] = np.mean(values)
                 aggregated[f'{metric}_std'] = np.std(values)
         
-        # Add to final results
         aggregated_results[model_name] = aggregated
+
+    # Evaluate cold-start if requested
+    if eval_cold_start:
+        logger.info(f"Evaluating cold-start scenarios with {cold_start_runs} runs...")
+        
+        # Use FECF and Hybrid for cold-start evaluation
+        if 'fecf' in models:
+            logger.info("Evaluating cold-start for FECF...")
+            aggregated_results['cold_start_fecf'] = evaluate_cold_start(
+                models['fecf'],
+                model_name="fecf",
+                user_item_matrix=user_item_matrix,
+                n_runs=cold_start_runs
+            )
+        
+        if 'hybrid' in models:
+            logger.info("Evaluating cold-start for Hybrid...")
+            aggregated_results['cold_start_hybrid'] = evaluate_cold_start(
+                models['hybrid'],
+                model_name="hybrid",
+                user_item_matrix=user_item_matrix,
+                n_runs=cold_start_runs
+            )
     
     # Save results if requested
     if save_results:
@@ -708,10 +726,11 @@ def evaluate_cold_start(model: Any,
                        test_ratio: Optional[float] = None,     
                        k_values: List[int] = [5, 10], 
                        debug: bool = False,
-                       max_users_per_batch: int = 50,      # OPTIMIZATION: Process in batches
-                       use_parallel: bool = False) -> Dict[str, Any]:
+                       max_users_per_batch: int = 50,
+                       use_parallel: bool = False,
+                       n_runs: int = 5) -> Dict[str, Any]:  # ADDED n_runs parameter
     """
-    Evaluate model performance on cold-start users - OPTIMIZED
+    Evaluate model performance on cold-start users with multiple runs for stability
     
     Args:
         model: Recommender model to evaluate
@@ -723,9 +742,10 @@ def evaluate_cold_start(model: Any,
         debug: Whether to enable detailed debugging
         max_users_per_batch: Maximum users to evaluate in one batch
         use_parallel: Whether to use parallel processing
+        n_runs: Number of runs to average results
         
     Returns:
-        dict: Evaluation metrics
+        dict: Evaluation metrics averaged across runs
     """
     # Load configuration or use defaults
     config = {}
@@ -739,7 +759,7 @@ def evaluate_cold_start(model: Any,
     min_interactions = config.get('min_interactions_required', 3)
     category_diversity_enabled = config.get('category_diversity_enabled', True)
     
-    logger.info(f"Evaluating {model_name} on cold-start scenario with {cold_start_users} users")
+    logger.info(f"Evaluating {model_name} on cold-start scenario with {cold_start_users} users, {n_runs} runs")
     
     # Verify model before evaluation
     if hasattr(model, 'model') and model.model is None:
@@ -752,99 +772,117 @@ def evaluate_cold_start(model: Any,
             "error": "model_not_loaded"
         }
     
-    # IMPROVED: Identify extremely popular items (top X%) to exclude from evaluation
-    # This makes the evaluation more challenging and realistic
-    item_popularity = user_item_matrix.sum()
-    popular_threshold = item_popularity.quantile(1 - popular_exclude_ratio)
-    extremely_popular_items = set(item_popularity[item_popularity > popular_threshold].index)
+    # IMPROVED: Multiple runs for more stable results
+    all_run_results = []
     
-    if debug:
-        logger.info(f"Identified {len(extremely_popular_items)} extremely popular items to exclude")
-        logger.info(f"Popularity threshold: {popular_threshold} interactions")
-    
-    # IMPROVED: Filtering users to ensure diverse selection
-    # Find users with sufficient interactions
-    user_counts = (user_item_matrix > 0).sum(axis=1)
-    eligible_users = user_counts[user_counts >= min_interactions].index.tolist()
-    
-    if not eligible_users or len(eligible_users) < min(30, cold_start_users):
-        logger.warning(f"Not enough users for cold-start evaluation. Found {len(eligible_users)} eligible users")
-        if len(eligible_users) < 30:  # Minimum users for meaningful evaluation
-            return {"error": "insufficient_users"}
-        cold_start_users = min(len(eligible_users), cold_start_users)
-    
-    # Create a more varied RNG seed
-    seed = EVAL_RANDOM_SEED
-    rng = np.random.default_rng(seed)
-
-    # OPTIMIZATION: Simpler user selection
-    cold_start_user_ids = rng.choice(eligible_users, size=min(cold_start_users, len(eligible_users)), replace=False).tolist()
-    
-    if debug:
-        logger.info(f"Selected {len(cold_start_user_ids)} users for cold-start evaluation")
-
-    # OPTIMIZATION: Simpler test interactions preparation
-    test_interactions = {}
-    
-    for user_id in cold_start_user_ids:
-        user_items = user_item_matrix.loc[user_id]
-        positive_items = user_items[user_items > 0].index.tolist()
+    for run in range(n_runs):
+        logger.info(f"Cold-start evaluation run {run+1}/{n_runs}")
         
-        # Filter out extremely popular items for more challenging evaluation
-        non_popular_items = [item for item in positive_items if item not in extremely_popular_items]
+        # Create a run-specific seed for variability
+        run_seed = EVAL_RANDOM_SEED + run * 1000
+        rng = np.random.default_rng(run_seed)
         
-        # If we have almost no items after filtering, use some popular items
-        if len(non_popular_items) < min(5, len(positive_items) // 2):
-            # Keep some popular items to ensure sufficient test data
-            supplement_count = min(5, len(positive_items) - len(non_popular_items))
-            popular_user_items = [item for item in positive_items if item in extremely_popular_items]
-            if popular_user_items and supplement_count > 0:
-                added_items = rng.choice(popular_user_items, size=min(supplement_count, len(popular_user_items)), replace=False)
-                non_popular_items.extend(added_items)
+        # Identify extremely popular items for this run
+        item_popularity = user_item_matrix.sum()
+        popular_threshold = item_popularity.quantile(1 - popular_exclude_ratio)
+        extremely_popular_items = set(item_popularity[item_popularity > popular_threshold].index)
         
-        # Minimum requirements check - need at least 5 items total for evaluation
-        if len(non_popular_items) < 5:
+        if debug and run == 0:  # Only log on first run
+            logger.info(f"Identified {len(extremely_popular_items)} extremely popular items to exclude")
+            logger.info(f"Popularity threshold: {popular_threshold} interactions")
+            logger.debug(f"Using seed {run_seed} for run {run+1}")
+        
+        # Find eligible users
+        user_counts = (user_item_matrix > 0).sum(axis=1)
+        eligible_users = user_counts[user_counts >= min_interactions].index.tolist()
+        
+        if not eligible_users or len(eligible_users) < min(30, cold_start_users):
+            logger.warning(f"Not enough users for cold-start evaluation. Found {len(eligible_users)} eligible users")
+            if len(eligible_users) < 30:
+                return {"error": "insufficient_users"}
+            cold_start_users = min(len(eligible_users), cold_start_users)
+        
+        # Select users for this run
+        cold_start_user_ids = rng.choice(eligible_users, size=min(cold_start_users, len(eligible_users)), replace=False).tolist()
+        
+        # Prepare test interactions
+        test_interactions = {}
+        
+        for user_id in cold_start_user_ids:
+            user_items = user_item_matrix.loc[user_id]
+            positive_items = user_items[user_items > 0].index.tolist()
+            
+            # Filter out extremely popular items
+            non_popular_items = [item for item in positive_items if item not in extremely_popular_items]
+            
+            # If too few non-popular items, include some popular ones
+            if len(non_popular_items) < min(5, len(positive_items) // 2):
+                supplement_count = min(5, len(positive_items) - len(non_popular_items))
+                popular_user_items = [item for item in positive_items if item in extremely_popular_items]
+                if popular_user_items and supplement_count > 0:
+                    added_items = rng.choice(popular_user_items, size=min(supplement_count, len(popular_user_items)), replace=False)
+                    non_popular_items.extend(added_items)
+            
+            # Skip if insufficient items
+            if len(non_popular_items) < 5:
+                continue
+            
+            # Random split for test items
+            test_size = max(min(int(len(non_popular_items) * test_ratio), len(non_popular_items) - 2), 3)
+            test_items = rng.choice(non_popular_items, size=test_size, replace=False).tolist()
+            test_interactions[user_id] = test_items
+        
+        # Evaluate this run
+        if len(test_interactions) < 10:
+            logger.warning(f"Not enough valid users for cold-start evaluation in run {run+1}: {len(test_interactions)}")
             continue
         
-        # Simple random split with higher test ratio for cold-start simulation
-        test_size = max(min(int(len(non_popular_items) * test_ratio), len(non_popular_items) - 2), 3)
-        test_items = rng.choice(non_popular_items, size=test_size, replace=False).tolist()
-        test_interactions[user_id] = test_items
+        run_result = evaluate_model(
+            model_name=f"cold_start_{model_name}_run{run+1}",
+            recommender=model,
+            test_users=list(test_interactions.keys()),
+            test_interactions=test_interactions,
+            k_values=k_values,
+            debug=(debug and run == 0),  # Only debug first run
+            max_users_per_batch=max_users_per_batch,
+            use_parallel=use_parallel
+        )
+        
+        all_run_results.append(run_result)
     
-    # Final check for sufficient test data
-    if len(test_interactions) < 10:  # Minimum users for evaluation
-        logger.warning(f"Not enough valid users for cold-start evaluation after filtering: {len(test_interactions)}")
-        return {"error": "insufficient_valid_users", "users_found": len(test_interactions)}
+    # Aggregate results across runs
+    if not all_run_results:
+        return {"error": "no_successful_runs"}
     
-    if debug:
-        logger.info(f"Final cold-start evaluation will use {len(test_interactions)} users")
-        logger.info(f"Average test items per user: {sum(len(items) for items in test_interactions.values()) / len(test_interactions):.1f}")
+    aggregated_result = {}
     
-    # OPTIMIZATION: Simpler evaluation without multiple runs
-    result = evaluate_model(
-        model_name=f"cold_start_{model_name}",
-        recommender=model,
-        test_users=list(test_interactions.keys()),
-        test_interactions=test_interactions,
-        k_values=k_values,
-        debug=(debug),
-        max_users_per_batch=max_users_per_batch,
-        use_parallel=use_parallel
-    )
+    # Metrics to aggregate
+    metrics_to_aggregate = ['precision', 'recall', 'f1', 'ndcg', 'hit_ratio']
+    for k in k_values:
+        metrics_to_aggregate.extend([
+            f'precision@{k}', f'recall@{k}', f'f1@{k}', 
+            f'ndcg@{k}', f'hit_ratio@{k}'
+        ])
     
-    # Add cold-start specific metadata
-    result['scenario'] = 'cold_start'
-    result['num_cold_start_users'] = len(test_interactions)
-    result['avg_test_items'] = sum(len(items) for items in test_interactions.values()) / len(test_interactions)
-    result['test_ratio'] = test_ratio
-    result['popular_items_excluded'] = len(extremely_popular_items)
+    # Calculate mean and std for each metric
+    for metric in metrics_to_aggregate:
+        values = [r.get(metric, 0) for r in all_run_results if metric in r]
+        if values:
+            aggregated_result[metric] = np.mean(values)
+            aggregated_result[f'{metric}_std'] = np.std(values)
     
-    return result
+    # Add metadata
+    aggregated_result['scenario'] = 'cold_start'
+    aggregated_result['num_runs'] = len(all_run_results)
+    aggregated_result['num_cold_start_users'] = cold_start_users
+    aggregated_result['test_ratio'] = test_ratio
+    aggregated_result['popular_items_excluded'] = len(extremely_popular_items)
+    
+    return aggregated_result
 
 
 # Existing support functions (save_evaluation_results, load_evaluation_results, generate_evaluation_report)
 # remain unchanged as they don't affect performance...
-
 def save_evaluation_results(results: Dict[str, Dict[str, Any]], filename: Optional[str] = None) -> str:
     """
     Save evaluation results to file
@@ -1086,7 +1124,7 @@ def _generate_text_report(results: Dict[str, Dict[str, Any]]) -> str:
 
 
 def _generate_markdown_report(results: Dict[str, Dict[str, Any]]) -> str:
-    """Generate Markdown evaluation report - SIMPLIFIED"""
+    """Generate Markdown evaluation report with standard deviation"""
     lines = ["# Recommendation System Evaluation Report", ""]
     
     # Add timestamp
@@ -1116,24 +1154,32 @@ def _generate_markdown_report(results: Dict[str, Dict[str, Any]]) -> str:
     
     lines.append("")
     
-    # Cold-start performance
+    # Cold-start performance with standard deviations
     cold_start_models = [m for m in results if 'cold_start' in m]
     if cold_start_models:
-        lines.append("## Cold-Start Performance")
+        lines.append("## Cold-Start Performance (Averaged across multiple runs)")
         lines.append("")
-        lines.append("| Model | Precision | Recall | F1 | NDCG | Hit Ratio |")
-        lines.append("|-------|-----------|--------|----|-------|-----------|")
+        lines.append("| Model | Precision | Recall | F1 | NDCG | Hit Ratio | Runs |")
+        lines.append("|-------|-----------|--------|----|-------|-----------|------|")
         
         for model_name in cold_start_models:
             model_results = results[model_name]
             precision = model_results.get('precision', 0)
+            precision_std = model_results.get('precision_std', 0)
             recall = model_results.get('recall', 0)
+            recall_std = model_results.get('recall_std', 0)
             f1 = model_results.get('f1', 0)
+            f1_std = model_results.get('f1_std', 0)
             ndcg = model_results.get('ndcg', 0)
+            ndcg_std = model_results.get('ndcg_std', 0)
             hit_ratio = model_results.get('hit_ratio', 0)
+            hit_ratio_std = model_results.get('hit_ratio_std', 0)
+            num_runs = model_results.get('num_runs', 1)
             
-            lines.append(f"| {model_name} | {precision:.4f} | {recall:.4f} | {f1:.4f} | "
-                        f"{ndcg:.4f} | {hit_ratio:.4f} |")
+            # Gunakan +/- atau ± dengan encoding yang tepat
+            lines.append(f"| {model_name} | {precision:.4f}+/-{precision_std:.4f} | "
+                        f"{recall:.4f}+/-{recall_std:.4f} | {f1:.4f}+/-{f1_std:.4f} | "
+                        f"{ndcg:.4f}+/-{ndcg_std:.4f} | {hit_ratio:.4f}+/-{hit_ratio_std:.4f} | {num_runs} |")
     
     # Evaluation times information
     lines.append("\n## Evaluation Times")

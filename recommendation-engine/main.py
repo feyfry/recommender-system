@@ -527,6 +527,7 @@ def evaluate_models(args):
         k_values = getattr(args, 'k_values', [5, 10, 20])
         eval_cold_start = getattr(args, 'cold_start', True)
         output_format = getattr(args, 'format', 'markdown')
+        cold_start_runs = getattr(args, 'cold_start_runs', 5)
         
         # Get main user-item matrix
         user_item_matrix = fecf.user_item_matrix if 'fecf' in models else ncf.user_item_matrix
@@ -541,27 +542,10 @@ def evaluate_models(args):
             test_ratio=test_ratio,
             min_interactions=min_interactions,
             k_values=k_values,
-            save_results=True
+            save_results=True,
+            eval_cold_start=eval_cold_start,
+            cold_start_runs=cold_start_runs
         )
-        
-        # Evaluate cold-start if requested
-        if eval_cold_start:
-            print("Evaluating cold-start scenarios...")
-            
-            # Use FECF and Hybrid for cold-start evaluation
-            if 'fecf' in models:
-                results['cold_start_fecf'] = evaluate_cold_start(
-                    models['fecf'],
-                    model_name="fecf",
-                    user_item_matrix=user_item_matrix
-                )
-            
-            if 'hybrid' in models:
-                results['cold_start_hybrid'] = evaluate_cold_start(
-                    models['hybrid'],
-                    model_name="hybrid",
-                    user_item_matrix=user_item_matrix
-                )
         
         # Generate and save report
         report = generate_evaluation_report(results, output_format=output_format)
@@ -1480,10 +1464,9 @@ Examples:
     evaluate_parser.add_argument("--test-ratio", type=float, default=0.2, help="Test data ratio")
     evaluate_parser.add_argument("--min-interactions", type=int, default=5, help="Minimum interactions for test users")
     evaluate_parser.add_argument("--cold-start", action="store_true", help="Evaluate cold-start scenarios")
-    evaluate_parser.add_argument("--format", choices=["text", "markdown", "html"], default="markdown", help="Output format")
+    evaluate_parser.add_argument("--cold-start-runs", type=int, default=5, help="Number of runs for cold-start evaluation (default: 5)")
+    evaluate_parser.add_argument("--format", choices=["text", "markdown", "html"], default="markdown", help="Output format")  
     evaluate_parser.add_argument("--debug", action="store_true", help="Enable detailed debug logging")
-    evaluate_parser.add_argument("--cold-start-users", type=int, default=100, help="Number of users for cold-start evaluation (default: 100)")
-    evaluate_parser.add_argument("--cold-start-ratio", type=float, default=0.5, help="Ratio of interactions to hide for cold-start evaluation (default: 0.5)")
     
     # recommend command
     recommend_parser = subparsers.add_parser("recommend", help="Generate recommendations for a user")
