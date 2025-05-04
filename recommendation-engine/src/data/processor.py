@@ -1351,7 +1351,7 @@ class DataProcessor:
                 'popularity_bias': (0.7, 0.9),
                 'category_focus': (0.8, 0.95),
                 'weight_boost': (0.8, 1.2),
-                'probs': 0.10  # Dikurangi dari 0.15
+                'probs': 0.10  # Diturunkan dari 0.15
             },
             'casual': {
                 'interaction_count_range': (10, 20),  # MINIMUM DINAIKKAN
@@ -1360,7 +1360,7 @@ class DataProcessor:
                 'popularity_bias': (0.6, 0.8),
                 'category_focus': (0.7, 0.9),
                 'weight_boost': (0.9, 1.3),
-                'probs': 0.20  # Dikurangi dari 0.25
+                'probs': 0.20  # Diturunkan dari 0.25
             },
             'regular': {
                 'interaction_count_range': (20, 50),
