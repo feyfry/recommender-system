@@ -56,7 +56,7 @@ NCF_PARAMS = {
     "dropout": 0.4,                 # Dropout lebih agresif
     "weight_decay": 8e-4,           # Regularisasi lebih kuat
     "patience": 5,                  # Patience lebih pendek
-    "negative_ratio": 2             # Negative samples lebih sedikit
+    "negative_ratio": 4             # Negative samples lebih sedikit
 }
 
 # Feature-Enhanced CF - MODERATE TUNING
