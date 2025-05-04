@@ -447,7 +447,7 @@ class DataProcessor:
                     'id': coin_id,
                     'platforms': data.get('platforms', {}),
                     'categories': data.get('categories', []),
-                    'reddit_subscribers': community_data.get('reddit_subscribers', 0),
+                    'telegram_channel_user_count': community_data.get('telegram_channel_user_count', 0),
                     'twitter_followers': community_data.get('twitter_followers', 0),
                     'github_stars': developer_data.get('stars', 0),
                     'github_subscribers': developer_data.get('subscribers', 0),
