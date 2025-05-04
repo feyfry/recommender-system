@@ -778,7 +778,7 @@ class DataProcessor:
         else:
             df['categories'] = [[] for _ in range(len(df))]
         
-        # Ekstrak primary_category (satu kolom saja, tidak perlu primary_categories)
+        # Ekstrak primary_category
         df['primary_category'] = df.apply(self._extract_primary_category_improved, axis=1)
         
         # Ekstrak chain
@@ -2302,6 +2302,24 @@ class DataProcessor:
         
         # Create a copy for CSV export
         projects_df_csv = projects_df.copy()
+
+        # Hapus kolom redundan dan tidak diperlukan
+        columns_to_remove = []
+
+        # Hapus kolom deskripsi yang tidak diperlukan
+        for col in ['description_length_raw', 'description_word_count', 'description_avg_word_length']:
+            if col in projects_df_csv.columns:
+                columns_to_remove.append(col)
+                
+        # Hapus kolom sosial yang tidak diperlukan
+        for col in ['reddit_subscribers', 'discord_members', 'facebook_likes']:
+            if col in projects_df_csv.columns:
+                columns_to_remove.append(col)
+        
+        # Hapus kolom sekaligus
+        if columns_to_remove:
+            logger.info(f"Removing unnecessary columns: {columns_to_remove}")
+            projects_df_csv = projects_df_csv.drop(columns=columns_to_remove)
         
         # Properly handle 'platforms' column
         if 'platforms' in projects_df_csv.columns:
