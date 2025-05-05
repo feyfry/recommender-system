@@ -1,7 +1,3 @@
-"""
-Modul untuk memproses dan menyiapkan data koin/token Web3
-"""
-
 import os
 import re
 import json
@@ -30,9 +26,6 @@ class DataProcessor:
     """
     
     def __init__(self):
-        """
-        Inisialisasi processor dengan kategori dan platform normalisasi - versi yang lebih akurat
-        """
         # Pastikan direktori ada
         os.makedirs(PROCESSED_DIR, exist_ok=True)
         
@@ -338,12 +331,6 @@ class DataProcessor:
         }
     
     def load_latest_data(self) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-        """
-        Load data mentah terbaru dari direktori RAW_DIR
-        
-        Returns:
-            tuple: (projects_df, categories_df, trending_df)
-        """
         logger.info("Loading raw data")
         
         # Check for combined file first
@@ -520,15 +507,6 @@ class DataProcessor:
         return projects_df, categories_df, trending_df
     
     def validate_processed_data(self, projects_df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Memvalidasi data yang diproses untuk memastikan integritas data
-        
-        Args:
-            projects_df: DataFrame proyek yang akan divalidasi
-            
-        Returns:
-            pd.DataFrame: Laporan validasi
-        """
         logger.info("Validating processed data")
         
         validation_results = {
@@ -667,15 +645,6 @@ class DataProcessor:
         return validation_results
     
     def process_data(self, n_users: int = 500) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """
-        Proses data mentah dan persiapkan untuk sistem rekomendasi, dengan validasi hasil
-        
-        Args:
-            n_users: Jumlah user sintetis untuk dibuat
-            
-        Returns:
-            tuple: (projects_df, interactions_df, features_df)
-        """
         logger.info("Processing data")
         
         # Load data mentah
@@ -710,16 +679,6 @@ class DataProcessor:
         return projects_df, interactions_df, features_df
     
     def _clean_project_data(self, projects_df: pd.DataFrame, trending_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
-        """
-        Bersihkan dan standarisasi data proyek dengan penghapusan kolom redundan
-        
-        Args:
-            projects_df: DataFrame proyek yang akan dibersihkan
-            trending_df: DataFrame proyek trending (opsional)
-                
-        Returns:
-            pd.DataFrame: DataFrame proyek yang sudah dibersihkan
-        """
         logger.info("Cleaning project data")
         
         # Buat salinan untuk dimodifikasi
@@ -827,15 +786,6 @@ class DataProcessor:
         return df
         
     def _extract_primary_category_improved(self, row) -> str:
-        """
-        Extract primary category yang disimpan sebagai string JSON untuk multiple kategori
-        
-        Args:
-            row: Row from DataFrame 
-            
-        Returns:
-            str: Primary category string, bisa berisi multiple kategori dalam format JSON
-        """
         categories = row.get('categories', [])
         query_category = row.get('query_category')
         
@@ -945,15 +895,6 @@ class DataProcessor:
             return json.dumps(top_categories)
     
     def _extract_primary_chain(self, platforms: Dict[str, str]) -> str:
-        """
-        Ekstrak blockchain utama dari daftar platforms
-        
-        Args:
-            platforms: Dictionary platform (blockchain -> alamat kontrak)
-            
-        Returns:
-            str: Chain utama yang dinormalisasi
-        """
         # Handle NaN or non-dict values
         if pd.isna(platforms) or not isinstance(platforms, dict):
             return 'unknown'
@@ -980,15 +921,6 @@ class DataProcessor:
         return list(platforms.keys())[0] if platforms else 'unknown'
     
     def _calculate_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Calculate metrics dengan penghapusan metrics yang tidak perlu
-        
-        Args:
-            df: DataFrame with project data
-            
-        Returns:
-            pd.DataFrame: DataFrame with additional metrics
-        """
         logger.info("Calculating additional metrics")
         
         # Create a copy to avoid modifying the original
@@ -1195,16 +1127,6 @@ class DataProcessor:
         return result_df
     
     def _calculate_category_similarity(self, category1: str, category2: str) -> float:
-        """
-        Calculate similarity between two categories for exploration and expansion
-        
-        Args:
-            category1: First category
-            category2: Second category
-            
-        Returns:
-            float: Similarity score between 0 and 1
-        """
         if category1 == category2:
             return 1.0
         
@@ -1240,15 +1162,6 @@ class DataProcessor:
         return intersection / union
     
     def _create_features(self, projects_df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Buat matriks fitur untuk model rekomendasi
-        
-        Args:
-            projects_df: DataFrame proyek
-            
-        Returns:
-            pd.DataFrame: DataFrame fitur
-        """
         logger.info("Creating feature matrix")
         
         # Pilih dan standarisasi fitur numerik
@@ -1291,16 +1204,6 @@ class DataProcessor:
         return features_df
     
     def _create_synthetic_interactions(self, projects_df: pd.DataFrame, n_users: int = 500) -> pd.DataFrame:
-        """
-        Create synthetic user interactions with significantly increased randomness and realism
-        
-        Args:
-            projects_df: DataFrame of projects
-            n_users: Number of synthetic users to create
-            
-        Returns:
-            pd.DataFrame: DataFrame of user interactions
-        """
         logger.info(f"Creating synthetic interactions for {n_users} users")
         
         # Create global RNG instance with fixed seed for reproducibility
@@ -2037,18 +1940,6 @@ class DataProcessor:
         return interactions_df
     
     def _generate_user_timestamps(self, n_interactions: int, max_days_ago: int, start_offset: int, user_rng) -> List[datetime]:
-        """
-        Generate realistic timestamps for a user with improved distribution and interleaving
-        
-        Args:
-            n_interactions: Number of interactions to generate
-            max_days_ago: Maximum days ago for this user's activity window
-            start_offset: Offset from global start date to ensure better user interleaving
-            user_rng: Random number generator instance for this user
-            
-        Returns:
-            List[datetime]: List of timestamps for this user
-        """
         now = datetime.now()
         timestamps = []
         
@@ -2235,15 +2126,6 @@ class DataProcessor:
         return timestamps
 
     def clean_json_string(self, json_str):
-        """
-        Comprehensively clean JSON string from invalid double quotes
-        
-        Args:
-            json_str: String JSON that needs cleaning
-            
-        Returns:
-            str: Properly cleaned JSON string
-        """
         import re
         
         if not isinstance(json_str, str):
@@ -2278,16 +2160,7 @@ class DataProcessor:
         
         return json_str
     
-    def _save_processed_data(self, projects_df: pd.DataFrame, interactions_df: pd.DataFrame, 
-                    features_df: pd.DataFrame) -> None:
-        """
-        Save processed data dengan penghapusan kolom yang tidak perlu
-        
-        Args:
-            projects_df: DataFrame of projects
-            interactions_df: DataFrame of interactions
-            features_df: DataFrame of features
-        """
+    def _save_processed_data(self, projects_df: pd.DataFrame, interactions_df: pd.DataFrame, features_df: pd.DataFrame) -> None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         # Paths with timestamp
@@ -2390,12 +2263,6 @@ class DataProcessor:
         logger.info(f"Features: {features_df.shape}")
 
     def load_processed_data(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """
-        Load processed data with improved JSON handling
-        
-        Returns:
-            tuple: (projects_df, interactions_df, features_df)
-        """
         # Standard paths
         projects_path = os.path.join(PROCESSED_DIR, "projects.csv")
         interactions_path = os.path.join(PROCESSED_DIR, "interactions.csv")

@@ -1,7 +1,3 @@
-"""
-Modul untuk menghasilkan sinyal trading berdasarkan analisis teknikal (VERSI YANG DIPERBARUI)
-"""
-
 import os
 import logging
 import numpy as np
@@ -35,16 +31,6 @@ logger = logging.getLogger(__name__)
 
 
 def detect_market_regime(prices_df: pd.DataFrame, window: int = 30) -> str:
-    """
-    Mendeteksi regime pasar saat ini dengan penanganan data yang lebih baik
-
-    Args:
-        prices_df: DataFrame dengan data harga
-        window: Periode untuk perhitungan (default: 30)
-        
-    Returns:
-        str: Tipe regime pasar ('trending_bullish', 'trending_bearish', 'ranging', 'volatile')
-    """
     # Pastikan ada cukup data
     if len(prices_df) < window * 2:
         logger.warning(f"Tidak cukup data untuk deteksi regime pasar, minimal {window*2} titik data diperlukan")
@@ -135,17 +121,6 @@ def detect_market_regime(prices_df: pd.DataFrame, window: int = 30) -> str:
 
 def get_optimal_parameters(prices_df: pd.DataFrame, market_regime: str = None, 
                           trading_style: str = 'standard') -> Dict[str, Any]:
-    """
-    Menentukan parameter teknikal optimal berdasarkan karakteristik pasar
-
-    Args:
-        prices_df: DataFrame dengan data harga
-        market_regime: Tipe regime pasar (jika None, akan dihitung)
-        trading_style: Gaya trading ('short_term', 'standard', 'long_term')
-        
-    Returns:
-        dict: Parameter teknikal yang dioptimalkan
-    """
     # Deteksi regime pasar jika tidak disediakan
     if market_regime is None:
         market_regime = detect_market_regime(prices_df)
@@ -257,16 +232,6 @@ def get_optimal_parameters(prices_df: pd.DataFrame, market_regime: str = None,
 
 def weighted_signal_ensemble(signals: Dict[str, Dict[str, Any]], 
                            market_regime: str) -> Dict[str, Any]:
-    """
-    Menggabungkan sinyal trading dengan bobot yang disesuaikan berdasarkan market regime
-    
-    Args:
-        signals: Dictionary berisi signal dari berbagai indikator
-        market_regime: Tipe regime pasar saat ini
-        
-    Returns:
-        dict: Hasil ensemble berisi action, confidence, dan scoring details
-    """
     # Default weights
     weights = {
         'rsi': 0.15,
@@ -384,16 +349,6 @@ def weighted_signal_ensemble(signals: Dict[str, Dict[str, Any]],
 
 
 def calculate_rsi(prices: pd.Series, window: int = 14) -> pd.Series:
-    """
-    Calculate Relative Strength Index (RSI)
-    
-    Args:
-        prices: Series of prices
-        window: Window size for RSI calculation
-        
-    Returns:
-        pd.Series: RSI values
-    """
     # Pastikan ada cukup data untuk perhitungan
     if len(prices) < window * 2:
         logger.warning(f"Tidak cukup data untuk menghitung RSI. Minimal {window * 2} titik data diperlukan.")
@@ -455,18 +410,6 @@ def calculate_macd(prices: pd.Series,
                   fast_period: int = 12, 
                   slow_period: int = 26, 
                   signal_period: int = 9) -> Tuple[pd.Series, pd.Series, pd.Series]:
-    """
-    Calculate Moving Average Convergence Divergence (MACD)
-    
-    Args:
-        prices: Series of prices
-        fast_period: Fast EMA period
-        slow_period: Slow EMA period
-        signal_period: Signal line period
-        
-    Returns:
-        tuple: (macd, signal, histogram)
-    """
     min_periods_needed = slow_period + signal_period + 5  # Tambahan 5 untuk margin keamanan
     
     # Pastikan ada cukup data untuk perhitungan
@@ -526,17 +469,6 @@ def _calculate_macd_pandas(prices: pd.Series,
 
 
 def calculate_bollinger_bands(prices: pd.Series, window: int = 20, num_std: float = 2.0) -> Tuple[pd.Series, pd.Series, pd.Series]:
-    """
-    Calculate Bollinger Bands
-    
-    Args:
-        prices: Series of prices
-        window: Window size for moving average
-        num_std: Number of standard deviations for bands
-        
-    Returns:
-        tuple: (upper_band, middle_band, lower_band)
-    """
     # Pastikan ada cukup data untuk perhitungan
     if len(prices) < window:
         logger.warning(f"Tidak cukup data untuk menghitung Bollinger Bands. Minimal {window} titik data diperlukan.")
@@ -596,19 +528,6 @@ def calculate_stochastic(prices: pd.Series,
                         low_prices: pd.Series,
                         k_period: int = 14, 
                         d_period: int = 3) -> Tuple[pd.Series, pd.Series]:
-    """
-    Calculate Stochastic Oscillator
-    
-    Args:
-        prices: Series of closing prices
-        high_prices: Series of high prices
-        low_prices: Series of low prices
-        k_period: K period
-        d_period: D period
-        
-    Returns:
-        tuple: (k, d)
-    """
     # Pastikan ada cukup data untuk perhitungan
     if len(prices) < k_period + d_period:
         logger.warning(f"Tidak cukup data untuk menghitung Stochastic. Minimal {k_period + d_period} titik data diperlukan.")
@@ -688,18 +607,6 @@ def calculate_adx(high_prices: pd.Series,
                 low_prices: pd.Series, 
                 close_prices: pd.Series, 
                 window: int = 14) -> Tuple[pd.Series, pd.Series, pd.Series]:
-    """
-    Calculate Average Directional Index (ADX)
-    
-    Args:
-        high_prices: Series of high prices
-        low_prices: Series of low prices
-        close_prices: Series of closing prices
-        window: Window size for ADX calculation
-        
-    Returns:
-        tuple: (adx, plus_di, minus_di)
-    """
     # Pastikan ada cukup data untuk perhitungan
     min_periods_needed = window * 3  # ADX membutuhkan banyak data historis
     if len(close_prices) < min_periods_needed:
@@ -839,18 +746,6 @@ def calculate_atr(high_prices: pd.Series,
                 low_prices: pd.Series, 
                 close_prices: pd.Series, 
                 window: int = 14) -> pd.Series:
-    """
-    Calculate Average True Range (ATR)
-    
-    Args:
-        high_prices: Series of high prices
-        low_prices: Series of low prices
-        close_prices: Series of closing prices
-        window: Window size for ATR calculation
-        
-    Returns:
-        pd.Series: ATR values
-    """
     # Pastikan ada cukup data untuk perhitungan
     if len(close_prices) < window + 1:  # +1 untuk previous close
         logger.warning(f"Tidak cukup data untuk menghitung ATR. Minimal {window + 1} titik data diperlukan.")
@@ -921,19 +816,6 @@ def calculate_ichimoku(prices_df: pd.DataFrame,
                       base_period: int = 26,
                       span_b_period: int = 52, 
                       displacement_period: int = 26) -> Dict[str, pd.Series]:
-    """
-    Calculate Ichimoku Cloud components (Tenkan-sen, Kijun-sen, Senkou Span A, Senkou Span B, Chikou Span)
-    
-    Args:
-        prices_df: DataFrame dengan data harga (harus memiliki 'high', 'low', 'close')
-        conversion_period: Period for Tenkan-sen (default: 9)
-        base_period: Period for Kijun-sen (default: 26)
-        span_b_period: Period for Senkou Span B (default: 52)
-        displacement_period: Displacement period (default: 26)
-        
-    Returns:
-        dict: Ichimoku components (tenkan, kijun, senkou_a, senkou_b, chikou)
-    """
     # Cek apakah columns diperlukan ada
     required = ['high', 'low', 'close']
     for col in required:
@@ -980,18 +862,6 @@ def backtest_strategy(prices_df: pd.DataFrame,
                     strategy_type: str = 'macd', 
                     indicator_periods: Optional[Dict[str, Any]] = None,
                     initial_capital: float = 10000.0) -> Dict[str, Any]:
-    """
-    Backtest a trading strategy
-
-    Args:
-        prices_df: DataFrame dengan data harga
-        strategy_type: Tipe strategi ('macd', 'rsi', 'bollinger', dll)
-        indicator_periods: Parameter periode indikator
-        initial_capital: Modal awal
-        
-    Returns:
-        dict: Hasil backtest (profit, trades, metrics)
-    """
     # Cek apakah data cukup
     if len(prices_df) < 50:
         logger.warning("Tidak cukup data untuk backtest. Minimal 50 titik data diperlukan.")
@@ -1143,17 +1013,6 @@ def backtest_strategy(prices_df: pd.DataFrame,
 
 def generate_trading_signals(prices_df: pd.DataFrame, 
                          indicator_periods: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """
-    Generate trading signals based on technical indicators dengan penanganan data yang lebih baik
-    
-    Args:
-        prices_df: DataFrame with price data (must have 'close' column, 
-                  optionally 'high', 'low', 'volume')
-        indicator_periods: Dictionary of indicator periods
-        
-    Returns:
-        dict: Trading signals and analysis
-    """
     logger.info("Generating trading signals")
     
     # Membuat salinan data untuk menghindari modifikasi pada input asli
@@ -1906,9 +1765,6 @@ def generate_trading_signals(prices_df: pd.DataFrame,
 
 def personalize_signals(signals: Dict[str, Any], 
                       risk_tolerance: str = 'medium') -> Dict[str, Any]:
-    """
-    Personalize trading signals based on user risk tolerance
-    """
     # Create a copy to avoid modifying the original
     personalized = signals.copy()
     
@@ -2049,22 +1905,6 @@ def detect_market_events(prices_df: pd.DataFrame,
                         window: int = 20, 
                         threshold: float = 2.0,
                         custom_thresholds: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
-    """
-    Detect market events such as pumps, dumps, high volatility, etc.
-    
-    Args:
-        prices_df: DataFrame with price data
-        window: Window size for calculations
-        threshold: Standard deviation threshold for event detection
-        custom_thresholds: Dictionary dengan threshold kustom untuk berbagai event
-            - pump: Threshold untuk event pump (default: threshold)
-            - dump: Threshold untuk event dump (default: threshold)
-            - volatility: Threshold untuk volatility (default: threshold)
-            - volume_spike: Threshold untuk lonjakan volume (default: threshold)
-        
-    Returns:
-        dict: Detected market events
-    """
     # Default thresholds
     thresholds = {
         'pump': threshold,

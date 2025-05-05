@@ -1,7 +1,3 @@
-"""
-API endpoints untuk rekomendasi proyek Web3 (dengan perbaikan nama field image)
-"""
-
 import os
 import logging
 from typing import Dict, List, Optional, Any
@@ -176,15 +172,6 @@ load_models_on_startup()
 
 # Helper functions
 def get_model(model_type: str) -> Any:
-    """
-    Get or initialize model based on type with aggressive caching
-    
-    Args:
-        model_type: Type of model ('fecf', 'ncf', 'hybrid')
-        
-    Returns:
-        Model instance
-    """
     global _models
     
     if model_type not in ["fecf", "ncf", "hybrid"]:
@@ -253,16 +240,6 @@ def get_model(model_type: str) -> Any:
         return None
 
 def is_cold_start_user(user_id: str, model: Any) -> bool:
-    """
-    Check if user is a cold-start user
-    
-    Args:
-        user_id: User ID
-        model: Recommender model
-        
-    Returns:
-        bool: True if user is cold-start
-    """
     if hasattr(model, 'user_item_matrix') and model.user_item_matrix is not None:
         return user_id not in model.user_item_matrix.index
     
@@ -273,16 +250,6 @@ def get_cache_key(request: RecommendationRequest) -> str:
     return f"{request.user_id}:{request.model_type}:{request.num_recommendations}:{request.category}:{request.chain}"
 
 def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Clean project data dan memetakan field untuk kompatibilitas API
-    dengan penanganan NumPy array yang komprehensif
-    
-    Args:
-        project_dict: Project data dictionary
-        
-    Returns:
-        dict: Cleaned project data
-    """
     result = {}
     
     # Pastikan project_dict adalah dictionary
@@ -413,9 +380,6 @@ def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
 # Routes
 @router.post("/projects", response_model=RecommendationResponse)
 async def recommend_projects(request: RecommendationRequest):
-    """
-    Get project recommendations for a user with aggressive caching
-    """
     start_time = datetime.now()
     logger.info(f"Recommendation request for user {request.user_id} using {request.model_type} model")
     
@@ -591,9 +555,6 @@ async def get_trending_projects(
     limit: int = Query(10, ge=1, le=100),
     model_type: str = Query("fecf", enum=["fecf", "ncf", "hybrid"])
 ):
-    """
-    Get trending projects based on trend score
-    """
     try:
         model = get_model(model_type)
         trending = model.get_trending_projects(n=limit)
@@ -649,9 +610,6 @@ async def get_popular_projects(
     limit: int = Query(10, ge=1, le=100),
     model_type: str = Query("fecf", enum=["fecf", "ncf", "hybrid"])
 ):
-    """
-    Get popular projects based on popularity score
-    """
     try:
         model = get_model(model_type)
         popular = model.get_popular_projects(n=limit)
@@ -708,9 +666,6 @@ async def get_similar_projects(
     limit: int = Query(10, ge=1, le=100),
     model_type: str = Query("fecf", enum=["fecf", "ncf", "hybrid"])
 ):
-    """
-    Get similar projects based on feature similarity
-    """
     try:
         model = get_model(model_type)
         
@@ -770,12 +725,6 @@ async def get_similar_projects(
 # Fungsi untuk membersihkan cache secara lebih agresif
 @router.post("/cache/clear")
 async def clear_cache(full_clear: bool = False):
-    """
-    Clear recommendation cache with more options
-    
-    Args:
-        full_clear: Whether to clear all caches, including models
-    """
     global _user_recommendations_cache
     global _models
     

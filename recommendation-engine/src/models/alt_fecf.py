@@ -1,8 +1,3 @@
-"""
-Alternative Feature-Enhanced CF menggunakan scikit-learn Matrix Factorization
-yang dioptimalkan untuk domain cryptocurrency
-"""
-
 import os
 import logging
 import numpy as np
@@ -37,12 +32,6 @@ class FeatureEnhancedCF:
     """
     
     def __init__(self, params: Optional[Dict[str, Any]] = None):
-        """
-        Initialize Feature-Enhanced CF model
-        
-        Args:
-            params: Model parameters (overwrites defaults from config)
-        """
         # Model parameters
         self.params = params or FECF_PARAMS
         
@@ -76,17 +65,7 @@ class FeatureEnhancedCF:
                  projects_path: Optional[str] = None, 
                  interactions_path: Optional[str] = None,
                  features_path: Optional[str] = None) -> bool:
-        """
-        Load data for the model
         
-        Args:
-            projects_path: Path to projects data
-            interactions_path: Path to interactions data
-            features_path: Path to features data
-            
-        Returns:
-            bool: Success status
-        """
         # Use default paths if not specified
         if projects_path is None:
             projects_path = os.path.join(PROCESSED_DIR, "projects.csv")
@@ -160,12 +139,6 @@ class FeatureEnhancedCF:
         logger.info(f"Created mappings for {len(users)} users and {len(items)} items")
     
     def _create_item_features(self) -> csr_matrix:
-        """
-        Create item features matrix dengan normalisasi yang lebih baik
-        
-        Returns:
-            csr_matrix: Item features matrix
-        """
         # Extract relevant columns - exclude ID and numeric metrics
         exclude_cols = ['id', 'market_cap', 'total_volume', 'current_price', 
                     'price_change_percentage_24h', 'price_change_percentage_7d_in_currency',
@@ -210,15 +183,6 @@ class FeatureEnhancedCF:
         return features_matrix
     
     def train(self, save_model: bool = True) -> Dict[str, float]:
-        """
-        Train the Feature-Enhanced CF model menggunakan SVD dengan parameter optimal
-        
-        Args:
-            save_model: Whether to save the model after training
-            
-        Returns:
-            dict: Training metrics
-        """
         start_time = time.time()
         logger.info("Training Feature-Enhanced CF model with SVD")
         
@@ -308,15 +272,6 @@ class FeatureEnhancedCF:
             return {"error": str(e), "training_time": time.time() - start_time}
     
     def save_model(self, filepath: Optional[str] = None) -> str:
-        """
-        Save model to file
-        
-        Args:
-            filepath: Path to save model, if None will use default path
-            
-        Returns:
-            str: Path where model was saved
-        """
         if filepath is None:
             # Create default path
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -344,15 +299,6 @@ class FeatureEnhancedCF:
         return filepath
     
     def load_model(self, filepath: str) -> bool:
-        """
-        Load model from file
-        
-        Args:
-            filepath: Path to model file
-            
-        Returns:
-            bool: Success status
-        """
         try:
             logger.info(f"Attempting to load FECF model from {filepath}")
             
@@ -389,28 +335,11 @@ class FeatureEnhancedCF:
             return False
         
     def is_trained(self) -> bool:
-        """
-        Check if model is trained and ready for predictions
-        
-        Returns:
-            bool: True if model is trained, False otherwise
-        """
         if self.model is None:
             return False
         return True
     
     def recommend_for_user(self, user_id: str, n: int = 10, exclude_known: bool = True) -> List[Tuple[str, float]]:
-        """
-        Generate recommendations for a user with improved performance and vectorization
-        
-        Args:
-            user_id: User ID
-            n: Number of recommendations
-            exclude_known: Whether to exclude already interacted items
-            
-        Returns:
-            list: List of (project_id, score) tuples
-        """
         if self.model is None or self.item_similarity_matrix is None:
             logger.error("Model not trained or loaded")
             return []
@@ -566,16 +495,6 @@ class FeatureEnhancedCF:
         return top_candidates[:n]
     
     def _get_cold_start_recommendations(self, n: int = 10) -> List[Tuple[str, float]]:
-        """
-        Get recommendations for cold-start users with improved category diversity and
-        cryptocurrency-specific optimizations
-        
-        Args:
-            n: Number of recommendations
-            
-        Returns:
-            list: List of (project_id, score) tuples
-        """
         # IMPROVED: Multi-factor cryptocurrency cold-start approach
         if 'primary_category' in self.projects_df.columns:
             # 1. Get category distribution
@@ -795,16 +714,6 @@ class FeatureEnhancedCF:
             return [(row['id'], 1.0) for _, row in projects.iterrows()]
     
     def recommend_projects(self, user_id: str, n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Generate project recommendations with full details
-        
-        Args:
-            user_id: User ID
-            n: Number of recommendations
-            
-        Returns:
-            list: List of project dictionaries with recommendation scores
-        """
         # Get recommendations as (project_id, score) tuples
         recommendations = self.recommend_for_user(user_id, n)
         
@@ -848,17 +757,6 @@ class FeatureEnhancedCF:
         return detailed_recommendations
     
     def get_similar_projects(self, project_id: str, n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Find similar projects based on features and collaborative data
-        with cryptocurrency-specific enhancements
-        
-        Args:
-            project_id: Project ID
-            n: Number of similar projects to return
-            
-        Returns:
-            list: List of similar project dictionaries with similarity scores
-        """
         if self.model is None or self.item_similarity_matrix is None:
             logger.error("Model not trained or loaded")
             # Fallback to popular projects
@@ -1071,16 +969,6 @@ class FeatureEnhancedCF:
     def get_cold_start_recommendations(self, 
                           user_interests: Optional[List[str]] = None,
                           n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Mendapatkan rekomendasi untuk cold-start user
-        
-        Args:
-            user_interests: Daftar kategori/minat pengguna (opsional)
-            n: Jumlah rekomendasi yang diinginkan
-            
-        Returns:
-            list: Daftar objek proyek yang direkomendasikan
-        """
         # Mendapatkan rekomendasi dalam bentuk (project_id, score) tuples
         recommendations = self._get_cold_start_recommendations(n=n)
         
@@ -1124,15 +1012,6 @@ class FeatureEnhancedCF:
         return detailed_recommendations
     
     def get_trending_projects(self, n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Get trending projects based on trend score
-        
-        Args:
-            n: Number of trending projects to return
-            
-        Returns:
-            list: List of trending project dictionaries
-        """
         if 'trend_score' in self.projects_df.columns:
             # Sort by trend score
             trending = self.projects_df.sort_values('trend_score', ascending=False).head(n)
@@ -1173,16 +1052,6 @@ class FeatureEnhancedCF:
             return self.get_popular_projects(n)
     
     def get_popular_projects(self, n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Get popular projects based on popularity score with
-        cryptocurrency-specific enhancements
-        
-        Args:
-            n: Number of popular projects to return
-            
-        Returns:
-            list: List of popular project dictionaries
-        """
         if 'popularity_score' in self.projects_df.columns:
             # IMPROVED: Enhanced popularity ranking for crypto
             # In crypto, mix of popularity, market cap, and trend is important

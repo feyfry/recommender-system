@@ -1,7 +1,3 @@
-"""
-Konfigurasi utama untuk sistem rekomendasi Web3 (versi yang dioptimalkan)
-"""
-
 import os
 from pathlib import Path
 from dotenv import load_dotenv

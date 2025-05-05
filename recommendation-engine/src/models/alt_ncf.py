@@ -1,7 +1,3 @@
-"""
-Neural Collaborative Filtering alternatif menggunakan TensorFlow
-"""
-
 import os
 import logging
 import numpy as np
@@ -40,12 +36,6 @@ class NCFRecommender:
     """
     
     def __init__(self, params: Optional[Dict[str, Any]] = None):
-        """
-        Initialize NCF Recommender
-        
-        Args:
-            params: Model parameters (overwrites defaults from config)
-        """
         # Model parameters
         self.params = params or NCF_PARAMS
         
@@ -83,16 +73,6 @@ class NCFRecommender:
     def load_data(self, 
                  projects_path: Optional[str] = None, 
                  interactions_path: Optional[str] = None) -> bool:
-        """
-        Load data for the model
-        
-        Args:
-            projects_path: Path to projects data
-            interactions_path: Path to interactions data
-            
-        Returns:
-            bool: Success status
-        """
         # Use default paths if not specified
         if projects_path is None:
             projects_path = os.path.join(PROCESSED_DIR, "projects.csv")
@@ -147,12 +127,6 @@ class NCFRecommender:
             return False
     
     def _prepare_data(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Prepare data for training
-        
-        Returns:
-            tuple: (user_indices, item_indices, ratings)
-        """
         # Convert interactions to training format
         interactions = []
         
@@ -187,16 +161,6 @@ class NCFRecommender:
         return user_indices, item_indices, ratings
     
     def _build_model(self, num_users: int, num_items: int) -> tf.keras.Model:
-        """
-        Build NCF model
-        
-        Args:
-            num_users: Number of users
-            num_items: Number of items
-            
-        Returns:
-            tf.keras.Model: Built model
-        """
         # Parameters
         embedding_dim = self.params['embedding_dim']
         layers = self.params['layers']
@@ -259,19 +223,6 @@ class NCFRecommender:
     def train(self, val_ratio: Optional[float] = None, batch_size: Optional[int] = None, 
       num_epochs: Optional[int] = None, learning_rate: Optional[float] = None,
       save_model: bool = True) -> Dict[str, Any]:
-        """
-        Train the NCF model with Early Stopping
-        
-        Args:
-            val_ratio: Validation data ratio
-            batch_size: Batch size
-            num_epochs: Number of epochs
-            learning_rate: Learning rate
-            save_model: Whether to save the model after training
-            
-        Returns:
-            dict: Training metrics
-        """
         # Use config params if not specified
         val_ratio = val_ratio if val_ratio is not None else self.params.get('val_ratio', 0.2)
         batch_size = batch_size if batch_size is not None else self.params.get('batch_size', 256)
@@ -308,19 +259,6 @@ class NCFRecommender:
         
         # Create direct dataset inputs instead of using generators
         def create_tf_dataset(users, items, ratings, batch_size, shuffle=True):
-            """
-            Create TensorFlow dataset with proper type handling
-            
-            Args:
-                users: Array of user indices
-                items: Array of item indices
-                ratings: Array of ratings
-                batch_size: Batch size
-                shuffle: Whether to shuffle the dataset
-                
-            Returns:
-                tf.data.Dataset: TensorFlow dataset
-            """
             # Pastikan semua array memiliki tipe data yang benar
             users = np.array(users, dtype=np.int32)
             items = np.array(items, dtype=np.int32)
@@ -457,15 +395,6 @@ class NCFRecommender:
         }
     
     def save_model(self, filepath: Optional[str] = None) -> str:
-        """
-        Save model to file
-        
-        Args:
-            filepath: Path to save model, if None will use default path
-            
-        Returns:
-            str: Path where model was saved
-        """
         if filepath is None:
             # Create default path
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -521,15 +450,6 @@ class NCFRecommender:
             return filepath
     
     def load_model(self, filepath: str) -> bool:
-        """
-        Load model from file
-        
-        Args:
-            filepath: Path to model file
-            
-        Returns:
-            bool: Success status
-        """
         try:
             logger.info(f"Attempting to load NCF model from {filepath}")
             
@@ -636,12 +556,6 @@ class NCFRecommender:
             return False
         
     def is_trained(self) -> bool:
-        """
-        Check if model is trained and ready for predictions
-        
-        Returns:
-            bool: True if model is trained, False otherwise
-        """
         if self.model is None:
             return False
         
@@ -649,16 +563,6 @@ class NCFRecommender:
         return self.is_model_loaded
     
     def predict(self, user_id: str, item_id: str) -> float:
-        """
-        Predict rating for a user-item pair
-        
-        Args:
-            user_id: User ID
-            item_id: Item ID
-            
-        Returns:
-            float: Predicted rating (0-1)
-        """
         if not self.is_trained():
             logger.error("Model not trained or loaded")
             return 0.0
@@ -682,17 +586,6 @@ class NCFRecommender:
     
     def recommend_for_user(self, user_id: str, n: int = 10, 
                          exclude_known: bool = True) -> List[Tuple[str, float]]:
-        """
-        Generate recommendations for a user
-        
-        Args:
-            user_id: User ID
-            n: Number of recommendations
-            exclude_known: Whether to exclude already interacted items
-            
-        Returns:
-            list: List of (project_id, score) tuples
-        """
         if not self.is_trained():
             logger.error("Model not trained or loaded")
             return []
@@ -746,16 +639,6 @@ class NCFRecommender:
         return predictions[:n]
     
     def recommend_projects(self, user_id: str, n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Generate project recommendations with full details
-        
-        Args:
-            user_id: User ID
-            n: Number of recommendations
-            
-        Returns:
-            list: List of project dictionaries with recommendation scores
-        """
         # Get recommendations as (project_id, score) tuples
         recommendations = self.recommend_for_user(user_id, n)
         
@@ -781,16 +664,6 @@ class NCFRecommender:
     def get_cold_start_recommendations(self, 
                                       user_interests: Optional[List[str]] = None,
                                       n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Get recommendations for cold-start users based on interests
-        
-        Args:
-            user_interests: List of categories/interests
-            n: Number of recommendations
-            
-        Returns:
-            list: List of project dictionaries with recommendation scores
-        """
         # Filter projects by categories if interests are provided
         if user_interests and 'primary_category' in self.projects_df.columns:
             # Filter projects by category
@@ -829,15 +702,6 @@ class NCFRecommender:
             return filtered_projects.head(n).to_dict('records')
     
     def get_trending_projects(self, n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Get trending projects based on trend score
-        
-        Args:
-            n: Number of trending projects to return
-            
-        Returns:
-            list: List of trending project dictionaries
-        """
         if 'trend_score' in self.projects_df.columns:
             trending = self.projects_df.sort_values('trend_score', ascending=False).head(n)
             result = []
@@ -853,15 +717,6 @@ class NCFRecommender:
             return self.get_popular_projects(n)
     
     def get_popular_projects(self, n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Get popular projects based on popularity score
-        
-        Args:
-            n: Number of popular projects to return
-            
-        Returns:
-            list: List of popular project dictionaries
-        """
         if 'popularity_score' in self.projects_df.columns:
             popular = self.projects_df.sort_values('popularity_score', ascending=False).head(n)
             result = []

@@ -1,7 +1,3 @@
-"""
-Modul untuk menghitung indikator-indikator teknikal (VERSI YANG DIPERBARUI - DENGAN PERIODE DINAMIS)
-"""
-
 import warnings
 import os
 import logging
@@ -54,14 +50,6 @@ class TechnicalIndicators:
     """
     
     def __init__(self, prices_df: pd.DataFrame, indicator_periods: Optional[Dict[str, Any]] = None):
-        """
-        Inisialisasi dengan DataFrame harga dan periode indikator kustom
-        
-        Args:
-            prices_df: DataFrame dengan data harga (harus memiliki kolom 'close',
-                    opsional 'high', 'low', 'volume')
-            indicator_periods: Dictionary periode indikator kustom
-        """
         self.prices_df = prices_df
         
         # Set default periods jika tidak disediakan
@@ -137,12 +125,6 @@ class TechnicalIndicators:
             logger.info(f"Adjusted long MA period from {original_ma_long} to {self.periods['ma_long']} due to limited data")
     
     def _detect_market_regime(self) -> str:
-        """
-        Deteksi regime pasar
-        
-        Returns:
-            str: Market regime
-        """
         # Implement market regime detection
         df = self.prices_df
         
@@ -178,9 +160,6 @@ class TechnicalIndicators:
         return "unknown"
         
     def _optimize_parameters(self):
-        """
-        Optimize indicator parameters based on market regime and volatility
-        """
         regime = self.market_regime
         
         if regime == "unknown":
@@ -217,12 +196,6 @@ class TechnicalIndicators:
         logger.info(f"Parameters optimized for {regime} market regime")
     
     def add_indicators(self) -> pd.DataFrame:
-        """
-        Tambahkan indikator teknikal ke DataFrame
-        
-        Returns:
-            pd.DataFrame: DataFrame dengan indikator teknikal
-        """
         try:
             # Create a copy to avoid modifying the original
             df = self.prices_df.copy()
@@ -284,15 +257,6 @@ class TechnicalIndicators:
             return self.prices_df.copy()
     
     def add_trend_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Tambahkan indikator tren dengan penanganan error yang lebih baik
-        
-        Args:
-            df: DataFrame harga
-                
-        Returns:
-            pd.DataFrame: DataFrame dengan indikator tren
-        """
         # Moving Averages
         ma_short = self.periods['ma_short']
         ma_medium = self.periods['ma_medium']
@@ -533,15 +497,6 @@ class TechnicalIndicators:
                 )
     
     def add_momentum_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Tambahkan indikator momentum
-        
-        Args:
-            df: DataFrame harga
-            
-        Returns:
-            pd.DataFrame: DataFrame dengan indikator momentum
-        """
         # RSI - Relative Strength Index
         rsi_period = self.periods['rsi_period']
         
@@ -886,15 +841,6 @@ class TechnicalIndicators:
             logger.error(f"Error calculating momentum composite: {str(e)}")
     
     def add_volatility_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Tambahkan indikator volatilitas
-        
-        Args:
-            df: DataFrame harga
-            
-        Returns:
-            pd.DataFrame: DataFrame dengan indikator volatilitas
-        """
         # Bollinger Bands
         bb_period = self.periods['bb_period']
         
@@ -1062,15 +1008,6 @@ class TechnicalIndicators:
             logger.error(f"Error calculating volatility squeeze: {str(e)}")
     
     def add_volume_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Tambahkan indikator volume
-        
-        Args:
-            df: DataFrame harga
-            
-        Returns:
-            pd.DataFrame: DataFrame dengan indikator volume
-        """
         if self.volume_col is None or self.volume_col not in df.columns:
             logger.warning("Volume column not available, skipping volume indicators")
             return df
@@ -1211,15 +1148,6 @@ class TechnicalIndicators:
             logger.error(f"Error adding volume divergence: {str(e)}")
     
     def add_ichimoku_cloud(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Add Ichimoku Cloud indicators
-        
-        Args:
-            df: DataFrame harga
-            
-        Returns:
-            pd.DataFrame: DataFrame dengan indikator Ichimoku
-        """
         if not all(col in df.columns for col in [self.high_col, self.low_col]):
             return df  # Need high/low data for Ichimoku
         
@@ -1271,15 +1199,6 @@ class TechnicalIndicators:
         return df
     
     def add_pivot_points(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Add pivot points - commonly used for support/resistance levels
-        
-        Args:
-            df: DataFrame harga
-            
-        Returns:
-            pd.DataFrame: DataFrame dengan pivot points
-        """
         if not all(col in df.columns for col in [self.high_col, self.low_col]):
             return df  # Need high/low data for pivot points
         
@@ -1308,9 +1227,6 @@ class TechnicalIndicators:
         return df
     
     def add_signal_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Tambahkan indikator sinyal/keputusan dengan penanganan error yang lebih baik
-        """
         try:
             # Buat salinan DataFrame dulu untuk mencegah fragmentasi
             result_df = df.copy()
@@ -1431,16 +1347,6 @@ class TechnicalIndicators:
             return df
     
     def generate_alerts(self, lookback_period: int = 5, df: pd.DataFrame = None) -> List[Dict[str, Any]]:
-        """
-        Generate alerts based on technical indicators
-        
-        Args:
-            lookback_period: Number of periods to look back for alerts
-            df: Optional pre-calculated DataFrame with indicators (jika None, akan menggunakan add_indicators())
-                
-        Returns:
-            list: List of alert dictionaries
-        """
         # Use provided dataframe or calculate indicators if not provided
         if df is None:
             df = self.add_indicators()
@@ -1650,12 +1556,6 @@ class TechnicalIndicators:
         return alerts
     
     def generate_reversal_signals(self) -> Dict[str, Any]:
-        """
-        Generate potential reversal signals
-        
-        Returns:
-            dict: Potential reversal signals and probabilities
-        """
         # Add indicators if not already
         df = self.add_indicators()
         
@@ -1801,15 +1701,6 @@ class TechnicalIndicators:
         }
     
     def predict_price_trend(self, periods: int = 5) -> Dict[str, Any]:
-        """
-        Predict price trend for the near future
-        
-        Args:
-            periods: Number of periods to predict
-            
-        Returns:
-            dict: Prediction data including direction, confidence, target levels
-        """
         df = self.add_indicators()
         
         # Need sufficient data points
@@ -1928,16 +1819,6 @@ class TechnicalIndicators:
 
 # Helper functions for ML-based price predictions
 def predict_price_ml(prices_df: pd.DataFrame, days_to_predict: int = 7) -> Dict[str, Any]:
-    """
-    Predict future prices using machine learning (LSTM)
-    
-    Args:
-        prices_df: DataFrame with historical price data
-        days_to_predict: Number of days to predict
-        
-    Returns:
-        dict: Prediction results
-    """
     try:
         # Check if we have TensorFlow
         try:
@@ -2067,16 +1948,6 @@ def predict_price_ml(prices_df: pd.DataFrame, days_to_predict: int = 7) -> Dict[
         return predict_price_arima(prices_df, days_to_predict)
 
 def predict_price_arima(prices_df: pd.DataFrame, days_to_predict: int = 7) -> Dict[str, Any]:
-    """
-    Predict future prices using ARIMA statistical model (diperbarui untuk mengatasi warning indeks)
-    
-    Args:
-        prices_df: DataFrame with historical price data
-        days_to_predict: Number of days to predict
-        
-    Returns:
-        dict: Prediction results
-    """
     try:
         # Check if statsmodels available
         try:
@@ -2166,16 +2037,6 @@ def predict_price_arima(prices_df: pd.DataFrame, days_to_predict: int = 7) -> Di
         return predict_price_simple(prices_df, days_to_predict)
 
 def predict_price_simple(prices_df: pd.DataFrame, days_to_predict: int = 7) -> Dict[str, Any]:
-    """
-    Simple price prediction using moving average and recent trend
-    
-    Args:
-        prices_df: DataFrame with historical price data
-        days_to_predict: Number of days to predict
-        
-    Returns:
-        dict: Prediction results
-    """
     try:
         # Calculate moving averages
         if len(prices_df) >= 20:

@@ -1,7 +1,3 @@
-"""
-Evaluasi model rekomendasi dengan metode yang dioptimalkan untuk cryptocurrency - OPTIMIZED
-"""
-
 import os
 import logging
 import numpy as np
@@ -37,17 +33,6 @@ logger = logging.getLogger(__name__)
 
 # Fungsi-fungsi metrik tetap sama seperti sebelumnya...
 def precision_at_k(actual: List[str], predicted: List[str], k: int) -> float:
-    """
-    Calculate precision@k
-    
-    Args:
-        actual: List of actual relevant items
-        predicted: List of predicted items
-        k: Number of top predictions to consider
-        
-    Returns:
-        float: Precision@k
-    """
     if len(predicted) == 0 or k <= 0:
         return 0.0
     
@@ -62,17 +47,6 @@ def precision_at_k(actual: List[str], predicted: List[str], k: int) -> float:
 
 
 def recall_at_k(actual: List[str], predicted: List[str], k: int) -> float:
-    """
-    Calculate recall@k
-    
-    Args:
-        actual: List of actual relevant items
-        predicted: List of predicted items
-        k: Number of top predictions to consider
-        
-    Returns:
-        float: Recall@k
-    """
     if len(actual) == 0 or len(predicted) == 0 or k <= 0:
         return 0.0
     
@@ -87,17 +61,6 @@ def recall_at_k(actual: List[str], predicted: List[str], k: int) -> float:
 
 
 def f1_at_k(actual: List[str], predicted: List[str], k: int) -> float:
-    """
-    Calculate F1@k
-    
-    Args:
-        actual: List of actual relevant items
-        predicted: List of predicted items
-        k: Number of top predictions to consider
-        
-    Returns:
-        float: F1@k
-    """
     p = precision_at_k(actual, predicted, k)
     r = recall_at_k(actual, predicted, k)
     
@@ -108,17 +71,6 @@ def f1_at_k(actual: List[str], predicted: List[str], k: int) -> float:
 
 
 def ndcg_at_k(actual: List[str], predicted: List[str], k: int) -> float:
-    """
-    Calculate Normalized Discounted Cumulative Gain (NDCG) at k
-    
-    Args:
-        actual: List of actual relevant items
-        predicted: List of predicted items
-        k: Number of top predictions to consider
-        
-    Returns:
-        float: NDCG@k
-    """
     if len(actual) == 0 or len(predicted) == 0 or k <= 0:
         return 0.0
     
@@ -146,17 +98,6 @@ def ndcg_at_k(actual: List[str], predicted: List[str], k: int) -> float:
 
 
 def mean_average_precision(actual_lists: List[List[str]], predicted_lists: List[List[str]], k: int) -> float:
-    """
-    Calculate Mean Average Precision (MAP) at k
-    
-    Args:
-        actual_lists: List of lists of actual relevant items
-        predicted_lists: List of lists of predicted items
-        k: Number of top predictions to consider
-        
-    Returns:
-        float: MAP@k
-    """
     if not actual_lists or not predicted_lists:
         return 0.0
     
@@ -188,16 +129,6 @@ def mean_average_precision(actual_lists: List[List[str]], predicted_lists: List[
 
 
 def reciprocal_rank(actual: List[str], predicted: List[str]) -> float:
-    """
-    Calculate Reciprocal Rank
-    
-    Args:
-        actual: List of actual relevant items
-        predicted: List of predicted items
-        
-    Returns:
-        float: Reciprocal Rank
-    """
     if not actual or not predicted:
         return 0.0
     
@@ -210,16 +141,6 @@ def reciprocal_rank(actual: List[str], predicted: List[str]) -> float:
 
 
 def mean_reciprocal_rank(actual_lists: List[List[str]], predicted_lists: List[List[str]]) -> float:
-    """
-    Calculate Mean Reciprocal Rank (MRR)
-    
-    Args:
-        actual_lists: List of lists of actual relevant items
-        predicted_lists: List of lists of predicted items
-        
-    Returns:
-        float: MRR
-    """
     if not actual_lists or not predicted_lists:
         return 0.0
     
@@ -238,17 +159,6 @@ def mean_reciprocal_rank(actual_lists: List[List[str]], predicted_lists: List[Li
 
 
 def hit_ratio(actual_lists: List[List[str]], predicted_lists: List[List[str]], k: int) -> float:
-    """
-    Calculate Hit Ratio at k
-    
-    Args:
-        actual_lists: List of lists of actual relevant items
-        predicted_lists: List of lists of predicted items
-        k: Number of top predictions to consider
-        
-    Returns:
-        float: Hit Ratio@k
-    """
     if not actual_lists or not predicted_lists:
         return 0.0
     
@@ -279,25 +189,6 @@ def evaluate_model(model_name: str,
                   max_debug_users: int = 3,
                   use_parallel: bool = True,       # OPTIMIZED: Enable parallelism by default
                   num_workers: int = 4) -> Dict[str, Any]:
-    """
-    Evaluate a recommender model with improved performance
-    
-    Args:
-        model_name: Name of the model
-        recommender: Recommender model
-        test_users: List of test users
-        test_interactions: Dictionary mapping users to their test interactions
-        k_values: List of k values for evaluation
-        metrics: List of metrics to compute
-        debug: Whether to print debug information
-        max_users_per_batch: Maximum users to evaluate in one batch
-        max_debug_users: Maximum number of debug users 
-        use_parallel: Whether to use parallel processing
-        num_workers: Number of parallel workers if use_parallel=True
-        
-    Returns:
-        dict: Evaluation results
-    """
     logger.info(f"Evaluating {model_name} model")
     start_time = time.time()
     
@@ -454,19 +345,6 @@ def prepare_test_data(user_item_matrix: pd.DataFrame,
                     min_interactions: int = 5,
                     random_seed: int = 42,
                     max_test_users: int = 100) -> Tuple[List[str], Dict[str, List[str]]]:  # OPTIMIZATION: Limit test users
-    """
-    Prepare test data for model evaluation with improved sampling - OPTIMIZED
-    
-    Args:
-        user_item_matrix: User-item interaction matrix
-        test_ratio: Proportion of interactions to use for testing
-        min_interactions: Minimum number of interactions required for a user
-        random_seed: Random seed for reproducibility
-        max_test_users: Maximum number of test users to use
-        
-    Returns:
-        tuple: (test_users, test_interactions)
-    """
     # Filter users with minimum number of interactions
     user_interactions = {}
     test_interactions = {}
@@ -555,26 +433,6 @@ def evaluate_all_models(models: Dict[str, Any],
                        num_workers: int = 4,
                        eval_cold_start: bool = True,
                        cold_start_runs: int = 5) -> Dict[str, Dict[str, Any]]:
-    """
-    Evaluate multiple recommender models with improved methodology
-    
-    Args:
-        models: Dictionary of model name to model instance
-        user_item_matrix: User-item interaction matrix
-        test_ratio: Proportion of interactions to use for testing
-        min_interactions: Minimum number of interactions required for test users
-        k_values: List of k values for evaluation metrics
-        save_results: Whether to save results to file
-        max_test_users: Maximum number of test users to use
-        max_users_per_batch: Maximum users to evaluate in one batch
-        use_parallel: Whether to use parallel processing 
-        num_workers: Number of workers for parallel processing
-        eval_cold_start: Whether to evaluate cold start scenarios
-        cold_start_runs: Number of runs for cold-start evaluation
-        
-    Returns:
-        dict: Evaluation results by model
-    """
     # Prepare test data
     test_users, test_interactions = prepare_test_data(
         user_item_matrix, 
@@ -729,24 +587,6 @@ def evaluate_cold_start(model: Any,
                        max_users_per_batch: int = 50,
                        use_parallel: bool = False,
                        n_runs: int = 5) -> Dict[str, Any]:  # ADDED n_runs parameter
-    """
-    Evaluate model performance on cold-start users with multiple runs for stability
-    
-    Args:
-        model: Recommender model to evaluate
-        model_name: Name of the model
-        user_item_matrix: User-item interaction matrix
-        cold_start_users: Number of users for cold-start evaluation (default from config)
-        test_ratio: Ratio of interactions to hide for cold-start simulation (default from config)
-        k_values: List of k values for evaluation metrics
-        debug: Whether to enable detailed debugging
-        max_users_per_batch: Maximum users to evaluate in one batch
-        use_parallel: Whether to use parallel processing
-        n_runs: Number of runs to average results
-        
-    Returns:
-        dict: Evaluation metrics averaged across runs
-    """
     # Load configuration or use defaults
     config = {}
     if 'COLD_START_EVAL_CONFIG' in globals():
@@ -884,16 +724,6 @@ def evaluate_cold_start(model: Any,
 # Existing support functions (save_evaluation_results, load_evaluation_results, generate_evaluation_report)
 # remain unchanged as they don't affect performance...
 def save_evaluation_results(results: Dict[str, Dict[str, Any]], filename: Optional[str] = None) -> str:
-    """
-    Save evaluation results to file
-    
-    Args:
-        results: Dictionary of evaluation results
-        filename: Filename to save results, if None uses timestamp
-        
-    Returns:
-        str: Path where results were saved
-    """
     if filename is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"model_performance_{timestamp}.json"
@@ -937,15 +767,6 @@ def save_evaluation_results(results: Dict[str, Dict[str, Any]], filename: Option
 
 
 def load_evaluation_results(filepath: str) -> Dict[str, Dict[str, Any]]:
-    """
-    Load evaluation results from file
-    
-    Args:
-        filepath: Path to evaluation results file
-        
-    Returns:
-        dict: Dictionary of evaluation results
-    """
     try:
         with open(filepath, 'r') as f:
             results = json.load(f)
@@ -959,16 +780,6 @@ def load_evaluation_results(filepath: str) -> Dict[str, Dict[str, Any]]:
 
 def generate_evaluation_report(results: Dict[str, Dict[str, Any]], 
                               output_format: str = 'json') -> str:
-    """
-    Generate evaluation report from results
-    
-    Args:
-        results: Dictionary of evaluation results
-        output_format: Output format ('text', 'markdown', 'json')
-        
-    Returns:
-        str: Evaluation report
-    """
     if output_format == 'markdown':
         return _generate_markdown_report(results)
     elif output_format == 'json':

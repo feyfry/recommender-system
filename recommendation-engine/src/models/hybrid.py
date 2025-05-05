@@ -1,8 +1,3 @@
-"""
-Enhanced Hybrid Recommender yang mengintegrasikan FECF dan NCF 
-dengan metode ensemble yang lebih canggih untuk domain cryptocurrency
-"""
-
 import os
 import logging
 import numpy as np
@@ -39,12 +34,6 @@ class HybridRecommender:
     """
     
     def __init__(self, params: Optional[Dict[str, Any]] = None):
-        """
-        Initialize Enhanced Hybrid Recommender
-        
-        Args:
-            params: Model parameters (overwrites defaults from config)
-        """
         # Model parameters dengan default yang lebih baik
         default_params = {
             "ncf_weight": 0.3,              # Kurangi bobot NCF karena underperform
@@ -96,17 +85,6 @@ class HybridRecommender:
                  projects_path: Optional[str] = None, 
                  interactions_path: Optional[str] = None,
                  features_path: Optional[str] = None) -> bool:
-        """
-        Load data for the model
-        
-        Args:
-            projects_path: Path to projects data
-            interactions_path: Path to interactions data
-            features_path: Path to features data
-            
-        Returns:
-            bool: Success status
-        """
         try:
             # Initialize component models if needed
             if self.fecf_model is None:
@@ -148,9 +126,6 @@ class HybridRecommender:
             return False
     
     def preprocess_categories(self):
-        """
-        Pre-process kategori untuk menangani multiple categories dengan lebih baik
-        """
         if self.projects_df is None or 'primary_category' not in self.projects_df.columns:
             return
             
@@ -189,17 +164,6 @@ class HybridRecommender:
              fecf_params: Optional[Dict[str, Any]] = None,
              ncf_params: Optional[Dict[str, Any]] = None,
              save_model: bool = True) -> Dict[str, Any]:
-        """
-        Train all component models
-        
-        Args:
-            fecf_params: Parameters for FECF model
-            ncf_params: Parameters for NCF model
-            save_model: Whether to save the trained models
-            
-        Returns:
-            dict: Training metrics
-        """
         metrics = {}
         
         # Train FECF
@@ -232,15 +196,6 @@ class HybridRecommender:
         return metrics
     
     def save_model(self, filepath: Optional[str] = None) -> str:
-        """
-        Save hybrid model weights and references to component models
-        
-        Args:
-            filepath: Path to save model, if None will use default path
-            
-        Returns:
-            str: Path where model was saved
-        """
         if filepath is None:
             # Create default path
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -286,17 +241,6 @@ class HybridRecommender:
               hybrid_filepath: Optional[str] = None,
               fecf_filepath: Optional[str] = None, 
               ncf_filepath: Optional[str] = None) -> bool:
-        """
-        Load model components
-        
-        Args:
-            hybrid_filepath: Path to hybrid model file
-            fecf_filepath: Path to FECF model file
-            ncf_filepath: Path to NCF model file
-            
-        Returns:
-            bool: Success status
-        """
         # Load hybrid weights if provided
         if hybrid_filepath and os.path.exists(hybrid_filepath):
             try:
@@ -368,12 +312,6 @@ class HybridRecommender:
         return fecf_success or ncf_success
     
     def is_trained(self) -> bool:
-        """
-        Check if model is trained and ready for predictions
-        
-        Returns:
-            bool: True if model is trained, False otherwise
-        """
         # Hybrid model dianggap terlatih jika minimal satu komponen terlatih
         fecf_trained = (self.fecf_model is not None and 
                     hasattr(self.fecf_model, 'model') and 
@@ -387,16 +325,6 @@ class HybridRecommender:
     
     def normalize_scores(self, recommendations: List[Tuple[str, float]], 
                     method: Optional[str] = None) -> List[Tuple[str, float]]:
-        """
-        Normalisasi skor rekomendasi dengan berbagai metode
-        
-        Args:
-            recommendations: List of (item_id, score) tuples
-            method: Normalization method ("linear", "sigmoid", "rank", "none")
-            
-        Returns:
-            list: List of (item_id, normalized_score) tuples
-        """
         if not recommendations:
             return []
             
@@ -454,15 +382,6 @@ class HybridRecommender:
         return normalized_recs
     
     def get_effective_weights(self, user_id: str) -> Tuple[float, float, float]:
-        """
-        Determine model weights based on user interactions and model health
-        
-        Args:
-            user_id: User ID
-            
-        Returns:
-            tuple: (fecf_weight, ncf_weight, diversity_weight)
-        """
         # Check model health
         fecf_health = 1.0  # Default full health
         ncf_health = 1.0   # Default full health
@@ -536,19 +455,6 @@ class HybridRecommender:
                                    fecf_weight: float = 0.7, 
                                    ncf_weight: float = 0.3,
                                    ensemble_method: Optional[str] = None) -> List[Tuple[str, float]]:
-        """
-        Implement advanced ensemble methods untuk menggabungkan rekomendasi
-        
-        Args:
-            fecf_recs: FECF recommendations as (item_id, score) tuples
-            ncf_recs: NCF recommendations as (item_id, score) tuples
-            fecf_weight: Weight for FECF model
-            ncf_weight: Weight for NCF model
-            ensemble_method: Ensemble method ("weighted_avg", "max", "rank_fusion")
-            
-        Returns:
-            list: Combined recommendations as (item_id, score) tuples
-        """
         if not fecf_recs and not ncf_recs:
             return []
             
@@ -629,17 +535,6 @@ class HybridRecommender:
     
     def apply_diversity(self, recommendations: List[Tuple[str, float]], 
                     n: int, diversity_weight: float = 0.2) -> List[Tuple[str, float]]:
-        """
-        Apply category and chain diversity with improved algorithm
-        
-        Args:
-            recommendations: List of (item_id, score) tuples
-            n: Number of results to return
-            diversity_weight: Weight of diversity factors
-            
-        Returns:
-            list: Diversified recommendations
-        """
         if not recommendations or len(recommendations) <= n:
             return recommendations
             
@@ -771,17 +666,6 @@ class HybridRecommender:
         return result
     
     def recommend_for_user(self, user_id: str, n: int = 10, exclude_known: bool = True) -> List[Tuple[str, float]]:
-        """
-        Generate recommendations for a user using ensemble approach
-        
-        Args:
-            user_id: User ID
-            n: Number of recommendations
-            exclude_known: Whether to exclude already interacted items
-            
-        Returns:
-            list: List of (project_id, score) tuples
-        """
         # OPTIMIZATION: Check cache first
         cache_key = f"{user_id}_{n}_{exclude_known}"
         if hasattr(self, '_recommendation_cache') and cache_key in self._recommendation_cache:
@@ -893,16 +777,6 @@ class HybridRecommender:
         return diversified_recs[:n]
     
     def _get_cold_start_recommendations(self, user_id: str, n: int = 10) -> List[Tuple[str, float]]:
-        """
-        Get enhanced cold-start recommendations with improved category handling
-        
-        Args:
-            user_id: User ID
-            n: Number of recommendations
-            
-        Returns:
-            list: List of (project_id, score) tuples
-        """
         # Use optimized weights for cold-start
         fecf_weight = self.params.get('cold_start_fecf_weight', 0.9)
         ncf_weight = 1.0 - fecf_weight
@@ -948,10 +822,6 @@ class HybridRecommender:
             trending = self.projects_df.sort_values('trend_score', ascending=False).head(n)
             trending_recs = [(row['id'], row['trend_score']/100) 
                            for _, row in trending.iterrows()]
-            
-        # Use a 3-way ensemble for cold-start
-        # 70% from model recommendations (weighted between FECF and NCF)
-        # 30% from trending for discovery
         
         # Get model recommendations using ensemble
         model_recs = self.get_ensemble_recommendations(
@@ -1011,16 +881,6 @@ class HybridRecommender:
         return diversified[:n]
     
     def recommend_projects(self, user_id: str, n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Generate project recommendations with full details
-        
-        Args:
-            user_id: User ID
-            n: Number of recommendations
-            
-        Returns:
-            list: List of project dictionaries with recommendation scores
-        """
         # Check if this is a cold-start user
         is_cold_start = False
         if self.user_item_matrix is not None:
@@ -1081,16 +941,6 @@ class HybridRecommender:
     def get_cold_start_recommendations(self, 
                           user_interests: Optional[List[str]] = None,
                           n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Mendapatkan rekomendasi untuk cold-start user
-        
-        Args:
-            user_interests: Daftar kategori/minat pengguna
-            n: Jumlah rekomendasi yang diinginkan
-            
-        Returns:
-            list: Daftar objek proyek yang direkomendasikan
-        """
         # Untuk HybridRecommender, kita bisa menggunakan dummy user_id untuk _get_cold_start_recommendations
         # karena method tersebut hanya menggunakan user_id untuk konsistensi interface
         dummy_user_id = "cold_start_user"
@@ -1149,15 +999,6 @@ class HybridRecommender:
         return detailed_recommendations
     
     def get_trending_projects(self, n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Get trending projects
-        
-        Args:
-            n: Number of trending projects to return
-            
-        Returns:
-            list: List of trending project dictionaries
-        """
         # Delegate to FECF
         if self.fecf_model is not None:
             return self.fecf_model.get_trending_projects(n)
@@ -1183,15 +1024,6 @@ class HybridRecommender:
         return self.get_popular_projects(n)
     
     def get_popular_projects(self, n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Get popular projects
-        
-        Args:
-            n: Number of popular projects to return
-            
-        Returns:
-            list: List of popular project dictionaries
-        """
         # Delegate to FECF
         if self.fecf_model is not None:
             return self.fecf_model.get_popular_projects(n)
@@ -1233,16 +1065,6 @@ class HybridRecommender:
         return []
     
     def get_similar_projects(self, project_id: str, n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Find similar projects
-        
-        Args:
-            project_id: Project ID
-            n: Number of similar projects to return
-            
-        Returns:
-            list: List of similar project dictionaries
-        """
         # Delegate to FECF
         if self.fecf_model is not None:
             return self.fecf_model.get_similar_projects(project_id, n)

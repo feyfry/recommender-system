@@ -31,12 +31,6 @@ from config import (
 )
 
 def collect_data(args):
-    """
-    Mengumpulkan data dari CoinGecko API
-    
-    Args:
-        args: Command line arguments
-    """
     from src.data.collector import CoinGeckoCollector
     
     logger.info("Starting data collection from CoinGecko API")
@@ -72,12 +66,6 @@ def collect_data(args):
         return False
 
 def process_data(args):
-    """
-    Memproses data mentah menjadi format yang siap digunakan
-    
-    Args:
-        args: Command line arguments
-    """
     from src.data.processor import DataProcessor
     
     logger.info("Starting data processing")
@@ -102,12 +90,6 @@ def process_data(args):
         return False
 
 def train_models(args):
-    """
-    Melatih model rekomendasi dengan penanganan error lebih baik
-    
-    Args:
-        args: Command line arguments
-    """
     logger.info("Training recommendation models")
     
     try:
@@ -346,12 +328,6 @@ def train_models(args):
         return False
     
 def _validate_data_quality():
-    """
-    Validasi kualitas data sebelum training
-    
-    Returns:
-        bool: True jika data valid, False jika ada masalah serius
-    """
     try:
         # Load interactions
         interactions_path = os.path.join(PROCESSED_DIR, "interactions.csv")
@@ -590,12 +566,6 @@ def evaluate_models(args):
 # Perbaikan untuk main.py - fungsi recommend
 
 def recommend(args):
-    """
-    Generate recommendations for a user
-    
-    Args:
-        args: Command line arguments
-    """
     logger.info(f"Generating recommendations for user {args.user_id}")
     
     # Get parameters
@@ -733,12 +703,6 @@ def recommend(args):
         return False
 
 def trading_signals(args):
-    """
-    Generate trading signals for a project using real market data
-    
-    Args:
-        args: Command line arguments
-    """
     from src.technical.signals import generate_trading_signals, personalize_signals
     from src.data.collector import fetch_real_market_data
     
@@ -912,12 +876,6 @@ def trading_signals(args):
         return False
 
 def start_api(args):
-    """
-    Start API server
-    
-    Args:
-        args: Command line arguments
-    """
     logger.info("Starting API server")
     print("Starting API server...")
     
@@ -969,20 +927,7 @@ def start_api(args):
         print("Check logs/main.log for full traceback details")
         return False
 
-"""
-Pipeline yang terorganisir untuk main.py (Versi yang Diperbaiki)
-"""
-
 def generate_sample_recommendations(args):
-    """
-    Generate sample recommendations for demonstration or testing
-    
-    Args:
-        args: Command line arguments
-        
-    Returns:
-        bool: Success status
-    """
     logger.info("Generating sample recommendations")
     
     try:
@@ -1080,15 +1025,6 @@ def generate_sample_recommendations(args):
         return False
 
 def analyze_results(args):
-    """
-    Analyze recommendation system results
-    
-    Args:
-        args: Command line arguments
-        
-    Returns:
-        bool: Success status
-    """
     logger.info("Analyzing recommendation results")
     
     try:
@@ -1165,12 +1101,6 @@ def analyze_results(args):
         return False
     
 def debug_recommendations(args):
-    """
-    Debug recommendations for a specific user
-    
-    Args:
-        args: Command line arguments
-    """
     user_id = args.user_id
     model_type = args.model
     n = args.num
@@ -1267,12 +1197,6 @@ def debug_recommendations(args):
         return False
 
 def run_pipeline(args):
-    """
-    Menjalankan seluruh pipeline recommendation engine
-    
-    Args:
-        args: Command line arguments
-    """
     logger.info("Running complete recommendation engine pipeline")
     print("Starting complete recommendation engine pipeline...")
     print(f"{'='*70}")

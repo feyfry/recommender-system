@@ -1,7 +1,3 @@
-"""
-Main API entrypoint untuk sistem rekomendasi Web3
-"""
-
 import os
 import logging
 from fastapi import FastAPI, Request, HTTPException, Query, Depends, Body
@@ -98,9 +94,6 @@ class TrainModelsRequest(BaseModel):
 # Router untuk interaksi pengguna
 @app.post("/interactions/record", tags=["interactions"])
 async def record_interaction(interaction: InteractionRecord):
-    """
-    Record a user interaction for real-time updates to recommendations
-    """
     # Cek apakah ini hanya request testing
     if interaction.test_only:
         return {"status": "success", "message": "Test mode - Interaction not recorded"}
@@ -140,9 +133,6 @@ async def record_interaction(interaction: InteractionRecord):
 # Router untuk admin endpoints
 @app.post("/admin/train-models", tags=["admin"])
 async def admin_train_models(request: TrainModelsRequest = Body(...)):
-    """
-    Train recommendation models (admin endpoint)
-    """
     try:
         # Jika mode test_only, kembalikan response sukses tanpa melatih model
         if request.test_only:
@@ -201,9 +191,6 @@ class SyncDataRequest(BaseModel):
 
 @app.post("/admin/sync-data", tags=["admin"])
 async def admin_sync_data(request: SyncDataRequest = Body(...)):
-    """
-    Sync data from database to recommendation engine (admin endpoint)
-    """
     # Jika hanya test mode, kembalikan respons sukses tanpa melakukan perubahan
     if request.test_only:
         return {

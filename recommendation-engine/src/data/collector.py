@@ -1,7 +1,3 @@
-"""
-Data collection utilities for the recommendation system
-"""
-
 import os
 import json
 import pandas as pd
@@ -37,12 +33,6 @@ class CoinGeckoCollector:
     """
     
     def __init__(self, rate_limit: float = 2.0):
-        """
-        Inisialisasi CoinGecko collector
-        
-        Args:
-            rate_limit: Waktu tunggu antara request API (seconds)
-        """
         self.api_url = COINGECKO_API_URL
         self.api_key = COINGECKO_API_KEY
         self.rate_limit = rate_limit
@@ -56,12 +46,6 @@ class CoinGeckoCollector:
             logger.info("Using CoinGecko API key")
         
     def ping_api(self) -> bool:
-        """
-        Ping CoinGecko API untuk cek ketersediaan
-        
-        Returns:
-            bool: True jika API tersedia
-        """
         try:
             url = f"{self.api_url}/ping"
             response = requests.get(url)
@@ -71,16 +55,6 @@ class CoinGeckoCollector:
             return False
     
     def make_request(self, endpoint: str, params: Dict = None) -> Optional[Dict]:
-        """
-        Make request to CoinGecko API with rate limiting
-        
-        Args:
-            endpoint: API endpoint
-            params: Query parameters
-            
-        Returns:
-            dict: Response data or None if error
-        """
         url = f"{self.api_url}/{endpoint}"
         headers = {}
         
@@ -114,15 +88,6 @@ class CoinGeckoCollector:
             return None
     
     def fetch_top_coins(self, limit: int = TOP_COINS_LIMIT) -> Optional[List[Dict]]:
-        """
-        Fetch top coins by market cap
-        
-        Args:
-            limit: Number of coins to fetch
-            
-        Returns:
-            list: List of coin data
-        """
         logger.info(f"Fetching top {limit} coins")
         
         # Calculate number of pages (max 250 per page)
@@ -181,15 +146,6 @@ class CoinGeckoCollector:
         return all_coins
     
     def fetch_category_coins(self, category: str) -> Optional[List[Dict]]:
-        """
-        Fetch coins for a specific category
-        
-        Args:
-            category: Category name
-            
-        Returns:
-            list: List of coin data
-        """
         logger.info(f"Fetching coins for category: {category}")
         
         params = {
@@ -223,17 +179,6 @@ class CoinGeckoCollector:
             return None
     
     def fetch_coin_details(self, coin_id: str, index: int = 0, total: int = 0) -> Optional[Dict]:
-        """
-        Mengambil informasi detail untuk koin tertentu dengan penanganan data sosial yang lebih baik
-        
-        Args:
-            coin_id: CoinGecko coin ID
-            index: Current index for progress tracking
-            total: Total number of coins to fetch
-            
-        Returns:
-            dict: Coin details
-        """
         progress = f"({index}/{total})" if total > 0 else ""
         logger.info(f"Fetching details for {coin_id} {progress}")
         
@@ -286,12 +231,6 @@ class CoinGeckoCollector:
             return None
     
     def fetch_coin_categories(self) -> Optional[List[Dict]]:
-        """
-        Fetch coin categories
-        
-        Returns:
-            list: List of categories
-        """
         logger.info("Fetching coin categories")
         
         data = self.make_request('coins/categories')
@@ -311,12 +250,6 @@ class CoinGeckoCollector:
             return None
     
     def fetch_trending_coins(self) -> Optional[Dict]:
-        """
-        Fetch trending coins
-        
-        Returns:
-            dict: Trending coins data
-        """
         logger.info("Fetching trending coins")
         
         data = self.make_request('search/trending')
@@ -337,17 +270,6 @@ class CoinGeckoCollector:
     
     def collect_all_data(self, limit: int = TOP_COINS_LIMIT, detail_limit: int = TOP_COINS_DETAIL, 
                          include_categories: bool = False) -> bool:
-        """
-        Collect all required data
-        
-        Args:
-            limit: Number of top coins to fetch 
-            detail_limit: Number of coins to fetch details for
-            include_categories: Whether to also fetch coins by category (from CATEGORIES in config.py)
-            
-        Returns:
-            bool: Success status
-        """
         try:
             start_time = time.time()
             
@@ -446,17 +368,6 @@ class CoinGeckoCollector:
             return False
 
 def fetch_real_market_data(coin_id, days=30, use_cache=True):
-    """
-    Fetch real market data from CoinGecko API with caching
-    
-    Args:
-        coin_id: Cryptocurrency ID (e.g., 'bitcoin', 'ethereum')
-        days: Number of days of historical data
-        use_cache: Whether to use cached data if available
-        
-    Returns:
-        pd.DataFrame: DataFrame with market data
-    """
     # Check cache if use_cache=True
     cache_dir = "data/cache"
     os.makedirs(cache_dir, exist_ok=True)

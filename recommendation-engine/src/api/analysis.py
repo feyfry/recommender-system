@@ -1,7 +1,3 @@
-"""
-API endpoints untuk analisis teknikal proyek Web3
-"""
-
 import os
 import logging
 from typing import Dict, List, Optional, Any, Tuple, Union
@@ -66,17 +62,6 @@ _cache_ttl = 300  # 5 minutes in seconds
 
 # Function to get price data using real market data
 async def get_price_data(project_id: str, days: int = 30, interval: str = "1d") -> pd.DataFrame:
-    """
-    Get historical price data for a project using real market data
-    
-    Args:
-        project_id: Project ID
-        days: Number of days of data to fetch
-        interval: Data interval ('1h', '1d', etc.)
-        
-    Returns:
-        pd.DataFrame: DataFrame with price data
-    """
     # Check cache first
     cache_key = f"{project_id}:{days}:{interval}"
     if cache_key in _price_data_cache:
@@ -109,16 +94,6 @@ async def get_price_data(project_id: str, days: int = 30, interval: str = "1d") 
         raise HTTPException(status_code=500, detail=f"Error fetching price data: {str(e)}")
 
 def get_optimal_timeframe(price_data: pd.DataFrame, request: Any) -> Tuple[int, str]:
-    """
-    Menentukan timeframe optimal berdasarkan volatilitas dan tujuan analisis
-    
-    Args:
-        price_data: DataFrame with price data
-        request: Request object with trading_style
-        
-    Returns:
-        tuple: (days, interval)
-    """
     # Hitung volatilitas harian
     if 'close' in price_data.columns:
         returns = price_data['close'].pct_change().dropna()
@@ -146,7 +121,6 @@ def get_optimal_timeframe(price_data: pd.DataFrame, request: Any) -> Tuple[int, 
 
 def _extract_trend_indicators(df: pd.DataFrame, latest_data: Dict[str, Any], 
                           indicator_periods: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract trend indicators from DataFrame"""
     ma_short = indicator_periods.get('ma_short', 20)
     ma_medium = indicator_periods.get('ma_medium', 50)
     ma_long = indicator_periods.get('ma_long', 200)
@@ -200,7 +174,6 @@ def _extract_trend_indicators(df: pd.DataFrame, latest_data: Dict[str, Any],
 
 def _extract_momentum_indicators(df: pd.DataFrame, latest_data: Dict[str, Any], 
                             indicator_periods: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract momentum indicators from DataFrame"""
     result = {}
     
     # RSI
@@ -278,7 +251,6 @@ def _extract_momentum_indicators(df: pd.DataFrame, latest_data: Dict[str, Any],
 
 def _extract_volatility_indicators(df: pd.DataFrame, latest_data: Dict[str, Any], 
                               indicator_periods: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract volatility indicators from DataFrame"""
     result = {}
     
     # Bollinger Bands
@@ -370,7 +342,6 @@ def _extract_volatility_indicators(df: pd.DataFrame, latest_data: Dict[str, Any]
     return result
 
 def _extract_volume_indicators(df: pd.DataFrame, latest_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract volume indicators from DataFrame"""
     result = {}
     
     # Volume
@@ -430,7 +401,6 @@ def _extract_volume_indicators(df: pd.DataFrame, latest_data: Dict[str, Any]) ->
     return result
 
 def _extract_ichimoku_indicators(df: pd.DataFrame, latest_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract Ichimoku Cloud indicators from DataFrame"""
     if not all(k in latest_data for k in ['tenkan_sen', 'kijun_sen', 'senkou_span_a', 'senkou_span_b']):
         return {}
     
@@ -487,7 +457,6 @@ def _extract_ichimoku_indicators(df: pd.DataFrame, latest_data: Dict[str, Any]) 
     return result
 
 def _extract_oscillator_composite(df: pd.DataFrame, latest_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract composite oscillator data from DataFrame"""
     if 'momentum_composite' not in latest_data:
         return {}
     
@@ -512,7 +481,6 @@ def _extract_oscillator_composite(df: pd.DataFrame, latest_data: Dict[str, Any])
     }
 
 def _get_regime_description(market_regime: str) -> str:
-    """Get description for market regime"""
     descriptions = {
         "trending_bullish": "Strong uptrend with normal volatility",
         "trending_bullish_volatile": "Strong uptrend with high volatility",
@@ -647,9 +615,6 @@ class PricePredictionResponse(BaseModel):
 # Routes
 @router.post("/trading-signals", response_model=TradingSignalResponse)
 async def get_trading_signals(request: TradingSignalRequest):
-    """
-    Get trading signals based on technical analysis with enhanced accuracy
-    """
     start_time = datetime.now()
     logger.info(f"Trading signal request for {request.project_id} with days={request.days}")
     
@@ -756,9 +721,6 @@ async def get_trading_signals(request: TradingSignalRequest):
 
 @router.post("/indicators", response_model=TechnicalIndicatorsResponse)
 async def get_technical_indicators(request: TechnicalIndicatorsRequest):
-    """
-    Calculate and return technical indicators for a project with enhanced analysis
-    """
     start_time = datetime.now()
     logger.info(f"Technical indicators request for {request.project_id}")
     
@@ -948,9 +910,6 @@ async def get_market_events(
     volatility_threshold: Optional[float] = Query(None, description="Threshold for high volatility events"),
     volume_threshold: Optional[float] = Query(None, description="Threshold for volume spike events")
 ):
-    """
-    Detect market events such as pumps, dumps, high volatility, etc. with enhanced detection
-    """
     logger.info(f"Market events request for {project_id}")
     
     try:
@@ -1030,9 +989,6 @@ async def predict_future_price(
     interval: str = Query("1d", description="Price data interval"),
     model: str = Query("auto", description="Prediction model (auto, ml, arima, simple)")
 ):
-    """
-    Predict future price movement with enhanced ML models
-    """
     logger.info(f"Price prediction request for {project_id} using {model} model")
     
     # Periksa cache untuk menghindari komputasi berulang
@@ -1159,9 +1115,6 @@ async def get_technical_alerts(
     lookback: int = Query(5, ge=1, le=30, description="Number of periods to look back for alerts"),
     trading_style: str = Query("standard", description="Trading style (short_term, standard, long_term)")
 ):
-    """
-    Get enhanced technical alerts for a project
-    """
     logger.info(f"Technical alerts request for {project_id}")
     
     try:
