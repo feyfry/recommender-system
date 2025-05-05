@@ -94,7 +94,7 @@ Sistem rekomendasi telah mengalami peningkatan signifikan pada performa model da
 | cold_start_fecf | 0.0366±0.0028 | 0.1071±0.0145 | 0.0522±0.0059 | 0.0813±0.0138 | 0.2291±0.0120 |
 | cold_start_hybrid | 0.0311±0.0031 | 0.0978±0.0113 | 0.0462±0.0051 | 0.0722±0.0107 | 0.1998±0.0248 |
 
-Model hybrid sekarang mengungguli model FECF dalam metrik Precision, F1, dan Hit Ratio. Khususnya, peningkatan signifikan terjadi pada Hit Ratio hybrid (0.8416 vs 0.8020 FECF). Untuk kasus cold-start, FECF masih sedikit mengungguli hybrid, karena tidak ada penggabungan dengan model NCF untuk cold-start.
+Model hybrid sekarang mengungguli model FECF dalam metrik Precision, F1, dan Hit Ratio. Khususnya, peningkatan signifikan terjadi pada Hit Ratio hybrid (0.8416 vs 0.8020 FECF). Untuk kasus cold-start, FECF masih sedikit mengungguli hybrid.
 
 ### Optimasi Analisis Teknikal dan Prediksi Harga (Mei 2025)
 
