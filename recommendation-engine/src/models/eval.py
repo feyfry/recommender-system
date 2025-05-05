@@ -667,7 +667,7 @@ def evaluate_cold_start(model: Any,
                        debug: bool = False,
                        max_users_per_batch: int = 50,
                        use_parallel: bool = False,
-                       n_runs: int = 3) -> Dict[str, Any]:
+                       n_runs: int = 5) -> Dict[str, Any]:
     """
     Perbaikan evaluasi cold-start untuk konsistensi yang lebih baik
     """

@@ -1,7 +1,3 @@
-"""
-Entry point utama untuk sistem rekomendasi Web3
-"""
-
 import os
 import argparse
 import logging
@@ -27,7 +23,8 @@ logger = logging.getLogger(__name__)
 
 from config import (
     PROCESSED_DIR,
-    MODELS_DIR
+    MODELS_DIR,
+    HYBRID_PARAMS
 )
 
 def collect_data(args):
@@ -247,7 +244,7 @@ def train_models(args):
                 
                 # Add custom parameters for NCF model to avoid BatchNorm issues
                 if model_name == "NCF":
-                    # Adjust batch size to be divisible by 8 for better BatchNorm performance
+                    # Adjust batch size to be divisible by A for better BatchNorm performance
                     batch_size = ((len(model.users) + 7) // 8) * 8
                     batch_size = min(max(batch_size, 32), 128)  # Keep between 32 and 128
                     
@@ -310,6 +307,10 @@ def train_models(args):
                         print(f"  Best validation loss: {metrics['best_val_loss']:.4f}")
                         if "early_stopped" in metrics and metrics["early_stopped"]:
                             print(f"  Early stopped at epoch {metrics.get('best_epoch', '?')}")
+                    elif model_name == "Hybrid" and "ensemble" in metrics:
+                        ensemble_metrics = metrics["ensemble"]
+                        print(f"  Ensemble precision: {ensemble_metrics.get('precision', 0):.4f}")
+                        print(f"  Ensemble recall: {ensemble_metrics.get('recall', 0):.4f}")
             elif "error" in result:
                 print(f"  Error: {result['error']}")
         
@@ -370,6 +371,9 @@ def _validate_data_quality():
         if median_interactions_per_user < 5:
             warnings.append(f"Median interactions per user is low: {median_interactions_per_user} (recommended: at least 10)")
         
+        if max_interactions_per_user > 50 * min_interactions_per_user:
+            warnings.append(f"High imbalance in user interactions: min={min_interactions_per_user}, max={max_interactions_per_user}, ratio={max_interactions_per_user/min_interactions_per_user:.1f}x")
+
         # 3. Check ratings distribution
         if 'weight' in interactions_df.columns:
             weight_stats = interactions_df['weight'].describe()
@@ -387,6 +391,17 @@ def _validate_data_quality():
         if popular_item_ratio < 0.01:
             warnings.append(f"Very few popular items: only {popular_item_ratio:.1%} items have >50 interactions")
         
+        # 5. Check category distribution (new)
+        if 'primary_category' in projects_df.columns:
+            category_counts = projects_df['primary_category'].value_counts()
+            largest_category_ratio = category_counts.max() / len(projects_df)
+            
+            if largest_category_ratio > 0.5:
+                warnings.append(f"Category distribution is skewed: largest category contains {largest_category_ratio:.1%} of items")
+            
+            if category_counts.nunique() < 5:
+                warnings.append(f"Very few unique categories: {category_counts.nunique()} (recommended: at least 5)")
+
         # Print warnings if any
         if warnings:
             print("\n⚠️ Data Quality Warnings:")
@@ -504,6 +519,7 @@ def evaluate_models(args):
         eval_cold_start = getattr(args, 'cold_start', True)
         output_format = getattr(args, 'format', 'markdown')
         cold_start_runs = getattr(args, 'cold_start_runs', 5)
+        max_test_users = getattr(args, 'max_test_users', 100)
         
         # Get main user-item matrix
         user_item_matrix = fecf.user_item_matrix if 'fecf' in models else ncf.user_item_matrix
@@ -520,7 +536,8 @@ def evaluate_models(args):
             k_values=k_values,
             save_results=True,
             eval_cold_start=eval_cold_start,
-            cold_start_runs=cold_start_runs
+            cold_start_runs=cold_start_runs,
+            max_test_users=max_test_users
         )
         
         # Generate and save report
@@ -552,7 +569,9 @@ def evaluate_models(args):
             recall = model_results.get('recall', 0)
             ndcg = model_results.get('ndcg', 0)
             
-            print(f"{model_name}: Precision={precision:.4f}, Recall={recall:.4f}, NDCG={ndcg:.4f}")
+            print(f"{model_name}: Precision={precision:.4f}, "
+                 f"Recall={recall:.4f}, "
+                 f"NDCG={ndcg:.4f}")
         
         return True
         
@@ -562,8 +581,6 @@ def evaluate_models(args):
         logger.error(traceback.format_exc())
         print(f"❌ Error during evaluation: {str(e)}")
         return False
-
-# Perbaikan untuk main.py - fungsi recommend
 
 def recommend(args):
     logger.info(f"Generating recommendations for user {args.user_id}")
@@ -730,7 +747,7 @@ def trading_signals(args):
             'ma_medium': 30,
             'ma_long': 60
         }
-        logger.info(f"Using short-term trading parameters (periode lebih pendek)")
+        logger.info("Using short-term trading parameters (periode lebih pendek)")
     elif trading_style == 'long_term':
         indicator_periods = {
             'rsi_period': 21,
@@ -744,7 +761,7 @@ def trading_signals(args):
             'ma_medium': 100,
             'ma_long': 200
         }
-        logger.info(f"Using long-term trading parameters (periode lebih panjang)")
+        logger.info("Using long-term trading parameters (periode lebih panjang)")
     else:  # standard
         indicator_periods = {
             'rsi_period': 14,
@@ -758,7 +775,7 @@ def trading_signals(args):
             'ma_medium': 50,
             'ma_long': 200
         }
-        logger.info(f"Using standard trading parameters (periode default)")
+        logger.info("Using standard trading parameters (periode default)")
     
     # Override dengan nilai kustom jika disediakan
     # RSI
@@ -1013,7 +1030,7 @@ def generate_sample_recommendations(args):
             print("\nSample recommendations generated successfully")
             
             # Return success if either user recommendations or trending projects worked
-            return True
+            return recommendation_success or len(trending) > 0
         else:
             logger.error("No user-item matrix available for sample recommendations")
             print("❌ No user data available for sample recommendations")
@@ -1091,6 +1108,75 @@ def analyze_results(args):
                 precision = results[model].get('precision', 0)
                 recall = results[model].get('recall', 0)
                 print(f"- {model}: Precision={precision:.4f}, Recall={recall:.4f}")
+        
+        # NEW: Analyze performance improvements
+        print("\nKey performance metrics by model and k value:")
+        
+        for model in models:
+            print(f"\n{model.upper()}:")
+            for k in [5, 10, 20]:
+                precision_k = results[model].get(f'precision@{k}', 0)
+                recall_k = results[model].get(f'recall@{k}', 0) 
+                ndcg_k = results[model].get(f'ndcg@{k}', 0)
+                hit_ratio_k = results[model].get(f'hit_ratio@{k}', 0)
+                
+                print(f"  k={k}: Precision={precision_k:.4f}, Recall={recall_k:.4f}, " 
+                      f"NDCG={ndcg_k:.4f}, Hit Ratio={hit_ratio_k:.4f}")
+        
+        # NEW: Calculate F1 scores explicitly
+        print("\nF1 Scores calculation:")
+        
+        for model in models:
+            f1_scores = {}
+            for k in [5, 10, 20]:
+                precision_k = results[model].get(f'precision@{k}', 0)
+                recall_k = results[model].get(f'recall@{k}', 0)
+                
+                if precision_k + recall_k > 0:
+                    f1 = 2 * (precision_k * recall_k) / (precision_k + recall_k)
+                else:
+                    f1 = 0
+                    
+                f1_scores[k] = f1
+                
+            print(f"{model}: F1@5={f1_scores[5]:.4f}, F1@10={f1_scores[10]:.4f}, F1@20={f1_scores[20]:.4f}")
+            
+        # NEW: Look at running times
+        print("\nEvaluation Times:")
+        
+        for model in models + cold_start_models:
+            eval_time = results[model].get('evaluation_time', 0)
+            print(f"- {model}: {eval_time:.2f} seconds")
+            
+        # NEW: Offer recommendations based on analysis
+        print("\nRecommendations:")
+        
+        # Identify the best overall model
+        best_overall = None
+        highest_avg = -1
+        
+        for model in models:
+            metrics = ['precision', 'recall', 'ndcg', 'hit_ratio']
+            avg_score = sum(results[model].get(m, 0) for m in metrics) / len(metrics)
+            
+            if avg_score > highest_avg:
+                highest_avg = avg_score
+                best_overall = model
+        
+        if best_overall:
+            print(f"• Recommended primary model: {best_overall}")
+            print(f"• For cold-start users, use {best_overall} with category-based recommendations")
+            
+            if 'hybrid' == best_overall:
+                # Get values from config
+                ncf_weight = HYBRID_PARAMS.get('ncf_weight', 0.2)
+                fecf_weight = HYBRID_PARAMS.get('fecf_weight', 0.8)
+                print(f"• Recommended hybrid weights: NCF: {ncf_weight}, FECF: {fecf_weight} (based on current configuration)")
+            
+            # Check if we need more data
+            poor_cold_start = all(results[model].get('precision', 0) < 0.05 for model in cold_start_models)
+            if poor_cold_start:
+                print("• Cold-start performance is poor - consider collecting more diverse interaction data")
         
         print("\nRecommendation system analysis completed successfully")
         return True
@@ -1179,7 +1265,7 @@ def debug_recommendations(args):
             else:
                 recs = model.recommend_projects(user_id, n=n)
                 
-                print(f"\nRecommendations (built-in method):")
+                print("\nRecommendations (built-in method):")
                 print(f"Generated {len(recs)} recommendations")
                 
                 for i, rec in enumerate(recs[:10], 1):
@@ -1187,6 +1273,47 @@ def debug_recommendations(args):
                     score = rec.get('recommendation_score', 0)
                     is_known = item_id in known_items
                     print(f"{i}. Item: {item_id}, Score: {score:.4f} {'(KNOWN)' if is_known else ''}")
+        
+        # Add new debugging for model parameters and weights
+        if model_type == 'hybrid' and hasattr(model, 'get_effective_weights'):
+            print("\nHybrid Model Analysis:")
+            fecf_weight, ncf_weight, diversity_weight = model.get_effective_weights(user_id)
+            print(f"Effective weights for user {user_id}:")
+            print(f"- FECF Weight: {fecf_weight:.4f}")
+            print(f"- NCF Weight: {ncf_weight:.4f}")
+            print(f"- Diversity Weight: {diversity_weight:.4f}")
+            
+            if hasattr(model, 'params'):
+                print("\nHybrid Parameters:")
+                for param, value in model.params.items():
+                    print(f"- {param}: {value}")
+        
+        # Show additional item metadata if available
+        if known_items and hasattr(model, 'projects_df'):
+            print("\nItem Metadata Analysis:")
+            categories = {}
+            chains = {}
+            
+            for item_id in known_items:
+                item_data = model.projects_df[model.projects_df['id'] == item_id]
+                if not item_data.empty:
+                    if 'primary_category' in item_data.columns:
+                        category = item_data.iloc[0]['primary_category']
+                        categories[category] = categories.get(category, 0) + 1
+                    
+                    if 'chain' in item_data.columns:
+                        chain = item_data.iloc[0]['chain']
+                        chains[chain] = chains.get(chain, 0) + 1
+            
+            if categories:
+                print("\nUser Category Distribution:")
+                for category, count in sorted(categories.items(), key=lambda x: x[1], reverse=True):
+                    print(f"- {category}: {count} items")
+            
+            if chains:
+                print("\nUser Chain Distribution:")
+                for chain, count in sorted(chains.items(), key=lambda x: x[1], reverse=True):
+                    print(f"- {chain}: {count} items")
         
         return True
     
@@ -1201,6 +1328,16 @@ def run_pipeline(args):
     print("Starting complete recommendation engine pipeline...")
     print(f"{'='*70}")
     
+    # Override arguments as needed
+    if args.skip_collection:
+        print("Skipping collection step (--skip-collection flag used)")
+    
+    if args.skip_processing:
+        print("Skipping processing step (--skip-processing flag used)")
+    
+    if args.skip_training:
+        print("Skipping training step (--skip-training flag used)")
+    
     # Tentukan langkah-langkah pipeline
     pipeline_steps = [
         {
@@ -1208,6 +1345,7 @@ def run_pipeline(args):
             "function": collect_data,
             "description": "Collecting data from CoinGecko API",
             "required": True,
+            "skip_if": lambda args: args.skip_collection,
             "args": args
         },
         {
@@ -1215,6 +1353,7 @@ def run_pipeline(args):
             "function": process_data,
             "description": "Processing raw data into usable formats",
             "required": True,
+            "skip_if": lambda args: args.skip_processing,
             "args": args
         },
         {
@@ -1222,6 +1361,15 @@ def run_pipeline(args):
             "function": train_models,
             "description": "Training recommendation models",
             "required": True,
+            "skip_if": lambda args: args.skip_training,
+            "args": args
+        },
+        {
+            "name": "Model Evaluation",  # NEW: Added model evaluation step
+            "function": evaluate_models,
+            "description": "Evaluating model performance",
+            "required": False,
+            "skip_if": lambda args: not args.evaluate,
             "args": args
         },
         {
@@ -1322,8 +1470,15 @@ def run_pipeline(args):
     
     if all_required_success:
         print("\n🎉 Pipeline completed successfully!")
+        
+        # NEW: Add final recommendations if successful
+        print("\nRecommendations for Next Steps:")
+        print("- View evaluation report in the data/models directory")
+        print("- Test the system with real users using: python main.py recommend --user-id <user_id>")
+        print("- Start the API server to serve recommendations: python main.py api")
     else:
         print("\n⚠️ Pipeline completed with errors in required steps.")
+        print("Check logs for more details: logs/main.log")
     
     return all_required_success
 
@@ -1382,15 +1537,18 @@ Examples:
     train_parser.add_argument("--fecf", action="store_true", help="Train Feature-Enhanced CF model")
     train_parser.add_argument("--ncf", action="store_true", help="Train Neural CF model")
     train_parser.add_argument("--hybrid", action="store_true", help="Train Hybrid model")
+    train_parser.add_argument("--include-all", action="store_true", help="Train all models")
+    train_parser.add_argument("--force", action="store_true", help="Force training even if data quality validation fails")
     
     # evaluate command
     evaluate_parser = subparsers.add_parser("evaluate", help="Evaluate recommendation models")
     evaluate_parser.add_argument("--test-ratio", type=float, default=0.2, help="Test data ratio")
     evaluate_parser.add_argument("--min-interactions", type=int, default=5, help="Minimum interactions for test users")
     evaluate_parser.add_argument("--cold-start", action="store_true", help="Evaluate cold-start scenarios")
-    evaluate_parser.add_argument("--cold-start-runs", type=int, default=3, help="Number of runs for cold-start evaluation (default: 5)")
-    evaluate_parser.add_argument("--format", choices=["text", "markdown", "html"], default="markdown", help="Output format")  
+    evaluate_parser.add_argument("--cold-start-runs", type=int, default=5, help="Number of runs for cold-start evaluation (default: 5)")
+    evaluate_parser.add_argument("--format", choices=["text", "markdown", "html", "json"], default="markdown", help="Output format")  
     evaluate_parser.add_argument("--debug", action="store_true", help="Enable detailed debug logging")
+    evaluate_parser.add_argument("--max-test-users", type=int, default=100, help="Maximum number of test users to evaluate")
     
     # recommend command
     recommend_parser = subparsers.add_parser("recommend", help="Generate recommendations for a user")
@@ -1459,6 +1617,8 @@ Examples:
                         default='all', help="Which models to train (default: all)")
     run_parser.add_argument("--evaluate", action="store_true",
                         help="Run evaluation after training")
+    run_parser.add_argument("--force", action="store_true",
+                        help="Force training even if data quality validation fails")
     run_parser.add_argument("--debug", action="store_true",
                         help="Enable debug logging")
     
@@ -1468,6 +1628,11 @@ Examples:
     # Create logs directory
     os.makedirs("logs", exist_ok=True)
     
+    # Set debug level if requested
+    if hasattr(args, 'debug') and args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.info("Debug mode enabled")
+    
     # Run appropriate command
     if args.command == "collect":
         collect_data(args)
@@ -1475,7 +1640,7 @@ Examples:
         process_data(args)
     elif args.command == "train":
         # If no specific model is selected, train all models
-        if not (args.fecf or args.ncf or args.hybrid):
+        if not (args.fecf or args.ncf or args.hybrid) and not args.include_all:
             args.fecf = True
             args.ncf = True
             args.hybrid = True
