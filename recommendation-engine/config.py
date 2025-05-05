@@ -45,14 +45,14 @@ CATEGORIES = [
 NCF_PARAMS = {
     "embedding_dim": 64,            # Ditingkatkan dari 32
     "layers": [128, 64, 32],        # Arsitektur lebih dalam dan lebih lebar
-    "learning_rate": 0.0003,        # Learning rate optimal
+    "learning_rate": 0.0001,        # Learning rate optimal
     "batch_size": 256,              # Batch size tetap
     "epochs": 30,                   # Lebih banyak epoch
     "val_ratio": 0.15,              # Porsi validasi tetap
     "dropout": 0.3,                 # Dropout dikurangi sedikit
     "weight_decay": 5e-4,           # Regularisasi sedikit dikurangi
     "patience": 7,                  # Patience ditingkatkan
-    "negative_ratio": 5             # Lebih banyak negative samples
+    "negative_ratio": 3             # Lebih banyak negative samples
 }
 
 # Feature-Enhanced CF - OPTIMIZED SETTINGS

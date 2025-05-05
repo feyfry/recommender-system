@@ -1388,7 +1388,7 @@ Examples:
     evaluate_parser.add_argument("--test-ratio", type=float, default=0.2, help="Test data ratio")
     evaluate_parser.add_argument("--min-interactions", type=int, default=5, help="Minimum interactions for test users")
     evaluate_parser.add_argument("--cold-start", action="store_true", help="Evaluate cold-start scenarios")
-    evaluate_parser.add_argument("--cold-start-runs", type=int, default=5, help="Number of runs for cold-start evaluation (default: 5)")
+    evaluate_parser.add_argument("--cold-start-runs", type=int, default=3, help="Number of runs for cold-start evaluation (default: 5)")
     evaluate_parser.add_argument("--format", choices=["text", "markdown", "html"], default="markdown", help="Output format")  
     evaluate_parser.add_argument("--debug", action="store_true", help="Enable detailed debug logging")
     

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class FeatureEnhancedCF:
     """
     Implementation of Feature-Enhanced CF using scikit-learn
-    Optimized for cryptocurrency domain
+    Optimized for cryptocurrency domain with enhanced cold-start strategies
     """
     
     def __init__(self, params: Optional[Dict[str, Any]] = None):
@@ -60,11 +60,18 @@ class FeatureEnhancedCF:
             "market_cap_influence": 0.4,
             "chain_importance": 0.3
         }
+        
+        # Cache untuk mempercepat rekomendasi
+        self._recommendation_cache = {}
+        self._cold_start_cache = {}
+        
+        # Metadata untuk optimasi cold-start
+        self._popular_items = None
+        self._trending_items = None
+        self._category_distributions = None
+        self._category_item_mapping = None
     
-    def load_data(self, 
-                 projects_path: Optional[str] = None, 
-                 interactions_path: Optional[str] = None,
-                 features_path: Optional[str] = None) -> bool:
+    def load_data(self, projects_path: Optional[str] = None, interactions_path: Optional[str] = None,features_path: Optional[str] = None) -> bool:
         
         # Use default paths if not specified
         if projects_path is None:
@@ -116,10 +123,18 @@ class FeatureEnhancedCF:
                 # Create simple features from projects data
                 self.features_df = self.projects_df[['id']].copy()
                 
+            # Precompute popular and trending items untuk cold-start
+            self._precompute_cold_start_candidates()
+            
+            # Precompute category distributions
+            self._precompute_category_info()
+            
             return True
             
         except Exception as e:
             logger.error(f"Error loading data: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
     
     def _create_mappings(self):
@@ -182,6 +197,137 @@ class FeatureEnhancedCF:
         logger.info(f"Created item features matrix with shape {features_matrix.shape}")
         return features_matrix
     
+    def _precompute_cold_start_candidates(self):
+        """Precompute popular and trending items for faster cold-start recommendations"""
+        if self.projects_df is None:
+            return
+            
+        # Calculate item popularity from interaction matrix
+        item_interactions = (self.user_item_matrix > 0).sum()
+        item_popularity = pd.Series(0, index=self.projects_df['id'])
+        item_popularity.update(item_interactions)
+        
+        # Get top 20% popular items by interaction count
+        popular_threshold = item_popularity.quantile(0.8) if len(item_popularity) > 5 else 1
+        popular_items = item_popularity[item_popularity >= popular_threshold].index.tolist()
+        
+        # Store popular items with scores
+        self._popular_items = []
+        for item_id in popular_items:
+            popularity_score = item_popularity.get(item_id, 0)
+            # Find project data
+            project_row = self.projects_df[self.projects_df['id'] == item_id]
+            if not project_row.empty:
+                # Normalize popularity score (max 100)
+                normalized_score = min(100, (popularity_score / popular_threshold) * 60)
+                self._popular_items.append((item_id, normalized_score / 100))
+        
+        # Sort by score
+        self._popular_items.sort(key=lambda x: x[1], reverse=True)
+        
+        # Get trending items 
+        if 'trend_score' in self.projects_df.columns:
+            trending_items = self.projects_df.sort_values('trend_score', ascending=False)
+            
+            # Get top 15% trending items
+            top_n = max(5, int(len(self.projects_df) * 0.15))
+            trending_df = trending_items.head(top_n)
+            
+            # Store trending items with normalized scores
+            self._trending_items = []
+            for _, row in trending_df.iterrows():
+                trend_score = row.get('trend_score', 0)
+                # Higher weight for trend score in cold-start
+                normalized_score = trend_score / 100 if trend_score <= 100 else 1.0
+                self._trending_items.append((row['id'], normalized_score))
+            
+            logger.info(f"Precomputed {len(self._trending_items)} trending items for cold-start")
+        
+        logger.info(f"Precomputed {len(self._popular_items)} popular items for cold-start")
+    
+    def _precompute_category_info(self):
+        """Precompute category distributions and mappings for better diversity"""
+        if self.projects_df is None or 'primary_category' not in self.projects_df.columns:
+            return
+            
+        # Get all categories
+        categories = []
+        
+        # Try different category fields
+        if 'categories_list' in self.projects_df.columns:
+            # If we have a list of categories, use that
+            for cats in self.projects_df['categories_list']:
+                if isinstance(cats, list):
+                    categories.extend(cats)
+                else:
+                    # Try to parse if it's a string representation of list
+                    try:
+                        if isinstance(cats, str) and cats.startswith('[') and cats.endswith(']'):
+                            parsed_cats = eval(cats)
+                            if isinstance(parsed_cats, list):
+                                categories.extend(parsed_cats)
+                    except:
+                        pass
+        else:
+            # Otherwise, use primary_category
+            categories = self.projects_df['primary_category'].tolist()
+        
+        # Calculate category distribution
+        self._category_distributions = {}
+        for category in categories:
+            if category and category != 'unknown':
+                self._category_distributions[category] = self._category_distributions.get(category, 0) + 1
+        
+        # Normalize distribution
+        total = sum(self._category_distributions.values())
+        if total > 0:
+            self._category_distributions = {k: v/total for k, v in self._category_distributions.items()}
+        
+        # Create mapping from category to items
+        self._category_item_mapping = {}
+        
+        # Check if categories_list column exists
+        if 'categories_list' in self.projects_df.columns:
+            # Process categorized items
+            for _, row in self.projects_df.iterrows():
+                if 'id' not in row:
+                    continue
+                    
+                item_id = row['id']
+                cats = row['categories_list']
+                
+                # Parse categories if needed
+                if isinstance(cats, str):
+                    try:
+                        cats = eval(cats)
+                    except:
+                        cats = [cats]
+                elif not isinstance(cats, list):
+                    cats = [str(cats)]
+                
+                # Add to category mapping
+                for category in cats:
+                    if category and category != 'unknown':
+                        if category not in self._category_item_mapping:
+                            self._category_item_mapping[category] = []
+                        self._category_item_mapping[category].append(item_id)
+        else:
+            # Use primary_category instead
+            for _, row in self.projects_df.iterrows():
+                if 'id' not in row or 'primary_category' not in row:
+                    continue
+                    
+                item_id = row['id']
+                category = row['primary_category']
+                
+                if category and category != 'unknown':
+                    if category not in self._category_item_mapping:
+                        self._category_item_mapping[category] = []
+                    self._category_item_mapping[category].append(item_id)
+        
+        logger.info(f"Precomputed distribution for {len(self._category_distributions)} categories")
+        logger.info(f"Created mapping for {len(self._category_item_mapping)} categories to items")
+    
     def train(self, save_model: bool = True) -> Dict[str, float]:
         start_time = time.time()
         logger.info("Training Feature-Enhanced CF model with SVD")
@@ -191,22 +337,23 @@ class FeatureEnhancedCF:
             user_item_array = self.user_item_matrix.values
             
             # Tentukan jumlah komponen yang optimal
-            # Recommend tidak melebihi 10% dari dimensi terkecil
+            # Avoid exceeding 10% of the minimum dimension
             min_dimension = min(user_item_array.shape)
             n_components = self.params.get('no_components', 0)
             if n_components <= 0:
-                # Jika n_components <= 0, gunakan auto-sizing berdasarkan data
-                n_components = min(user_item_array.shape[0], user_item_array.shape[1])
-                # Pastikan minimal 1
-                n_components = max(1, n_components)
+                # Auto-sizing based on data
+                n_components = int(min(min_dimension * 0.1, 100))
+                # Ensure at least 16 components
+                n_components = max(16, n_components)
                 self.params['no_components'] = n_components
-                logger.info(f"Applying SVD with {n_components} components (auto-sized based on data)")
+                logger.info(f"Using {n_components} components (auto-sized based on data)")
             
-            # Gunakan TruncatedSVD dengan parameter yang lebih baik
+            # Parameter untuk SVD yang lebih robust
             self.model = TruncatedSVD(
                 n_components=n_components,
                 random_state=42,
-                n_iter=10  # Menambahkan iterasi untuk memastikan konvergensi
+                n_iter=10,  # Lebih banyak iterasi untuk konvergensi
+                algorithm='randomized'  # Randomized for better performance
             )
             
             # Fit SVD model
@@ -216,31 +363,26 @@ class FeatureEnhancedCF:
             explained_variance = self.model.explained_variance_ratio_.sum()
             logger.info(f"SVD explained variance: {explained_variance:.4f}")
             
-            # Berhenti jika variance terlalu rendah - menunjukkan data tidak cocok untuk SVD
-            if explained_variance < 0.3:  # Minimal 30% variance harus bisa dijelaskan
-                logger.warning(f"Low explained variance ({explained_variance:.4f}), SVD might not be suitable for this data")
-            
             # Compute item-item similarity matrix using item factors
             self.item_similarity_matrix = cosine_similarity(item_factors)
             
-            # IMPROVED: Enhanced content feature weighting for crypto domain
+            # Enhanced content feature weighting for crypto domain
             if self._item_features is not None:
                 logger.info("Enhancing with content features (domain-optimized weighting)")
                 content_similarity = cosine_similarity(self._item_features)
                 
-                # Get content alpha from params, dengan pembatasan nilai
+                # Get content alpha from params
                 alpha = max(0.3, min(0.7, self.params.get('content_alpha', 0.65)))
                 
                 # Apply domain-specific adjustments
                 category_importance = self.crypto_weights.get("category_correlation", 0.6)
                 
-                # Jika categories lebih penting dalam domain ini, berikan weight lebih
+                # Adjust alpha if categories are more important in this domain
                 if category_importance > 0.5:
-                    # Reducer alpha untuk memberikan bobot lebih ke content features
+                    # Reduce alpha to give more weight to content features
                     alpha = alpha * 0.9
                 
-                # Blend kedua similarity matrices dengan mempertahankan sparsity
-                # Untuk items dengan content similarity = 0, gunakan CF similarity saja
+                # Blend both similarity matrices
                 for i in range(self.item_similarity_matrix.shape[0]):
                     for j in range(self.item_similarity_matrix.shape[1]):
                         if content_similarity[i, j] > 0:
@@ -300,7 +442,7 @@ class FeatureEnhancedCF:
     
     def load_model(self, filepath: str) -> bool:
         try:
-            logger.info(f"Attempting to load FECF model from {filepath}")
+            logger.info(f"Loading FECF model from {filepath}")
             
             if not os.path.exists(filepath):
                 logger.error(f"Model file not found: {filepath}")
@@ -324,6 +466,14 @@ class FeatureEnhancedCF:
             self.item_similarity_matrix = model_state.get('item_similarity_matrix')
             self.params = model_state.get('params', self.params)
             
+            # Precompute cold-start candidates if not already done
+            if self._popular_items is None or self._trending_items is None:
+                self._precompute_cold_start_candidates()
+                
+            # Precompute category info if not already done
+            if self._category_distributions is None or self._category_item_mapping is None:
+                self._precompute_category_info()
+                
             logger.info(f"FECF model successfully loaded from {filepath}")
             return True
                 
@@ -340,6 +490,17 @@ class FeatureEnhancedCF:
         return True
     
     def recommend_for_user(self, user_id: str, n: int = 10, exclude_known: bool = True) -> List[Tuple[str, float]]:
+        """
+        Generate recommendations for a user with enhanced diversity and performance 
+        """
+        # Check cache for performance
+        cache_key = f"{user_id}_{n}_{exclude_known}"
+        if cache_key in self._recommendation_cache:
+            # Check if cache is still valid (< 1 hour old)
+            cache_time, cache_results = self._recommendation_cache[cache_key]
+            if time.time() - cache_time < 3600:  # 1 hour in seconds
+                return cache_results
+        
         if self.model is None or self.item_similarity_matrix is None:
             logger.error("Model not trained or loaded")
             return []
@@ -363,7 +524,7 @@ class FeatureEnhancedCF:
         # Only consider items not in known_items
         all_items = [item for item in self.user_item_matrix.columns if item not in known_items]
         if not all_items:
-            logger.warning(f"No items available for recommendation after excluding known items")
+            logger.warning("No items available for recommendation after excluding known items")
             return []
         
         # Get similarity scores in a vectorized way
@@ -374,7 +535,7 @@ class FeatureEnhancedCF:
             rated_indices = [self._item_mapping[item] for item in positive_indices if item in self._item_mapping]
             candidate_indices = [self._item_mapping[item] for item in all_items if item in self._item_mapping]
             
-            # OPTIMIZATION: Use vectorized operations for similarity calculation
+            # Use vectorized operations for similarity calculation
             for i, item_idx in enumerate(candidate_indices):
                 # Use numpy's vectorized operations
                 similarities = np.array([self.item_similarity_matrix[item_idx, rated_idx] for rated_idx in rated_indices])
@@ -393,325 +554,358 @@ class FeatureEnhancedCF:
         scores.sort(key=lambda x: x[1], reverse=True)
         
         # OPTIMIZATION: Get more candidates for diversity but limit to a reasonable number
-        candidate_size = min(n * 3, 100)  # Don't get too many candidates
+        candidate_size = min(n * 3, 100)
         top_candidates = scores[:candidate_size]
         
-        # Check if we have category and chain data for diversity
+        # Ensure category diversity with item metadata
         if hasattr(self, 'projects_df') and 'primary_category' in self.projects_df.columns:
-            # OPTIMIZATION: Create item metadata lookup only once
-            item_metadata = {}
-            for _, row in self.projects_df.iterrows():
-                if 'id' in row:
-                    item_data = {
-                        'category': row.get('primary_category', 'unknown'),
-                        'chain': row.get('chain', 'unknown')
-                    }
-                    item_metadata[row['id']] = item_data
+            diversified_results = self._apply_diversity_with_metadata(top_candidates, n)
             
-            # OPTIMIZATION: More efficient diversification
-            # First, select some top items unconditionally
-            top_count = max(n // 5, 1)  # ~20% by pure score
-            result_items = [item for item, _ in top_candidates[:top_count]]
-            result_scores = [score for _, score in top_candidates[:top_count]]
+            # Store in cache
+            self._recommendation_cache[cache_key] = (time.time(), diversified_results)
             
-            # Track selected categories and chains for diversity
-            category_counts = {}
-            chain_counts = {}
-            
-            # Initialize tracking
-            for item in result_items:
-                if item in item_metadata:
-                    meta = item_metadata[item]
-                    category = meta['category']
-                    chain = meta['chain']
-                    
-                    category_counts[category] = category_counts.get(category, 0) + 1
-                    chain_counts[chain] = chain_counts.get(chain, 0) + 1
-            
-            # Diversity limits
-            max_per_category = max(2, int(n * 0.3))
-            max_per_chain = max(3, int(n * 0.4))
-            
-            # Pool remaining candidates
-            remaining = top_candidates[top_count:]
-            
-            # OPTIMIZATION: Pre-calculate diversity adjustments for all remaining items
-            diversity_adjustments = []
-            for item_id, score in remaining:
-                adjustment = 0
-                if item_id in item_metadata:
-                    meta = item_metadata[item_id]
-                    category = meta['category']
-                    chain = meta['chain']
-                    
-                    # Category adjustment
-                    cat_count = category_counts.get(category, 0)
-                    if cat_count >= max_per_category:
-                        adjustment -= 0.5
-                    elif cat_count == 0:
-                        adjustment += 0.3
-                    else:
-                        adjustment += 0.1 * (1 - cat_count / max_per_category)
-                    
-                    # Chain adjustment
-                    chain_count = chain_counts.get(chain, 0)
-                    if chain_count >= max_per_chain:
-                        adjustment -= 0.3
-                    elif chain_count == 0:
-                        adjustment += 0.2
-                    else:
-                        adjustment += 0.05 * (1 - chain_count / max_per_chain)
-                
-                diversity_adjustments.append((item_id, score, adjustment, score + adjustment))
-            
-            # Sort by adjusted score once
-            diversity_adjustments.sort(key=lambda x: x[3], reverse=True)
-            
-            # Select remaining items efficiently
-            for item_id, score, _, _ in diversity_adjustments:
-                if len(result_items) >= n:
-                    break
-                    
-                # Only update tracking if we select this item
-                if item_id in item_metadata:
-                    meta = item_metadata[item_id]
-                    category = meta['category']
-                    chain = meta['chain']
-                    
-                    # Update category and chain counts
-                    category_counts[category] = category_counts.get(category, 0) + 1
-                    chain_counts[chain] = chain_counts.get(chain, 0) + 1
-                
-                # Add to results
-                result_items.append(item_id)
-                result_scores.append(score)
-            
-            # Create final result tuples and sort by original score
-            result = list(zip(result_items, result_scores))
-            result.sort(key=lambda x: x[1], reverse=True)
-            return result[:n]
+            return diversified_results
         
-        # If no category/chain information, return top candidates
+        # If no category/chain data available, just return top-n
         return top_candidates[:n]
     
-    def _get_cold_start_recommendations(self, n: int = 10) -> List[Tuple[str, float]]:
-        # IMPROVED: Multi-factor cryptocurrency cold-start approach
-        if 'primary_category' in self.projects_df.columns:
-            # 1. Get category distribution
-            category_counts = self.projects_df['primary_category'].value_counts()
-            
-            # Identify major categories with at least 3 projects
-            major_categories = category_counts[category_counts >= 3].index.tolist()
-            
-            # 2. Identify trending projects across categories (vital for crypto)
-            trending_projects = []
-            if 'trend_score' in self.projects_df.columns:
-                # Get top trending projects overall
-                trending_df = self.projects_df.sort_values('trend_score', ascending=False)
-                # Take top 20% of trending projects, but at least 5
-                top_trending_count = max(5, int(len(self.projects_df) * 0.2))
-                trending_projects = trending_df.head(top_trending_count)['id'].tolist()
-            
-            # 3. Identify established projects by market cap (for stability)
-            established_projects = []
-            if 'market_cap' in self.projects_df.columns:
-                # Get top projects by market cap
-                market_cap_df = self.projects_df.sort_values('market_cap', ascending=False)
-                # Take top 15% by market cap, but at least 5
-                top_cap_count = max(5, int(len(self.projects_df) * 0.15))
-                established_projects = market_cap_df.head(top_cap_count)['id'].tolist()
-            
-            # 4. Calculate how many projects to take from each source
-            projects_per_category = max(1, int(n * 0.6 / len(major_categories)))  # 60% from categories
-            trending_count = max(1, int(n * 0.25))  # 25% from trending
-            established_count = max(1, int(n * 0.15))  # 15% from established
-            
-            # Adjust if we don't have trending or established projects
-            if not trending_projects:
-                established_count += trending_count
-                trending_count = 0
-            if not established_projects:
-                trending_count += established_count
-                established_count = 0
-            if not trending_projects and not established_projects:
-                projects_per_category = max(1, int(n / len(major_categories)))
-            
-            # 5. Collect diverse recommendations
-            diversified_recommendations = []
-            
-            # 5a. Add category-based recommendations
-            for category in major_categories:
-                # Get projects from this category
-                category_projects = self.projects_df[self.projects_df['primary_category'] == category]
-                
-                # Further sort by a blend of popularity and trend for better cold-start
-                if 'popularity_score' in category_projects.columns and 'trend_score' in category_projects.columns:
-                    # For crypto: Trend has higher weight than general popularity
-                    category_projects = category_projects.copy()
-                    category_projects['combined_score'] = (
-                        category_projects['popularity_score'] * 0.3 + 
-                        category_projects['trend_score'] * 0.6
-                    )
-                    category_projects = category_projects.sort_values('combined_score', ascending=False)
-                elif 'popularity_score' in category_projects.columns:
-                    category_projects = category_projects.sort_values('popularity_score', ascending=False)
-                
-                # Get top projects from this category
-                top_category_projects = category_projects.head(projects_per_category)
-                
-                # Add to recommendations with score
-                for _, project in top_category_projects.iterrows():
-                    # Use combined score if available, otherwise popularity or default 0.8
-                    if 'combined_score' in project:
-                        score = project['combined_score'] / 100  # Normalize to 0-1
-                    elif 'popularity_score' in project:
-                        score = project['popularity_score'] / 100
-                    else:
-                        score = 0.8
-                    
-                    # Add moderate boost for established projects for stability
-                    if project['id'] in established_projects:
-                        score += 0.05
-                    
-                    # Add stronger boost for trending projects
-                    if project['id'] in trending_projects:
-                        score += 0.1
-                    
-                    diversified_recommendations.append((project['id'], float(score)))
-            
-            # 5b. Add trending recommendations not already included
-            added_trends = set(item_id for item_id, _ in diversified_recommendations if item_id in trending_projects)
-            trending_to_add = [item for item in trending_projects if item not in added_trends]
-            
-            for trend_item in trending_to_add[:trending_count]:
-                project_row = self.projects_df[self.projects_df['id'] == trend_item]
-                if not project_row.empty:
-                    # Use trend score with a boost
-                    if 'trend_score' in project_row.columns:
-                        score = float(project_row['trend_score'].values[0]) / 100 + 0.1  # Added boost
-                    else:
-                        score = 0.85  # Default high score for trending
-                    
-                    diversified_recommendations.append((trend_item, score))
-            
-            # 5c. Add established recommendations not already included
-            added_established = set(item_id for item_id, _ in diversified_recommendations if item_id in established_projects)
-            established_to_add = [item for item in established_projects if item not in added_established]
-            
-            for estab_item in established_to_add[:established_count]:
-                project_row = self.projects_df[self.projects_df['id'] == estab_item]
-                if not project_row.empty:
-                    # Use market cap as basis with moderate score
-                    score = 0.75  # Slightly lower than trending
-                    
-                    diversified_recommendations.append((estab_item, score))
-            
-            # 6. Ensure we have enough recommendations
-            if len(diversified_recommendations) < n:
-                # Add top popularity projects not already included
-                already_added = set(item_id for item_id, _ in diversified_recommendations)
-                
-                if 'popularity_score' in self.projects_df.columns:
-                    popular_df = self.projects_df.sort_values('popularity_score', ascending=False)
-                    for _, row in popular_df.iterrows():
-                        if row['id'] not in already_added:
-                            score = float(row['popularity_score']) / 100
-                            diversified_recommendations.append((row['id'], score))
-                            already_added.add(row['id'])
-                            
-                            if len(diversified_recommendations) >= n:
-                                break
-            
-            # 7. Sort by score and return top n
-            diversified_recommendations.sort(key=lambda x: x[1], reverse=True)
-            return diversified_recommendations[:n]
+    def _apply_diversity_with_metadata(self, candidates: List[Tuple[str, float]], n: int) -> List[Tuple[str, float]]:
+        """Apply diversity to recommendations using project metadata"""
         
-        # Fallback to popularity-based approach if categories not available
-        if 'popularity_score' in self.projects_df.columns:
-            # IMPROVED: Calculate factor diversification penalty for crypto
-            if 'primary_category' in self.projects_df.columns:
-                # Calculate category frequency
-                category_counts = self.projects_df['primary_category'].value_counts()
-                max_count = category_counts.max()
+        # OPTIMIZATION: Create item metadata lookup only once
+        item_metadata = {}
+        for _, row in self.projects_df.iterrows():
+            if 'id' in row:
+                item_id = row['id']
                 
-                # Create adjusted DataFrame for scoring
-                df_with_adjusted_scores = self.projects_df.copy()
+                # Extract categories
+                categories = []
+                if 'categories_list' in row:
+                    cats = row['categories_list']
+                    if isinstance(cats, list):
+                        categories = cats
+                    elif isinstance(cats, str) and cats.startswith('[') and cats.endswith(']'):
+                        try:
+                            categories = eval(cats)
+                        except:
+                            categories = [cats]
+                    else:
+                        categories = [cats]
+                elif 'primary_category' in row:
+                    categories = [row['primary_category']]
                 
-                # Calculate score with category penalty and market cap bonus
-                def adjust_score_by_crypto_factors(row):
-                    # Start with base popularity score
-                    popularity = row.get('popularity_score', 0)
-                    
-                    # 1. Category diversification
-                    if 'primary_category' in row:
-                        category = row['primary_category']
-                        count = category_counts.get(category, 0)
-                        
-                        # Penalty for over-represented categories
-                        category_penalty = 0.15 * (count / max_count) if max_count > 0 else 0
-                        popularity = popularity * (1 - category_penalty)
-                    
-                    # 2. Market cap consideration - slight boost for established
-                    if 'market_cap' in row and self.projects_df['market_cap'].max() > 0:
-                        market_cap = row['market_cap']
-                        market_percentile = market_cap / self.projects_df['market_cap'].max()
-                        
-                        if market_percentile > 0.7:  # Large cap
-                            popularity += 5  # Small boost
-                    
-                    # 3. Trend boost for crypto projects
-                    if 'trend_score' in row:
-                        trend_score = row['trend_score']
-                        if trend_score > 70:  # Highly trending
-                            popularity += 15  # Significant boost
-                        elif trend_score > 55:  # Moderately trending
-                            popularity += 8   # Moderate boost
-                    
-                    return popularity
+                # Extract chain and market cap
+                chain = row.get('chain', 'unknown')
+                market_cap = row.get('market_cap', 0)
                 
-                # Apply the scoring function
-                df_with_adjusted_scores['adjusted_score'] = df_with_adjusted_scores.apply(
-                    adjust_score_by_crypto_factors, axis=1
+                # Store metadata
+                item_metadata[item_id] = {
+                    'categories': categories,
+                    'chain': chain,
+                    'market_cap': market_cap
+                }
+        
+        # OPTIMIZATION: Select top items unconditionally first
+        top_count = max(n // 5, 1)  # ~20% by pure score
+        result_items = [item for item, _ in candidates[:top_count]]
+        result_scores = [score for _, score in candidates[:top_count]]
+        
+        # Track selected categories and chains for diversity
+        category_counts = {}
+        chain_counts = {}
+        market_cap_tiers = {'high': 0, 'medium': 0, 'low': 0}
+        
+        # Market cap thresholds
+        high_cap_threshold = 1e9  # $1B
+        medium_cap_threshold = 1e8  # $100M
+        
+        # Initialize tracking
+        for item in result_items:
+            if item in item_metadata:
+                meta = item_metadata[item]
+                categories = meta['categories']
+                chain = meta['chain']
+                market_cap = meta['market_cap']
+                
+                # Update category counts
+                for category in categories:
+                    category_counts[category] = category_counts.get(category, 0) + 1
+                
+                # Update chain counts
+                chain_counts[chain] = chain_counts.get(chain, 0) + 1
+                
+                # Update market cap tier counts
+                if market_cap >= high_cap_threshold:
+                    market_cap_tiers['high'] += 1
+                elif market_cap >= medium_cap_threshold:
+                    market_cap_tiers['medium'] += 1
+                else:
+                    market_cap_tiers['low'] += 1
+        
+        # Diversity limits - more balanced for crypto
+        max_per_category = max(2, int(n * 0.3))  # Max 30% from any category
+        max_per_chain = max(3, int(n * 0.4))     # Max 40% from any chain
+        
+        # Desired distribution for market cap tiers
+        target_market_cap_distribution = {
+            'high': int(n * 0.4),    # 40% high cap for stability
+            'medium': int(n * 0.4),  # 40% medium cap for growth
+            'low': int(n * 0.2)      # 20% low cap for speculation
+        }
+        
+        # Remaining candidates
+        remaining = candidates[top_count:]
+        
+        # Calculate diversity adjustments for remaining items
+        diversity_adjustments = []
+        
+        for item_id, score in remaining:
+            if item_id in item_metadata:
+                meta = item_metadata[item_id]
+                categories = meta['categories']
+                chain = meta['chain']
+                market_cap = meta['market_cap']
+                
+                # Calculate category adjustment
+                category_adjustment = 0
+                has_overrepresented_category = False
+                has_new_category = True
+                
+                for category in categories:
+                    cat_count = category_counts.get(category, 0)
+                    
+                    if cat_count >= max_per_category:
+                        # Category overrepresented
+                        has_overrepresented_category = True
+                    elif cat_count == 0:
+                        # New category bonus
+                        has_new_category = True
+                
+                if has_overrepresented_category:
+                    category_adjustment -= 0.3
+                elif has_new_category:
+                    category_adjustment += 0.2
+                
+                # Chain adjustment
+                chain_adjustment = 0
+                chain_count = chain_counts.get(chain, 0)
+                
+                if chain_count >= max_per_chain:
+                    chain_adjustment -= 0.2
+                elif chain_count == 0:
+                    chain_adjustment += 0.1
+                
+                # Market cap adjustment based on tier targets
+                market_cap_adjustment = 0
+                
+                if market_cap >= high_cap_threshold:
+                    tier = 'high'
+                elif market_cap >= medium_cap_threshold:
+                    tier = 'medium'
+                else:
+                    tier = 'low'
+                
+                current_count = market_cap_tiers[tier]
+                target_count = target_market_cap_distribution[tier]
+                
+                if current_count >= target_count:
+                    # This tier is overrepresented
+                    market_cap_adjustment -= 0.2
+                else:
+                    # This tier is underrepresented
+                    fill_ratio = 1.0 - (current_count / target_count if target_count > 0 else 0)
+                    market_cap_adjustment += 0.2 * fill_ratio
+                
+                # Combine all adjustments
+                total_adjustment = (
+                    category_adjustment * 0.6 +   # Categories most important
+                    chain_adjustment * 0.25 +     # Chain secondary importance
+                    market_cap_adjustment * 0.15  # Market cap tertiary importance
                 )
                 
-                # Sort by adjusted score
-                popular = df_with_adjusted_scores.sort_values('adjusted_score', ascending=False).head(n*2)
+                # Add to diversity adjustments
+                diversity_adjustments.append(
+                    (item_id, score, score + total_adjustment * 0.5)  # Apply half of adjustment for balance
+                )
+            else:
+                # No metadata, just use original score
+                diversity_adjustments.append((item_id, score, score))
+        
+        # Sort by adjusted score
+        diversity_adjustments.sort(key=lambda x: x[2], reverse=True)
+        
+        # Add remaining items based on adjusted scores
+        for item_id, original_score, _ in diversity_adjustments:
+            if len(result_items) >= n:
+                break
                 
-                # Apply diversity constraints
-                max_per_category = max(2, n // 3)
-                selected = []
-                category_counts_selected = {}
+            # Skip if already selected
+            if item_id in result_items:
+                continue
                 
-                # Select with category constraints
-                for _, row in popular.iterrows():
-                    category = row['primary_category']
-                    current_count = category_counts_selected.get(category, 0)
-                    
-                    if current_count < max_per_category:
-                        selected.append((row['id'], float(row['adjusted_score'])))
-                        category_counts_selected[category] = current_count + 1
-                    
-                    if len(selected) >= n:
-                        break
-                
-                # If still not enough, add remaining popular items
-                if len(selected) < n:
-                    remaining = [
-                        (row['id'], float(row['adjusted_score']))
-                        for _, row in popular.iterrows() 
-                        if row['id'] not in [item[0] for item in selected]
-                    ]
-                    selected.extend(remaining[:n - len(selected)])
-                
-                return selected
+            # Add to results
+            result_items.append(item_id)
+            result_scores.append(original_score)  # Use original score for consistency
             
-            # Simple popularity-based fallback
-            popular = self.projects_df.sort_values('popularity_score', ascending=False).head(n)
-            return [(row['id'], float(row['popularity_score'])) for _, row in popular.iterrows()]
+            # Update tracking
+            if item_id in item_metadata:
+                meta = item_metadata[item_id]
+                categories = meta['categories']
+                chain = meta['chain']
+                market_cap = meta['market_cap']
+                
+                # Update category counts
+                for category in categories:
+                    category_counts[category] = category_counts.get(category, 0) + 1
+                
+                # Update chain counts
+                chain_counts[chain] = chain_counts.get(chain, 0) + 1
+                
+                # Update market cap tier counts
+                if market_cap >= high_cap_threshold:
+                    market_cap_tiers['high'] += 1
+                elif market_cap >= medium_cap_threshold:
+                    market_cap_tiers['medium'] += 1
+                else:
+                    market_cap_tiers['low'] += 1
+        
+        # Build final result
+        result = list(zip(result_items, result_scores))
+        return result
+    
+    def _get_cold_start_recommendations(self, n: int = 10) -> List[Tuple[str, float]]:
+        """
+        Enhanced multi-strategy cold-start approach for cryptocurrency domain
+        """
+        # Check cache for performance
+        cache_key = f"cold_start_{n}"
+        if cache_key in self._cold_start_cache:
+            # Check if cache is still valid (< 1 hour old)
+            cache_time, cache_results = self._cold_start_cache[cache_key]
+            if time.time() - cache_time < 3600:  # 1 hour in seconds
+                return cache_results[:n]  # Return subset if needed
+        
+        # STRATEGY 1: Use precomputed popular and trending items
+        recommendations = []
+        
+        # IMPROVED: Use balanced approach for crypto cold-start with multiple sources
+        
+        # 1. Get top trending items (highest priority for crypto)
+        if self._trending_items:
+            # Get top 40% from trending
+            trend_count = max(3, int(n * 0.4))
+            
+            # Apply additional boost for very trending items
+            boosted_trending = []
+            for item_id, score in self._trending_items:
+                if score > 0.8:  # Very trending (>80)
+                    # Apply 20% boost for hot items
+                    boosted_trending.append((item_id, min(1.0, score * 1.2)))
+                else:
+                    boosted_trending.append((item_id, score))
+            
+            recommendations.extend(boosted_trending[:trend_count])
+        
+        # 2. Get established projects by market cap (for stability)
+        if 'market_cap' in self.projects_df.columns:
+            # Get top projects by market cap
+            market_cap_df = self.projects_df.sort_values('market_cap', ascending=False)
+            
+            # Get top 30% by market cap
+            cap_count = max(3, int(n * 0.3))
+            
+            # Only include items not already in recommendations
+            recommended_ids = {item[0] for item in recommendations}
+            
+            for _, row in market_cap_df.iterrows():
+                if len(recommendations) >= trend_count + cap_count:
+                    break
+                    
+                item_id = row['id']
+                
+                if item_id not in recommended_ids:
+                    # Normalized score based on market cap position
+                    market_cap_score = 0.7  # Slightly lower than trending
+                    
+                    # Add to recommendations
+                    recommendations.append((item_id, market_cap_score))
+                    recommended_ids.add(item_id)
+        
+        # 3. Add category-diverse popular items
+        if self._popular_items:
+            # Get remaining slots
+            remaining_slots = n - len(recommendations)
+            
+            if remaining_slots > 0:
+                # Keep track of categories we've already included
+                category_counts = {}
+                recommended_ids = {item[0] for item in recommendations}
+                
+                # First pass: collect category information for current recommendations
+                for item_id, _ in recommendations:
+                    project = self.projects_df[self.projects_df['id'] == item_id]
+                    
+                    if not project.empty and 'primary_category' in project.columns:
+                        category = project.iloc[0]['primary_category']
+                        category_counts[category] = category_counts.get(category, 0) + 1
+                
+                # Second pass: add diverse popular items
+                for item_id, score in self._popular_items:
+                    if len(recommendations) >= n:
+                        break
+                        
+                    if item_id not in recommended_ids:
+                        project = self.projects_df[self.projects_df['id'] == item_id]
+                        
+                        if not project.empty and 'primary_category' in project.columns:
+                            category = project.iloc[0]['primary_category']
+                            
+                            # Skip if we already have enough from this category
+                            if category_counts.get(category, 0) >= 2 and len(category_counts) > 2:
+                                continue
+                            
+                            # Add to counts
+                            category_counts[category] = category_counts.get(category, 0) + 1
+                        
+                        # Add to recommendations
+                        recommendations.append((item_id, score * 0.9))  # Slightly reduce score for diversity
+                        recommended_ids.add(item_id)
+        
+        # Ensure we have enough recommendations
+        remaining_slots = n - len(recommendations)
+        if remaining_slots > 0 and self.projects_df is not None:
+            # Use high popularity as fallback if we still need more
+            if 'popularity_score' in self.projects_df.columns:
+                popular_df = self.projects_df.sort_values('popularity_score', ascending=False)
+                recommended_ids = {item[0] for item in recommendations}
+                
+                for _, row in popular_df.iterrows():
+                    if len(recommendations) >= n:
+                        break
+                        
+                    item_id = row['id']
+                    if item_id not in recommended_ids:
+                        pop_score = row['popularity_score'] / 100 if row['popularity_score'] <= 100 else 1.0
+                        recommendations.append((item_id, pop_score * 0.8))  # Lower priority
+                        recommended_ids.add(item_id)
+            else:
+                # Last resort: use random popular items
+                remaining_popular = [item for item in self._popular_items if item[0] not in {rec[0] for rec in recommendations}]
+                recommendations.extend(remaining_popular[:remaining_slots])
+        
+        # Sort by score
+        recommendations.sort(key=lambda x: x[1], reverse=True)
+        
+        # Apply diversity if we have more than needed
+        if len(recommendations) > n and 'primary_category' in self.projects_df.columns:
+            final_recommendations = self._apply_diversity_with_metadata(recommendations, n)
         else:
-            # Return random items with default score
-            projects = self.projects_df.sample(n=min(n, len(self.projects_df)))
-            return [(row['id'], 1.0) for _, row in projects.iterrows()]
+            final_recommendations = recommendations[:n]
+        
+        # Store in cache
+        self._cold_start_cache[cache_key] = (time.time(), final_recommendations)
+        
+        return final_recommendations
     
     def recommend_projects(self, user_id: str, n: int = 10) -> List[Dict[str, Any]]:
         # Get recommendations as (project_id, score) tuples
@@ -966,36 +1160,21 @@ class FeatureEnhancedCF:
         
         return diversified_results[:n]
     
-    def get_cold_start_recommendations(self, 
-                          user_interests: Optional[List[str]] = None,
-                          n: int = 10) -> List[Dict[str, Any]]:
+    def get_cold_start_recommendations(self, user_interests: Optional[List[str]] = None, n: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get cold-start recommendations with optional user interests
+        """
         # Mendapatkan rekomendasi dalam bentuk (project_id, score) tuples
-        recommendations = self._get_cold_start_recommendations(n=n)
-        
-        # Membuat filter berdasarkan kategori jika user_interests disediakan
-        filtered_recommendations = []
-        if user_interests and hasattr(self, 'projects_df') and 'primary_category' in self.projects_df.columns:
-            interest_set = set(user_interests)
-            
-            # Filter rekomendasi berdasarkan minat pengguna
-            for project_id, score in recommendations:
-                project_data = self.projects_df[self.projects_df['id'] == project_id]
-                if not project_data.empty:
-                    category = project_data.iloc[0].get('primary_category')
-                    if category in interest_set or not interest_set:
-                        filtered_recommendations.append((project_id, score))
-            
-            # Jika hasil filter terlalu sedikit, tambahkan rekomendasi lain
-            if len(filtered_recommendations) < n//2:
-                for project_id, score in recommendations:
-                    if (project_id, score) not in filtered_recommendations and len(filtered_recommendations) < n:
-                        filtered_recommendations.append((project_id, score))
+        if user_interests:
+            # Custom recommendations based on interests
+            recommendations = self._get_interest_based_recommendations(user_interests, n)
         else:
-            filtered_recommendations = recommendations
+            # Generic cold-start recommendations
+            recommendations = self._get_cold_start_recommendations(n)
         
         # Konversi ke bentuk dictionary
         detailed_recommendations = []
-        for project_id, score in filtered_recommendations[:n]:
+        for project_id, score in recommendations[:n]:
             # Cari data proyek
             project_data = self.projects_df[self.projects_df['id'] == project_id]
             
@@ -1011,134 +1190,283 @@ class FeatureEnhancedCF:
         
         return detailed_recommendations
     
+    def _get_interest_based_recommendations(self, user_interests: List[str], n: int = 10) -> List[Tuple[str, float]]:
+        """
+        Generate cold-start recommendations based on user interests
+        """
+        # Normalize interests to lowercase for better matching
+        normalized_interests = [interest.lower() for interest in user_interests]
+        
+        # Track selected categories to ensure diversity
+        selected_categories = {}
+        recommendations = []
+        
+        # Max items per category
+        max_per_category = max(2, n // len(normalized_interests) if normalized_interests else n // 3)
+        
+        # First pass: Find direct matches for each interest
+        for interest in normalized_interests:
+            match_count = 0
+            
+            # Try to find exact category matches
+            for category, items in self._category_item_mapping.items():
+                if interest in category.lower() or category.lower() in interest:
+                    # Match found - get items from this category
+                    category_items = items[:max_per_category*2]  # Get more for filtering
+                    
+                    # Get associated projects
+                    for item_id in category_items:
+                        if item_id not in [rec[0] for rec in recommendations]:
+                            # Get project data
+                            project_data = self.projects_df[self.projects_df['id'] == item_id]
+                            
+                            if not project_data.empty and match_count < max_per_category:
+                                # Create recommendation with boosted score
+                                recommendations.append((item_id, 0.85))  # High score for direct match
+                                
+                                # Track category to ensure diversity
+                                selected_categories[category] = selected_categories.get(category, 0) + 1
+                                
+                                match_count += 1
+                                
+                                # Break if we have enough from this category
+                                if match_count >= max_per_category:
+                                    break
+                                    
+            # If no direct matches, try partial matches
+            if match_count == 0:
+                # Try partial matching with a more flexible approach
+                potential_categories = []
+                
+                for category in self._category_distributions.keys():
+                    # Check for token overlap in words
+                    interest_tokens = set(interest.lower().split())
+                    category_tokens = set(category.lower().split('-'))
+                    
+                    # Check for any overlap
+                    if interest_tokens.intersection(category_tokens):
+                        potential_categories.append(category)
+                
+                # Use the potential categories
+                for category in potential_categories[:3]:  # Limit to top 3 potential categories
+                    if category in self._category_item_mapping:
+                        items = self._category_item_mapping[category][:max_per_category]
+                        
+                        for item_id in items:
+                            if item_id not in [rec[0] for rec in recommendations]:
+                                # Lower score for partial match
+                                recommendations.append((item_id, 0.75))
+                                
+                                # Track category
+                                selected_categories[category] = selected_categories.get(category, 0) + 1
+                                
+                                match_count += 1
+                                
+                                # Limit number of partial matches
+                                if match_count >= max_per_category // 2:
+                                    break
+        
+        # Second pass: Fill remaining slots with trending and popular items
+        remaining_slots = n - len(recommendations)
+        
+        if remaining_slots > 0:
+            # Use trending items first
+            if self._trending_items:
+                trending_count = min(remaining_slots, max(2, remaining_slots // 2))
+                trending_candidates = [item for item in self._trending_items 
+                                    if item[0] not in [rec[0] for rec in recommendations]]
+                
+                recommendations.extend(trending_candidates[:trending_count])
+            
+            # Then fill with popular items if needed
+            remaining_slots = n - len(recommendations)
+            if remaining_slots > 0 and self._popular_items:
+                popular_candidates = [item for item in self._popular_items 
+                                    if item[0] not in [rec[0] for rec in recommendations]]
+                
+                recommendations.extend(popular_candidates[:remaining_slots])
+        
+        # Final pass: Ensure category diversity
+        if 'primary_category' in self.projects_df.columns and len(recommendations) > n:
+            # Apply diversity logic
+            diverse_recommendations = self._apply_diversity_with_metadata(recommendations, n)
+            return diverse_recommendations
+        
+        # Sort by score and return
+        recommendations.sort(key=lambda x: x[1], reverse=True)
+        return recommendations[:n]
+    
     def get_trending_projects(self, n: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get trending crypto projects with enhanced diversity
+        """
         if 'trend_score' in self.projects_df.columns:
             # Sort by trend score
-            trending = self.projects_df.sort_values('trend_score', ascending=False).head(n)
-            result = []
+            trending = self.projects_df.sort_values('trend_score', ascending=False).head(n*2)
             
-            for _, project in trending.iterrows():
-                # Get complete project data
-                project_dict = project.to_dict()
+            # Ensure category diversity
+            if 'primary_category' in trending.columns or 'categories_list' in trending.columns:
+                # Apply diversity directly
+                trend_tuples = [(row['id'], row['trend_score']/100) for _, row in trending.iterrows()]
+                diversified = self._apply_diversity_with_metadata(trend_tuples, n)
                 
-                # Ensure we add recommendation score for consistency
-                project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0))
+                # Convert back to dictionaries
+                result = []
+                for item_id, score in diversified:
+                    project_data = self.projects_df[self.projects_df['id'] == item_id]
+                    if not project_data.empty:
+                        project_dict = project_data.iloc[0].to_dict()
+                        project_dict['recommendation_score'] = float(score)
+                        project_dict['trend_score'] = project_dict.get('trend_score', score * 100)
+                        result.append(project_dict)
                 
-                # Ensure critical fields are available (even if null)
-                required_fields = ['id', 'name', 'symbol', 'image', 'current_price', 'market_cap', 
-                                'total_volume', 'price_change_24h', 'price_change_percentage_7d_in_currency', 
-                                'popularity_score', 'trend_score', 'primary_category', 'chain']
-                
-                for field in required_fields:
-                    if field not in project_dict:
-                        # Try alternate field names
-                        if field == 'price_usd' and 'current_price' in project_dict:
-                            project_dict['price_usd'] = project_dict['current_price']
-                        elif field == 'volume_24h' and 'total_volume' in project_dict:
-                            project_dict['volume_24h'] = project_dict['total_volume']
-                        elif field == 'price_change_7d' and 'price_change_percentage_7d_in_currency' in project_dict:
-                            project_dict['price_change_7d'] = project_dict['price_change_percentage_7d_in_currency']
-                        elif field == 'category' and 'primary_category' in project_dict:
-                            project_dict['category'] = project_dict['primary_category']
-                        else:
-                            # Default to None
-                            project_dict[field] = None
-                
-                result.append(project_dict)
-                
-            return result
+                return result[:n]
+            else:
+                # Just return top trending without diversity
+                result = []
+                for _, project in trending.head(n).iterrows():
+                    project_dict = project.to_dict()
+                    project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0)) / 100
+                    result.append(project_dict)
+                return result
         else:
-            logger.warning("No trend score available, returning top projects by other metrics")
+            logger.warning("No trend score available, returning top projects by popularity")
             return self.get_popular_projects(n)
     
     def get_popular_projects(self, n: int = 10) -> List[Dict[str, Any]]:
-        if 'popularity_score' in self.projects_df.columns:
-            # IMPROVED: Enhanced popularity ranking for crypto
-            # In crypto, mix of popularity, market cap, and trend is important
-            if 'trend_score' in self.projects_df.columns and 'market_cap' in self.projects_df.columns:
-                df = self.projects_df.copy()
-                
-                # Calculate blended score with domain-specific weights
-                trend_weight = self.crypto_weights.get("trend_importance", 0.7)
-                market_weight = self.crypto_weights.get("market_cap_influence", 0.4)
-                
-                # Create blended rank considering both popularity and trend
-                df['crypto_score'] = (
-                    df['popularity_score'] * (1 - trend_weight) + 
-                    df['trend_score'] * trend_weight
-                )
-                
-                # Add market cap bonus for established projects (transformed to avoid domination)
-                if df['market_cap'].max() > 0:
-                    # Calculate market cap percentile
-                    df['market_cap_pct'] = df['market_cap'] / df['market_cap'].max()
-                    # Apply moderate bonus for established projects
-                    df['crypto_score'] += df['market_cap_pct'] * 10 * market_weight
-                
-                # Sort by enhanced score
-                popular = df.sort_values('crypto_score', ascending=False).head(n)
-                
-                # Prepare result
-                result = []
-                for _, project in popular.iterrows():
-                    project_dict = project.to_dict()
-                    
-                    # Use enhanced score for recommendation
-                    project_dict['recommendation_score'] = float(project_dict.get('crypto_score', 0))
-                    
-                    # Ensure all required fields
-                    required_fields = ['id', 'name', 'symbol', 'image', 'current_price', 'market_cap', 
-                                'total_volume', 'price_change_24h', 'price_change_percentage_7d_in_currency']
-                    
-                    for field in required_fields:
-                        if field not in project_dict:
-                            if field == 'price_usd' and 'current_price' in project_dict:
-                                project_dict['price_usd'] = project_dict['current_price']
-                            elif field == 'volume_24h' and 'total_volume' in project_dict:
-                                project_dict['volume_24h'] = project_dict['total_volume']
-                            else:
-                                project_dict[field] = None
-                    
-                    result.append(project_dict)
-                    
-                return result
+        """
+        Get popular crypto projects with enhanced diversity and ranking
+        """
+        if 'popularity_score' in self.projects_df.columns and 'trend_score' in self.projects_df.columns:
+            # IMPROVED: Create balanced score with market cap influence
+            df = self.projects_df.copy()
             
-            # Standard popularity approach if additional metrics not available
-            popular = self.projects_df.sort_values('popularity_score', ascending=False).head(n)
+            # Create normalized scores
+            df['popularity_normalized'] = df['popularity_score'] / 100 
+            df['trend_normalized'] = df['trend_score'] / 100
+            
+            # Create combined score with domain-specific weights
+            trend_weight = self.crypto_weights.get("trend_importance", 0.7)
+            df['combined_score'] = (
+                df['popularity_normalized'] * (1 - trend_weight) + 
+                df['trend_normalized'] * trend_weight
+            ) * 100
+            
+            # Apply market cap bonus for reliable projects
+            if 'market_cap' in df.columns and df['market_cap'].max() > 0:
+                # Calculate percentile rank of market cap
+                df['market_cap_rank'] = df['market_cap'].rank(pct=True)
+                
+                # Apply smaller bonus for market cap to avoid over-dominance of large caps
+                market_cap_boost = self.crypto_weights.get("market_cap_influence", 0.4)
+                df['combined_score'] += df['market_cap_rank'] * 20 * market_cap_boost
+            
+            # Sort by combined score
+            popular = df.sort_values('combined_score', ascending=False).head(n*2)
+            
+            # Apply diversity to popular projects
+            popular_tuples = [(row['id'], row['combined_score']/100) for _, row in popular.iterrows()]
+            diversified = self._apply_diversity_with_metadata(popular_tuples, n)
+            
+            # Convert back to dictionaries
             result = []
+            for item_id, score in diversified:
+                project_data = df[df['id'] == item_id]
+                if not project_data.empty:
+                    project_dict = project_data.iloc[0].to_dict()
+                    project_dict['recommendation_score'] = float(score)
+                    result.append(project_dict)
             
-            for _, project in popular.iterrows():
-                # Get complete project data
-                project_dict = project.to_dict()
-                
-                # Ensure we add recommendation score for consistency
-                project_dict['recommendation_score'] = float(project_dict.get('popularity_score', 0))
-                
-                # Add to results
-                result.append(project_dict)
-                    
-            return result
+            return result[:n]
+        elif 'popularity_score' in self.projects_df.columns:
+            # Just use popularity score
+            popular = self.projects_df.sort_values('popularity_score', ascending=False).head(n*2)
+            
+            # Apply diversity
+            popular_tuples = [(row['id'], row['popularity_score']/100) for _, row in popular.iterrows()]
+            diversified = self._apply_diversity_with_metadata(popular_tuples, n)
+            
+            # Convert to dictionaries
+            result = []
+            for item_id, score in diversified:
+                project_data = self.projects_df[self.projects_df['id'] == item_id]
+                if not project_data.empty:
+                    project_dict = project_data.iloc[0].to_dict()
+                    project_dict['recommendation_score'] = float(score)
+                    result.append(project_dict)
+            
+            return result[:n]
         elif 'market_cap' in self.projects_df.columns:
             # Use market cap as fallback
-            popular = self.projects_df.sort_values('market_cap', ascending=False).head(n)
+            popular = self.projects_df.sort_values('market_cap', ascending=False).head(n*2)
             
-            # Ensure all required fields are present
+            # Apply diversity
+            if popular['market_cap'].max() > 0:
+                popular_tuples = [(row['id'], row['market_cap']/popular['market_cap'].max() * 0.9) 
+                                for _, row in popular.iterrows()]
+            else:
+                popular_tuples = [(row['id'], 0.5) for _, row in popular.iterrows()]
+            
+            diversified = self._apply_diversity_with_metadata(popular_tuples, n)
+            
+            # Convert to dictionaries
             result = []
-            for _, project in popular.iterrows():
-                project_dict = project.to_dict()
-                project_dict['recommendation_score'] = float(project_dict.get('market_cap', 0)) / 1e9  # Normalize market cap
-                
-                # Add missing fields
-                if 'image' not in project_dict:
-                    project_dict['image'] = None
-                
-                result.append(project_dict)
-                
-            return result
+            for item_id, score in diversified:
+                project_data = self.projects_df[self.projects_df['id'] == item_id]
+                if not project_data.empty:
+                    project_dict = project_data.iloc[0].to_dict()
+                    project_dict['recommendation_score'] = float(score)
+                    result.append(project_dict)
+            
+            return result[:n]
         else:
-            # Just return first n projects
-            projects = self.projects_df.head(n)
-            return [
-                {**row.to_dict(), 'recommendation_score': 0.5, 'image': row.get('image', None)}
-                for _, row in projects.iterrows()
-            ]
+            # Just return random selection with diversity
+            random_tuples = [(row['id'], 0.5) for _, row in self.projects_df.sample(min(n*2, len(self.projects_df))).iterrows()]
+            diversified = self._apply_diversity_with_metadata(random_tuples, n)
+            
+            # Convert to dictionaries
+            result = []
+            for item_id, score in diversified:
+                project_data = self.projects_df[self.projects_df['id'] == item_id]
+                if not project_data.empty:
+                    project_dict = project_data.iloc[0].to_dict()
+                    project_dict['recommendation_score'] = float(score)
+                    result.append(project_dict)
+            
+            return result[:n]
+
+
+if __name__ == "__main__":
+    # Testing the module
+    fecf = FeatureEnhancedCF()
+    
+    # Load data
+    if fecf.load_data():
+        # Train model
+        metrics = fecf.train(save_model=True)
+        print(f"Training metrics: {metrics}")
+        
+        # Test recommendations
+        if fecf.user_item_matrix is not None and not fecf.user_item_matrix.empty:
+            test_user = fecf.user_item_matrix.index[0]
+            print(f"\nFECF recommendations for user {test_user}:")
+            recs = fecf.recommend_projects(test_user, n=5)
+            
+            for i, rec in enumerate(recs, 1):
+                print(f"{i}. {rec.get('name', rec.get('id'))} - Score: {rec.get('recommendation_score', 0):.4f}")
+                
+        # Test cold-start recommendations
+        print("\nCold-start recommendations:")
+        cold_start = fecf.get_cold_start_recommendations(n=5)
+        
+        for i, rec in enumerate(cold_start, 1):
+            print(f"{i}. {rec.get('name', rec.get('id'))} - Score: {rec.get('recommendation_score', 0):.4f}")
+            
+        # Test trending projects
+        print("\nTrending projects:")
+        trending = fecf.get_trending_projects(n=5)
+        
+        for i, proj in enumerate(trending, 1):
+            print(f"{i}. {proj.get('name', proj.get('id'))} - Score: {proj.get('recommendation_score', 0):.4f}")
+    else:
+        print("Failed to load data")

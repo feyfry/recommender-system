@@ -564,7 +564,7 @@ def evaluate_all_models(models: Dict[str, Any],
     all_results = {model_name: [] for model_name in models.keys()}
     
     # Only one run for regular evaluation
-    logger.info(f"Starting main evaluation")
+    logger.info("Starting main evaluation")
     
     # Evaluate each model
     for model_name, model in models.items():
@@ -667,7 +667,7 @@ def evaluate_cold_start(model: Any,
                        debug: bool = False,
                        max_users_per_batch: int = 50,
                        use_parallel: bool = False,
-                       n_runs: int = 5) -> Dict[str, Any]:
+                       n_runs: int = 3) -> Dict[str, Any]:
     """
     Perbaikan evaluasi cold-start untuk konsistensi yang lebih baik
     """

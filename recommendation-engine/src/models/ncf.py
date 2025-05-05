@@ -32,19 +32,25 @@ logger = logging.getLogger(__name__)
 
 class NCFDataset(Dataset):
     """
-    Dataset untuk Neural Collaborative Filtering dengan optimasi untuk domain cryptocurrency
+    Dataset untuk Neural Collaborative Filtering dengan sampling negatif yang ditingkatkan
+    dan strategi pembobotan yang dioptimalkan untuk domain cryptocurrency
     """
     
     def __init__(self, user_indices: np.ndarray, item_indices: np.ndarray, 
                  ratings: np.ndarray, num_negative: int = 4,
-                 item_categories: Optional[Dict[int, str]] = None,
-                 item_trend_scores: Optional[Dict[int, float]] = None):
+                 item_categories: Optional[Dict[int, List[str]]] = None,
+                 item_popularity: Optional[Dict[int, float]] = None,
+                 item_trend_scores: Optional[Dict[int, float]] = None,
+                 all_items: Optional[np.ndarray] = None,
+                 seed: int = 42):
         self.user_indices = user_indices
         self.item_indices = item_indices
         self.ratings = ratings
         self.num_negative = num_negative
         self.item_categories = item_categories
+        self.item_popularity = item_popularity
         self.item_trend_scores = item_trend_scores
+        self.rng = np.random.RandomState(seed)  # Fixed seed for reproducibility
         
         # Konversi ke tensor
         self.user_indices_tensor = torch.LongTensor(user_indices)
@@ -54,63 +60,93 @@ class NCFDataset(Dataset):
         # Map untuk negative sampling
         self.user_item_map = self._create_user_item_map()
         
-        # Tambahkan user-category map untuk sampling yang lebih cerdas jika kategori tersedia
+        # Tambahkan user-category map untuk sampling yang lebih cerdas
         self.user_category_map = {}
         if self.item_categories:
             self._create_user_category_map()
         
         # Generate semua unique item indices
-        self.all_items = np.unique(item_indices)
+        if all_items is not None:
+            self.all_items = all_items
+        else:
+            self.all_items = np.unique(item_indices)
         
-        # Generate negative samples di awal untuk menghindari inconsistency
+        # Generate negative samples di awal untuk konsistensi
         self.neg_samples = self._pregenerate_negative_samples()
         
         # Panjang total dataset: sampel positif + sampel negatif
         self.length = len(ratings) + len(self.neg_samples)
 
     def _create_user_category_map(self):
+        """Buat pemetaan minat kategori pengguna berdasarkan histori interaksi"""
         for user_idx, item_idx in zip(self.user_indices, self.item_indices):
             if user_idx not in self.user_category_map:
                 self.user_category_map[user_idx] = {}
                 
             if self.item_categories and item_idx in self.item_categories:
-                category = self.item_categories[item_idx]
-                if category not in self.user_category_map[user_idx]:
-                    self.user_category_map[user_idx][category] = 0
-                self.user_category_map[user_idx][category] += 1
+                categories = self.item_categories[item_idx]
+                if not isinstance(categories, list):
+                    categories = [categories]
+                    
+                for category in categories:
+                    if category not in self.user_category_map[user_idx]:
+                        self.user_category_map[user_idx][category] = 0
+                    self.user_category_map[user_idx][category] += 1
 
     def _pregenerate_negative_samples(self):
-        # Gunakan seed tetap untuk reproducibility
-        rng = np.random.default_rng(42)
+        """
+        Generate negative samples dengan strategi sampling yang lebih canggih:
+        1. Sampling dari kategori yang mirip (in-category negative sampling)
+        2. Anti-popularity sampling untuk lebih merata
+        3. Hard negative mining (near-miss examples)
+        """
         neg_samples = []
         
         # Pertama, hitung popularitas item berdasarkan frekuensi interaksi
-        item_popularity = np.zeros(len(self.all_items))
-        for user_idx in self.user_item_map:
-            for item_idx in self.user_item_map[user_idx]:
-                # Cari indeks item dalam all_items array
-                item_pos = np.where(self.all_items == item_idx)[0]
-                if len(item_pos) > 0:
-                    item_popularity[item_pos[0]] += 1
-        
-        # Normalisasi popularitas dan buat distribusi probabilitas inverse (untuk mendorong diversity)
-        max_pop = item_popularity.max()
-        if max_pop > 0:
-            # 1 - (pop/max*0.8) membuat item populer tetap memiliki kesempatan dipilih,
-            # tetapi dengan probabilitas yang lebih rendah
-            item_probability = 1.0 - (item_popularity / max_pop * 0.8)
-            item_probability = item_probability / item_probability.sum()
+        if self.item_popularity is None:
+            item_popularity = np.zeros(len(self.all_items))
+            for user_idx in self.user_item_map:
+                for item_idx in self.user_item_map[user_idx]:
+                    # Cari indeks item dalam all_items array
+                    item_pos = np.nonzero(self.all_items == item_idx)[0]
+                    if len(item_pos) > 0:
+                        item_popularity[item_pos[0]] += 1
+            
+            # Normalisasi popularitas
+            max_pop = item_popularity.max()
+            if max_pop > 0:
+                item_popularity = item_popularity / max_pop
         else:
-            item_probability = np.ones_like(item_popularity) / len(item_popularity)
+            # Use provided popularity if available
+            item_popularity = np.array([self.item_popularity.get(item, 0) for item in self.all_items])
+        
+        # Buat distribusi probabilitas inverse untuk mendorong diversity
+        # Formula: 1 - (pop^0.5) * 0.75
+        # Ini membuat item populer tetap ada kesempatan, tapi menurunkan dominasinya
+        item_probability = 1.0 - (np.power(item_popularity, 0.5) * 0.75)
+        item_probability = item_probability / item_probability.sum()
+        
+        # Prepare untuk hard negative sampling - group items by category
+        category_to_items = {}
+        if self.item_categories:
+            for item_idx in self.all_items:
+                if item_idx in self.item_categories:
+                    categories = self.item_categories[item_idx]
+                    if not isinstance(categories, list):
+                        categories = [categories]
+                        
+                    for category in categories:
+                        if category not in category_to_items:
+                            category_to_items[category] = []
+                        category_to_items[category].append(item_idx)
         
         for i, user_idx in enumerate(self.user_indices):
             # Get items yang sudah diinteraksi
             interacted_items = set(self.user_item_map.get(user_idx, []))
             
-            # Jika ada kategori data, kita bisa melakukan stratified negative sampling
+            # Dapatkan kategori yang disukai user berdasarkan frekuensi interaksi
             user_preferred_categories = []
             if user_idx in self.user_category_map:
-                # Dapatkan kategori yang disukai user berdasarkan frekuensi interaksi
                 user_preferred_categories = sorted(
                     self.user_category_map[user_idx].items(), 
                     key=lambda x: x[1], 
@@ -118,48 +154,69 @@ class NCFDataset(Dataset):
                 )
                 user_preferred_categories = [cat for cat, _ in user_preferred_categories]
             
-            # Generate negative samples untuk user ini
+            # Generate negative samples untuk user ini dengan 3 strategi:
+            # 1. In-category negatives (40%)
+            # 2. Trending negatives (30%)
+            # 3. Diverse negatives (30%)
+            
             for _ in range(self.num_negative):
-                # Strategi sampling yang lebih seimbang
-                if user_preferred_categories and self.item_categories and rng.random() < 0.5:
-                    # 50% probability: Sample dari kategori yang disukai tapi item yang belum diinteraksi
-                    preferred_cat = rng.choice(user_preferred_categories)
-                    
-                    # Cari item dalam kategori ini yang belum diinteraksi
-                    cat_items = [
-                        item for item in self.all_items 
-                        if item in self.item_categories and self.item_categories[item] == preferred_cat
-                        and item not in interacted_items
-                    ]
-                    
-                    if cat_items:
-                        neg_item_idx = rng.choice(cat_items)
-                    else:
-                        # Jika tidak ada item yang cocok, gunakan distribusi probabilitas
-                        while True:
-                            neg_item_idx = rng.choice(self.all_items, p=item_probability)
-                            if neg_item_idx not in interacted_items:
+                neg_item_idx = None
+                
+                # Randomly choose sampling strategy
+                sampling_strategy = self.rng.choice(['in-category', 'trending', 'diverse'], p=[0.4, 0.3, 0.3])
+                
+                if sampling_strategy == 'in-category' and user_preferred_categories and category_to_items:
+                    # In-category negative sampling
+                    for category in user_preferred_categories[:3]:  # Try top 3 categories
+                        if category in category_to_items:
+                            # Get items in this category
+                            cat_items = category_to_items[category]
+                            # Filter out already interacted items
+                            available_items = [item for item in cat_items if item not in interacted_items]
+                            
+                            if available_items:
+                                # Select random item from same category
+                                neg_item_idx = self.rng.choice(available_items)
                                 break
-                else:
-                    # 50% probability: Gunakan distribusi probabilitas inverse popularitas
-                    # Ini mendorong model untuk belajar tentang lebih banyak item, tidak hanya yang populer
-                    attempts = 0
-                    while attempts < 5:  # Batasi jumlah percobaan untuk efisiensi
-                        neg_item_idx = rng.choice(self.all_items, p=item_probability)
-                        if neg_item_idx not in interacted_items:
-                            break
-                        attempts += 1
+                
+                elif sampling_strategy == 'trending' and self.item_trend_scores:
+                    # Trending negative sampling - focus on trending items
+                    # Convert trend scores to probabilities
+                    trend_items = []
+                    trend_scores = []
                     
-                    # Jika gagal setelah beberapa percobaan, fallback ke random sampling
-                    if attempts >= 5 or neg_item_idx in interacted_items:
+                    for item in self.all_items:
+                        if item not in interacted_items and item in self.item_trend_scores:
+                            trend_items.append(item)
+                            trend_scores.append(max(0.1, self.item_trend_scores[item]))
+                    
+                    if trend_items:
+                        # Normalize scores to probabilities
+                        trend_probs = np.array(trend_scores)
+                        trend_probs = trend_probs / trend_probs.sum()
+                        
+                        # Sample based on trend scores
+                        neg_item_idx = self.rng.choice(trend_items, p=trend_probs)
+                
+                # If previous strategies failed or we're using diverse strategy, use anti-popularity sampling
+                if neg_item_idx is None:
+                    # Try anti-popularity sampling a few times
+                    for _ in range(5):
+                        candidate = self.rng.choice(self.all_items, p=item_probability)
+                        if candidate not in interacted_items:
+                            neg_item_idx = candidate
+                            break
+                    
+                    # If still no valid item, just pick any non-interacted item
+                    if neg_item_idx is None:
                         available_items = np.array([item for item in self.all_items if item not in interacted_items])
                         if len(available_items) > 0:
-                            neg_item_idx = rng.choice(available_items)
+                            neg_item_idx = self.rng.choice(available_items)
                         else:
-                            # Fallback terakhir jika tidak ada item tersedia sama sekali
-                            neg_item_idx = rng.choice(self.all_items)
+                            # Last resort - pick any item (could be duplicate in extreme cases)
+                            neg_item_idx = self.rng.choice(self.all_items)
                 
-                # Tambahkan sebagai sample negatif
+                # Add negative sample
                 neg_samples.append((user_idx, neg_item_idx, 0.0))
         
         return neg_samples
@@ -194,6 +251,7 @@ class NCFDataset(Dataset):
         )
     
     def _create_user_item_map(self) -> Dict[int, List[int]]:
+        """Create mapping of user to interacted items"""
         user_item_map = {}
         for user_idx, item_idx in zip(self.user_indices, self.item_indices):
             if user_idx not in user_item_map:
@@ -205,7 +263,11 @@ class NCFDataset(Dataset):
 class CryptoNCFModel(nn.Module):
     """
     Neural Collaborative Filtering Model dioptimalkan untuk domain cryptocurrency
-    dengan arsitektur yang lebih dalam dan fitur khusus
+    dengan arsitektur yang lebih dalam dan fitur khusus:
+    1. Residual connections
+    2. Layer normalization
+    3. Dual-path architecture (GMF + MLP)
+    4. Attention mechanism
     """
     
     def __init__(self, num_users: int, num_items: int, embedding_dim: int, layers: List[int], dropout: float):
@@ -218,25 +280,43 @@ class CryptoNCFModel(nn.Module):
         self.user_embedding_mlp = nn.Embedding(num_users, embedding_dim)
         self.item_embedding_mlp = nn.Embedding(num_items, embedding_dim)
         
-        # MLP layers with safe BatchNorm
+        # MLP path dengan residual connections
         self.mlp_layers = nn.ModuleList()
-        input_size = 2 * embedding_dim  # Concatenated embeddings
+        input_size = 2 * embedding_dim  # Concatenated user+item embeddings
         
         for i, layer_size in enumerate(layers):
+            # Create sequential block with normalization, activation and dropout
             if i == 0:
-                self.mlp_layers.append(nn.Linear(input_size, layer_size))
+                # First layer
+                mlp_block = nn.Sequential(
+                    nn.Linear(input_size, layer_size),
+                    nn.LayerNorm(layer_size),  # Layer norm instead of batch norm
+                    nn.LeakyReLU(0.1),
+                    nn.Dropout(dropout)
+                )
             else:
-                self.mlp_layers.append(nn.Linear(layers[i-1], layer_size))
+                # Add residual connection if dimensions match
+                if layers[i-1] == layer_size:
+                    mlp_block = nn.Sequential(
+                        ResidualBlock(layers[i-1], layer_size, dropout)
+                    )
+                else:
+                    mlp_block = nn.Sequential(
+                        nn.Linear(layers[i-1], layer_size),
+                        nn.LayerNorm(layer_size),
+                        nn.LeakyReLU(0.1),
+                        nn.Dropout(dropout)
+                    )
             
-            # Use LeakyReLU for better gradients on negative values
-            self.mlp_layers.append(nn.LeakyReLU(0.1))
-            
-            # Use GroupNorm instead of BatchNorm for better handling of small batches
-            # GroupNorm doesn't depend on batch statistics and works even with batch size=1
-            num_groups = min(8, layer_size)  # Use 8 groups or fewer if layer is small
-            self.mlp_layers.append(nn.GroupNorm(num_groups, layer_size))
-            
-            self.mlp_layers.append(nn.Dropout(dropout))
+            self.mlp_layers.append(mlp_block)
+        
+        # Simple attention mechanism for GMF path
+        self.attention = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim // 2),
+            nn.ReLU(),
+            nn.Linear(embedding_dim // 2, 1),
+            nn.Sigmoid()
+        )
         
         # Output layer: combine GMF and MLP results
         self.output_layer = nn.Linear(layers[-1] + embedding_dim, 1)
@@ -246,6 +326,7 @@ class CryptoNCFModel(nn.Module):
         self._init_weights()
     
     def _init_weights(self):
+        """Initialize model weights with improved method"""
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 # Use Kaiming initialization for linear layers with LeakyReLU
@@ -254,36 +335,32 @@ class CryptoNCFModel(nn.Module):
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.Embedding):
                 # Normal initialization for embeddings with smaller variance
-                nn.init.normal_(m.weight, std=0.01)
+                nn.init.normal_(m.weight, mean=0.0, std=0.01)
     
     def forward(self, user_indices, item_indices):
-        # Deteksi batch size
-        batch_size = user_indices.size(0)
-        
         # GMF path
         user_embedding_gmf = self.user_embedding_gmf(user_indices)
         item_embedding_gmf = self.item_embedding_gmf(item_indices)
-        gmf_vector = user_embedding_gmf * item_embedding_gmf  # Element-wise product
+        
+        # Apply attention to GMF embeddings
+        user_attention = self.attention(user_embedding_gmf)
+        item_attention = self.attention(item_embedding_gmf)
+        
+        # Apply attention weights
+        user_embedding_gmf = user_embedding_gmf * user_attention
+        item_embedding_gmf = item_embedding_gmf * item_attention
+        
+        # Element-wise product for GMF path
+        gmf_vector = user_embedding_gmf * item_embedding_gmf
         
         # MLP path
         user_embedding_mlp = self.user_embedding_mlp(user_indices)
         item_embedding_mlp = self.item_embedding_mlp(item_indices)
         mlp_vector = torch.cat([user_embedding_mlp, item_embedding_mlp], dim=-1)
         
-        # Process through MLP layers dengan penanganan batch kecil
-        for i in range(0, len(self.mlp_layers), 4):
-            # Linear layer selalu aman
-            mlp_vector = self.mlp_layers[i](mlp_vector)
-            
-            # Activation juga selalu aman
-            mlp_vector = self.mlp_layers[i+1](mlp_vector)
-            
-            # BatchNorm bermasalah untuk batch size = 1
-            if batch_size > 1:  # Skip BatchNorm untuk batch kecil
-                mlp_vector = self.mlp_layers[i+2](mlp_vector)
-            
-            # Dropout aman untuk semua ukuran batch
-            mlp_vector = self.mlp_layers[i+3](mlp_vector)
+        # Process through MLP layers
+        for layer in self.mlp_layers:
+            mlp_vector = layer(mlp_vector)
         
         # Combine GMF and MLP paths
         combined = torch.cat([gmf_vector, mlp_vector], dim=-1)
@@ -291,6 +368,25 @@ class CryptoNCFModel(nn.Module):
         # Final prediction
         output = self.output_layer(combined)
         return self.sigmoid(output).view(-1)
+
+
+class ResidualBlock(nn.Module):
+    """Residual block for MLP path"""
+    def __init__(self, in_features, out_features, dropout):
+        super(ResidualBlock, self).__init__()
+        self.linear = nn.Linear(in_features, out_features)
+        self.norm = nn.LayerNorm(out_features)
+        self.activation = nn.LeakyReLU(0.1)
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, x):
+        identity = x
+        out = self.linear(x)
+        out = self.norm(out)
+        out = self.activation(out)
+        out = self.dropout(out)
+        out = out + identity  # Residual connection
+        return out
 
 
 class NCFRecommender:
@@ -324,11 +420,14 @@ class NCFRecommender:
         
         # Item metadata for better sampling
         self.item_categories = None
+        self.item_popularity = None
         self.item_trend_scores = None
+        
+        # Cache untuk mempercepat rekomendasi
+        self._recommendation_cache = {}
+        self._popular_items = None  # Cache for cold-start
     
-    def load_data(self, 
-                 projects_path: Optional[str] = None, 
-                 interactions_path: Optional[str] = None) -> bool:
+    def load_data(self, projects_path: Optional[str] = None, interactions_path: Optional[str] = None) -> bool:
         # Use default paths if not specified
         if projects_path is None:
             projects_path = os.path.join(PROCESSED_DIR, "projects.csv")
@@ -341,14 +440,54 @@ class NCFRecommender:
                 self.projects_df = pd.read_csv(projects_path)
                 logger.info(f"Loaded {len(self.projects_df)} projects from {projects_path}")
                 
-                # Extract category and trend information for better sampling
+                # Extract category information for better sampling
+                self.item_categories = {}
                 if 'primary_category' in self.projects_df.columns:
-                    self.item_categories = dict(zip(self.projects_df['id'], self.projects_df['primary_category']))
+                    for _, row in self.projects_df.iterrows():
+                        if 'id' in row:
+                            item_id = row['id']
+                            
+                            # Try to get multiple categories if available
+                            categories = []
+                            if 'categories_list' in row:
+                                # Process categories list
+                                cats = row['categories_list']
+                                if isinstance(cats, list):
+                                    categories = cats
+                                elif isinstance(cats, str) and cats.startswith('[') and cats.endswith(']'):
+                                    try:
+                                        categories = eval(cats)
+                                    except:
+                                        categories = [cats]
+                                else:
+                                    categories = [cats]
+                            elif 'primary_category' in row:
+                                categories = [row['primary_category']]
+                            
+                            self.item_categories[item_id] = categories
+                    
                     logger.info(f"Extracted categories for {len(self.item_categories)} items")
                 
+                # Extract popularity for sampling
+                self.item_popularity = {}
+                if 'popularity_score' in self.projects_df.columns:
+                    for _, row in self.projects_df.iterrows():
+                        if 'id' in row and 'popularity_score' in row:
+                            self.item_popularity[row['id']] = row['popularity_score'] / 100  # Normalize to 0-1
+                    
+                    logger.info(f"Extracted popularity scores for {len(self.item_popularity)} items")
+                
+                # Extract trend scores for sampling
+                self.item_trend_scores = {}
                 if 'trend_score' in self.projects_df.columns:
-                    self.item_trend_scores = dict(zip(self.projects_df['id'], self.projects_df['trend_score']))
+                    for _, row in self.projects_df.iterrows():
+                        if 'id' in row and 'trend_score' in row:
+                            self.item_trend_scores[row['id']] = row['trend_score'] / 100  # Normalize to 0-1
+                    
                     logger.info(f"Extracted trend scores for {len(self.item_trend_scores)} items")
+                
+                # Precompute popular items for cold-start
+                self._precompute_popular_items()
             else:
                 logger.error(f"Projects file not found: {projects_path}")
                 return False
@@ -385,9 +524,86 @@ class NCFRecommender:
             
         except Exception as e:
             logger.error(f"Error loading data: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
     
-    def _prepare_data(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[int, str], Dict[int, float]]:
+    def _precompute_popular_items(self):
+        """Precompute popular items for cold-start recommendations"""
+        if self.projects_df is None:
+            return
+            
+        # Combine popularity and trend scores
+        popular_items = []
+        
+        # Check for trend score and popularity score
+        if 'trend_score' in self.projects_df.columns and 'popularity_score' in self.projects_df.columns:
+            # Use weighted combination of trend and popularity
+            df = self.projects_df.copy()
+            
+            # Create combined score (70% trend, 30% popularity)
+            df['combined_score'] = df['trend_score'] * 0.7 + df['popularity_score'] * 0.3
+            
+            # Sort by combined score
+            top_df = df.sort_values('combined_score', ascending=False)
+            
+            # Get top 30%
+            top_n = max(30, int(len(df) * 0.3))
+            top_items = top_df.head(top_n)
+            
+            # Create list of (id, score) tuples
+            for _, row in top_items.iterrows():
+                score = row['combined_score'] / 100  # Normalize to 0-1
+                popular_items.append((row['id'], score))
+                
+        elif 'trend_score' in self.projects_df.columns:
+            # Just use trend score
+            top_df = self.projects_df.sort_values('trend_score', ascending=False)
+            
+            # Get top 30%
+            top_n = max(30, int(len(self.projects_df) * 0.3))
+            top_items = top_df.head(top_n)
+            
+            # Create list of (id, score) tuples
+            for _, row in top_items.iterrows():
+                score = row['trend_score'] / 100  # Normalize to 0-1
+                popular_items.append((row['id'], score))
+                
+        elif 'popularity_score' in self.projects_df.columns:
+            # Just use popularity score
+            top_df = self.projects_df.sort_values('popularity_score', ascending=False)
+            
+            # Get top 30%
+            top_n = max(30, int(len(self.projects_df) * 0.3))
+            top_items = top_df.head(top_n)
+            
+            # Create list of (id, score) tuples
+            for _, row in top_items.iterrows():
+                score = row['popularity_score'] / 100  # Normalize to 0-1
+                popular_items.append((row['id'], score))
+                
+        elif 'market_cap' in self.projects_df.columns:
+            # Use market cap as fallback
+            top_df = self.projects_df.sort_values('market_cap', ascending=False)
+            
+            # Get top 30%
+            top_n = max(30, int(len(self.projects_df) * 0.3))
+            top_items = top_df.head(top_n)
+            
+            # Create list of (id, score) tuples normalized by max market cap
+            max_market_cap = top_items['market_cap'].max()
+            if max_market_cap > 0:
+                for _, row in top_items.iterrows():
+                    score = min(1.0, row['market_cap'] / max_market_cap * 0.8)
+                    popular_items.append((row['id'], score))
+            
+        # Store for later use
+        self._popular_items = popular_items
+        
+        logger.info(f"Precomputed {len(popular_items)} popular items for cold-start")
+    
+    def _prepare_data(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict, Dict, Dict, np.ndarray]:
+        """Prepare data for training with enhanced metadata for better sampling"""
         # Convert interactions to training format
         interactions = []
         
@@ -416,29 +632,52 @@ class NCFRecommender:
         item_indices = interaction_array[:, 1].astype(np.int64)
         ratings = interaction_array[:, 2].astype(np.float32)
         
-        # Convert item categories and trend scores to encoded indices
+        # Get all unique items
+        all_items = np.array([self.item_encoder.transform([item])[0] for item in self.items])
+        
+        # Convert item categories to encoded indices
         encoded_categories = {}
+        encoded_popularity = {}
         encoded_trend_scores = {}
         
-        if self.item_categories:
-            for item_id, category in self.item_categories.items():
-                if item_id in self.items:  # Only include items in our training data
+        # Process categories
+        for item_id, categories in self.item_categories.items():
+            if item_id in self.items:  # Only include items in our training data
+                try:
                     item_idx = self.item_encoder.transform([item_id])[0]
-                    encoded_categories[item_idx] = category
+                    encoded_categories[item_idx] = categories
+                except:
+                    # Skip if transform fails
+                    pass
         
-        if self.item_trend_scores:
-            for item_id, score in self.item_trend_scores.items():
-                if item_id in self.items:  # Only include items in our training data
+        # Process popularity scores
+        for item_id, score in self.item_popularity.items():
+            if item_id in self.items:  # Only include items in our training data
+                try:
+                    item_idx = self.item_encoder.transform([item_id])[0]
+                    encoded_popularity[item_idx] = score
+                except:
+                    # Skip if transform fails
+                    pass
+        
+        # Process trend scores
+        for item_id, score in self.item_trend_scores.items():
+            if item_id in self.items:  # Only include items in our training data
+                try:
                     item_idx = self.item_encoder.transform([item_id])[0]
                     encoded_trend_scores[item_idx] = score
+                except:
+                    # Skip if transform fails
+                    pass
         
         # Log normalization info
         logger.info(f"Normalized {len(ratings)} ratings to range [0, 1]")
         logger.info(f"Rating statistics - Min: {ratings.min():.4f}, Max: {ratings.max():.4f}, Mean: {ratings.mean():.4f}")
         
-        return user_indices, item_indices, ratings, encoded_categories, encoded_trend_scores
+        return user_indices, item_indices, ratings, encoded_categories, encoded_popularity, encoded_trend_scores, all_items
     
     def _validate_training_data(self, user_indices, item_indices, ratings):
+        """Validate data quality before training and apply appropriate filtering"""
         logger.info("Validating training data...")
         
         # Check for min interaction count per user
@@ -460,19 +699,19 @@ class NCFRecommender:
         if min_user_interactions < 2:
             logger.warning(f"Some users have only {min_user_interactions} interactions, which is too few for stratified split")
             
-            # Identifikasi user dengan minimal 2 interaksi
-            valid_users = np.where(user_counts >= 2)[0]
+            # Identify users with at least 2 interactions
+            valid_users = np.nonzero(user_counts >= 2)[0]
             
-            # Hitung berapa banyak user yang valid
+            # Calculate ratio of valid users
             valid_user_ratio = len(valid_users) / len(user_counts)
             logger.info(f"Found {len(valid_users)}/{len(user_counts)} users with at least 2 interactions ({valid_user_ratio:.1%})")
             
             if valid_user_ratio < 0.8:
-                # Jika terlalu banyak user yang akan dihapus, gunakan saja semua data
+                # If too many users would be filtered out, don't use stratification
                 logger.warning("Too many users would be filtered out, disabling stratified split")
                 can_stratify = False
             else:
-                # Filter data untuk menyertakan hanya user dengan interaksi yang cukup
+                # Filter data to include only users with sufficient interactions
                 valid_indices = np.isin(user_indices, valid_users)
                 
                 # Log filtering info
@@ -488,48 +727,72 @@ class NCFRecommender:
         unique_ratings, rating_counts = np.unique(ratings, return_counts=True)
         min_rating_count = rating_counts.min()
         
-        # Stratified split berdasarkan user memerlukan minimal 2 sampel per class
         if min_rating_count < 2:
             logger.warning(f"Some rating values have only {min_rating_count} samples, disabling stratified split")
             can_stratify = False
         
-        # Pastikan tidak ada user yang hilang semua interaksinya
-        unique_users_after = len(np.unique(user_indices))
-        if unique_users_after < len(np.unique(user_counts)):
-            logger.warning(f"Some users were completely filtered out. Original: {len(np.unique(user_counts))}, "
-                        f"After: {unique_users_after}")
+        # Ensure we still have enough data after filtering
+        if len(user_indices) < 10:
+            logger.warning("Too few interactions after filtering, using all data without stratification")
+            can_stratify = False
         
-        # Sampel final
+        # Check for extreme imbalance in interaction counts
+        if max_user_interactions > 50 * min_user_interactions:
+            logger.warning(f"Extreme imbalance in user interaction counts: min={min_user_interactions}, max={max_user_interactions}")
+            logger.warning("Will apply weight adjustment during training to handle imbalance")
+        
+        # Log final data stats
         logger.info(f"Final training data: {len(user_indices)} interactions, "
                 f"{len(np.unique(user_indices))} users, {len(np.unique(item_indices))} items")
         
         return user_indices, item_indices, ratings, can_stratify
         
     def train(self, val_ratio: Optional[float] = None, batch_size: Optional[int] = None, 
-      num_epochs: Optional[int] = None, learning_rate: Optional[float] = None,
-      save_model: bool = True) -> Dict[str, List[float]]:
+              num_epochs: Optional[int] = None, learning_rate: Optional[float] = None,
+              save_model: bool = True, **kwargs) -> Dict[str, Any]:
+        """
+        Train NCF model with enhanced strategy:
+        1. Better parameter initialization
+        2. Learning rate scheduling
+        3. Early stopping with improved criteria
+        4. Gradual warm-up
+        """
         # Use config params if not specified
-        val_ratio = val_ratio if val_ratio is not None else self.params.get('val_ratio', 0.2)
-        batch_size = batch_size if batch_size is not None else self.params.get('batch_size', 128)
+        val_ratio = val_ratio if val_ratio is not None else self.params.get('val_ratio', 0.15)
+        batch_size = batch_size if batch_size is not None else self.params.get('batch_size', 256)
         num_epochs = num_epochs if num_epochs is not None else self.params.get('epochs', 30)
-        learning_rate = learning_rate if learning_rate is not None else self.params.get('learning_rate', 0.001)
+        learning_rate = learning_rate if learning_rate is not None else self.params.get('learning_rate', 0.0003)
         
-        logger.info("Starting NCF training with improved architecture")
+        # Get additional parameters for training
+        weight_decay = kwargs.get('weight_decay', self.params.get('weight_decay', 5e-4))
+        num_negative = kwargs.get('negative_ratio', self.params.get('negative_ratio', 5))
+        patience = kwargs.get('patience', self.params.get('patience', 7))
+        
+        logger.info("Starting NCF training with enhanced architecture")
+        logger.info(f"Parameters: batch_size={batch_size}, lr={learning_rate}, "
+                    f"weight_decay={weight_decay}, negative_ratio={num_negative}")
+        
         start_time = time.time()
         
         # Prepare data
         try:
-            user_indices, item_indices, ratings, encoded_categories, encoded_trend_scores = self._prepare_data()
+            user_indices, item_indices, ratings, encoded_categories, encoded_popularity, encoded_trend_scores, all_items = self._prepare_data()
         except ValueError as e:
             logger.error(f"Error preparing data: {str(e)}")
             return {"error": str(e)}
         
-        # Validate training data sebelum splitting
+        # Validate training data before splitting
         user_indices, item_indices, ratings, can_stratify = self._validate_training_data(
             user_indices, item_indices, ratings
         )
         
-        # Split data with appropriate strategy
+        # Ensure batch size is valid for the dataset size
+        # Batch size should be divisible by 8 for optimal performance
+        batch_size = min(max(32, ((len(user_indices) + 7) // 8) * 8), batch_size)
+        batch_size = min(batch_size, 512)  # Cap at 512 to avoid memory issues
+        logger.info(f"Using optimized batch size: {batch_size}")
+        
+        # Split data into train and validation with appropriate strategy
         try:
             if can_stratify:
                 # Split data into train and validation with stratification by user
@@ -563,36 +826,35 @@ class NCFRecommender:
         val_item_indices = item_indices[val_indices]
         val_ratings = ratings[val_indices]
         
-        # Dynamic negative sampling ratio based on dataset size
-        num_negative = self.params.get('negative_ratio', 4)
-        logger.info(f"Using {num_negative} negative samples per positive interaction")
-        
-        # Create datasets dengan metadata untuk improved sampling
+        # Create datasets with enhanced metadata
         train_dataset = NCFDataset(
             train_user_indices, train_item_indices, train_ratings, 
             num_negative=num_negative,
             item_categories=encoded_categories,
-            item_trend_scores=encoded_trend_scores
+            item_popularity=encoded_popularity,
+            item_trend_scores=encoded_trend_scores,
+            all_items=all_items,
+            seed=42  # Fixed seed for reproducibility
         )
+        
         val_dataset = NCFDataset(
             val_user_indices, val_item_indices, val_ratings, 
             num_negative=num_negative,
             item_categories=encoded_categories,
-            item_trend_scores=encoded_trend_scores
+            item_popularity=encoded_popularity,
+            item_trend_scores=encoded_trend_scores,
+            all_items=all_items,
+            seed=43  # Different seed for validation
         )
         
-        # Use appropriate number of workers based on system
-        import multiprocessing
-        num_workers = min(4, max(1, multiprocessing.cpu_count() // 2))
-        
-        # Create dataloaders
+        # Create dataloaders with pin_memory for faster transfer to GPU
         train_loader = DataLoader(
             train_dataset, 
             batch_size=batch_size, 
             shuffle=True, 
-            num_workers=0,
+            num_workers=0,  # No multiprocessing for stability
             pin_memory=self.use_cuda,
-            drop_last=True  # Hindari batch terakhir dengan ukuran tidak standar
+            drop_last=True  # Drop last batch if not full size
         )
         
         val_loader = DataLoader(
@@ -607,27 +869,31 @@ class NCFRecommender:
         # Initialize model with improved architecture
         num_users = len(self.user_encoder.classes_)
         num_items = len(self.item_encoder.classes_)
+        
+        # Get model architecture from params
+        embedding_dim = self.params.get('embedding_dim', 64)
+        layers = self.params.get('layers', [128, 64, 32])
+        dropout = self.params.get('dropout', 0.3)
 
         self.model = CryptoNCFModel(
             num_users=num_users,
             num_items=num_items,
-            embedding_dim=self.params['embedding_dim'],
-            layers=self.params['layers'],
-            dropout=self.params['dropout']
+            embedding_dim=embedding_dim,
+            layers=layers,
+            dropout=dropout
         ).to(self.device)
         
         # Use Binary Cross Entropy loss
         criterion = nn.BCELoss()
         
-        # Use AdamW with lower weight decay
+        # Use AdamW optimizer for better regularization
         optimizer = optim.AdamW(
             self.model.parameters(), 
             lr=learning_rate,
-            weight_decay=self.params.get('weight_decay', 1e-3)
+            weight_decay=weight_decay
         )
         
         # Learning rate scheduler with warm-up and cosine annealing
-        # First few epochs use increasing learning rate, then decay
         total_steps = len(train_loader) * num_epochs
         warmup_steps = int(total_steps * 0.1)  # 10% of steps for warm-up
         
@@ -647,13 +913,12 @@ class NCFRecommender:
         val_losses = []
         
         # Early stopping parameters
-        patience = self.params.get('patience', 5)  # Reduced patience
         best_val_loss = float('inf')
         patience_counter = 0
         best_model_state = None
-        improvement_threshold = 0.005  # Perlu 0.5% improvement untuk dianggap signifikan
-        consecutive_no_improvement = 0  # Counter untuk kasus tanpa improvement berturut-turut
-        max_consecutive_no_improvement = 3  # Maksimal epoch tanpa improvement berturut-turut
+        improvement_threshold = 0.005  # Need 0.5% improvement to be considered significant
+        consecutive_no_improvement = 0  # Counter for epochs without improvement
+        max_consecutive_no_improvement = kwargs.get('patience', self.params.get('patience', 7))  # Max consecutive epochs without improvement
 
         logger.info(f"Starting training for {num_epochs} epochs with patience {patience}")
         
@@ -667,7 +932,7 @@ class NCFRecommender:
             
             for batch_idx, (user_indices, item_indices, ratings) in enumerate(train_loader):
                 try:
-                    # Make sure tensors are properly shaped
+                    # Shape validation
                     if user_indices.dim() > 1 and user_indices.size(1) == 1:
                         user_indices = user_indices.squeeze(1)
                     if item_indices.dim() > 1 and item_indices.size(1) == 1:
@@ -675,7 +940,7 @@ class NCFRecommender:
                     if ratings.dim() > 1 and ratings.size(1) == 1:
                         ratings = ratings.squeeze(1)
                     
-                    # Skip batch jika ukuran batch = 1 (untuk mencegah BatchNorm error)
+                    # Skip batch if size = 1 (to avoid batch norm issues)
                     if user_indices.size(0) <= 1:
                         continue
                     
@@ -719,7 +984,7 @@ class NCFRecommender:
             with torch.no_grad():
                 for batch_idx, (user_indices, item_indices, ratings) in enumerate(val_loader):
                     try:
-                        # Make sure tensors are properly shaped
+                        # Shape validation
                         if user_indices.dim() > 1 and user_indices.size(1) == 1:
                             user_indices = user_indices.squeeze(1)
                         if item_indices.dim() > 1 and item_indices.size(1) == 1:
@@ -727,7 +992,7 @@ class NCFRecommender:
                         if ratings.dim() > 1 and ratings.size(1) == 1:
                             ratings = ratings.squeeze(1)
                         
-                        # Skip batch jika ukuran batch = 1
+                        # Skip small batches
                         if user_indices.size(0) <= 1:
                             continue
                         
@@ -752,10 +1017,10 @@ class NCFRecommender:
             
             # Get current learning rate
             current_lr = optimizer.param_groups[0]['lr']
-            logger.info(f"Current learning rate: {current_lr:.6f}")
             
-            # Early stopping dengan improvement threshold yang lebih ketat
+            # Early stopping with improvement threshold
             if avg_val_loss < best_val_loss * (1 - improvement_threshold):
+                # Significant improvement
                 improvement_percent = 100 * (best_val_loss - avg_val_loss) / best_val_loss
                 best_val_loss = avg_val_loss
                 patience_counter = 0
@@ -768,7 +1033,7 @@ class NCFRecommender:
                 consecutive_no_improvement += 1
                 logger.info(f"Validation loss did not improve significantly. Patience: {patience_counter}/{patience}")
                 
-                # Jika ada peningkatan tapi tidak signifikan, reset consecutive counter
+                # If small improvement but not significant, still track as best
                 if avg_val_loss < best_val_loss:
                     consecutive_no_improvement = 0
                     logger.info(f"Small improvement detected: {best_val_loss:.4f} -> {avg_val_loss:.4f}")
@@ -782,9 +1047,7 @@ class NCFRecommender:
                     f"Time: {epoch_time:.2f}s, "
                     f"LR: {current_lr:.6f}")
             
-            # Check early stopping dengan dua kondisi:
-            # 1. Melewati batas patience normal
-            # 2. Consecutive epochs tanpa improvement mencapai batas
+            # Check early stopping criteria
             if patience_counter >= patience or consecutive_no_improvement >= max_consecutive_no_improvement:
                 if patience_counter >= patience:
                     logger.info(f"Early stopping triggered after {epoch} epochs (patience exceeded)")
@@ -792,7 +1055,7 @@ class NCFRecommender:
                     logger.info(f"Early stopping triggered after {epoch} epochs (no significant improvement for {max_consecutive_no_improvement} epochs)")
                 break
             
-            # Deteksi plateauing loss dan kurangi learning rate jika perlu
+            # Learning rate reduction if loss plateaus
             if epoch > 5 and avg_train_loss > 0.9 * train_losses[-2]:
                 new_lr = current_lr * 0.5
                 for param_group in optimizer.param_groups:
@@ -807,6 +1070,9 @@ class NCFRecommender:
         total_time = time.time() - start_time
         logger.info(f"Training completed in {total_time:.2f}s")
         
+        # Calculate validation metrics for performance comparison
+        validation_metrics = self._calculate_validation_metrics(val_dataset)
+        
         # Save model if requested
         if save_model:
             model_path = os.path.join(MODELS_DIR, "ncf_model.pkl")
@@ -818,8 +1084,95 @@ class NCFRecommender:
             'training_time': total_time,
             'early_stopped': patience_counter >= patience or consecutive_no_improvement >= max_consecutive_no_improvement,
             'best_epoch': epoch - patience_counter if patience_counter >= patience else epoch,
-            'best_val_loss': best_val_loss
+            'best_val_loss': best_val_loss,
+            'validation_metrics': validation_metrics
         }
+    
+    def _calculate_validation_metrics(self, val_dataset):
+        """Calculate validation metrics for model comparison"""
+        self.model.eval()
+        
+        # Extract positive examples from validation set
+        positive_indices = np.nonzero(val_dataset.ratings > 0)[0]
+        
+        if len(positive_indices) == 0:
+            return {'precision': 0, 'recall': 0, 'ndcg': 0, 'hit_ratio': 0}
+        
+        # Sample up to 1000 positive examples for evaluation
+        sample_size = min(1000, len(positive_indices))
+        sample_indices = np.random.choice(positive_indices, size=sample_size, replace=False)
+        
+        # Calculate metrics
+        precision_list = []
+        recall_list = []
+        ndcg_list = []
+        hit_list = []
+        
+        with torch.no_grad():
+            for idx in sample_indices:
+                user_idx = val_dataset.user_indices[idx]
+                pos_item_idx = val_dataset.item_indices[idx]
+                
+                # Get user's interacted items to exclude
+                user_interacted_items = val_dataset.user_item_map.get(user_idx, [])
+                
+                # Generate candidate items (1 positive + 99 negative)
+                candidate_items = [pos_item_idx]
+                
+                # Add 99 random negative items
+                neg_items = []
+                for _ in range(99):
+                    while True:
+                        neg_item = np.random.choice(val_dataset.all_items)
+                        if neg_item not in user_interacted_items and neg_item not in candidate_items:
+                            neg_items.append(neg_item)
+                            break
+                
+                candidate_items.extend(neg_items)
+                
+                # Move to device
+                user_tensor = torch.LongTensor([user_idx] * len(candidate_items)).to(self.device)
+                item_tensor = torch.LongTensor(candidate_items).to(self.device)
+                
+                # Get predictions
+                predictions = self.model(user_tensor, item_tensor).cpu().numpy()
+                
+                # Sort items by prediction score
+                pred_indices = np.argsort(predictions)[::-1]
+                
+                # Calculate metrics at k=10
+                k = 10
+                topk_indices = pred_indices[:k]
+                
+                # Precision@k: proportion of recommended items that are relevant
+                precision = 1.0 if 0 in topk_indices else 0.0
+                precision_list.append(precision)
+                
+                # Recall@k: proportion of relevant items that are recommended
+                recall = 1.0 if 0 in topk_indices else 0.0
+                recall_list.append(recall)
+                
+                # NDCG@k: Normalized Discounted Cumulative Gain
+                if 0 in topk_indices:
+                    position = np.nonzero(topk_indices == 0)[0][0]
+                    ndcg = 1.0 / np.log2(position + 2)  # +2 because position is 0-indexed
+                else:
+                    ndcg = 0.0
+                ndcg_list.append(ndcg)
+                
+                # Hit Ratio@k: whether the test item is in the top-k items
+                hit_ratio = 1.0 if 0 in topk_indices else 0.0
+                hit_list.append(hit_ratio)
+        
+        # Calculate average metrics
+        metrics = {
+            'precision': np.mean(precision_list),
+            'recall': np.mean(recall_list),
+            'ndcg': np.mean(ndcg_list),
+            'hit_ratio': np.mean(hit_list)
+        }
+        
+        return metrics
     
     def save_model(self, filepath: Optional[str] = None) -> str:
         if filepath is None:
@@ -853,7 +1206,7 @@ class NCFRecommender:
     
     def load_model(self, filepath: str) -> bool:
         try:
-            logger.info(f"Attempting to load NCF model from {filepath}")
+            logger.info(f"Loading NCF model from {filepath}")
             
             if not os.path.exists(filepath):
                 logger.error(f"Model file not found: {filepath}")
@@ -881,7 +1234,7 @@ class NCFRecommender:
             num_users = len(self.user_encoder.classes_)
             num_items = len(self.item_encoder.classes_)
             
-            # Compatible with both old NCFModel and new CryptoNCFModel
+            # Create model with enhanced architecture
             try:
                 self.model = CryptoNCFModel(
                     num_users=num_users,
@@ -896,37 +1249,28 @@ class NCFRecommender:
                     self.model.load_state_dict(state_dict)
                 except Exception as e:
                     logger.warning(f"Error loading state dict with CryptoNCFModel: {e}")
-                    # Fall back to old architecture (for backward compatibility)
-                    from src.models.ncf import NCFModel
-                    self.model = NCFModel(
-                        num_users=num_users,
-                        num_items=num_items,
-                        embedding_dim=config['embedding_dim'],
-                        layers=config['layers'],
-                        dropout=config['dropout']
-                    ).to(self.device)
-                    self.model.load_state_dict(state_dict)
+                    logger.warning("Loading with strict=False to accommodate architecture differences")
+                    
+                    # Try loading with strict=False
+                    self.model.load_state_dict(state_dict, strict=False)
+                    logger.info("Model loaded with architecture accommodations")
             except Exception as e:
-                # If CryptoNCFModel is not defined yet (first run), use the old model
-                logger.warning(f"Falling back to original model architecture: {e}")
-                from src.models.ncf import NCFModel
-                self.model = NCFModel(
-                    num_users=num_users,
-                    num_items=num_items,
-                    embedding_dim=config['embedding_dim'],
-                    layers=config['layers'],
-                    dropout=config['dropout']
-                ).to(self.device)
-                self.model.load_state_dict(state_dict)
+                logger.error(f"Error creating model with enhanced architecture: {e}")
+                return False
             
-            self.model.eval()  # Set to evaluation mode
+            # Set model to evaluation mode
+            self.model.eval()
+            
+            # Precompute popular items if not already done
+            if self._popular_items is None:
+                self._precompute_popular_items()
             
             logger.info(f"NCF model successfully loaded from {filepath}")
             return True
                 
         except Exception as e:
             logger.error(f"Error loading NCF model: {str(e)}")
-            # Log traceback untuk debugging
+            # Log traceback for debugging
             import traceback
             logger.error(traceback.format_exc())
             return False
@@ -937,6 +1281,7 @@ class NCFRecommender:
         return True
     
     def predict(self, user_id: str, item_id: str) -> float:
+        """Predict rating for user-item pair"""
         if self.model is None:
             logger.error("Model not trained or loaded")
             return 0.0
@@ -962,6 +1307,17 @@ class NCFRecommender:
     
     def recommend_for_user(self, user_id: str, n: int = 10, 
                    exclude_known: bool = True) -> List[Tuple[str, float]]:
+        """
+        Generate recommendations for a user with enhanced diversity
+        """
+        # Check cache for performance
+        cache_key = f"{user_id}_{n}_{exclude_known}"
+        if cache_key in self._recommendation_cache:
+            # Check if cache is still valid (< 1 hour old)
+            cache_time, cache_results = self._recommendation_cache[cache_key]
+            if time.time() - cache_time < 3600:  # 1 hour in seconds
+                return cache_results
+        
         if self.model is None:
             logger.error("Model not trained or loaded")
             return []
@@ -969,7 +1325,7 @@ class NCFRecommender:
         # Check if user exists
         if user_id not in self.users:
             logger.warning(f"User {user_id} not in training data")
-            return []
+            return self._get_cold_start_recommendations(n)
         
         # Get known items to exclude
         known_items = set()
@@ -988,7 +1344,29 @@ class NCFRecommender:
             if self.projects_df is not None:
                 # Map item_id to metadata for easier lookup
                 if 'primary_category' in self.projects_df.columns:
-                    item_to_category = dict(zip(self.projects_df['id'], self.projects_df['primary_category']))
+                    for _, row in self.projects_df.iterrows():
+                        if 'id' in row:
+                            item_id = row['id']
+                            
+                            # Try to get multiple categories if available
+                            categories = []
+                            if 'categories_list' in row:
+                                # Process categories list
+                                cats = row['categories_list']
+                                if isinstance(cats, list):
+                                    categories = cats
+                                elif isinstance(cats, str) and cats.startswith('[') and cats.endswith(']'):
+                                    try:
+                                        categories = eval(cats)
+                                    except:
+                                        categories = [cats]
+                                else:
+                                    categories = [cats]
+                            elif 'primary_category' in row:
+                                categories = [row['primary_category']]
+                            
+                            item_to_category[item_id] = categories
+                    
                 if 'chain' in self.projects_df.columns:
                     item_to_chain = dict(zip(self.projects_df['id'], self.projects_df['chain']))
                 if 'trend_score' in self.projects_df.columns:
@@ -1033,82 +1411,47 @@ class NCFRecommender:
                 # Skip this batch on error
                 continue
         
-        # If we have too few predictions, try to fallback to a popularity-based approach
-        if len(predictions) < n and hasattr(self, 'projects_df'):
-            logger.warning(f"Got only {len(predictions)} predictions, adding popularity-based candidates")
+        # If we have too few predictions, add some trending/popular ones
+        if len(predictions) < n and self.projects_df is not None:
+            # Get fallback recommendations
+            fallback_recs = self._get_fallback_recommendations(n, exclude_ids=known_items)
             
-            # Get popular items that aren't already in our predictions
-            predicted_items = {item for item, _ in predictions}
-            if 'popularity_score' in self.projects_df.columns:
-                popular_items = self.projects_df.sort_values('popularity_score', ascending=False)['id'].tolist()
-                
-                # Add popular items not already predicted or known
-                for item in popular_items:
-                    if (item not in predicted_items and 
-                        item not in known_items and 
-                        len(predictions) < n*2):  # Get twice what we need for filtering later
-                        # Add with lower confidence score
-                        predictions.append((item, 0.5))
-                        predicted_items.add(item)
+            # Filter out any that are already in predictions
+            predicted_ids = {item_id for item_id, _ in predictions}
+            filtered_fallbacks = [(item_id, score) for item_id, score in fallback_recs 
+                               if item_id not in predicted_ids]
+            
+            # Add to predictions
+            predictions.extend(filtered_fallbacks)
         
         # Sort by prediction score
         predictions.sort(key=lambda x: x[1], reverse=True)
         
         # If we have fewer recommendations than requested, return what we have
         if len(predictions) <= n:
+            # Store in cache
+            self._recommendation_cache[cache_key] = (time.time(), predictions)
             return predictions
         
         # Take more candidates for better diversity
         top_candidates = predictions[:min(len(predictions), n*3)]
         
-        # Score normalization - sigmoid to enhance differentiation
-        min_score = min([score for _, score in top_candidates])
-        max_score = max([score for _, score in top_candidates])
-        score_range = max(0.001, max_score - min_score)  # Avoid division by zero
-        
-        # Apply sigmoid normalization
-        normalized_candidates = []
-        for item_id, score in top_candidates:
-            # Normalize to 0-1 range
-            norm_score = (score - min_score) / score_range
-            # Apply sigmoid for better separation
-            sigmoid_score = 1.0 / (1.0 + np.exp(-8 * (norm_score - 0.5)))
-            normalized_candidates.append((item_id, sigmoid_score))
-        
-        # Cryptocurrency-specific boost for trending items
-        boosted_candidates = []
-        for item_id, score in normalized_candidates:
-            final_score = score
-            
-            # Boost based on trend score - crypto is highly trend-sensitive
-            if item_id in item_to_trend:
-                trend_score = item_to_trend[item_id]
-                if trend_score > 80:  # Very trending
-                    final_score += 0.2
-                elif trend_score > 65:  # Moderately trending
-                    final_score += 0.1
-                elif trend_score > 50:  # Slightly trending
-                    final_score += 0.05
-            
-            boosted_candidates.append((item_id, final_score))
-        
-        # Sort by boosted score
-        boosted_candidates.sort(key=lambda x: x[1], reverse=True)
-        
-        # Ensure category diversity
+        # Enhance predictions with diversity
         if item_to_category:
             # First, select some top items unconditionally
             top_count = max(n // 4, 1)  # 25% by pure score
-            result = boosted_candidates[:top_count]
+            result = top_candidates[:top_count]
             
-            # Track selected categories
+            # Track selected categories and chains
             selected_categories = {}
             selected_chains = {}
             
             for item_id, _ in result:
                 if item_id in item_to_category:
-                    category = item_to_category[item_id]
-                    selected_categories[category] = selected_categories.get(category, 0) + 1
+                    categories = item_to_category[item_id]
+                    for category in categories:
+                        selected_categories[category] = selected_categories.get(category, 0) + 1
+                
                 if item_id in item_to_chain:
                     chain = item_to_chain[item_id]
                     selected_chains[chain] = selected_chains.get(chain, 0) + 1
@@ -1119,90 +1462,166 @@ class NCFRecommender:
             max_per_chain = max(2, int(n * 0.4))
             
             # Remaining candidates
-            remaining = boosted_candidates[top_count:]
+            remaining = top_candidates[top_count:]
             
-            # Select remaining with diversity in mind
+            # Apply diversity balancing for remaining slots
             while len(result) < n and remaining:
+                best_score = -float('inf')
                 best_idx = -1
-                best_adjusted_score = -float('inf')
                 
                 for idx, (item_id, score) in enumerate(remaining):
-                    category_adjustment = 0
-                    chain_adjustment = 0
+                    # Start with original score
+                    adjusted_score = score
                     
-                    # Category diversity
+                    # Apply diversity adjustments
                     if item_id in item_to_category:
-                        category = item_to_category[item_id]
-                        current_count = selected_categories.get(category, 0)
+                        categories = item_to_category[item_id]
                         
-                        if current_count >= max_per_category:
-                            # Heavy penalty for exceeding max per category
-                            category_adjustment = -0.5
-                        elif current_count == 0:
-                            # Strong boost for new categories
-                            category_adjustment = 0.3
-                        else:
-                            # Small adjustment based on count
-                            category_adjustment = 0.1 * (1 - current_count / max_per_category)
+                        # Check if categories are overrepresented
+                        category_penalty = 0
+                        for category in categories:
+                            cat_count = selected_categories.get(category, 0)
+                            if cat_count >= max_per_category:
+                                category_penalty -= 0.2  # Penalty for overrepresented category
+                                break
+                        
+                        # Check if categories are new
+                        category_bonus = 0
+                        for category in categories:
+                            if category not in selected_categories:
+                                category_bonus += 0.1  # Bonus for new category
+                                break
+                        
+                        # Apply category adjustments
+                        adjusted_score += category_penalty + category_bonus
                     
                     # Chain diversity
                     if item_id in item_to_chain:
                         chain = item_to_chain[item_id]
-                        current_count = selected_chains.get(chain, 0)
+                        chain_count = selected_chains.get(chain, 0)
                         
-                        if current_count >= max_per_chain:
-                            # Penalty for exceeding max per chain
-                            chain_adjustment = -0.3
-                        elif current_count == 0:
-                            # Boost for new chains
-                            chain_adjustment = 0.2
-                        else:
-                            # Small adjustment
-                            chain_adjustment = 0.05 * (1 - current_count / max_per_chain)
+                        if chain_count >= max_per_chain:
+                            # Penalty for overrepresented chain
+                            adjusted_score -= 0.15
+                        elif chain_count == 0:
+                            # Bonus for new chain
+                            adjusted_score += 0.05
                     
-                    # Combined adjustment
-                    diversity_adjustment = category_adjustment + chain_adjustment * 0.5  # Chain less important than category
-                    adjusted_score = score + diversity_adjustment
+                    # Trend boost
+                    if item_id in item_to_trend:
+                        trend_score = item_to_trend[item_id]
+                        if trend_score > 80:  # Very trending
+                            adjusted_score += 0.15
+                        elif trend_score > 65:  # Moderately trending
+                            adjusted_score += 0.05
                     
-                    if adjusted_score > best_adjusted_score:
+                    # Track best adjusted score
+                    if adjusted_score > best_score:
+                        best_score = adjusted_score
                         best_idx = idx
-                        best_adjusted_score = adjusted_score
                 
                 if best_idx >= 0:
+                    # Add best item to result
                     item_id, score = remaining.pop(best_idx)
                     result.append((item_id, score))
                     
                     # Update tracking
                     if item_id in item_to_category:
-                        category = item_to_category[item_id]
-                        selected_categories[category] = selected_categories.get(category, 0) + 1
+                        categories = item_to_category[item_id]
+                        for category in categories:
+                            selected_categories[category] = selected_categories.get(category, 0) + 1
+                    
                     if item_id in item_to_chain:
                         chain = item_to_chain[item_id]
                         selected_chains[chain] = selected_chains.get(chain, 0) + 1
                 else:
-                    # If no suitable candidate, take next best by score
-                    if remaining:
-                        item_id, score = remaining.pop(0)
-                        result.append((item_id, score))
-                        
-                        # Update tracking
-                        if item_id in item_to_category:
-                            category = item_to_category[item_id]
-                            selected_categories[category] = selected_categories.get(category, 0) + 1
-                        if item_id in item_to_chain:
-                            chain = item_to_chain[item_id]
-                            selected_chains[chain] = selected_chains.get(chain, 0) + 1
-                    else:
-                        break
+                    # No more items
+                    break
             
-            # Sort by final score
-            result.sort(key=lambda x: x[1], reverse=True)
+            # Store in cache
+            self._recommendation_cache[cache_key] = (time.time(), result)
+            
             return result[:n]
         
-        # If no category info, just return top candidates
-        return boosted_candidates[:n]
+        # If no category data, just return top candidates
+        top_candidates = top_candidates[:n]
+        
+        # Store in cache
+        self._recommendation_cache[cache_key] = (time.time(), top_candidates)
+        
+        return top_candidates
+    
+    def _get_fallback_recommendations(self, n: int, exclude_ids: set = None) -> List[Tuple[str, float]]:
+        """Get fallback recommendations when prediction fails"""
+        if exclude_ids is None:
+            exclude_ids = set()
+            
+        fallback_recs = []
+        
+        # First try trending items
+        if 'trend_score' in self.projects_df.columns:
+            trending_items = self.projects_df.sort_values('trend_score', ascending=False)
+            
+            for _, row in trending_items.iterrows():
+                if row['id'] not in exclude_ids and len(fallback_recs) < n:
+                    score = row['trend_score'] / 100 * 0.8  # Scale to 0-0.8
+                    fallback_recs.append((row['id'], score))
+        
+        # If still not enough, add popular items
+        if len(fallback_recs) < n and 'popularity_score' in self.projects_df.columns:
+            popular_items = self.projects_df.sort_values('popularity_score', ascending=False)
+            
+            for _, row in popular_items.iterrows():
+                if row['id'] not in exclude_ids and row['id'] not in [rec[0] for rec in fallback_recs] and len(fallback_recs) < n:
+                    score = row['popularity_score'] / 100 * 0.7  # Scale to 0-0.7
+                    fallback_recs.append((row['id'], score))
+        
+        # If still not enough, add by market cap
+        if len(fallback_recs) < n and 'market_cap' in self.projects_df.columns:
+            market_cap_items = self.projects_df.sort_values('market_cap', ascending=False)
+            max_cap = market_cap_items['market_cap'].max()
+            
+            for _, row in market_cap_items.iterrows():
+                if row['id'] not in exclude_ids and row['id'] not in [rec[0] for rec in fallback_recs] and len(fallback_recs) < n:
+                    # Normalize market cap to 0-0.6
+                    if max_cap > 0:
+                        score = row['market_cap'] / max_cap * 0.6
+                    else:
+                        score = 0.5
+                    fallback_recs.append((row['id'], score))
+        
+        # If still not enough, add random items
+        remaining = n - len(fallback_recs)
+        if remaining > 0:
+            # Get random items not already included
+            available_items = [item for item in self.items 
+                          if item not in exclude_ids 
+                          and item not in [rec[0] for rec in fallback_recs]]
+            
+            if available_items:
+                # Sample random items
+                random_items = random.sample(available_items, min(remaining, len(available_items)))
+                
+                # Add with low score
+                for item in random_items:
+                    fallback_recs.append((item, 0.4))  # Low default score
+        
+        return fallback_recs
+    
+    def _get_cold_start_recommendations(self, n: int = 10) -> List[Tuple[str, float]]:
+        """Get recommendations for cold-start users"""
+        # Use precomputed popular items if available
+        if self._popular_items:
+            return self._popular_items[:n]
+            
+        # Fallback to trending + popular items
+        fallback_recs = self._get_fallback_recommendations(n)
+        return fallback_recs
     
     def recommend_projects(self, user_id: str, n: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get recommendations as project dictionaries with all available fields
+        """
         # Get recommendations as (project_id, score) tuples
         recommendations = self.recommend_for_user(user_id, n)
         
@@ -1220,125 +1639,124 @@ class NCFRecommender:
                 # Add recommendation score
                 project_dict['recommendation_score'] = float(score)
                 
+                # Ensure all required fields are present
+                required_fields = ['id', 'name', 'symbol', 'image', 'current_price', 'market_cap', 
+                                'total_volume', 'price_change_percentage_24h', 'price_change_percentage_7d_in_currency', 
+                                'popularity_score', 'trend_score', 'primary_category', 'chain']
+                
+                for field in required_fields:
+                    if field not in project_dict:
+                        if field == 'price_usd' and 'current_price' in project_dict:
+                            project_dict['price_usd'] = project_dict['current_price']
+                        elif field == 'volume_24h' and 'total_volume' in project_dict:
+                            project_dict['volume_24h'] = project_dict['total_volume']
+                        elif field == 'price_change_7d' and 'price_change_percentage_7d_in_currency' in project_dict:
+                            project_dict['price_change_7d'] = project_dict['price_change_percentage_7d_in_currency']
+                        else:
+                            project_dict[field] = None
+                
                 # Add to results
                 detailed_recommendations.append(project_dict)
         
         return detailed_recommendations
     
     def get_cold_start_recommendations(self, 
-                                      user_interests: Optional[List[str]] = None,
-                                      n: int = 10) -> List[Dict[str, Any]]:
-        # Filter projects by categories if interests are provided
-        if user_interests and 'primary_category' in self.projects_df.columns:
-            # Filter projects by category
-            filtered_projects = self.projects_df[
-                self.projects_df['primary_category'].isin(user_interests)
-            ]
-            
-            # If not enough projects match interests, add some trending ones
-            if len(filtered_projects) < n * 1.5:
-                trending_projects = None
-                
-                # Get trending projects if available
-                if 'trend_score' in self.projects_df.columns:
-                    trending_projects = self.projects_df.sort_values('trend_score', ascending=False).head(n)
-                    
-                    # Combine with category-based recommendations
-                    if trending_projects is not None:
-                        filtered_projects = pd.concat([filtered_projects, trending_projects])
-                        filtered_projects = filtered_projects.drop_duplicates(subset='id')
-            
-            # If still not enough, add popular general projects
-            if len(filtered_projects) < n:
-                filtered_projects = self.projects_df
-        else:
-            # Use combined popularity and trend approach
-            filtered_projects = self.projects_df
+                                     user_interests: Optional[List[str]] = None,
+                                     n: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get cold-start recommendations with optional user interests
+        """
+        recommendations = []
         
-        # Create advanced scoring for crypto cold-start
-        if 'popularity_score' in filtered_projects.columns and 'trend_score' in filtered_projects.columns:
-            # Normalize both metrics to 0-100 range if needed
-            if filtered_projects['popularity_score'].max() > 100:
-                filtered_projects['popularity_score'] = 100 * filtered_projects['popularity_score'] / filtered_projects['popularity_score'].max()
+        if user_interests and self.projects_df is not None:
+            # Filter projects by categories if interests are provided
+            interest_filtered_projects = []
             
-            if filtered_projects['trend_score'].max() > 100:
-                filtered_projects['trend_score'] = 100 * filtered_projects['trend_score'] / filtered_projects['trend_score'].max()
-            
-            # For crypto, trend matters more than pure popularity for cold start
-            filtered_projects['combined_score'] = (
-                filtered_projects['popularity_score'] * 0.3 + 
-                filtered_projects['trend_score'] * 0.7
-            )
-            
-            # Consider market cap tier for cold-start (prefer established projects for safety)
-            if 'market_cap' in filtered_projects.columns:
-                # Normalize market cap to 0-1 range
-                max_market_cap = filtered_projects['market_cap'].max()
-                if max_market_cap > 0:
-                    market_cap_normalized = filtered_projects['market_cap'] / max_market_cap
-                    
-                    # Add market cap bonus - prefer established projects for cold-start
-                    filtered_projects['combined_score'] += market_cap_normalized * 20  # Significant boost
-            
-            # Sort by combined score
-            recommendations = filtered_projects.sort_values('combined_score', ascending=False).head(n*2)
-            
-            # Ensure good diversity in final results
-            if 'primary_category' in recommendations.columns:
-                # Create tracking for category counts
-                selected_categories = {}
-                result = []
+            for interest in user_interests:
+                interest_lower = interest.lower()
                 
-                # Max per category (25% of total)
-                max_per_category = max(1, int(n * 0.25))
+                # Search for matching categories
+                for _, row in self.projects_df.iterrows():
+                    categories = []
+                    
+                    # Try to get categories from different fields
+                    if 'categories_list' in row:
+                        cats = row['categories_list']
+                        if isinstance(cats, list):
+                            categories = cats
+                        elif isinstance(cats, str) and cats.startswith('[') and cats.endswith(']'):
+                            try:
+                                categories = eval(cats)
+                            except:
+                                categories = [cats]
+                        else:
+                            categories = [cats]
+                    elif 'primary_category' in row:
+                        categories = [row['primary_category']]
+                    
+                    # Check if any category matches interest
+                    match_found = False
+                    for category in categories:
+                        if isinstance(category, str) and (interest_lower in category.lower() or category.lower() in interest_lower):
+                            match_found = True
+                            break
+                    
+                    if match_found:
+                        interest_filtered_projects.append((row['id'], 0.85))  # High score for interest match
+            
+            # If we found projects matching interests
+            if interest_filtered_projects:
+                # Deduplicate and take top n*2 for diversity
+                seen = set()
+                unique_projects = []
+                for proj_id, score in interest_filtered_projects:
+                    if proj_id not in seen:
+                        seen.add(proj_id)
+                        unique_projects.append((proj_id, score))
                 
-                # Process candidates to ensure category diversity
-                for _, project in recommendations.iterrows():
-                    category = project['primary_category']
-                    current_count = selected_categories.get(category, 0)
-                    
-                    # Skip if we already have enough from this category
-                    if current_count >= max_per_category and len(result) >= n // 2:
-                        continue
-                    
-                    # Add this project
-                    project_dict = project.to_dict()
-                    project_dict['recommendation_score'] = float(project_dict.get('combined_score', 0))
-                    result.append(project_dict)
-                    
-                    # Update category tracking
-                    selected_categories[category] = current_count + 1
-                    
-                    # Break if we have enough recommendations
-                    if len(result) >= n:
-                        break
+                recommendations.extend(unique_projects[:n*2])
+        
+        # If not enough recommendations from interests, add trending/popular
+        if len(recommendations) < n:
+            remaining = n - len(recommendations)
+            already_added = {proj_id for proj_id, _ in recommendations}
+            
+            # Add from precomputed popular items
+            if self._popular_items:
+                for proj_id, score in self._popular_items:
+                    if proj_id not in already_added and len(recommendations) < n:
+                        recommendations.append((proj_id, score * 0.8))  # Lower score for non-interest match
+                        already_added.add(proj_id)
+            
+            # If still not enough, use fallback
+            if len(recommendations) < n:
+                remaining = n - len(recommendations)
+                fallback_recs = self._get_fallback_recommendations(remaining, exclude_ids=already_added)
+                recommendations.extend(fallback_recs)
+        
+        # Sort by score
+        recommendations.sort(key=lambda x: x[1], reverse=True)
+        
+        # Convert to detailed dictionaries
+        detailed_recommendations = []
+        for project_id, score in recommendations[:n]:
+            # Find project data
+            project_data = self.projects_df[self.projects_df['id'] == project_id]
+            
+            if not project_data.empty:
+                # Convert to dictionary
+                project_dict = project_data.iloc[0].to_dict()
                 
-                # If we don't have enough after diversity filtering, add more
-                if len(result) < n:
-                    # Add remaining recommendations without category constraints
-                    remaining = [
-                        p.to_dict() for _, p in recommendations.iterrows()
-                        if p['id'] not in [r['id'] for r in result]
-                    ]
-                    
-                    for project_dict in remaining[:n - len(result)]:
-                        project_dict['recommendation_score'] = float(project_dict.get('combined_score', 0))
-                        result.append(project_dict)
+                # Add recommendation score
+                project_dict['recommendation_score'] = float(score)
                 
-                return result[:n]
-            else:
-                # Just return top recommendations if no category data
-                result = []
-                for _, project in recommendations.head(n).iterrows():
-                    project_dict = project.to_dict()
-                    project_dict['recommendation_score'] = float(project_dict.get('combined_score', 0))
-                    result.append(project_dict)
-                return result
-        else:
-            # Just return top n projects if no scores available
-            return filtered_projects.head(n).to_dict('records')
+                # Add to results
+                detailed_recommendations.append(project_dict)
+        
+        return detailed_recommendations
     
     def get_trending_projects(self, n: int = 10) -> List[Dict[str, Any]]:
+        """Get trending projects with diversity"""
         if 'trend_score' in self.projects_df.columns:
             trending = self.projects_df.sort_values('trend_score', ascending=False).head(n*2)
             
@@ -1361,7 +1779,7 @@ class NCFRecommender:
                     
                     # Add to results
                     project_dict = project.to_dict()
-                    project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0))
+                    project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0)) / 100
                     result.append(project_dict)
                     
                     # Update tracking
@@ -1379,7 +1797,7 @@ class NCFRecommender:
                     ]
                     
                     for project_dict in remaining[:n - len(result)]:
-                        project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0))
+                        project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0)) / 100
                         result.append(project_dict)
                 
                 return result[:n]
@@ -1388,7 +1806,7 @@ class NCFRecommender:
                 result = []
                 for _, project in trending.head(n).iterrows():
                     project_dict = project.to_dict()
-                    project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0))
+                    project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0)) / 100
                     result.append(project_dict)
                 return result
         else:
@@ -1396,6 +1814,7 @@ class NCFRecommender:
             return self.get_popular_projects(n)
     
     def get_popular_projects(self, n: int = 10) -> List[Dict[str, Any]]:
+        """Get popular projects with diversity"""
         if 'popularity_score' in self.projects_df.columns:
             popular = self.projects_df.sort_values('popularity_score', ascending=False).head(n*2)
             
@@ -1418,7 +1837,7 @@ class NCFRecommender:
                     
                     # Add to results
                     project_dict = project.to_dict()
-                    project_dict['recommendation_score'] = float(project_dict.get('popularity_score', 0))
+                    project_dict['recommendation_score'] = float(project_dict.get('popularity_score', 0)) / 100
                     result.append(project_dict)
                     
                     # Update tracking
@@ -1436,7 +1855,7 @@ class NCFRecommender:
                     ]
                     
                     for project_dict in remaining[:n - len(result)]:
-                        project_dict['recommendation_score'] = float(project_dict.get('popularity_score', 0))
+                        project_dict['recommendation_score'] = float(project_dict.get('popularity_score', 0)) / 100
                         result.append(project_dict)
                 
                 return result[:n]
@@ -1445,7 +1864,7 @@ class NCFRecommender:
                 result = []
                 for _, project in popular.head(n).iterrows():
                     project_dict = project.to_dict()
-                    project_dict['recommendation_score'] = float(project_dict.get('popularity_score', 0))
+                    project_dict['recommendation_score'] = float(project_dict.get('popularity_score', 0)) / 100
                     result.append(project_dict)
                 return result
         elif 'market_cap' in self.projects_df.columns:
