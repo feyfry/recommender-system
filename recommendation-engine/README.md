@@ -172,9 +172,9 @@ Model Hybrid baru menggabungkan kekuatan kedua pendekatan dengan teknik ensemble
    - **Adaptive Ensemble**: Menyesuaikan bobot secara dinamis berdasarkan kepercayaan model dan kualitas data
 
 3. **Pembobotan Dinamis (Dioptimalkan)**:
-   - **Pengguna Cold-Start (0-3 interaksi)**: 95% FECF, 5% NCF
-   - **Pengguna dengan Interaksi Menengah (4-10)**: Transisi secara bertahap
-   - **Pengguna dengan Interaksi Banyak (>10)**: 70% FECF, 30% NCF
+   - **Pengguna Cold-Start (<5> interaksi)**: 95% FECF, 5% NCF (menggunakan parameter cold_start_fecf_weight)
+   - **Pengguna dengan Interaksi Menengah (5-15)**: Transisi secara bertahap dengan interpolasi linear
+   - **Pengguna dengan Interaksi Banyak (>15)**: 80% FECF, 20% NCF (menggunakan parameter fecf_weight dan ncf_weight)
 
 4. **Diversifikasi yang Ditingkatkan**:
    - Penanganan multi-kategori untuk diversifikasi yang lebih baik
