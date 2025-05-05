@@ -723,7 +723,7 @@ def evaluate_cold_start(model: Any,
     cold_start_users = min(100, cold_start_users or config.get('cold_start_users', 100))
     test_ratio = config.get('test_ratio', 0.3)
     popular_exclude_ratio = config.get('max_popular_items_exclude', 0.05)
-    min_interactions = config.get('min_interactions_required', 5)
+    min_interactions = config.get('min_interactions_required', 3)
     category_diversity_enabled = config.get('category_diversity_enabled', True)
     
     logger.info(f"Evaluating {model_name} on cold-start scenario with {cold_start_users} users, {n_runs} runs")

@@ -151,7 +151,7 @@ COLD_START_EVAL_CONFIG = {
     "cold_start_users": 100,         # Jumlah test users tetap
     "max_popular_items_exclude": 0.05, # Hanya exclude 5% item populer
     "test_ratio": 0.3,               # Test set yang lebih reasonable
-    "min_interactions_required": 5,   # Sesuaikan dengan minimal interaksi
+    "min_interactions_required": 3,   # Sesuaikan dengan minimal interaksi
     "category_diversity_enabled": True,
 }
 
