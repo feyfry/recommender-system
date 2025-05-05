@@ -30,23 +30,25 @@ logger = logging.getLogger(__name__)
 class HybridRecommender:
     """
     Hybrid Recommender dengan pendekatan ensemble yang ditingkatkan
-    optimalisasi untuk data sparse, dan penanganan kategori yang lebih baik
+    Optimasi untuk cryptocurrency domain dengan adaptive ensemble dan diversity boosting
     """
     
     def __init__(self, params: Optional[Dict[str, Any]] = None):
         # Model parameters dengan default yang lebih baik
         default_params = {
-            "ncf_weight": 0.3,              # Kurangi bobot NCF karena underperform
-            "fecf_weight": 0.7,             # Tingkatkan bobot FECF
-            "interaction_threshold_low": 3,  # Turunkan threshold cold start
-            "interaction_threshold_high": 10, # Turunkan high threshold
-            "diversity_factor": 0.2,         # Kurangi faktor diversitas yang terlalu agresif
-            "cold_start_fecf_weight": 0.9,   # Lebih dominan FECF untuk cold start
-            "explore_ratio": 0.15,           # Kurangi eksplorasi
-            "normalization": "sigmoid",      # Metode normalisasi ("linear", "sigmoid", "rank", "none")
-            "ensemble_method": "weighted_avg", # Metode ensemble ("weighted_avg", "max", "rank_fusion")
-            "n_candidates_factor": 3,        # Faktor jumlah kandidat vs. hasil akhir
-            "category_diversity_weight": 0.15, # Bobot diversitas kategori
+            "ncf_weight": 0.2,              # Kurangi bobot NCF
+            "fecf_weight": 0.8,             # Tingkatkan bobot FECF
+            "interaction_threshold_low": 5,  # Sesuaikan dengan minimal interaksi
+            "interaction_threshold_high": 15, # Tingkatkan threshold high
+            "diversity_factor": 0.25,        # Tingkatkan sedikit faktor diversitas
+            "cold_start_fecf_weight": 0.95,  # Hampir sepenuhnya FECF untuk cold start
+            "explore_ratio": 0.2,            # Tingkatkan eksplorasi
+            "normalization": "sigmoid",      # Normalisasi metode
+            "ensemble_method": "adaptive",   # Metode ensemble adaptif
+            "n_candidates_factor": 4,        # Lebih banyak kandidat
+            "category_diversity_weight": 0.2, # Tingkatkan bobot diversitas kategori
+            "trending_boost_factor": 0.3,    # Faktor boost untuk trending items
+            "confidence_threshold": 0.65,    # Threshold confidence untuk NCF
         }
         
         # Update dengan parameter yang disediakan atau dari config
@@ -74,11 +76,17 @@ class HybridRecommender:
         
         # Domain-specific weights for cryptocurrency
         self.crypto_weights = CRYPTO_DOMAIN_WEIGHTS if 'CRYPTO_DOMAIN_WEIGHTS' in globals() else {
-            "trend_importance": 0.7,
-            "popularity_decay": 0.05,
-            "category_correlation": 0.6,
-            "market_cap_influence": 0.4,
-            "chain_importance": 0.3
+            "trend_importance": 0.75,
+            "popularity_decay": 0.1,
+            "category_correlation": 0.65,
+            "market_cap_influence": 0.55,
+            "chain_importance": 0.45,
+        }
+        
+        # Performance metrics for adaptive ensemble
+        self.model_performance = {
+            'fecf': {'precision': 0.0, 'recall': 0.0, 'ndcg': 0.0, 'hit_ratio': 0.0},
+            'ncf': {'precision': 0.0, 'recall': 0.0, 'ndcg': 0.0, 'hit_ratio': 0.0}
         }
         
     def load_data(self, 
@@ -115,6 +123,9 @@ class HybridRecommender:
                 # Pre-process kategori untuk memudahkan penanganan
                 self.preprocess_categories()
                 
+                # Calculate interaction statistics for adaptive weighting
+                self._calculate_interaction_statistics()
+                
                 logger.info("Data loaded successfully for Enhanced Hybrid Recommender")
                 return True
             else:
@@ -125,6 +136,40 @@ class HybridRecommender:
             logger.error(f"Error loading data for Enhanced Hybrid Recommender: {str(e)}")
             return False
     
+    def _calculate_interaction_statistics(self):
+        """Calculate interaction statistics for adaptive weighting"""
+        if self.user_item_matrix is None:
+            return
+            
+        # Calculate user interaction counts
+        self.user_interaction_counts = (self.user_item_matrix > 0).sum(axis=1)
+        
+        # Calculate item popularity
+        self.item_popularity = (self.user_item_matrix > 0).sum(axis=0)
+        
+        # Calculate quantiles for user interactions
+        self.interaction_quantiles = {
+            'q10': self.user_interaction_counts.quantile(0.1),
+            'q25': self.user_interaction_counts.quantile(0.25),
+            'q50': self.user_interaction_counts.quantile(0.5),
+            'q75': self.user_interaction_counts.quantile(0.75),
+            'q90': self.user_interaction_counts.quantile(0.9)
+        }
+        
+        # Calculate quantiles for item popularity
+        self.popularity_quantiles = {
+            'q10': self.item_popularity.quantile(0.1),
+            'q25': self.item_popularity.quantile(0.25),
+            'q50': self.item_popularity.quantile(0.5),
+            'q75': self.item_popularity.quantile(0.75),
+            'q90': self.item_popularity.quantile(0.9),
+            'q95': self.item_popularity.quantile(0.95),
+            'q99': self.item_popularity.quantile(0.99)
+        }
+        
+        logger.info(f"Calculated interaction statistics: median user interactions={self.interaction_quantiles['q50']:.1f}, "
+                   f"median item popularity={self.popularity_quantiles['q50']:.1f}")
+    
     def preprocess_categories(self):
         if self.projects_df is None or 'primary_category' not in self.projects_df.columns:
             return
@@ -134,6 +179,19 @@ class HybridRecommender:
         
         # Buat kolom kategori yang distandarisasi
         self.projects_df['categories_list'] = self.projects_df['primary_category'].apply(self.process_categories)
+        
+        # Hitung distribusi kategori untuk diversitas recommendation
+        self.category_distribution = {}
+        for categories in self.projects_df['categories_list']:
+            for category in categories:
+                if category in self.category_distribution:
+                    self.category_distribution[category] += 1
+                else:
+                    self.category_distribution[category] = 1
+        
+        # Normalisasi distribusi
+        total_categories = sum(self.category_distribution.values())
+        self.category_distribution = {k: v/total_categories for k, v in self.category_distribution.items()}
         
         logger.info(f"Preprocessed categories for {len(self.projects_df)} projects")
     
@@ -174,12 +232,12 @@ class HybridRecommender:
         # Train NCF
         logger.info("Training Neural CF component with optimized parameters")
         
-        # Update NCF params dengan nilai yang lebih baik untuk data sparse
+        # Update NCF params dengan nilai yang lebih baik untuk domain cryptocurrency
         optimized_ncf_params = {
-            "val_ratio": 0.15,              # Porsi validasi lebih kecil
-            "batch_size": 256,              # Batch size lebih besar untuk stabilitas
-            "num_epochs": 20,               # Epoch cukup
-            "learning_rate": 0.0005         # Learning rate lebih kecil
+            "val_ratio": 0.15,              # Porsi validasi tetap
+            "batch_size": 256,              # Batch size tetap
+            "num_epochs": 30,               # Lebih banyak epochs
+            "learning_rate": 0.0003         # Optimized learning rate
         }
         
         # Gabungkan dengan ncf_params yang disediakan
@@ -189,9 +247,29 @@ class HybridRecommender:
         ncf_metrics = self.ncf_model.train(save_model=save_model, **optimized_ncf_params)
         metrics['ncf'] = ncf_metrics
         
+        # Capture performance for adaptive ensemble
+        if 'validation_metrics' in fecf_metrics:
+            self.model_performance['fecf'] = fecf_metrics['validation_metrics']
+        if 'validation_metrics' in ncf_metrics:
+            self.model_performance['ncf'] = ncf_metrics['validation_metrics']
+        
         # Save hybrid model weights if requested
         if save_model:
             self.save_model()
+        
+        # Create ensemble performance estimate
+        base_fecf_weight = self.params.get('fecf_weight', 0.8)
+        base_ncf_weight = self.params.get('ncf_weight', 0.2)
+        
+        # Estimate combined performance
+        ensemble_metrics = {}
+        for metric in ['precision', 'recall', 'ndcg', 'hit_ratio']:
+            fecf_value = self.model_performance['fecf'].get(metric, 0)
+            ncf_value = self.model_performance['ncf'].get(metric, 0)
+            ensemble_metrics[metric] = (fecf_value * base_fecf_weight + ncf_value * base_ncf_weight)
+        
+        metrics['ensemble'] = ensemble_metrics
+        metrics['base_weights'] = {'fecf': base_fecf_weight, 'ncf': base_ncf_weight}
         
         return metrics
     
@@ -225,6 +303,7 @@ class HybridRecommender:
             'params': self.params,
             'fecf_path': fecf_path,
             'ncf_path': ncf_path,
+            'model_performance': self.model_performance,
             'timestamp': datetime.now().isoformat()
         }
         
@@ -249,6 +328,7 @@ class HybridRecommender:
                     model_state = pickle.load(f)
                     
                 self.params = model_state.get('params', self.params)
+                self.model_performance = model_state.get('model_performance', self.model_performance)
                 logger.info(f"Enhanced Hybrid model weights loaded from {hybrid_filepath}")
                 
                 # Get component model paths from hybrid model if not provided
@@ -308,9 +388,12 @@ class HybridRecommender:
         # Preprocess categories
         self.preprocess_categories()
         
+        # Calculate interaction statistics
+        self._calculate_interaction_statistics()
+        
         # Model dianggap sukses jika minimal salah satu komponen berhasil dimuat
         return fecf_success or ncf_success
-    
+        
     def is_trained(self) -> bool:
         # Hybrid model dianggap terlatih jika minimal satu komponen terlatih
         fecf_trained = (self.fecf_model is not None and 
@@ -359,16 +442,20 @@ class HybridRecommender:
                 normalized = np.ones_like(scores) * 0.5
                 
         elif method == 'sigmoid':
-            # Sigmoid normalization - centers around 0.5 with smoother transition
+            # Enhanced sigmoid normalization with better scaling
             mean = scores.mean()
             std = max(scores.std(), 1e-5)  # Avoid division by zero
             z_scores = (scores - mean) / std
-            normalized = expit(z_scores)  # Apply sigmoid function
+            normalized = expit(z_scores * 1.5)  # Steeper sigmoid for better differentiation
             
         elif method == 'rank':
-            # Rank-based normalization
+            # Rank-based normalization with exponential decay
             ranks = np.argsort(np.argsort(scores)[::-1]) + 1
-            normalized = 1 - (ranks / len(ranks))
+            max_rank = len(ranks)
+            # Exponential decay for pronounced ranking effect
+            normalized = np.exp(-0.5 * ranks / max_rank)
+            # Re-normalize to [0,1] range
+            normalized = (normalized - normalized.min()) / (normalized.max() - normalized.min())
         else:
             # Fallback to original scores
             normalized = scores
@@ -395,9 +482,9 @@ class HybridRecommender:
             ncf_health = 0.0
             
         # Get base weights from params
-        base_fecf_weight = self.params.get('fecf_weight', 0.7)
-        base_ncf_weight = self.params.get('ncf_weight', 0.3)
-        diversity_factor = self.params.get('diversity_factor', 0.2)
+        base_fecf_weight = self.params.get('fecf_weight', 0.8)
+        base_ncf_weight = self.params.get('ncf_weight', 0.2)
+        diversity_factor = self.params.get('diversity_factor', 0.25)
         
         # Count user interactions if available
         user_interaction_count = 0
@@ -406,8 +493,36 @@ class HybridRecommender:
             user_interaction_count = (user_interactions > 0).sum()
             
         # Get thresholds
-        interaction_threshold_low = self.params.get('interaction_threshold_low', 3)
-        interaction_threshold_high = self.params.get('interaction_threshold_high', 10)
+        interaction_threshold_low = self.params.get('interaction_threshold_low', 5)
+        interaction_threshold_high = self.params.get('interaction_threshold_high', 15)
+        
+        # Look at model performance for adaptive weighting
+        fecf_perf = self.model_performance.get('fecf', {})
+        ncf_perf = self.model_performance.get('ncf', {})
+        
+        # Get average performance across metrics
+        fecf_avg_perf = np.mean([fecf_perf.get(m, 0) for m in ['precision', 'recall', 'ndcg', 'hit_ratio']])
+        ncf_avg_perf = np.mean([ncf_perf.get(m, 0) for m in ['precision', 'recall', 'ndcg', 'hit_ratio']])
+        
+        # Adjust weights based on performance difference if meaningful
+        performance_diff = fecf_avg_perf - ncf_avg_perf
+        
+        # Apply adaptive performance adjustment if using adaptive ensemble method
+        if self.params.get('ensemble_method') == 'adaptive' and fecf_avg_perf > 0 and ncf_avg_perf > 0:
+            # Calculate performance ratio
+            if ncf_avg_perf > 0:
+                perf_ratio = fecf_avg_perf / ncf_avg_perf
+            else:
+                perf_ratio = 10.0  # Default high ratio if NCF performance is 0
+                
+            # Apply performance-based adjustment
+            perf_adjustment = min(0.3, max(-0.3, (perf_ratio - 1.0) * 0.15))
+            
+            # Adjust weights based on performance
+            base_fecf_weight = min(0.95, max(0.05, base_fecf_weight + perf_adjustment))
+            base_ncf_weight = 1.0 - base_fecf_weight
+            
+            logger.debug(f"Adaptive weights based on performance: FECF {base_fecf_weight:.2f}, NCF {base_ncf_weight:.2f}")
         
         # Determine effective weights based on interaction count and model health
         if fecf_health == 0.0:
@@ -424,22 +539,32 @@ class HybridRecommender:
             # Both models available, apply adaptive weighting based on interaction count
             if user_interaction_count < interaction_threshold_low:
                 # For cold-start users, rely more on FECF
-                effective_fecf_weight = 0.85 * fecf_health  # Increase from 0.75 to 0.85
-                effective_ncf_weight = 0.15 * ncf_health    # Decrease from 0.25 to 0.15
-                effective_diversity_weight = diversity_factor * 0.7  # Slightly lower diversity for cold-start
+                cold_start_fecf_weight = self.params.get('cold_start_fecf_weight', 0.95)
+                effective_fecf_weight = cold_start_fecf_weight * fecf_health
+                effective_ncf_weight = (1.0 - cold_start_fecf_weight) * ncf_health
+                effective_diversity_weight = diversity_factor * 0.8  # Slightly lower diversity for cold-start
             elif user_interaction_count < interaction_threshold_high:
                 # Linear interpolation between thresholds
                 ratio = (user_interaction_count - interaction_threshold_low) / (interaction_threshold_high - interaction_threshold_low)
-                fecf_low = 0.85
+                fecf_low = self.params.get('cold_start_fecf_weight', 0.95)
                 fecf_high = base_fecf_weight
                 effective_fecf_weight = (fecf_low - (fecf_low - fecf_high) * ratio) * fecf_health
-                effective_ncf_weight = (0.15 + (base_ncf_weight - 0.15) * ratio) * ncf_health
-                effective_diversity_weight = diversity_factor * (0.7 + ratio * 0.5)
+                effective_ncf_weight = (1.0 - fecf_low + (fecf_low - fecf_high) * ratio) * ncf_health
+                effective_diversity_weight = diversity_factor * (0.8 + ratio * 0.4)
             else:
-                # For active users, use configured weights
+                # For active users, use performance-adjusted weights
                 effective_fecf_weight = base_fecf_weight * fecf_health
                 effective_ncf_weight = base_ncf_weight * ncf_health
                 effective_diversity_weight = diversity_factor
+                
+                # Additional adjustment for very active users
+                if user_interaction_count > interaction_threshold_high * 2:
+                    # For very active users, increase NCF weight slightly as it may have more personalized patterns
+                    activity_boost = min(0.1, 0.05 * user_interaction_count / (interaction_threshold_high * 2))
+                    effective_ncf_weight = min(0.6, effective_ncf_weight + activity_boost)
+                    effective_fecf_weight = 1.0 - effective_ncf_weight
+                    # Also increase diversity for very active users
+                    effective_diversity_weight = min(0.4, diversity_factor * 1.5)
         
         # Normalize weights to sum to 1.0
         total_weight = effective_fecf_weight + effective_ncf_weight
@@ -452,14 +577,14 @@ class HybridRecommender:
     def get_ensemble_recommendations(self, 
                                    fecf_recs: List[Tuple[str, float]], 
                                    ncf_recs: List[Tuple[str, float]],
-                                   fecf_weight: float = 0.7, 
-                                   ncf_weight: float = 0.3,
+                                   fecf_weight: float = 0.8, 
+                                   ncf_weight: float = 0.2,
                                    ensemble_method: Optional[str] = None) -> List[Tuple[str, float]]:
         if not fecf_recs and not ncf_recs:
             return []
             
         # Use specified method or default from params
-        ensemble_method = ensemble_method or self.params.get('ensemble_method', 'weighted_avg')
+        ensemble_method = ensemble_method or self.params.get('ensemble_method', 'adaptive')
             
         # Quick return if only one model's recommendations are available
         if not fecf_recs:
@@ -477,6 +602,9 @@ class HybridRecommender:
         
         # Get all unique items
         all_items = set(fecf_dict.keys()) | set(ncf_dict.keys())
+        
+        # Get confidence threshold for selective methods
+        confidence_threshold = self.params.get('confidence_threshold', 0.65)
         
         if ensemble_method == 'max':
             # Maximum score ensemble - ambil nilai tertinggi dari kedua model
@@ -508,7 +636,52 @@ class HybridRecommender:
                 
                 # Weighted sum
                 results[item] = fecf_weight * fecf_score + ncf_weight * ncf_score
+        
+        elif ensemble_method == 'selective':
+            # Selective ensemble - only use NCF when confidence is high
+            results = {}
+            for item in all_items:
+                fecf_score = fecf_dict.get(item, 0)
+                ncf_score = ncf_dict.get(item, 0)
                 
+                if item in ncf_dict and ncf_score > confidence_threshold:
+                    # High confidence in NCF prediction, use it
+                    results[item] = ncf_score
+                elif item in fecf_dict:
+                    # Otherwise use FECF
+                    results[item] = fecf_score
+                else:
+                    # Fallback case
+                    results[item] = ncf_score
+                    
+        elif ensemble_method == 'adaptive':
+            # Adaptive ensemble with confidence-based weighting
+            results = {}
+            for item in all_items:
+                fecf_score = fecf_dict.get(item, 0)
+                ncf_score = ncf_dict.get(item, 0)
+                
+                if item in fecf_dict and item in ncf_dict:
+                    # Calculate confidence-adjusted weights
+                    fecf_conf = (fecf_score - 0.5) * 2  # Scale to [-1, 1]
+                    ncf_conf = (ncf_score - 0.5) * 2    # Scale to [-1, 1]
+                    
+                    # Apply sigmoid to get weight adjustment
+                    fecf_adj = expit(fecf_conf * 3) - 0.5
+                    ncf_adj = expit(ncf_conf * 3) - 0.5
+                    
+                    # Calculate dynamic weights
+                    dynamic_fecf_weight = max(0.3, min(0.9, fecf_weight + fecf_adj * 0.3 - ncf_adj * 0.3))
+                    dynamic_ncf_weight = 1.0 - dynamic_fecf_weight
+                    
+                    # Weighted average with dynamic weights
+                    results[item] = fecf_score * dynamic_fecf_weight + ncf_score * dynamic_ncf_weight
+                elif item in fecf_dict:
+                    # Only FECF recommends
+                    results[item] = fecf_score * 0.9  # Slight confidence reduction
+                else:
+                    # Only NCF recommends
+                    results[item] = ncf_score * 0.85  # More confidence reduction
         else:  # default to weighted_avg
             # Weighted average ensemble
             results = {}
@@ -516,17 +689,38 @@ class HybridRecommender:
                 fecf_score = fecf_dict.get(item, 0)
                 ncf_score = ncf_dict.get(item, 0)
                 
-                # Weighted average core - lebih sophisticated dari naive weighted sum
+                # Enhanced weighted average logic
                 if item in fecf_dict and item in ncf_dict:
-                    # Jika item direkomendasikan oleh kedua model, gunakan weighted average
+                    # Both models recommend - weighted average
                     results[item] = fecf_score * fecf_weight + ncf_score * ncf_weight
                 elif item in fecf_dict:
-                    # Jika hanya FECF merekomendasikan, kurangi confidence sedikit
-                    results[item] = fecf_score * fecf_weight * 0.9  # Slight confidence reduction
+                    # Only FECF recommends - reduce confidence slightly
+                    results[item] = fecf_score * fecf_weight * 0.95
                 else:
-                    # Jika hanya NCF merekomendasikan, kurangi confidence lebih banyak
-                    results[item] = ncf_score * ncf_weight * 0.8  # More confidence reduction
+                    # Only NCF recommends - reduce confidence more
+                    results[item] = ncf_score * ncf_weight * 0.9
         
+        # Apply trending boost if available
+        if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
+            trend_boost_factor = self.params.get('trending_boost_factor', 0.3)
+            
+            if trend_boost_factor > 0:
+                # Create item to trend lookup
+                item_to_trend = dict(zip(self.projects_df['id'], self.projects_df['trend_score']))
+                
+                # Apply trend boosting
+                for item in list(results.keys()):
+                    if item in item_to_trend:
+                        trend_score = item_to_trend[item]
+                        
+                        # Normalize trend score to [0, 1]
+                        norm_trend = min(1.0, max(0.0, trend_score / 100.0))
+                        
+                        # Apply boost only for highly trending items
+                        if norm_trend > 0.6:  # More than 60/100 trending score
+                            boost = (norm_trend - 0.6) * trend_boost_factor
+                            results[item] = min(1.0, results[item] + boost)
+                                
         # Convert to list of tuples and sort
         combined_recs = [(item, score) for item, score in results.items()]
         combined_recs.sort(key=lambda x: x[1], reverse=True)
@@ -534,13 +728,14 @@ class HybridRecommender:
         return combined_recs
     
     def apply_diversity(self, recommendations: List[Tuple[str, float]], 
-                    n: int, diversity_weight: float = 0.2) -> List[Tuple[str, float]]:
+                    n: int, diversity_weight: float = 0.25) -> List[Tuple[str, float]]:
         if not recommendations or len(recommendations) <= n:
             return recommendations
             
         # Prepare item metadata
         item_categories = {}
         item_chains = {}
+        item_market_caps = {}
         
         if self.projects_df is not None:
             # Extract item metadata
@@ -559,18 +754,37 @@ class HybridRecommender:
                 # Extract chain information
                 if 'chain' in row:
                     item_chains[item_id] = row['chain']
+                    
+                # Extract market cap for balance between new/established projects
+                if 'market_cap' in row:
+                    item_market_caps[item_id] = row['market_cap']
         
         # If no category/chain data available, just return top-n
         if not item_categories and not item_chains:
             return recommendations[:n]
             
         # Select top items without diversity first (guaranteed selection)
-        top_count = max(n // 5, 1)  # ~20% by pure score
+        top_count = max(n // 4, 1)  # ~25% by pure score
         result = recommendations[:top_count]
         
         # Track selected categories and chains
         selected_categories = {}
         selected_chains = {}
+        selected_market_cap_tiers = {'high': 0, 'medium': 0, 'low': 0, 'unknown': 0}
+        
+        # Define market cap thresholds (can be derived from data)
+        if item_market_caps:
+            market_caps = list(item_market_caps.values())
+            market_caps.sort()
+            if market_caps:
+                market_cap_high = market_caps[int(len(market_caps) * 0.9)]  # Top 10%
+                market_cap_medium = market_caps[int(len(market_caps) * 0.5)]  # Medium 40%
+            else:
+                market_cap_high = 1e9
+                market_cap_medium = 1e8
+        else:
+            market_cap_high = 1e9
+            market_cap_medium = 1e8
         
         # Populate initial tracking
         for item_id, _ in result:
@@ -583,10 +797,32 @@ class HybridRecommender:
             if item_id in item_chains:
                 chain = item_chains[item_id]
                 selected_chains[chain] = selected_chains.get(chain, 0) + 1
+                
+            # Track market cap tiers
+            if item_id in item_market_caps:
+                market_cap = item_market_caps[item_id]
+                if market_cap >= market_cap_high:
+                    selected_market_cap_tiers['high'] += 1
+                elif market_cap >= market_cap_medium:
+                    selected_market_cap_tiers['medium'] += 1
+                else:
+                    selected_market_cap_tiers['low'] += 1
+            else:
+                selected_market_cap_tiers['unknown'] += 1
         
-        # Calculate diversity limits
-        max_per_category = max(2, int(n * 0.3))  # Maximum ~30% per category
-        max_per_chain = max(3, int(n * 0.4))     # Maximum ~40% per chain
+        # Calculate diversity limits with more nuanced approach
+        # Adjust based on total recommendations requested
+        max_per_category = max(2, int(n * 0.25))  # Maximum ~25% per category
+        max_per_chain = max(3, int(n * 0.33))     # Maximum ~33% per chain
+        
+        # Market cap tier targets (percentages of total)
+        # Aim for diverse mix of established/mid/new projects
+        market_cap_targets = {
+            'high': int(n * 0.3),    # 30% high cap
+            'medium': int(n * 0.4),  # 40% medium cap
+            'low': int(n * 0.3),     # 30% low cap
+            'unknown': int(n * 0.1)  # Allow 10% unknown
+        }
         
         # Process remaining candidates
         remaining = recommendations[top_count:]
@@ -597,8 +833,9 @@ class HybridRecommender:
         for item_id, score in remaining:
             category_adjustment = 0
             chain_adjustment = 0
+            market_cap_adjustment = 0
             
-            # Category diversity adjustment
+            # Category diversity adjustment with underrepresented boost
             if item_id in item_categories:
                 # Periksa semua kategori item
                 cat_adjustments = []
@@ -609,35 +846,68 @@ class HybridRecommender:
                     
                     if cat_count >= max_per_category:
                         # Heavy penalty for overrepresented category
-                        cat_adjustments.append(-0.4)
+                        cat_adjustments.append(-0.5)
                     elif cat_count == 0:
-                        # Strong boost for new category
-                        cat_adjustments.append(0.2) 
+                        # Strong boost for new categories - especially underrepresented ones
+                        category_freq = self.category_distribution.get(category, 0.05)
+                        rarity_boost = 0.2 + (0.2 * (1 - min(1.0, category_freq * 20)))
+                        cat_adjustments.append(rarity_boost)
                     else:
                         # Smaller adjustment based on count
-                        adjustment = 0.1 * (1 - cat_count / max_per_category)
+                        adjustment = 0.15 * (1 - cat_count / max_per_category)
                         cat_adjustments.append(adjustment)
                 
-                # Use worst adjustment as the primary signal
-                # This avoids selecting items from overrepresented categories
-                # even if they have other categories that are underrepresented
+                # Use mean of top adjustments for better balance
                 if cat_adjustments:
-                    category_adjustment = min(cat_adjustments)
+                    cat_adjustments.sort(reverse=True)  # Sort by highest boost first
+                    top_n_adjustments = cat_adjustments[:min(2, len(cat_adjustments))]  # Use top 2 adjustments
+                    category_adjustment = sum(top_n_adjustments) / len(top_n_adjustments)
             
-            # Chain diversity adjustment (simpler)
+            # Chain diversity adjustment
             if item_id in item_chains:
                 chain = item_chains[item_id]
                 chain_count = selected_chains.get(chain, 0)
                 
                 if chain_count >= max_per_chain:
-                    chain_adjustment = -0.3  # Penalty for overrepresented chain
+                    chain_adjustment = -0.4  # Stronger penalty
                 elif chain_count == 0:
-                    chain_adjustment = 0.15  # Bonus for new chain
+                    chain_adjustment = 0.25  # Stronger bonus
                 else:
-                    chain_adjustment = 0.05 * (1 - chain_count / max_per_chain)
+                    chain_adjustment = 0.1 * (1 - chain_count / max_per_chain)
+            
+            # Market cap diversity adjustment
+            if item_id in item_market_caps:
+                market_cap = item_market_caps[item_id]
+                tier = 'high' if market_cap >= market_cap_high else 'medium' if market_cap >= market_cap_medium else 'low'
+                
+                # Calculate how full this tier is compared to target
+                tier_count = selected_market_cap_tiers[tier]
+                tier_target = market_cap_targets[tier]
+                
+                if tier_count >= tier_target:
+                    # Tier is full or overrepresented
+                    fullness_ratio = tier_count / tier_target
+                    market_cap_adjustment = -0.2 * fullness_ratio
+                elif tier_count < tier_target * 0.5:
+                    # Tier is significantly underrepresented
+                    market_cap_adjustment = 0.15
+                else:
+                    # Small positive adjustment
+                    market_cap_adjustment = 0.05
             
             # Apply diversity weight
-            diversity_score = (category_adjustment + chain_adjustment * 0.5) * diversity_weight
+            # Adaptive weights for more nuanced diversity control
+            category_weight = 0.6  # Categories are most important for crypto
+            chain_weight = 0.25    # Chains are secondary
+            market_cap_weight = 0.15  # Market cap is tertiary
+            
+            # Calculate weighted diversity adjustment
+            diversity_score = (
+                category_adjustment * category_weight + 
+                chain_adjustment * chain_weight + 
+                market_cap_adjustment * market_cap_weight
+            ) * diversity_weight
+            
             adjusted_score = score + diversity_score
             
             # Store original item, score, and adjusted score
@@ -646,7 +916,7 @@ class HybridRecommender:
         # Sort by adjusted score
         diversity_adjusted.sort(key=lambda x: x[2], reverse=True)
         
-        # Select remaining items
+        # Select remaining items with greater diversity consciousness
         for item_id, original_score, _ in diversity_adjusted:
             if len(result) >= n:
                 break
@@ -659,6 +929,18 @@ class HybridRecommender:
             if item_id in item_chains:
                 chain = item_chains[item_id]
                 selected_chains[chain] = selected_chains.get(chain, 0) + 1
+                
+            # Update market cap tracking
+            if item_id in item_market_caps:
+                market_cap = item_market_caps[item_id]
+                if market_cap >= market_cap_high:
+                    selected_market_cap_tiers['high'] += 1
+                elif market_cap >= market_cap_medium:
+                    selected_market_cap_tiers['medium'] += 1
+                else:
+                    selected_market_cap_tiers['low'] += 1
+            else:
+                selected_market_cap_tiers['unknown'] += 1
             
             # Add to result with original score
             result.append((item_id, original_score))
@@ -693,17 +975,19 @@ class HybridRecommender:
             return []
             
         # Determine number of candidates to get from each model
-        n_candidates = min(n * self.params.get('n_candidates_factor', 3), 100)
+        n_candidates = min(n * self.params.get('n_candidates_factor', 4), 150)
         
         # Get FECF recommendations if available
         fecf_recs = []
         if fecf_weight > 0:
             try:
+                start_time = time.time()
                 fecf_recs = self.fecf_model.recommend_for_user(
                     user_id, 
                     n=n_candidates,
                     exclude_known=exclude_known
                 )
+                logger.debug(f"FECF recommendations for {user_id} took {time.time() - start_time:.3f}s")
             except Exception as e:
                 logger.warning(f"Error getting FECF recommendations: {e}")
                 # Adjust weights if FECF fails
@@ -718,11 +1002,13 @@ class HybridRecommender:
         ncf_recs = []
         if ncf_weight > 0:
             try:
+                start_time = time.time()
                 ncf_recs = self.ncf_model.recommend_for_user(
                     user_id, 
                     n=n_candidates,
                     exclude_known=exclude_known
                 )
+                logger.debug(f"NCF recommendations for {user_id} took {time.time() - start_time:.3f}s")
             except Exception as e:
                 logger.warning(f"Error getting NCF recommendations: {e}")
                 # Adjust weights if NCF fails
@@ -734,20 +1020,24 @@ class HybridRecommender:
                     return self._get_cold_start_recommendations(user_id, n)
         
         # Use enhanced ensemble to combine recommendations
+        start_time = time.time()
         combined_recs = self.get_ensemble_recommendations(
             fecf_recs=fecf_recs,
             ncf_recs=ncf_recs,
             fecf_weight=fecf_weight,
             ncf_weight=ncf_weight,
-            ensemble_method=self.params.get('ensemble_method', 'weighted_avg')
+            ensemble_method=self.params.get('ensemble_method', 'adaptive')
         )
+        logger.debug(f"Ensemble recommendations for {user_id} took {time.time() - start_time:.3f}s")
         
         # Apply diversity
+        start_time = time.time()
         diversified_recs = self.apply_diversity(
             combined_recs, 
             n=n, 
             diversity_weight=diversity_weight
         )
+        logger.debug(f"Diversity application for {user_id} took {time.time() - start_time:.3f}s")
         
         # Store in cache
         if not hasattr(self, '_recommendation_cache'):
@@ -777,17 +1067,21 @@ class HybridRecommender:
         return diversified_recs[:n]
     
     def _get_cold_start_recommendations(self, user_id: str, n: int = 10) -> List[Tuple[str, float]]:
-        # Use optimized weights for cold-start
-        fecf_weight = self.params.get('cold_start_fecf_weight', 0.9)
+        logger.info(f"Generating cold-start recommendations for user {user_id}")
+        
+        # Use optimized weights for cold-start with FECF heavily favored
+        fecf_weight = self.params.get('cold_start_fecf_weight', 0.95)
         ncf_weight = 1.0 - fecf_weight
         
         # Get FECF cold-start recommendations
         fecf_recs = []
         if fecf_weight > 0 and self.fecf_model is not None:
             try:
-                fecf_cold_start = self.fecf_model.get_cold_start_recommendations(n=n*2)
+                start_time = time.time()
+                fecf_cold_start = self.fecf_model.get_cold_start_recommendations(n=n*3)
                 fecf_recs = [(rec['id'], rec['recommendation_score']) 
                            for rec in fecf_cold_start if 'id' in rec]
+                logger.debug(f"FECF cold-start recommendations took {time.time() - start_time:.3f}s")
             except Exception as e:
                 logger.warning(f"Error getting FECF cold-start recommendations: {e}")
                 
@@ -795,92 +1089,123 @@ class HybridRecommender:
         ncf_recs = []
         if ncf_weight > 0 and self.ncf_model is not None:
             try:
-                ncf_cold_start = self.ncf_model.get_popular_projects(n=n*2)
+                start_time = time.time()
+                ncf_cold_start = self.ncf_model.get_popular_projects(n=n*3)
                 ncf_recs = [(rec['id'], rec['recommendation_score']) 
                           for rec in ncf_cold_start if 'id' in rec]
+                logger.debug(f"NCF cold-start recommendations took {time.time() - start_time:.3f}s")
             except Exception as e:
                 logger.warning(f"Error getting NCF cold-start recommendations: {e}")
                 
-        # If both models failed, return trending projects
+        # If both models failed, get trending projects as a fallback
         if not fecf_recs and not ncf_recs:
+            logger.warning("Both models failed for cold-start, using trending/popular fallback")
+            
             trending_projects = []
-            if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
-                trending = self.projects_df.sort_values('trend_score', ascending=False).head(n*2)
-                trending_projects = [(row['id'], row['trend_score']/100) 
-                                  for _, row in trending.iterrows()]
-                return trending_projects[:n]
-            else:
-                # Last resort: just return random projects
-                if hasattr(self, 'projects_df'):
-                    random_projects = self.projects_df.sample(min(n, len(self.projects_df)))
-                    return [(row['id'], 0.5) for _, row in random_projects.iterrows()]
-                return []
+            if hasattr(self, 'projects_df'):
+                if 'trend_score' in self.projects_df.columns:
+                    # Get highly trending projects
+                    trending = self.projects_df.sort_values('trend_score', ascending=False).head(n*3)
+                    trending_projects = [(row['id'], row['trend_score']/100) 
+                                      for _, row in trending.iterrows()]
+                    
+                    # Mix with some popular by market cap
+                    if 'market_cap' in self.projects_df.columns and len(trending_projects) < n*3:
+                        popular = self.projects_df.sort_values('market_cap', ascending=False).head(n*3)
+                        # Convert market_cap to normalized score
+                        max_market_cap = popular['market_cap'].max()
+                        if max_market_cap > 0:
+                            popular_projects = [(row['id'], row['market_cap']/max_market_cap * 0.8) 
+                                             for _, row in popular.iterrows() 
+                                             if row['id'] not in [p[0] for p in trending_projects]]
+                            trending_projects.extend(popular_projects)
+                elif 'popularity_score' in self.projects_df.columns:
+                    # Fallback to popularity
+                    popular = self.projects_df.sort_values('popularity_score', ascending=False).head(n*3)
+                    trending_projects = [(row['id'], row['popularity_score']/100) 
+                                      for _, row in popular.iterrows()]
+                else:
+                    # Last resort: random projects
+                    trending_projects = [(row['id'], 0.5) 
+                                      for _, row in self.projects_df.sample(min(n*3, len(self.projects_df))).iterrows()]
+            
+            return trending_projects[:n]
                 
-        # Also get trending projects for cold-start
-        trending_recs = []
-        if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
-            trending = self.projects_df.sort_values('trend_score', ascending=False).head(n)
-            trending_recs = [(row['id'], row['trend_score']/100) 
-                           for _, row in trending.iterrows()]
+        # Get category distribution (if available) for diversity
+        category_distribution = {}
+        if hasattr(self, 'projects_df') and 'primary_category' in self.projects_df.columns:
+            for _, row in self.projects_df.iterrows():
+                category = row['primary_category']
+                if category in category_distribution:
+                    category_distribution[category] += 1
+                else:
+                    category_distribution[category] = 1
+            
+            # Normalize
+            total = sum(category_distribution.values())
+            if total > 0:
+                category_distribution = {k: v/total for k, v in category_distribution.items()}
         
-        # Get model recommendations using ensemble
-        model_recs = self.get_ensemble_recommendations(
+        # Use sophisticated ensemble with heavy weight on FECF for cold-start
+        combined_recs = self.get_ensemble_recommendations(
             fecf_recs=fecf_recs,
             ncf_recs=ncf_recs,
             fecf_weight=fecf_weight,
             ncf_weight=ncf_weight,
-            ensemble_method='weighted_avg'  # Simplified for cold-start
+            ensemble_method='weighted_avg'  # Simpler method for cold-start
         )
         
-        # Calculate counts for each source
-        model_count = int(n * 0.7)  # 70% from models
-        trend_count = n - model_count  # 30% from trending
+        # Also get purely trending projects as a source of diversity
+        trending_recs = []
+        if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
+            trending = self.projects_df.sort_values('trend_score', ascending=False).head(n*2)
+            trending_recs = [(row['id'], row['trend_score']/100 * 0.9)  # Scale trend score and apply minor discount
+                           for _, row in trending.iterrows()]
         
-        # Make sure counts are at least 1 if we have recommendations
-        model_count = max(1, model_count) if model_recs else 0
-        trend_count = max(1, trend_count) if trending_recs else 0
+        # Balance model-based and trending-based recommendations for cold-start
+        # More algorithmic approach to ratio
+        model_ratio = 0.7  # Start with 70% model-based
+        trend_ratio = 0.3  # And 30% trending
         
-        # Adjust if either source is empty
-        if not model_recs:
-            trend_count = n
-        elif not trending_recs:
-            model_count = n
-        else:
-            # Make sure they sum to n
-            while model_count + trend_count > n:
-                if model_count > trend_count:
-                    model_count -= 1
-                else:
-                    trend_count -= 1
-                    
-            while model_count + trend_count < n:
-                if model_count < trend_count:
-                    model_count += 1
-                else:
-                    trend_count += 1
+        # Adjust ratios based on data quality (we can check here if needed)
+        # Just using static values for now, but could be dynamic
         
-        # Get recommendations from each source
-        selected_model_recs = model_recs[:model_count]
+        # Calculate counts with minimum guarantees
+        model_count = max(int(n * model_ratio), n // 2)
+        trend_count = max(n - model_count, n // 5)
         
-        # Filter out trending items that are already in model recs
+        # Rebalance if needed
+        if model_count + trend_count > n:
+            excess = model_count + trend_count - n
+            if model_count > trend_count:
+                model_count -= excess
+            else:
+                trend_count -= excess
+        
+        # Ensure we're using the best of each source
+        selected_model_recs = combined_recs[:model_count]
+        
+        # Filter trending to avoid duplicates with model recs
         model_items = {item_id for item_id, _ in selected_model_recs}
         filtered_trending = [(item_id, score) for item_id, score in trending_recs 
                           if item_id not in model_items]
         selected_trending_recs = filtered_trending[:trend_count]
         
-        # Combine all sources
-        combined = selected_model_recs + selected_trending_recs
+        # Combine recommendations with guaranteed diversity
+        diversity_seeds = selected_model_recs + selected_trending_recs
         
-        # Apply diversity
+        # Apply even more diversity enhancement
         diversified = self.apply_diversity(
-            combined, 
+            diversity_seeds, 
             n=n, 
-            diversity_weight=self.params.get('category_diversity_weight', 0.15)
+            diversity_weight=self.params.get('category_diversity_weight', 0.2) * 1.5  # Stronger diversity for cold-start
         )
         
         return diversified[:n]
     
     def recommend_projects(self, user_id: str, n: int = 10) -> List[Dict[str, Any]]:
+        start_time = time.time()
+        
         # Check if this is a cold-start user
         is_cold_start = False
         if self.user_item_matrix is not None:
@@ -931,6 +1256,7 @@ class HybridRecommender:
                     'ncf': ncf_weight,
                     'diversity': diversity_weight
                 },
+                'processing_time_ms': int((time.time() - start_time) * 1000),
                 'timestamp': datetime.now().isoformat()
             }
             
@@ -948,37 +1274,115 @@ class HybridRecommender:
         # Jika user_interests disediakan, kita perlu menggunakannya untuk meningkatkan rekomendasi
         enhanced_recommendations = []
         
-        # Pertama, dapatkan rekomendasi dari method _get_cold_start_recommendations
-        base_recommendations = self._get_cold_start_recommendations(dummy_user_id, n=n*2)
-        
-        # Jika user_interests tersedia, filter dan prioritaskan sesuai minat
+        # Khusus untuk kasus dengan user_interests
         if user_interests and self.projects_df is not None:
-            # Buat set untuk lookup yang cepat
-            interest_set = set(user_interests)
+            logger.info(f"Using user interests for cold-start: {user_interests}")
             
-            # Pisahkan rekomendasi menjadi yang match minat dan tidak
-            matching_interests = []
-            other_recommendations = []
+            # Prepare category matches for interest-based filtering
+            interest_projects = {}
+            category_distributions = {}
             
-            for project_id, score in base_recommendations:
-                project_data = self.projects_df[self.projects_df['id'] == project_id]
-                if not project_data.empty:
-                    # Periksa apakah kategori proyek ada di user_interests
-                    category = None
-                    
-                    if 'primary_category' in project_data.columns:
-                        category = project_data.iloc[0].get('primary_category')
-                        
-                    # Jika kategori cocok, tambahkan ke matching_interests dengan skor lebih tinggi
-                    if category in interest_set:
-                        matching_interests.append((project_id, score * 1.2))  # Boost skor 20%
-                    else:
-                        other_recommendations.append((project_id, score))
+            # Get projects for each interest category
+            for interest in user_interests:
+                # Build index of categories with flexible matching
+                matching_projects = []
+                for _, row in self.projects_df.iterrows():
+                    if 'categories_list' in row:
+                        categories = row['categories_list']
+                        # Check if any category matches the interest
+                        if any(interest.lower() in cat.lower() or cat.lower() in interest.lower() 
+                               for cat in categories):
+                            matching_projects.append((row['id'], 1.0))
+                    elif 'primary_category' in row:
+                        category = row['primary_category']
+                        if isinstance(category, str) and (interest.lower() in category.lower() or 
+                                                        category.lower() in interest.lower()):
+                            matching_projects.append((row['id'], 1.0))
+                
+                # Get trend-weighted projects for this interest
+                if 'trend_score' in self.projects_df.columns:
+                    for _, row in self.projects_df.iterrows():
+                        if row['id'] not in [p[0] for p in matching_projects]:
+                            # Add trending projects even if they don't match exactly
+                            trend_score = row['trend_score'] / 100 if row['trend_score'] <= 100 else 1.0
+                            if trend_score > 0.7:  # Very trending
+                                # Check for secondary matches
+                                if 'categories_list' in row:
+                                    categories = row['categories_list']
+                                    # Add with lower score for partial matches
+                                    for cat in categories:
+                                        if (interest.lower() in cat.lower() or cat.lower() in interest.lower()):
+                                            matching_projects.append((row['id'], 0.8))
+                                            break
+                
+                interest_projects[interest] = matching_projects
+                category_distributions[interest] = len(matching_projects)
             
-            # Gabungkan, prioritaskan yang match interests
-            enhanced_recommendations = matching_interests + other_recommendations
+            # Sort interests by available project count (prioritize interests with more matches)
+            sorted_interests = sorted(category_distributions.items(), key=lambda x: x[1], reverse=True)
+            
+            # Calculate how many projects to get from each interest
+            total_projects = sum(category_distributions.values())
+            interest_allocation = {}
+            if total_projects > 0:
+                remaining = n
+                for interest, count in sorted_interests:
+                    # Allocate proportionally with minimum guarantees
+                    allocation = max(1, min(remaining, int(n * count / total_projects)))
+                    interest_allocation[interest] = allocation
+                    remaining -= allocation
+                
+                # Distribute any remaining slots
+                if remaining > 0:
+                    for interest in interest_allocation:
+                        if remaining > 0:
+                            interest_allocation[interest] += 1
+                            remaining -= 1
+                        else:
+                            break
+            
+            # Get top projects from each interest category
+            for interest, allocation in interest_allocation.items():
+                if interest in interest_projects:
+                    projects = interest_projects[interest]
+                    if projects:
+                        # Sort by score
+                        projects.sort(key=lambda x: x[1], reverse=True)
+                        # Add top projects not already selected
+                        selected_ids = [p[0] for p in enhanced_recommendations]
+                        for project_id, score in projects:
+                            if project_id not in selected_ids and len(enhanced_recommendations) < n:
+                                enhanced_recommendations.append((project_id, score))
+                                selected_ids.append(project_id)
+                                
+                                # Respect allocation limits
+                                if sum(1 for p in enhanced_recommendations if p[0] in 
+                                      [proj[0] for proj in interest_projects[interest]]) >= allocation:
+                                    break
+            
+            # If we still don't have enough recommendations, use trending and popular
+            if len(enhanced_recommendations) < n:
+                # Get trending projects
+                trending_projects = []
+                if 'trend_score' in self.projects_df.columns:
+                    trending = self.projects_df.sort_values('trend_score', ascending=False)
+                    selected_ids = [p[0] for p in enhanced_recommendations]
+                    for _, row in trending.iterrows():
+                        if row['id'] not in selected_ids and len(trending_projects) < (n - len(enhanced_recommendations)):
+                            trending_projects.append((row['id'], row['trend_score'] / 100 * 0.9))
+                
+                # Add to recommendations
+                enhanced_recommendations.extend(trending_projects)
+            
+            # Apply diversity
+            enhanced_recommendations = self.apply_diversity(
+                enhanced_recommendations, 
+                n=n, 
+                diversity_weight=self.params.get('category_diversity_weight', 0.2) * 1.5  # Stronger diversity
+            )
         else:
-            enhanced_recommendations = base_recommendations
+            # Fallback to regular cold-start when no interests specified
+            enhanced_recommendations = self._get_cold_start_recommendations(dummy_user_id, n=n)
         
         # Konversi ke bentuk dictionary
         detailed_recommendations = []
@@ -999,77 +1403,149 @@ class HybridRecommender:
         return detailed_recommendations
     
     def get_trending_projects(self, n: int = 10) -> List[Dict[str, Any]]:
-        # Delegate to FECF
+        # Leverage FECF for trending recommendations
         if self.fecf_model is not None:
             return self.fecf_model.get_trending_projects(n)
         
         # Fallback if FECF not available
         if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
-            trending = self.projects_df.sort_values('trend_score', ascending=False).head(n)
+            trending = self.projects_df.sort_values('trend_score', ascending=False).head(n*2)
             
-            # Prepare result
-            result = []
-            for _, project in trending.iterrows():
-                project_dict = project.to_dict()
+            # Ensure category diversity
+            if 'primary_category' in trending.columns or 'categories_list' in trending.columns:
+                # Apply diversity directly
+                trend_tuples = [(row['id'], row['trend_score']/100) for _, row in trending.iterrows()]
+                diversified = self.apply_diversity(trend_tuples, n, diversity_weight=0.3)
                 
-                # Add recommendation score from trend score
-                project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0)) / 100
+                # Convert back to dictionaries
+                result = []
+                for item_id, score in diversified:
+                    project_data = self.projects_df[self.projects_df['id'] == item_id]
+                    if not project_data.empty:
+                        project_dict = project_data.iloc[0].to_dict()
+                        project_dict['recommendation_score'] = float(score)
+                        project_dict['trend_score'] = project_dict.get('trend_score', score * 100)
+                        result.append(project_dict)
                 
-                # Add to results
-                result.append(project_dict)
-                
-            return result
-        
-        # Last resort
-        return self.get_popular_projects(n)
+                return result[:n]
+            else:
+                # Just return top trending without diversity
+                result = []
+                for _, project in trending.head(n).iterrows():
+                    project_dict = project.to_dict()
+                    project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0)) / 100
+                    result.append(project_dict)
+                return result
+        else:
+            logger.warning("No trend score available, returning top projects by popularity")
+            return self.get_popular_projects(n)
     
     def get_popular_projects(self, n: int = 10) -> List[Dict[str, Any]]:
-        # Delegate to FECF
+        # Leverage FECF for popularity with cryptocurreny optimizations
         if self.fecf_model is not None:
             return self.fecf_model.get_popular_projects(n)
         
-        # Fallback if FECF not available
+        # Direct implementation with enhancements
         if hasattr(self, 'projects_df'):
-            if 'popularity_score' in self.projects_df.columns:
-                popular = self.projects_df.sort_values('popularity_score', ascending=False).head(n)
-            elif 'market_cap' in self.projects_df.columns:
-                # Use market cap as a proxy for popularity
-                popular = self.projects_df.sort_values('market_cap', ascending=False).head(n)
-            else:
-                # Random selection
-                popular = self.projects_df.sample(min(n, len(self.projects_df)))
+            # Combine multiple metrics for a more comprehensive popularity score
+            df = self.projects_df.copy()
             
-            # Prepare result
-            result = []
-            for _, project in popular.iterrows():
-                project_dict = project.to_dict()
+            if 'popularity_score' in df.columns and 'trend_score' in df.columns:
+                # Create balanced score with market cap influence
+                df['combined_score'] = df['popularity_score'] * 0.6
                 
-                # Add recommendation score
-                if 'popularity_score' in project_dict:
-                    project_dict['recommendation_score'] = float(project_dict['popularity_score']) / 100
-                elif 'market_cap' in project_dict:
-                    max_cap = self.projects_df['market_cap'].max()
-                    if max_cap > 0:
-                        project_dict['recommendation_score'] = float(project_dict['market_cap']) / max_cap
-                    else:
-                        project_dict['recommendation_score'] = 0.5
+                # Boost with trend score
+                df['combined_score'] += df['trend_score'] * 0.4
+                
+                # Market cap influence
+                if 'market_cap' in df.columns and df['market_cap'].max() > 0:
+                    # Add small boost for established projects
+                    df['market_cap_normalized'] = df['market_cap'] / df['market_cap'].max()
+                    df['combined_score'] += df['market_cap_normalized'] * 10
+                
+                # Sort by this comprehensive metric
+                popular = df.sort_values('combined_score', ascending=False).head(n*2)
+                
+                # Apply diversity to popular projects
+                popular_tuples = [(row['id'], row['combined_score']/100) for _, row in popular.iterrows()]
+                diversified = self.apply_diversity(popular_tuples, n, diversity_weight=0.25)
+                
+                # Convert back to dictionaries
+                result = []
+                for item_id, score in diversified:
+                    project_data = df[df['id'] == item_id]
+                    if not project_data.empty:
+                        project_dict = project_data.iloc[0].to_dict()
+                        project_dict['recommendation_score'] = float(score)
+                        result.append(project_dict)
+                
+                return result[:n]
+            elif 'popularity_score' in df.columns:
+                # Just use popularity score
+                popular = df.sort_values('popularity_score', ascending=False).head(n*2)
+                
+                # Apply diversity
+                popular_tuples = [(row['id'], row['popularity_score']/100) for _, row in popular.iterrows()]
+                diversified = self.apply_diversity(popular_tuples, n, diversity_weight=0.25)
+                
+                # Convert to dictionaries
+                result = []
+                for item_id, score in diversified:
+                    project_data = df[df['id'] == item_id]
+                    if not project_data.empty:
+                        project_dict = project_data.iloc[0].to_dict()
+                        project_dict['recommendation_score'] = float(score)
+                        result.append(project_dict)
+                
+                return result[:n]
+            elif 'market_cap' in df.columns:
+                # Use market cap as fallback
+                popular = df.sort_values('market_cap', ascending=False).head(n*2)
+                
+                # Apply diversity
+                if popular['market_cap'].max() > 0:
+                    popular_tuples = [(row['id'], row['market_cap']/popular['market_cap'].max() * 0.9) 
+                                   for _, row in popular.iterrows()]
                 else:
-                    project_dict['recommendation_score'] = 0.5
+                    popular_tuples = [(row['id'], 0.5) for _, row in popular.iterrows()]
                 
-                # Add to results
-                result.append(project_dict)
+                diversified = self.apply_diversity(popular_tuples, n, diversity_weight=0.25)
                 
-            return result
+                # Convert to dictionaries
+                result = []
+                for item_id, score in diversified:
+                    project_data = df[df['id'] == item_id]
+                    if not project_data.empty:
+                        project_dict = project_data.iloc[0].to_dict()
+                        project_dict['recommendation_score'] = float(score)
+                        result.append(project_dict)
+                
+                return result[:n]
+            else:
+                # Just return random selection with diversity
+                random_tuples = [(row['id'], 0.5) for _, row in df.sample(min(n*2, len(df))).iterrows()]
+                diversified = self.apply_diversity(random_tuples, n, diversity_weight=0.3)
+                
+                # Convert to dictionaries
+                result = []
+                for item_id, score in diversified:
+                    project_data = df[df['id'] == item_id]
+                    if not project_data.empty:
+                        project_dict = project_data.iloc[0].to_dict()
+                        project_dict['recommendation_score'] = float(score)
+                        result.append(project_dict)
+                
+                return result[:n]
         
         # Should never reach here
         return []
     
     def get_similar_projects(self, project_id: str, n: int = 10) -> List[Dict[str, Any]]:
-        # Delegate to FECF
+        # Delegate to FECF for similarity with cryptocurrency optimizations
         if self.fecf_model is not None:
             return self.fecf_model.get_similar_projects(project_id, n)
         
-        # Fallback using category similarity if FECF not available
+        # Custom implementation if FECF not available
         if hasattr(self, 'projects_df'):
             project_data = self.projects_df[self.projects_df['id'] == project_id]
             
@@ -1086,83 +1562,190 @@ class HybridRecommender:
                 # Get chain
                 chain = project.get('chain', 'unknown')
                 
-                # Filter by category and chain
-                if categories and chain != 'unknown':
-                    # Look for projects in same category AND chain first
-                    similar_by_both = self.projects_df[
-                        (self.projects_df['id'] != project_id) &
-                        (self.projects_df['chain'] == chain)
-                    ]
-                    
-                    if 'categories_list' in self.projects_df.columns:
-                        # Filter by category lists
-                        similar_by_both = similar_by_both[
-                            similar_by_both['categories_list'].apply(
-                                lambda x: any(cat in categories for cat in x)
-                            )
-                        ]
-                    elif 'primary_category' in self.projects_df.columns:
-                        # Filter by primary_category
-                        similar_by_both = similar_by_both[
-                            similar_by_both['primary_category'].apply(
-                                lambda x: x in categories if isinstance(x, str) else False
-                            )
-                        ]
-                    
-                    if len(similar_by_both) >= n:
-                        # Enough results, add similarity score and return
-                        result = []
-                        for _, similar in similar_by_both.head(n).iterrows():
-                            sim_dict = similar.to_dict()
-                            sim_dict['similarity_score'] = 0.85  # High similarity
-                            result.append(sim_dict)
-                        return result
+                # Get market cap tier
+                market_cap_tier = 'unknown'
+                if 'market_cap' in project:
+                    market_cap = project['market_cap']
+                    if market_cap > 1e9:
+                        market_cap_tier = 'high'
+                    elif market_cap > 1e8:
+                        market_cap_tier = 'medium'
+                    else:
+                        market_cap_tier = 'low'
                 
-                # If not enough by both, try just category
-                if categories:
-                    similar_by_category = self.projects_df[
-                        self.projects_df['id'] != project_id
-                    ]
-                    
-                    if 'categories_list' in self.projects_df.columns:
-                        similar_by_category = similar_by_category[
-                            similar_by_category['categories_list'].apply(
-                                lambda x: any(cat in categories for cat in x)
-                            )
-                        ]
-                    elif 'primary_category' in self.projects_df.columns:
-                        similar_by_category = similar_by_category[
-                            similar_by_category['primary_category'].apply(
-                                lambda x: x in categories if isinstance(x, str) else False
-                            )
-                        ]
-                    
-                    if len(similar_by_category) >= n:
-                        # Enough results, add similarity score and return
-                        result = []
-                        for _, similar in similar_by_category.head(n).iterrows():
-                            sim_dict = similar.to_dict()
-                            sim_dict['similarity_score'] = 0.75  # Medium similarity
-                            result.append(sim_dict)
-                        return result
+                # Calculate similarity scores for all projects
+                similarity_scores = []
                 
-                # If still not enough, try chain
-                if chain != 'unknown':
-                    similar_by_chain = self.projects_df[
-                        (self.projects_df['id'] != project_id) &
-                        (self.projects_df['chain'] == chain)
-                    ]
+                for _, other_project in self.projects_df.iterrows():
+                    if other_project['id'] == project_id:
+                        continue
                     
-                    if len(similar_by_chain) >= n:
-                        # Enough results, add similarity score and return
-                        result = []
-                        for _, similar in similar_by_chain.head(n).iterrows():
-                            sim_dict = similar.to_dict()
-                            sim_dict['similarity_score'] = 0.65  # Lower similarity
-                            result.append(sim_dict)
-                        return result
-            
-            # Last resort - just return popular projects
+                    # Calculate category similarity
+                    category_sim = 0.0
+                    other_categories = []
+                    
+                    if 'categories_list' in other_project:
+                        other_categories = other_project['categories_list']
+                    elif 'primary_category' in other_project:
+                        other_categories = self.process_categories(other_project['primary_category'])
+                    
+                    # Calculate category overlap
+                    if categories and other_categories:
+                        common_categories = set(categories) & set(other_categories)
+                        category_sim = len(common_categories) / max(len(categories), len(other_categories))
+                    
+                    # Chain similarity
+                    chain_sim = 0.0
+                    if 'chain' in other_project:
+                        other_chain = other_project['chain']
+                        chain_sim = 1.0 if chain == other_chain else 0.0
+                    
+                    # Market cap similarity
+                    market_cap_sim = 0.0
+                    if 'market_cap' in other_project:
+                        other_market_cap = other_project['market_cap']
+                        other_tier = 'unknown'
+                        if other_market_cap > 1e9:
+                            other_tier = 'high'
+                        elif other_market_cap > 1e8:
+                            other_tier = 'medium'
+                        else:
+                            other_tier = 'low'
+                            
+                        market_cap_sim = 1.0 if market_cap_tier == other_tier else 0.5 if (
+                            (market_cap_tier == 'high' and other_tier == 'medium') or
+                            (market_cap_tier == 'medium' and other_tier in ['high', 'low']) or
+                            (market_cap_tier == 'low' and other_tier == 'medium')) else 0.25
+                    
+                    # Combined similarity score with cryptocurrency-specific weights
+                    # Category is most important for crypto similarity
+                    combined_sim = (
+                        category_sim * 0.6 +
+                        chain_sim * 0.3 +
+                        market_cap_sim * 0.1
+                    )
+                    
+                    # Boost score if projects share multiple categories
+                    if isinstance(category_sim, float) and category_sim > 0.5:
+                        combined_sim *= 1.2
+                    
+                    # Add trend correlation if available
+                    if 'trend_score' in project and 'trend_score' in other_project:
+                        trend_diff = abs(project['trend_score'] - other_project['trend_score'])
+                        trend_sim = 1.0 - (trend_diff / 100.0) if project['trend_score'] <= 100 else 0.5
+                        combined_sim = combined_sim * 0.85 + trend_sim * 0.15
+                    
+                    # Store similarity with original and adjusted scores
+                    similarity_scores.append({
+                        'id': other_project['id'],
+                        'original_sim': combined_sim,
+                        'adjusted_sim': combined_sim,
+                        'categories': other_categories,
+                        'chain': other_project.get('chain', 'unknown')
+                    })
+                
+                # Apply diversity on top similar projects
+                # First sort by original similarity
+                similarity_scores.sort(key=lambda x: x['original_sim'], reverse=True)
+                top_similar = similarity_scores[:min(n*3, len(similarity_scores))]
+                
+                # Apply diversity adjustments
+                selected_categories = {}
+                selected_chains = {}
+                
+                # Define diversity limits
+                max_per_category = max(2, int(n * 0.35))  # Slightly higher for similar projects
+                max_per_chain = max(3, int(n * 0.4))
+                
+                # Process top candidates for diversity
+                result = []
+                for i, item in enumerate(top_similar):
+                    # Always include very top items
+                    if i < max(2, n // 4):
+                        # Update category and chain counters
+                        for category in item['categories']:
+                            selected_categories[category] = selected_categories.get(category, 0) + 1
+                        
+                        chain = item['chain']
+                        selected_chains[chain] = selected_chains.get(chain, 0) + 1
+                        
+                        # Add to result
+                        project_data = self.projects_df[self.projects_df['id'] == item['id']]
+                        if not project_data.empty:
+                            project_dict = project_data.iloc[0].to_dict()
+                            project_dict['similarity_score'] = float(item['original_sim'])
+                            project_dict['recommendation_score'] = float(item['original_sim'])
+                            result.append(project_dict)
+                    else:
+                        # Apply diversity considerations
+                        category_adjustment = 0
+                        chain_adjustment = 0
+                        
+                        # Category diversity check
+                        over_represented_category = False
+                        for category in item['categories']:
+                            cat_count = selected_categories.get(category, 0)
+                            if cat_count >= max_per_category:
+                                over_represented_category = True
+                                break
+                        
+                        if over_represented_category:
+                            category_adjustment = -0.2
+                        else:
+                            # Check if this adds a new category
+                            new_category = False
+                            for category in item['categories']:
+                                if category not in selected_categories:
+                                    new_category = True
+                                    break
+                            
+                            if new_category:
+                                category_adjustment = 0.15
+                        
+                        # Chain diversity check
+                        chain = item['chain']
+                        chain_count = selected_chains.get(chain, 0)
+                        
+                        if chain_count >= max_per_chain:
+                            chain_adjustment = -0.15
+                        elif chain_count == 0:
+                            chain_adjustment = 0.1
+                        
+                        # Apply adjustments
+                        diversity_weight = 0.3  # Moderate diversity for similar projects
+                        diversity_adjusted_sim = item['original_sim'] + (category_adjustment + chain_adjustment) * diversity_weight
+                        
+                        item['adjusted_sim'] = max(0.01, diversity_adjusted_sim)
+                
+                # Re-sort by adjusted scores
+                top_similar.sort(key=lambda x: x['adjusted_sim'], reverse=True)
+                
+                # Select top projects
+                selected_ids = [p['id'] for p in result]
+                for item in top_similar:
+                    if len(result) >= n:
+                        break
+                    
+                    if item['id'] not in selected_ids:
+                        project_data = self.projects_df[self.projects_df['id'] == item['id']]
+                        if not project_data.empty:
+                            project_dict = project_data.iloc[0].to_dict()
+                            project_dict['similarity_score'] = float(item['adjusted_sim'])
+                            project_dict['recommendation_score'] = float(item['adjusted_sim'])
+                            result.append(project_dict)
+                            
+                            # Update tracking
+                            selected_ids.append(item['id'])
+                            for category in item['categories']:
+                                selected_categories[category] = selected_categories.get(category, 0) + 1
+                            
+                            chain = item['chain']
+                            selected_chains[chain] = selected_chains.get(chain, 0) + 1
+                
+                return result
+                    
+            # If project not found, fall back to popular projects
+            logger.warning(f"Project {project_id} not found, returning popular projects")
             return self.get_popular_projects(n)
         
         # Should never reach here

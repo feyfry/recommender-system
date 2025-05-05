@@ -41,47 +41,49 @@ CATEGORIES = [
 ]
 
 # Parameter model rekomendasi
-# Neural Collaborative Filtering - NORMAL TUNING
+# Neural Collaborative Filtering - FINE-TUNED SETTINGS
 NCF_PARAMS = {
-    "embedding_dim": 32,            # Kurangi dimensi embedding
-    "layers": [64, 32, 16],         # Arsitektur lebih sederhana
-    "learning_rate": 0.0005,        # Learning rate lebih kecil
-    "batch_size": 256,              # Batch size lebih besar untuk stabilitas
-    "epochs": 20,                   # Epoch cukup
-    "val_ratio": 0.15,              # Porsi validasi lebih kecil
-    "dropout": 0.4,                 # Dropout lebih agresif
-    "weight_decay": 8e-4,           # Regularisasi lebih kuat
-    "patience": 5,                  # Patience lebih pendek
-    "negative_ratio": 4             # Negative samples lebih sedikit
+    "embedding_dim": 64,            # Ditingkatkan dari 32
+    "layers": [128, 64, 32],        # Arsitektur lebih dalam dan lebih lebar
+    "learning_rate": 0.0003,        # Learning rate optimal
+    "batch_size": 256,              # Batch size tetap
+    "epochs": 30,                   # Lebih banyak epoch
+    "val_ratio": 0.15,              # Porsi validasi tetap
+    "dropout": 0.3,                 # Dropout dikurangi sedikit
+    "weight_decay": 5e-4,           # Regularisasi sedikit dikurangi
+    "patience": 7,                  # Patience ditingkatkan
+    "negative_ratio": 5             # Lebih banyak negative samples
 }
 
-# Feature-Enhanced CF - MODERATE TUNING
+# Feature-Enhanced CF - OPTIMIZED SETTINGS
 FECF_PARAMS = {
-    "no_components": 48,            # Jumlah komponen lebih sedikit (sekitar 10% jumlah item)
-    "content_alpha": 0.65            # Keseimbangan antara collaborative dan content features
+    "no_components": 64,            # Ditingkatkan dari 48
+    "content_alpha": 0.55            # Lebih banyak bobot untuk collaborative filtering
 }
 
-# Hybrid Model - MODERATE TUNING
+# Hybrid Model - OPTIMIZED WEIGHTS AND SETTINGS
 HYBRID_PARAMS = {
-    "ncf_weight": 0.3,              # Kurangi bobot NCF karena underperform
-    "fecf_weight": 0.7,             # Tingkatkan bobot FECF
-    "interaction_threshold_low": 3,  # Turunkan threshold cold start
-    "interaction_threshold_high": 10, # Turunkan high threshold
-    "diversity_factor": 0.2,         # Kurangi faktor diversitas yang terlalu agresif
-    "cold_start_fecf_weight": 0.9,   # Lebih dominan FECF untuk cold start
-    "explore_ratio": 0.15,           # Kurangi eksplorasi
-    "normalization": "sigmoid",      # Metode normalisasi ("linear", "sigmoid", "rank", "none")
-    "ensemble_method": "weighted_avg", # Metode ensemble ("weighted_avg", "max", "rank_fusion")
-    "n_candidates_factor": 3,        # Faktor jumlah kandidat vs. hasil akhir
-    "category_diversity_weight": 0.15, # Bobot diversitas kategori
+    "ncf_weight": 0.2,              # Kurangi bobot NCF karena underperform
+    "fecf_weight": 0.8,             # Tingkatkan bobot FECF
+    "interaction_threshold_low": 5,  # Sesuaikan dengan minimal interaksi
+    "interaction_threshold_high": 15, # Tingkatkan threshold interaksi tinggi
+    "diversity_factor": 0.25,        # Tingkatkan sedikit faktor diversitas
+    "cold_start_fecf_weight": 0.95,  # Hampir sepenuhnya FECF untuk cold start
+    "explore_ratio": 0.2,            # Tingkatkan eksplorasi
+    "normalization": "sigmoid",      # Tetap gunakan sigmoid normalization
+    "ensemble_method": "adaptive",   # Metode ensemble baru: adaptive
+    "n_candidates_factor": 4,        # Lebih banyak kandidat vs. hasil akhir
+    "category_diversity_weight": 0.2, # Tingkatkan bobot diversitas kategori
+    "trending_boost_factor": 0.3,    # Faktor boost untuk trending items
+    "confidence_threshold": 0.65,    # Threshold kepercayaan untuk NCF
 }
 
-# Category Configuration - EXTREME TUNING
+# Category Configuration - ENHANCED SETTINGS
 CATEGORY_CONFIG = {
-    "max_per_category": 0.15,       # Even stricter category limits
+    "max_per_category": 0.2,        # Sedikit tingkatkan batas kategori
     "prioritize_diverse": True,
-    "boost_underrepresented": 0.5,  # Stronger boost
-    "penalty_overrepresented": -0.8 # Much stronger penalty
+    "boost_underrepresented": 0.6,  # Tingkatkan boost kategori langka
+    "penalty_overrepresented": -0.7 # Penalti kuat untuk kategori over-represented
 }
 
 # Keputusan investasi
@@ -94,7 +96,7 @@ EVAL_K_VALUES = [5, 10, 20]
 EVAL_TEST_RATIO = 0.2
 EVAL_RANDOM_SEED = 42
 
-# Persona pengguna yang lebih beragam untuk sintetis data
+# Persona pengguna
 USER_PERSONAS = {
     "defi_enthusiast": {
         "categories": ["defi", "layer-1", "stablecoin", "liquid-staking"],
@@ -130,11 +132,11 @@ USER_PERSONAS = {
     }
 }
 
-# Interaction Diversity - EXTREME TUNING
+# Interaction Diversity - OPTIMIZED SETTINGS
 INTERACTION_DIVERSITY = {
     "enable_exploration": True,
-    "exploration_rate": 0.45,       # Much higher exploration
-    "novelty_bias": 0.6,           # Strong novelty preference
+    "exploration_rate": 0.35,       # Terkalibrasi dari 0.45
+    "novelty_bias": 0.5,           # Juga terkalibrasi dari 0.6
     "temporal_variance": True,
     "negative_feedback": True
 }
@@ -144,20 +146,20 @@ API_HOST = "0.0.0.0"
 API_PORT = 8001
 API_CACHE_TTL = 300  # 5 menit dalam detik
 
-# Cold Start Evaluation - EXTREME TUNING
+# Cold Start Evaluation - FIXED SETTINGS
 COLD_START_EVAL_CONFIG = {
-    "cold_start_users": 100,         # More test users
-    "max_popular_items_exclude": 0.1, # Exclude more popular items
-    "test_ratio": 0.4,               # Larger test set
-    "min_interactions_required": 3,   # Lower requirement
+    "cold_start_users": 100,         # Jumlah test users tetap
+    "max_popular_items_exclude": 0.05, # Hanya exclude 5% item populer
+    "test_ratio": 0.3,               # Test set yang lebih reasonable
+    "min_interactions_required": 5,   # Sesuaikan dengan minimal interaksi
     "category_diversity_enabled": True,
 }
 
-# Domain-specific weights - EXTREME TUNING
+# Domain-specific weights - OPTIMIZED FOR CRYPTO
 CRYPTO_DOMAIN_WEIGHTS = {
-    "trend_importance": 0.85,       # Much stronger trend following
-    "popularity_decay": 0.15,        # Faster popularity decay
-    "category_correlation": 0.7,    # Stronger category influence
-    "market_cap_influence": 0.5,    # More weight on market cap
-    "chain_importance": 0.5,        # Stronger chain preference
+    "trend_importance": 0.75,       # Terkalibrasi sedikit dari 0.85
+    "popularity_decay": 0.1,         # Lebih lambat popularity decay
+    "category_correlation": 0.65,    # Sedikit lebih rendah
+    "market_cap_influence": 0.55,    # Tingkatkan sedikit bobot market cap
+    "chain_importance": 0.45,        # Sedikit lebih rendah
 }
