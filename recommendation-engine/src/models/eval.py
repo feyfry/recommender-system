@@ -512,9 +512,10 @@ def evaluate_all_models(models: Dict[str, Any],
                        use_parallel: bool = True,
                        num_workers: int = 4,
                        eval_cold_start: bool = True,
-                       cold_start_runs: int = 5) -> Dict[str, Dict[str, Any]]:
+                       cold_start_runs: int = 5,
+                       regular_runs: int = 1) -> Dict[str, Dict[str, Any]]:
     """
-    Perbaikan untuk mengevaluasi semua model dengan konsistensi dan efisiensi yang lebih baik
+    Perbaikan untuk mengevaluasi semua model dengan multiple runs untuk hasil yang lebih robust
     """
     # Main evaluation start time
     evaluation_start_time = time.perf_counter()
@@ -559,63 +560,105 @@ def evaluate_all_models(models: Dict[str, Any],
                     logger.info(f"Loading {model_name} from {model_path}")
                     model.load_model(model_path)
     
-    # Regular evaluation with specified seed for consistent results
-    num_runs = 1  # Single run for regular models to avoid fluctuations
+    # Regular evaluation with multiple runs for more robust results
+    # IMPROVED: Use multiple runs like cold-start for regular models too
+    num_runs = max(1, regular_runs)  # Default to at least 1 run
+    logger.info(f"Performing {num_runs} evaluation runs for regular models")
+    
     all_results = {model_name: [] for model_name in models.keys()}
     
-    # Only one run for regular evaluation
-    logger.info("Starting main evaluation")
-    
-    # Evaluate each model
-    for model_name, model in models.items():
-        if hasattr(model, 'model') and model.model is None:
-            logger.error(f"Model {model_name} could not be loaded for evaluation")
-            all_results[model_name].append({
-                "precision": 0.0,
-                "recall": 0.0,
-                "ndcg": 0.0,
-                "hit_ratio": 0.0,
-                "error": "model_not_loaded"
-            })
-            continue
+    # Run multiple evaluations for each model with different seeds
+    for run in range(num_runs):
+        run_seed = EVAL_RANDOM_SEED + run * 997  # Use different seeds for each run
+        logger.info(f"Starting evaluation run {run+1}/{num_runs} with seed {run_seed}")
+        
+        # Evaluate each model
+        for model_name, model in models.items():
+            if hasattr(model, 'model') and model.model is None:
+                logger.error(f"Model {model_name} could not be loaded for evaluation run {run+1}")
+                all_results[model_name].append({
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "ndcg": 0.0,
+                    "hit_ratio": 0.0,
+                    "error": "model_not_loaded"
+                })
+                continue
+                    
+            # Add a better timeout
+            try:
+                # Set run-specific seed for reproducible but different evaluations
+                np.random.seed(run_seed)
+                random.seed(run_seed)
                 
-        # Add a better timeout
-        try:
-            model_results = evaluate_model(
-                model_name=model_name,
-                recommender=model,
-                test_users=test_users,
-                test_interactions=test_interactions,
-                k_values=k_values,
-                max_users_per_batch=max_users_per_batch,
-                use_parallel=use_parallel,
-                num_workers=num_workers
-            )
-            
-            all_results[model_name].append(model_results)
-            
-        except Exception as e:
-            logger.error(f"Error evaluating model {model_name}: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            
-            all_results[model_name].append({
-                "error": str(e),
-                "model": model_name,
-                "evaluation_time": 0.0
-            })
+                model_results = evaluate_model(
+                    model_name=f"{model_name}_run{run+1}",
+                    recommender=model,
+                    test_users=test_users,
+                    test_interactions=test_interactions,
+                    k_values=k_values,
+                    max_users_per_batch=max_users_per_batch,
+                    use_parallel=use_parallel,
+                    num_workers=num_workers
+                )
+                
+                all_results[model_name].append(model_results)
+                
+            except Exception as e:
+                logger.error(f"Error evaluating model {model_name} in run {run+1}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                
+                all_results[model_name].append({
+                    "error": str(e),
+                    "model": model_name,
+                    "evaluation_time": 0.0
+                })
     
-    # Format results for single run
+    # Format results for multiple runs - compute mean and std
     aggregated_results = {}
     
     for model_name, run_results in all_results.items():
         if not run_results:
             continue
             
-        # Just use the single run results directly
-        aggregated_results[model_name] = run_results[0]
-        # Add num_runs field for consistency
-        aggregated_results[model_name]['num_runs'] = 1
+        # Filter out runs with errors
+        valid_runs = [r for r in run_results if "error" not in r]
+        num_valid_runs = len(valid_runs)
+            
+        if num_valid_runs == 0:
+            # All runs failed, use first run result
+            aggregated_results[model_name] = run_results[0]
+            continue
+            
+        # Create base result from first valid run
+        aggregated_result = valid_runs[0].copy()
+        aggregated_result['num_runs'] = num_valid_runs
+            
+        # Get list of metrics first before modifying dictionary
+        metrics_to_process = [metric for metric in list(aggregated_result.keys()) 
+                            if isinstance(aggregated_result[metric], (int, float)) and 
+                            metric not in ['num_runs', 'evaluation_time', 'model']]
+
+        # Now process each metric separately
+        for metric in metrics_to_process:
+            # Collect values across all runs
+            values = [r.get(metric, 0) for r in valid_runs]
+            
+            # Calculate mean and std
+            mean_value = np.mean(values)
+            std_value = np.std(values)
+            
+            # Store mean and std
+            aggregated_result[metric] = mean_value
+            aggregated_result[f'{metric}_std'] = std_value
+            
+        # Sum evaluation times
+        total_time = sum(r.get('evaluation_time', 0) for r in valid_runs)
+        aggregated_result['evaluation_time'] = total_time
+            
+        # Store aggregated result
+        aggregated_results[model_name] = aggregated_result
 
     # Evaluate cold-start if requested
     if eval_cold_start:
@@ -649,7 +692,8 @@ def evaluate_all_models(models: Dict[str, Any],
         'test_ratio': test_ratio,
         'min_interactions': min_interactions,
         'random_seed': EVAL_RANDOM_SEED,
-        'cold_start_runs': cold_start_runs if eval_cold_start else 0
+        'cold_start_runs': cold_start_runs if eval_cold_start else 0,
+        'regular_runs': regular_runs
     }
     
     # Save results if requested
@@ -657,7 +701,6 @@ def evaluate_all_models(models: Dict[str, Any],
         save_evaluation_results(aggregated_results)
     
     return aggregated_results
-
 
 def evaluate_cold_start(model: Any,
                        model_name: str,

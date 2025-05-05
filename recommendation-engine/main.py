@@ -520,6 +520,7 @@ def evaluate_models(args):
         output_format = getattr(args, 'format', 'markdown')
         cold_start_runs = getattr(args, 'cold_start_runs', 5)
         max_test_users = getattr(args, 'max_test_users', 100)
+        regular_runs = getattr(args, 'regular_runs', 1)
         
         # Get main user-item matrix
         user_item_matrix = fecf.user_item_matrix if 'fecf' in models else ncf.user_item_matrix
@@ -537,7 +538,8 @@ def evaluate_models(args):
             save_results=True,
             eval_cold_start=eval_cold_start,
             cold_start_runs=cold_start_runs,
-            max_test_users=max_test_users
+            max_test_users=max_test_users,
+            regular_runs=regular_runs
         )
         
         # Generate and save report
@@ -570,8 +572,8 @@ def evaluate_models(args):
             ndcg = model_results.get('ndcg', 0)
             
             print(f"{model_name}: Precision={precision:.4f}, "
-                 f"Recall={recall:.4f}, "
-                 f"NDCG={ndcg:.4f}")
+                    f"Recall={recall:.4f}, "
+                    f"NDCG={ndcg:.4f}")
         
         return True
         
@@ -618,7 +620,7 @@ def recommend(args):
         if model_type == 'fecf':
             # Cari file FECF model terbaru
             fecf_files = [f for f in os.listdir(MODELS_DIR) 
-                          if f.startswith("fecf_model_") and f.endswith(".pkl")]
+                        if f.startswith("fecf_model_") and f.endswith(".pkl")]
             if fecf_files:
                 latest_model = sorted(fecf_files)[-1]
                 model_path = os.path.join(MODELS_DIR, latest_model)
@@ -1546,6 +1548,7 @@ Examples:
     evaluate_parser.add_argument("--min-interactions", type=int, default=5, help="Minimum interactions for test users")
     evaluate_parser.add_argument("--cold-start", action="store_true", help="Evaluate cold-start scenarios")
     evaluate_parser.add_argument("--cold-start-runs", type=int, default=5, help="Number of runs for cold-start evaluation (default: 5)")
+    evaluate_parser.add_argument("--regular-runs", type=int, default=1, help="Number of runs for regular model evaluation (default: 1)")
     evaluate_parser.add_argument("--format", choices=["text", "markdown", "html", "json"], default="markdown", help="Output format")  
     evaluate_parser.add_argument("--debug", action="store_true", help="Enable detailed debug logging")
     evaluate_parser.add_argument("--max-test-users", type=int, default=100, help="Maximum number of test users to evaluate")
