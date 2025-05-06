@@ -315,7 +315,7 @@
                                     </div>
                                 </div>
                                 <div class="clay-badge clay-badge-primary py-0.5 px-1 text-xs">
-                                    {{ number_format($recommendation['score'] ?? 0, 2) }}
+                                    {{ number_format($recommendation['recommendation_score'] ?? 0, 2) }}
                                 </div>
                             </div>
                             @if(isset($recommendation['current_price']))
