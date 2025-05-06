@@ -468,7 +468,6 @@
                         <button type="submit"
                                 class="clay-button clay-button-primary py-1.5 px-3 text-sm import-button"
                                 {{ !$projectsCsvExists ? 'disabled' : '' }}>
-                            <i class="fas fa-spinner fa-spin mr-2 hidden"></i>
                             Import Proyek
                         </button>
                     </form>
@@ -493,7 +492,6 @@
                         <button type="submit"
                                 class="clay-button clay-button-warning py-1.5 px-3 text-sm import-button"
                                 {{ !$interactionsCsvExists ? 'disabled' : '' }}>
-                            <i class="fas fa-spinner fa-spin mr-2 hidden"></i>
                             Import Interaksi
                         </button>
                     </form>
@@ -516,7 +514,6 @@
                         @csrf
                         <input type="hidden" name="command" value="recommend:sync --full">
                         <button type="submit" class="clay-button clay-button-info py-1.5 px-3 text-sm import-button">
-                            <i class="fas fa-spinner fa-spin mr-2 hidden"></i>
                             Export Semua Data
                         </button>
                     </form>
@@ -742,14 +739,14 @@
         forms.forEach(form => {
             form.addEventListener('submit', function(e) {
                 const submitButton = form.querySelector('button[type="submit"]');
-                const spinner = submitButton.querySelector('.fa-spinner');
 
                 if (submitButton && !submitButton.disabled) {
+                    // Disable button
                     submitButton.disabled = true;
-                    if (spinner) {
-                        spinner.classList.remove('hidden');
-                    }
-                    submitButton.textContent = ' Memproses...';
+
+                    // Simpan teks original dan tambahkan spinner + teks loading
+                    const originalHTML = submitButton.innerHTML;
+                    submitButton.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Memproses...';
                 }
             });
         });
