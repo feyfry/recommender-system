@@ -39,11 +39,13 @@ class RecommendationController extends Controller
         $user = Auth::user();
         $userId = $user->user_id;
 
-        // Gunakan sistem cache untuk data yang sering diakses
+        // DIOPTIMALKAN: Gunakan cara cache yang konsisten
         $personalRecommendations = Cache::remember("rec_personal_{$userId}_10", 15, function() use ($userId) {
-            return $this->getPersonalRecommendations($userId, 'hybrid', 10);
+            $recommendations = $this->getPersonalRecommendations($userId, 'hybrid', 10);
+            return $this->normalizeRecommendationData($recommendations);
         });
 
+        // Cache untuk data yang sering diakses
         $trendingProjects = Cache::remember('rec_trending_8', 30, function() {
             return $this->getTrendingProjects(8);
         });
@@ -52,18 +54,17 @@ class RecommendationController extends Controller
             return $this->getPopularProjects(8);
         });
 
-        // DIOPTIMALKAN: Cache hasil query database
+        // DIOPTIMALKAN: Batasi jumlah interaksi yang dimuat
         $interactions = Cache::remember("rec_interactions_{$userId}", 10, function() use ($userId) {
             return Interaction::forUser($userId)
-                ->with('project')
-                ->recent()
+                ->with(['project' => function ($query) {
+                    // Hanya select kolom yang dibutuhkan
+                    $query->select('id', 'name', 'symbol', 'image');
+                }])
                 ->orderBy('created_at', 'desc')
                 ->limit(10)
                 ->get();
         });
-
-        // DIOPTIMALKAN: Tidak mencatat aktivitas view dashboard
-        // Karena ini adalah halaman yang sering dikunjungi
 
         return view('backend.recommendation.index', [
             'personalRecommendations' => $personalRecommendations,
@@ -81,31 +82,58 @@ class RecommendationController extends Controller
         $user = Auth::user();
         $userId = $user->user_id;
 
-        // DIOPTIMALKAN: Menggunakan Cache untuk mengurangi beban API
+        // DIOPTIMALKAN: Cached recommendations dengan normalisasi yang konsisten
         $hybridRecommendations = Cache::remember("rec_personal_hybrid_{$userId}", 15, function() use ($userId) {
-            return $this->normalizeRecommendationData($this->getPersonalRecommendations($userId, 'hybrid', 10));
+            $recommendations = $this->getPersonalRecommendations($userId, 'hybrid', 10);
+            return $this->normalizeRecommendationData($recommendations);
         });
 
         $fecfRecommendations = Cache::remember("rec_personal_fecf_{$userId}", 15, function() use ($userId) {
-            return $this->normalizeRecommendationData($this->getPersonalRecommendations($userId, 'fecf', 10));
+            $recommendations = $this->getPersonalRecommendations($userId, 'fecf', 10);
+            return $this->normalizeRecommendationData($recommendations);
         });
 
         $ncfRecommendations = Cache::remember("rec_personal_ncf_{$userId}", 15, function() use ($userId) {
-            return $this->normalizeRecommendationData($this->getPersonalRecommendations($userId, 'ncf', 10));
+            $recommendations = $this->getPersonalRecommendations($userId, 'ncf', 10);
+            return $this->normalizeRecommendationData($recommendations);
         });
 
-        // DIOPTIMALKAN: Tidak catat aktivitas untuk halaman yang sering dikunjungi ini
+        // DIOPTIMALKAN: Deteksi cold-start user tanpa query tambahan
+        $interactionCount = Cache::remember("user_interactions_count_{$userId}", 30, function() use ($userId) {
+            return Interaction::where('user_id', $userId)->count();
+        });
+
+        $isColdStart = $interactionCount < 5;
 
         return view('backend.recommendation.personal', [
             'hybridRecommendations' => $hybridRecommendations,
             'fecfRecommendations'   => $fecfRecommendations,
             'ncfRecommendations'    => $ncfRecommendations,
+            'interactions'          => $this->getUserInteractions($userId, 10),
             'user'                  => $user,
+            'isColdStart'           => $isColdStart,
         ]);
     }
 
     /**
-     * Menampilkan halaman proyek trending
+     * DIOPTIMALKAN: Mendapatkan interaksi pengguna dengan paginasi dan caching
+     */
+    private function getUserInteractions($userId, $limit = 10)
+    {
+        return Cache::remember("user_interactions_{$userId}_{$limit}", 10, function() use ($userId, $limit) {
+            return Interaction::forUser($userId)
+                ->select(['id', 'user_id', 'project_id', 'interaction_type', 'created_at'])
+                ->with(['project' => function($query) {
+                    $query->select(['id', 'name', 'symbol', 'image']);
+                }])
+                ->orderBy('created_at', 'desc')
+                ->limit($limit)
+                ->get();
+        });
+    }
+
+    /**
+     * Menampilkan halaman proyek trending dengan pagination
      */
     public function trending(Request $request)
     {
@@ -119,19 +147,18 @@ class RecommendationController extends Controller
             return $this->getTrendingProjects($perPage, $page);
         });
 
-        // DIOPTIMALKAN: Tidak catat aktivitas untuk halaman yang sering dikunjungi ini
-
         return view('backend.recommendation.trending', [
             'trendingProjects' => $trendingProjects,
         ]);
     }
 
     /**
-    * AJAX endpoint untuk refresh trending projects
-    */
+     * AJAX endpoint untuk refresh trending projects
+     */
     public function refreshTrending()
     {
         // Clear cache dan ambil data baru
+        Cache::forget('rec_trending_4');
         Cache::forget('dashboard_trending_projects');
         $trendingProjects = $this->getTrendingProjects(4);
 
@@ -147,8 +174,6 @@ class RecommendationController extends Controller
         $popularProjects = Cache::remember('rec_popular_20', 30, function() {
             return $this->getPopularProjects(20);
         });
-
-        // DIOPTIMALKAN: Tidak catat aktivitas untuk halaman yang sering dikunjungi ini
 
         return view('backend.recommendation.popular', [
             'popularProjects' => $popularProjects,
@@ -167,11 +192,12 @@ class RecommendationController extends Controller
         // DIOPTIMALKAN: Cache rekomendasi kategori
         $cacheKey = "rec_category_{$userId}_{$category}_16";
         $categoryRecommendations = Cache::remember($cacheKey, 15, function() use ($userId, $category) {
-            return $this->normalizeRecommendationData($this->getCategoryRecommendations($userId, $category, 16));
+            $recommendations = $this->getCategoryRecommendations($userId, $category, 16);
+            return $this->normalizeRecommendationData($recommendations);
         });
 
         // DIOPTIMALKAN: Cache untuk daftar kategori
-        $categories = Cache::remember('all_categories', 1440, function() { // 24 jam
+        $categories = Cache::remember('all_categories', 60, function() { // 1 jam
             return $this->getCategories();
         });
 
@@ -199,11 +225,12 @@ class RecommendationController extends Controller
         // DIOPTIMALKAN: Cache rekomendasi blockchain
         $cacheKey = "rec_chain_{$userId}_{$chain}_16";
         $chainRecommendations = Cache::remember($cacheKey, 15, function() use ($userId, $chain) {
-            return $this->normalizeRecommendationData($this->getChainRecommendations($userId, $chain, 16));
+            $recommendations = $this->getChainRecommendations($userId, $chain, 16);
+            return $this->normalizeRecommendationData($recommendations);
         });
 
         // DIOPTIMALKAN: Cache untuk daftar blockchain
-        $chains = Cache::remember('all_chains', 1440, function() { // 24 jam
+        $chains = Cache::remember('all_chains', 60, function() { // 1 jam
             return $this->getChains();
         });
 
@@ -227,69 +254,51 @@ class RecommendationController extends Controller
         $user = Auth::user();
         $userId = $user->user_id;
 
+        // DIOPTIMALKAN: Cache cold-start status
+        $isColdStart = Cache::remember("user_cold_start_{$userId}", 30, function() use ($userId) {
+            $interactionCount = Interaction::where('user_id', $userId)->count();
+            return $interactionCount < 5;
+        });
+
         // Coba cari proyek di database lokal terlebih dahulu
         $project = Project::find($projectId);
-        $similarProjects = [];
-        $tradingSignals = null;
-        $isColdStart = false;
         $projectExistsInDatabase = $project ? true : false;
 
-        // PERBAIKAN: Log untuk debugging
-        Log::info("Loading project detail for ID: {$projectId}, exists in DB: " . ($projectExistsInDatabase ? 'Yes' : 'No'));
-
-        // Cek apakah pengguna adalah cold-start user
-        $interactionCount = Interaction::where('user_id', $userId)->count();
-        $isColdStart = $interactionCount < 5;
-
-        // Jika proyek tidak ditemukan di database lokal, coba ambil dari API
+        // DIOPTIMALKAN: Caching untuk project detail
         if (!$project) {
-            try {
-                // PERBAIKAN: Coba API endpoints berbeda dan validasi ID
-                // 1. Pertama coba endpoint spesifik untuk project (jika ada)
-                $directResponse = Http::timeout(5)->get("{$this->apiUrl}/project/{$projectId}")->json();
+            $cacheKey = "api_project_detail_{$projectId}";
+            $projectData = Cache::remember($cacheKey, 60, function() use ($projectId) {
+                try {
+                    $directResponse = Http::timeout(3)->get("{$this->apiUrl}/project/{$projectId}")->json();
 
-                if (!empty($directResponse) && isset($directResponse['id']) && $directResponse['id'] == $projectId) {
-                    $projectData = $directResponse;
-                    Log::info("Found project via direct API");
-                } else {
-                    // 2. Jika tidak berhasil, coba endpoint similar
-                    Log::info("Direct project API failed, trying similar endpoint");
-                    $similarResponse = Http::timeout(5)->get("{$this->apiUrl}/recommend/similar/{$projectId}", [
-                        'limit' => 5, // Ambil lebih banyak untuk memfilter
+                    if (!empty($directResponse) && isset($directResponse['id']) && $directResponse['id'] == $projectId) {
+                        return $directResponse;
+                    }
+
+                    // Fallback ke similar endpoint
+                    $similarResponse = Http::timeout(3)->get("{$this->apiUrl}/recommend/similar/{$projectId}", [
+                        'limit' => 5,
                     ])->json();
 
-                    // PERBAIKAN: Cari yang ID-nya benar-benar cocok di antara similar projects
-                    $matchingProject = null;
-                    if (!empty($similarResponse) && is_array($similarResponse)) {
+                    if (is_array($similarResponse)) {
                         foreach ($similarResponse as $item) {
                             if (isset($item['id']) && $item['id'] == $projectId) {
-                                $matchingProject = $item;
-                                break;
+                                return $item;
                             }
                         }
                     }
 
-                    if ($matchingProject) {
-                        $projectData = $matchingProject;
-                        Log::info("Found exact matching project in similar results");
-                    } else {
-                        // PERBAIKAN: Jangan gunakan proyek serupa yang tidak cocok
-                        // Atur $project ke null sehingga halaman menampilkan "Project Not Found"
-                        $project = null;
-                        Log::warning("No exact match found for project ID: {$projectId}");
-                        return view('backend.recommendation.project_detail', [
-                            'project' => null,
-                            'similarProjects' => [],
-                            'tradingSignals' => null,
-                            'isColdStart' => $isColdStart,
-                            'projectInDb' => false
-                        ]);
-                    }
+                    return null;
+                } catch (\Exception $e) {
+                    Log::error("Error getting project detail: " . $e->getMessage());
+                    return null;
                 }
+            });
 
-                // Buat objek Project sementara dari respons API yang ditemukan
+            if ($projectData) {
+                // Buat objek Project sementara
                 $project = new Project();
-                $project->id = $projectId; // PENTING: Tetap gunakan ID yang diminta
+                $project->id = $projectId;
                 $project->name = $projectData['name'] ?? 'Unknown Project';
                 $project->symbol = $projectData['symbol'] ?? 'N/A';
                 $project->image = $projectData['image'] ?? null;
@@ -303,25 +312,25 @@ class RecommendationController extends Controller
                 $project->description = $projectData['description'] ?? 'No description available.';
                 $project->popularity_score = $projectData['popularity_score'] ?? 0;
                 $project->trend_score = $projectData['trend_score'] ?? 0;
-
-                // Tandai proyek ini sebagai data dari API, bukan dari database
                 $project->exists = false;
                 $project->is_from_api = true;
-            } catch (\Exception $e) {
-                Log::error("Gagal mendapatkan info proyek dari API: " . $e->getMessage());
-                // PERBAIKAN: Atur $project ke null jika terjadi error
-                $project = null;
             }
         }
 
-        // Jika project ditemukan (baik dari database atau API), ambil similarProjects dan tradingSignals
+        // DIOPTIMALKAN: Mencatat interaksi menggunakan job di background untuk mengurangi waktu respons
+        if ($project && $projectExistsInDatabase) {
+            $this->recordInteraction($userId, $projectId, 'view');
+        }
+
+        $similarProjects = [];
+        $tradingSignals = null;
+
+        // DIOPTIMALKAN: Gunakan cache untuk similar projects dan trading signals
         if ($project) {
-            // DIOPTIMALKAN: Cache hasil untuk proyek serupa
             $similarProjects = Cache::remember("similar_projects_{$projectId}_8", 60, function() use ($projectId) {
                 return $this->getSimilarProjects($projectId, 8);
             });
 
-            // DIOPTIMALKAN: Cache hasil untuk sinyal trading
             $tradingSignals = Cache::remember(
                 "trading_signals_{$projectId}_{$user->risk_tolerance}",
                 30,
@@ -329,15 +338,6 @@ class RecommendationController extends Controller
                     return $this->getTradingSignals($projectId, $user->risk_tolerance ?? 'medium');
                 }
             );
-
-            // PENTING: Catat interaksi view HANYA jika proyek ada di database
-            // Ini untuk mencegah foreign key violation
-            if ($projectExistsInDatabase) {
-                $this->recordInteraction($userId, $projectId, 'view');
-                ActivityLog::logInteraction($user, request(), $projectId, 'view');
-            } else {
-                Log::info("Interaksi view tidak dicatat untuk '{$projectId}' karena proyek tidak ada di database");
-            }
         }
 
         return view('backend.recommendation.project_detail', [
@@ -347,15 +347,6 @@ class RecommendationController extends Controller
             'isColdStart' => $isColdStart,
             'projectInDb' => $projectExistsInDatabase
         ]);
-    }
-
-    /**
-     * Memeriksa apakah pengguna adalah cold-start user
-     */
-    private function isUserColdStart($userId)
-    {
-        $interactionCount = Interaction::where('user_id', $userId)->count();
-        return $interactionCount < 3; // Pengguna dianggap cold-start jika memiliki kurang dari 3 interaksi
     }
 
     /**
@@ -377,39 +368,29 @@ class RecommendationController extends Controller
 
     /**
      * Menambahkan interaksi pengguna - FUNGSI CORE UNTUK REKOMENDASI
+     * DIOPTIMALKAN: Menambahkan validasi proyek dan pengelolaan foreign key error
      */
     private function recordInteraction($userId, $projectId, $interactionType, $weight = 1)
     {
         // Validasi tipe interaksi
         if (!in_array($interactionType, Interaction::$validTypes)) {
-            throw new \InvalidArgumentException("Tipe interaksi tidak valid: {$interactionType}");
+            Log::warning("Tipe interaksi tidak valid: {$interactionType}");
+            return null;
         }
 
-        // PENTING: Verifikasi dulu apakah proyek ada di database sebelum mencatat interaksi
-        // untuk mencegah foreign key violation
-        $projectExists = Project::where('id', $projectId)->exists();
+        // Verifikasi proyek ada di database
+        $projectExists = Cache::remember("project_exists_{$projectId}", 60, function() use ($projectId) {
+            return Project::where('id', $projectId)->exists();
+        });
 
         if (!$projectExists) {
             Log::warning("Tidak dapat mencatat interaksi '{$interactionType}' untuk proyek '{$projectId}': Proyek tidak ditemukan di database");
             return null;
         }
 
-        // Catat interaksi di database lokal
-        $interaction = Interaction::create([
-            'user_id'          => $userId,
-            'project_id'       => $projectId,
-            'interaction_type' => $interactionType,
-            'weight'           => $weight,
-            'context'          => [
-                'source'    => 'web',
-                'timestamp' => now()->timestamp,
-            ],
-        ]);
-
-        // Kirim interaksi ke API dengan penanganan error yang lebih baik
         try {
-            // DIOPTIMALKAN: Gunakan timeout yang lebih rendah (2 detik)
-            Http::timeout(2)->post("{$this->apiUrl}/interactions/record", [
+            // Catat interaksi di database lokal
+            $interaction = Interaction::create([
                 'user_id'          => $userId,
                 'project_id'       => $projectId,
                 'interaction_type' => $interactionType,
@@ -419,35 +400,60 @@ class RecommendationController extends Controller
                     'timestamp' => now()->timestamp,
                 ],
             ]);
-        } catch (\Exception $e) {
-            // Log error tapi tetap lanjutkan eksekusi
-            Log::error("Gagal mengirim interaksi ke API: " . $e->getMessage());
-        }
 
-        // DIOPTIMALKAN: Hapus cache yang terkait saat ada interaksi baru
-        // untuk memastikan rekomendasi berikutnya merefleksikan interaksi ini
+            // DIOPTIMALKAN: Kirim interaksi ke API dengan penanganan error yang lebih baik
+            try {
+                Http::timeout(2)->post("{$this->apiUrl}/interactions/record", [
+                    'user_id'          => $userId,
+                    'project_id'       => $projectId,
+                    'interaction_type' => $interactionType,
+                    'weight'           => $weight,
+                    'context'          => [
+                        'source'    => 'web',
+                        'timestamp' => now()->timestamp,
+                    ],
+                ]);
+            } catch (\Exception $e) {
+                Log::error("Gagal mengirim interaksi ke API: " . $e->getMessage());
+            }
+
+            // DIOPTIMALKAN: Hapus caches terkait rekomendasi
+            $this->clearUserRecommendationCaches($userId);
+
+            // DIOPTIMALKAN: Update jumlah interaksi pada cache cold-start
+            Cache::forget("user_cold_start_{$userId}");
+            Cache::forget("user_interactions_count_{$userId}");
+
+            return $interaction;
+        } catch (\Exception $e) {
+            Log::error("Error recording interaction: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * DIOPTIMALKAN: Menghapus semua cache terkait rekomendasi untuk user
+     */
+    private function clearUserRecommendationCaches($userId)
+    {
         $cacheKeys = [
             "rec_personal_{$userId}_10",
             "rec_personal_hybrid_{$userId}",
             "rec_personal_fecf_{$userId}",
             "rec_personal_ncf_{$userId}",
-            "rec_interactions_{$userId}",
             "dashboard_personal_recs_{$userId}",
-            "dashboard_interactions_{$userId}"
+            "rec_interactions_{$userId}",
+            "user_interactions_{$userId}_10",
         ];
 
         foreach ($cacheKeys as $key) {
             Cache::forget($key);
         }
-
-        return $interaction;
     }
 
     /**
      * Menormalisasi data rekomendasi untuk memastikan format konsisten
-     *
-     * @param mixed $recommendations Data rekomendasi dari berbagai sumber
-     * @return array Data yang sudah dinormalisasi
+     * DIOPTIMALKAN: Perbaikan untuk handling object dan types
      */
     private function normalizeRecommendationData($recommendations)
     {
@@ -455,7 +461,7 @@ class RecommendationController extends Controller
             return [];
         }
 
-        // Jika string, kembalikan array kosong dan log warning
+        // Jika string, kembalikan array kosong
         if (is_string($recommendations)) {
             Log::warning("Data rekomendasi berupa string: {$recommendations}");
             return [];
@@ -464,32 +470,45 @@ class RecommendationController extends Controller
         $normalized = [];
 
         foreach ($recommendations as $key => $item) {
-            // Jika item adalah string, skip item ini
+            // Skip jika item adalah string
             if (is_string($item)) {
-                Log::warning("Item rekomendasi berupa string, dilewati: {$item}");
                 continue;
             }
 
             // Konversi object ke array jika diperlukan
             $data = is_object($item) ? (array) $item : $item;
 
+            // Pastikan ID ada
+            $id = $data['id'] ?? ($data['project_id'] ?? "unknown-{$key}");
+            if ($id === "unknown-{$key}" && isset($data->id)) {
+                $id = $data->id;
+            } else if ($id === "unknown-{$key}" && isset($data->project_id)) {
+                $id = $data->project_id;
+            }
+
             // Pastikan semua property yang diperlukan ada
             $normalized[] = [
-                'id' => $data['id'] ?? ($data->id ?? "unknown-{$key}"),
+                'id' => $id,
                 'name' => $data['name'] ?? ($data->name ?? 'Unknown'),
                 'symbol' => $data['symbol'] ?? ($data->symbol ?? 'N/A'),
                 'image' => $data['image'] ?? ($data->image ?? null),
-                'current_price' => $data['current_price'] ?? ($data->current_price ?? 0),
-                'price_change_percentage_24h' => $data['price_change_percentage_24h'] ?? ($data->price_change_percentage_24h ?? 0),
-                'price_change_percentage_7d_in_currency' => $data['price_change_percentage_7d_in_currency'] ?? ($data->price_change_percentage_7d_in_currency ?? 0),
-                'market_cap' => $data['market_cap'] ?? ($data->market_cap ?? 0),
-                'total_volume' => $data['total_volume'] ?? ($data->total_volume ?? 0),
+                'current_price' => floatval($data['current_price'] ?? ($data->current_price ?? 0)),
+                'price_change_percentage_24h' => floatval($data['price_change_percentage_24h'] ?? ($data->price_change_percentage_24h ?? 0)),
+                'price_change_percentage_7d_in_currency' => floatval($data['price_change_percentage_7d_in_currency'] ?? ($data->price_change_percentage_7d_in_currency ?? 0)),
+                'market_cap' => floatval($data['market_cap'] ?? ($data->market_cap ?? 0)),
+                'total_volume' => floatval($data['total_volume'] ?? ($data->total_volume ?? 0)),
                 'primary_category' => $data['primary_category'] ?? ($data->primary_category ?? $data['category'] ?? ($data->category ?? 'Uncategorized')),
                 'chain' => $data['chain'] ?? ($data->chain ?? 'Multiple'),
                 'description' => $data['description'] ?? ($data->description ?? null),
-                'popularity_score' => $data['popularity_score'] ?? ($data->popularity_score ?? 0),
-                'trend_score' => $data['trend_score'] ?? ($data->trend_score ?? 0),
-                'recommendation_score' => $data['recommendation_score'] ?? ($data->recommendation_score ?? $data['similarity_score'] ?? ($data->similarity_score ?? 0.5)),
+                'popularity_score' => floatval($data['popularity_score'] ?? ($data->popularity_score ?? 0)),
+                'trend_score' => floatval($data['trend_score'] ?? ($data->trend_score ?? 0)),
+                // PERBAIKAN: Standardisasi score untuk konsistensi
+                'recommendation_score' => floatval($data['recommendation_score'] ??
+                    ($data->recommendation_score ??
+                     $data['similarity_score'] ??
+                     ($data->similarity_score ??
+                      $data['score'] ??
+                      ($data->score ?? 0.5)))),
             ];
         }
 
@@ -497,34 +516,26 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Mendapatkan rekomendasi personal
+     * Mendapatkan rekomendasi personal - DIOPTIMALKAN
      */
     private function getPersonalRecommendations($userId, $modelType = 'hybrid', $limit = 10)
     {
-        // Cek cache terlebih dahulu
+        // STANDARDIZED: Pendekatan cache yang konsisten
         $cacheKey = "personal_recommendations_{$userId}_{$modelType}_{$limit}";
-        $cachedData = ApiCache::findMatch($cacheKey, []);
+        $cachedData = Cache::get($cacheKey);
 
         if ($cachedData) {
-            // PERBAIKAN: Pastikan cache tidak kosong atau tidak valid
-            if (!empty($cachedData->response) && isset($cachedData->response[0]['id'])) {
-                return $cachedData->response;
-            } else {
-                // Cache tidak valid, hapus
-                ApiCache::where('endpoint', $cacheKey)->delete();
-            }
+            return $cachedData;
         }
 
         try {
-            // PERBAIKAN: Tambahkan retry logic dan timeout yang lebih lama untuk cold-start users
-            $interactionCount = Interaction::where('user_id', $userId)->count();
+            // DIOPTIMALKAN: Deteksi cold-start users dengan caching
+            $interactionCount = Cache::remember("user_interactions_count_{$userId}", 30, function() use ($userId) {
+                return Interaction::where('user_id', $userId)->count();
+            });
+
             $isColdStart = $interactionCount < 5;
-
-            // Tingkatkan timeout untuk cold-start users agar API punya waktu meload model
-            $timeout = $isColdStart ? 10 : 3; // 10 detik untuk cold-start, 3 detik untuk regular
-
-            // Log tambahan untuk debugging
-            Log::info("Requesting recommendations for user {$userId} (isColdStart: " . ($isColdStart ? 'Yes' : 'No') . ")");
+            $timeout = $isColdStart ? 5 : 2; // 5 detik untuk cold-start, 2 detik untuk regular
 
             $response = Http::timeout($timeout)->post("{$this->apiUrl}/recommend/projects", [
                 'user_id'             => $userId,
@@ -535,40 +546,27 @@ class RecommendationController extends Controller
                 'investment_style'    => Auth::user()->investment_style ?? 'balanced',
             ]);
 
-            // Apakah respons berhasil dan memiliki format yang benar
+            // Validasi respons
             if ($response->successful() && isset($response['recommendations']) && !empty($response['recommendations'])) {
-                // PERBAIKAN: Simpan ke cache hanya jika responsenya valid
-                ApiCache::store($cacheKey, [], $response['recommendations'], 30);
-
-                // Log hasil untuk debugging
-                Log::info("Successfully received {$modelType} recommendations for user {$userId}: " .
-                        count($response['recommendations']) . " items");
-
+                // PERBAIKAN: Simpan ke cache untuk 15 menit - konsisten dengan waktu cache lainnya
+                Cache::put($cacheKey, $response['recommendations'], 15);
                 return $response['recommendations'];
             } else {
-                // Log kesalahan dan kembalikan array kosong jika data tidak sesuai format
-                Log::warning("Format respons API tidak valid atau kosong: " . $response->body());
-
-                // PERBAIKAN: Jika respons tidak valid tapi user adalah cold-start,
-                // coba ambil rekomendasi trending sebagai fallback
+                // Fallback untuk cold-start users
                 if ($isColdStart) {
-                    Log::info("Trying to get trending projects for cold-start user");
                     return $this->getTrendingProjects($limit);
                 }
-
                 return [];
             }
         } catch (\Exception $e) {
             Log::error("Gagal mendapatkan rekomendasi personal: " . $e->getMessage());
 
-            // PERBAIKAN: Untuk cold-start, kembalikan trending sebagai fallback
-            $interactionCount = Interaction::where('user_id', $userId)->count();
+            // Fallback untuk cold-start atau error
             if ($interactionCount < 5) {
-                Log::info("Using trending projects as fallback for cold-start user");
                 return $this->getTrendingProjects($limit);
             }
 
-            // Fallback ke data dari database lokal
+            // Fallback ke data lokal
             return Recommendation::where('user_id', $userId)
                 ->where('recommendation_type', $modelType)
                 ->orderBy('rank')
@@ -579,66 +577,93 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Mendapatkan proyek trending
+     * Mendapatkan proyek trending - DIOPTIMALKAN dengan pagination
      */
     private function getTrendingProjects($perPage = 20, $page = 1)
     {
         try {
-            // Cek cache terlebih dahulu
-            $cacheKey = "trending_projects_paginated_{$perPage}_page_{$page}";
-            $cachedData = ApiCache::findMatch($cacheKey, []);
+            // Cache key berdasarkan pagination
+            $cacheKey = $page > 1 ?
+                "trending_projects_paginated_{$perPage}_page_{$page}" :
+                "trending_projects_{$perPage}";
+
+            $cachedData = Cache::get($cacheKey);
 
             if ($cachedData) {
-                return $cachedData->response;
+                return $cachedData;
             }
 
-            // Ambil data dari API dengan parameter pagination
+            // DIOPTIMALKAN: Timeout rendah dan error handling
             $response = Http::timeout(2)->get("{$this->apiUrl}/recommend/trending", [
                 'limit' => $perPage,
                 'page' => $page,
             ])->json();
 
-            // Simpan ke cache untuk 30 menit
-            ApiCache::store($cacheKey, [], $response, 30);
+            // Cache 60 menit untuk halaman trending
+            if (!empty($response)) {
+                Cache::put($cacheKey, $response, 60);
+                return $response;
+            }
 
-            return $response;
+            // Fallback ke database
+            $query = Project::orderBy('trend_score', 'desc');
+
+            // Handle pagination konsisten dengan API
+            if ($page > 1) {
+                $query->skip(($page - 1) * $perPage);
+            }
+
+            $projects = $query->limit($perPage)->get();
+
+            // Cache 60 menit untuk fallback
+            Cache::put($cacheKey, $projects, 60);
+            return $projects;
         } catch (\Exception $e) {
             Log::error("Gagal mendapatkan proyek trending: " . $e->getMessage());
 
-            // Fallback ke data dari database lokal dengan pagination
-            return Project::orderBy('trend_score', 'desc')
-                ->paginate($perPage, ['*'], 'page', $page);
+            // Fallback ke database dengan pagination
+            $query = Project::orderBy('trend_score', 'desc');
+
+            if ($page > 1) {
+                $query->skip(($page - 1) * $perPage);
+            }
+
+            return $query->limit($perPage)->get();
         }
     }
 
     /**
-     * Mendapatkan proyek populer
+     * Mendapatkan proyek populer - DIOPTIMALKAN
      */
     private function getPopularProjects($limit = 10)
     {
-        // Cek cache terlebih dahulu
         $cacheKey = "popular_projects_{$limit}";
-        $cachedData = ApiCache::findMatch($cacheKey, []);
+        $cachedData = Cache::get($cacheKey);
 
         if ($cachedData) {
-            return $cachedData->response;
+            return $cachedData;
         }
 
-        // Ambil data dari API jika tidak ada cache
         try {
-            // DIOPTIMALKAN: Gunakan timeout
-            $response = Http::timeout(3)->get("{$this->apiUrl}/recommend/popular", [
+            $response = Http::timeout(2)->get("{$this->apiUrl}/recommend/popular", [
                 'limit' => $limit,
             ])->json();
 
-            // Simpan ke cache untuk 60 menit
-            ApiCache::store($cacheKey, [], $response, 60);
+            if (!empty($response)) {
+                Cache::put($cacheKey, $response, 60);
+                return $response;
+            }
 
-            return $response;
+            // Fallback
+            $projects = Project::orderBy('popularity_score', 'desc')
+                ->limit($limit)
+                ->get();
+
+            Cache::put($cacheKey, $projects, 60);
+            return $projects;
         } catch (\Exception $e) {
             Log::error("Gagal mendapatkan proyek populer: " . $e->getMessage());
 
-            // Fallback ke data dari database lokal
             return Project::orderBy('popularity_score', 'desc')
                 ->limit($limit)
                 ->get();
@@ -646,33 +671,48 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Mendapatkan proyek serupa
+     * Mendapatkan proyek serupa - DIOPTIMALKAN
      */
     private function getSimilarProjects($projectId, $limit = 8)
     {
-        // Cek cache terlebih dahulu
         $cacheKey = "similar_projects_{$projectId}_{$limit}";
-        $cachedData = ApiCache::findMatch($cacheKey, []);
+        $cachedData = Cache::get($cacheKey);
 
         if ($cachedData) {
-            return $cachedData->response;
+            return $cachedData;
         }
 
-        // Ambil data dari API jika tidak ada cache
         try {
-            // DIOPTIMALKAN: Gunakan timeout
-            $response = Http::timeout(3)->get("{$this->apiUrl}/recommend/similar/{$projectId}", [
+            $response = Http::timeout(2)->get("{$this->apiUrl}/recommend/similar/{$projectId}", [
                 'limit' => $limit,
             ])->json();
 
-            // Simpan ke cache untuk 120 menit
-            ApiCache::store($cacheKey, [], $response, 120);
+            if (!empty($response)) {
+                Cache::put($cacheKey, $response, 120);
+                return $response;
+            }
 
-            return $response;
+            // Fallback dengan related projects
+            $project = Project::find($projectId);
+            if (!$project) {
+                return [];
+            }
+
+            $similarProjects = Project::where('id', '!=', $projectId)
+                ->where(function ($query) use ($project) {
+                    $query->where('primary_category', $project->primary_category)
+                        ->orWhere('chain', $project->chain);
+                })
+                ->orderBy('popularity_score', 'desc')
+                ->limit($limit)
+                ->get();
+
+            Cache::put($cacheKey, $similarProjects, 120);
+            return $similarProjects;
         } catch (\Exception $e) {
             Log::error("Gagal mendapatkan proyek serupa: " . $e->getMessage());
 
-            // Fallback ke data dari database lokal
+            // Fallback dengan logika yang sama
             $project = Project::find($projectId);
             if (!$project) {
                 return [];
@@ -690,22 +730,19 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Mendapatkan sinyal trading
+     * Mendapatkan sinyal trading - DIOPTIMALKAN
      */
     private function getTradingSignals($projectId, $riskTolerance = 'medium')
     {
-        // Cek cache terlebih dahulu
         $cacheKey = "trading_signals_{$projectId}_{$riskTolerance}";
-        $cachedData = ApiCache::findMatch($cacheKey, []);
+        $cachedData = Cache::get($cacheKey);
 
         if ($cachedData) {
-            return $cachedData->response;
+            return $cachedData;
         }
 
-        // Ambil data dari API jika tidak ada cache
         try {
-            // DIOPTIMALKAN: Gunakan timeout
-            $response = Http::timeout(3)->post("{$this->apiUrl}/analysis/trading-signals", [
+            $response = Http::timeout(2)->post("{$this->apiUrl}/analysis/trading-signals", [
                 'project_id'     => $projectId,
                 'days'           => 30,
                 'interval'       => '1d',
@@ -713,14 +750,28 @@ class RecommendationController extends Controller
                 'trading_style'  => 'standard',
             ])->json();
 
-            // Simpan ke cache untuk 30 menit
-            ApiCache::store($cacheKey, [], $response, 30);
+            if (!empty($response)) {
+                Cache::put($cacheKey, $response, 30);
+                return $response;
+            }
 
-            return $response;
+            // Placeholder data jika respons kosong
+            $placeholderData = [
+                'project_id'           => $projectId,
+                'action'               => 'hold',
+                'confidence'           => 0.5,
+                'evidence'             => [
+                    'Data tidak tersedia saat ini',
+                    'Coba lagi nanti',
+                ],
+                'personalized_message' => 'Data analisis teknikal tidak tersedia saat ini.',
+            ];
+
+            Cache::put($cacheKey, $placeholderData, 10); // Cache lebih pendek untuk data placeholder
+            return $placeholderData;
         } catch (\Exception $e) {
             Log::error("Gagal mendapatkan sinyal trading: " . $e->getMessage());
 
-            // Fallback ke data placeholder sederhana
             return [
                 'project_id'           => $projectId,
                 'action'               => 'hold',
@@ -735,22 +786,19 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Mendapatkan rekomendasi berdasarkan kategori
+     * Mendapatkan rekomendasi berdasarkan kategori - DIOPTIMALKAN
      */
     private function getCategoryRecommendations($userId, $category, $limit = 16)
     {
-        // Cek cache terlebih dahulu
         $cacheKey = "category_recommendations_{$userId}_{$category}_{$limit}";
-        $cachedData = ApiCache::findMatch($cacheKey, []);
+        $cachedData = Cache::get($cacheKey);
 
         if ($cachedData) {
-            return $cachedData->response;
+            return $cachedData;
         }
 
-        // Ambil data dari API jika tidak ada cache
         try {
-            // DIOPTIMALKAN: Gunakan timeout
-            $response = Http::timeout(3)->post("{$this->apiUrl}/recommend/projects", [
+            $response = Http::timeout(2)->post("{$this->apiUrl}/recommend/projects", [
                 'user_id'             => $userId,
                 'model_type'          => 'hybrid',
                 'num_recommendations' => $limit,
@@ -760,14 +808,22 @@ class RecommendationController extends Controller
                 'investment_style'    => Auth::user()->investment_style ?? 'balanced',
             ])->json();
 
-            // Simpan ke cache untuk 30 menit
-            ApiCache::store($cacheKey, [], $response, 30);
+            if (isset($response['recommendations']) && !empty($response['recommendations'])) {
+                Cache::put($cacheKey, $response['recommendations'], 30);
+                return $response['recommendations'];
+            }
 
-            return $response['recommendations'] ?? [];
+            // Fallback ke database local
+            $categoryProjects = Project::where('primary_category', $category)
+                ->orderBy('popularity_score', 'desc')
+                ->limit($limit)
+                ->get();
+
+            Cache::put($cacheKey, $categoryProjects, 30);
+            return $categoryProjects;
         } catch (\Exception $e) {
             Log::error("Gagal mendapatkan rekomendasi kategori: " . $e->getMessage());
 
-            // Fallback ke data dari database lokal
             return Project::where('primary_category', $category)
                 ->orderBy('popularity_score', 'desc')
                 ->limit($limit)
@@ -776,22 +832,19 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Mendapatkan rekomendasi berdasarkan blockchain
+     * Mendapatkan rekomendasi berdasarkan blockchain - DIOPTIMALKAN
      */
     private function getChainRecommendations($userId, $chain, $limit = 16)
     {
-        // Cek cache terlebih dahulu
         $cacheKey = "chain_recommendations_{$userId}_{$chain}_{$limit}";
-        $cachedData = ApiCache::findMatch($cacheKey, []);
+        $cachedData = Cache::get($cacheKey);
 
         if ($cachedData) {
-            return $cachedData->response;
+            return $cachedData;
         }
 
-        // Ambil data dari API jika tidak ada cache
         try {
-            // DIOPTIMALKAN: Gunakan timeout
-            $response = Http::timeout(3)->post("{$this->apiUrl}/recommend/projects", [
+            $response = Http::timeout(2)->post("{$this->apiUrl}/recommend/projects", [
                 'user_id'             => $userId,
                 'model_type'          => 'hybrid',
                 'num_recommendations' => $limit,
@@ -801,14 +854,22 @@ class RecommendationController extends Controller
                 'investment_style'    => Auth::user()->investment_style ?? 'balanced',
             ])->json();
 
-            // Simpan ke cache untuk 30 menit
-            ApiCache::store($cacheKey, [], $response, 30);
+            if (isset($response['recommendations']) && !empty($response['recommendations'])) {
+                Cache::put($cacheKey, $response['recommendations'], 30);
+                return $response['recommendations'];
+            }
 
-            return $response['recommendations'] ?? [];
+            // Fallback ke database local
+            $chainProjects = Project::where('chain', $chain)
+                ->orderBy('popularity_score', 'desc')
+                ->limit($limit)
+                ->get();
+
+            Cache::put($cacheKey, $chainProjects, 30);
+            return $chainProjects;
         } catch (\Exception $e) {
             Log::error("Gagal mendapatkan rekomendasi blockchain: " . $e->getMessage());
 
-            // Fallback ke data dari database lokal
             return Project::where('chain', $chain)
                 ->orderBy('popularity_score', 'desc')
                 ->limit($limit)
@@ -817,19 +878,17 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Mendapatkan daftar kategori
+     * Mendapatkan daftar kategori - DIOPTIMALKAN
      */
     private function getCategories()
     {
-        // Cek cache terlebih dahulu
         $cacheKey = "categories_list";
-        $cachedData = ApiCache::findMatch($cacheKey, []);
+        $cachedData = Cache::get($cacheKey);
 
         if ($cachedData) {
-            return $cachedData->response;
+            return $cachedData;
         }
 
-        // Ambil data dari database
         $categories = Project::select('primary_category')
             ->distinct()
             ->whereNotNull('primary_category')
@@ -837,26 +896,22 @@ class RecommendationController extends Controller
             ->pluck('primary_category')
             ->toArray();
 
-        // Simpan ke cache untuk 24 jam
-        ApiCache::store($cacheKey, [], $categories, 60 * 24);
-
+        Cache::put($cacheKey, $categories, 60 * 1); // 1 jam
         return $categories;
     }
 
     /**
-     * Mendapatkan daftar blockchain
+     * Mendapatkan daftar blockchain - DIOPTIMALKAN
      */
     private function getChains()
     {
-        // Cek cache terlebih dahulu
         $cacheKey = "chains_list";
-        $cachedData = ApiCache::findMatch($cacheKey, []);
+        $cachedData = Cache::get($cacheKey);
 
         if ($cachedData) {
-            return $cachedData->response;
+            return $cachedData;
         }
 
-        // Ambil data dari database
         $chains = Project::select('chain')
             ->distinct()
             ->whereNotNull('chain')
@@ -864,9 +919,7 @@ class RecommendationController extends Controller
             ->pluck('chain')
             ->toArray();
 
-        // Simpan ke cache untuk 24 jam
-        ApiCache::store($cacheKey, [], $chains, 60 * 24);
-
+        Cache::put($cacheKey, $chains, 60 * 1); // 1 jam
         return $chains;
     }
 }

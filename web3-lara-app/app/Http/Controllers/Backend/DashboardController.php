@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Http\Controllers\Backend;
 
 use App\Http\Controllers\Controller;
@@ -44,14 +43,15 @@ class DashboardController extends Controller
             'user'                    => $user,
             // Load rekomendasi personal pada load awal
             'personalRecommendations' => Cache::remember("dashboard_personal_recs_{$userId}", 30, function () use ($userId) {
-                return $this->getPersonalRecommendations($userId, 'hybrid', 4);
+                $recommendations = $this->getPersonalRecommendations($userId, 'hybrid', 4);
+                return $this->normalizeRecommendations($recommendations);
             }),
             // Load trending projects pada load awal dengan jumlah kecil
             'trendingProjects'        => Cache::remember('dashboard_trending_projects', 60, function () {
                 return $this->getTrendingProjects(4);
             }),
             // Inisialisasi data portfolio dan interactions dengan kosong
-            // untuk mengurangi load awal, akan dimuat dengan lazy loading
+            // untuk diisi dengan lazy loading
             'portfolioSummary'        => null,
             'recentInteractions'      => null,
         ];
@@ -84,6 +84,7 @@ class DashboardController extends Controller
 
         $recentInteractions = Cache::remember("dashboard_interactions_{$userId}", 15, function () use ($userId) {
             return Interaction::forUser($userId)
+                ->select(['id', 'user_id', 'project_id', 'interaction_type', 'created_at'])
                 ->with(['project' => function ($query) {
                     // Hanya select kolom yang dibutuhkan untuk optimasi
                     $query->select('id', 'name', 'symbol', 'image');
@@ -171,12 +172,73 @@ class DashboardController extends Controller
     }
 
     /**
+     * DITAMBAHKAN: Normalisasi rekomendasi - memastikan konsistensi dengan RecommendationController
+     */
+    private function normalizeRecommendations($recommendations)
+    {
+        if (empty($recommendations)) {
+            return [];
+        }
+
+        if (is_string($recommendations)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($recommendations as $key => $item) {
+            // Skip jika item adalah string
+            if (is_string($item)) {
+                continue;
+            }
+
+            // Konversi object ke array jika diperlukan
+            $data = is_object($item) ? (array) $item : $item;
+
+            // Pastikan ID ada
+            $id = $data['id'] ?? ($data['project_id'] ?? "unknown-{$key}");
+            if ($id === "unknown-{$key}" && isset($data->id)) {
+                $id = $data->id;
+            } else if ($id === "unknown-{$key}" && isset($data->project_id)) {
+                $id = $data->project_id;
+            }
+
+            // Pastikan semua property yang diperlukan ada
+            $normalized[] = [
+                'id'                                     => $id,
+                'name'                                   => $data['name'] ?? ($data->name ?? 'Unknown'),
+                'symbol'                                 => $data['symbol'] ?? ($data->symbol ?? 'N/A'),
+                'image'                                  => $data['image'] ?? ($data->image ?? null),
+                'current_price'                          => floatval($data['current_price'] ?? ($data->current_price ?? 0)),
+                'price_change_percentage_24h'            => floatval($data['price_change_percentage_24h'] ?? ($data->price_change_percentage_24h ?? 0)),
+                'price_change_percentage_7d_in_currency' => floatval($data['price_change_percentage_7d_in_currency'] ?? ($data->price_change_percentage_7d_in_currency ?? 0)),
+                'market_cap'                             => floatval($data['market_cap'] ?? ($data->market_cap ?? 0)),
+                'total_volume'                           => floatval($data['total_volume'] ?? ($data->total_volume ?? 0)),
+                'primary_category'                       => $data['primary_category'] ?? ($data->primary_category ?? $data['category'] ?? ($data->category ?? 'Uncategorized')),
+                'chain'                                  => $data['chain'] ?? ($data->chain ?? 'Multiple'),
+                'description'                            => $data['description'] ?? ($data->description ?? null),
+                'popularity_score'                       => floatval($data['popularity_score'] ?? ($data->popularity_score ?? 0)),
+                'trend_score'                            => floatval($data['trend_score'] ?? ($data->trend_score ?? 0)),
+                // PERBAIKAN: Standardisasi score untuk konsistensi dengan RecommendationController
+                'recommendation_score'                   => floatval($data['recommendation_score'] ??
+                    ($data->recommendation_score ??
+                        $data['similarity_score'] ??
+                        ($data->similarity_score ??
+                            $data['score'] ??
+                            ($data->score ?? 0.5)))),
+            ];
+        }
+
+        return $normalized;
+    }
+
+    /**
      * Mendapatkan rekomendasi personal untuk pengguna (Dioptimalkan)
      */
     private function getPersonalRecommendations($userId, $modelType = 'hybrid', $limit = 10)
     {
         try {
-            // DIOPTIMALKAN: Cache hasil API untuk mengurangi panggilan
+            // DIOPTIMALKAN: Cache key yang konsisten dengan RecommendationController
             $cacheKey   = "personal_recommendations_{$userId}_{$modelType}_{$limit}";
             $cachedData = Cache::get($cacheKey);
 
@@ -223,7 +285,7 @@ class DashboardController extends Controller
     private function getTrendingProjects($limit = 10)
     {
         try {
-            // DIOPTIMALKAN: Cache hasil API untuk mengurangi panggilan
+            // DIOPTIMALKAN: Cache key yang konsisten
             $cacheKey   = "trending_projects_{$limit}";
             $cachedData = Cache::get($cacheKey);
 
@@ -237,8 +299,19 @@ class DashboardController extends Controller
             ])->json();
 
             // Cache result for 60 minutes
-            Cache::put($cacheKey, $response, 60);
-            return $response;
+            if (! empty($response)) {
+                Cache::put($cacheKey, $response, 60);
+                return $response;
+            }
+
+            // Fallback ke database local
+            $projects = Project::select('id', 'name', 'symbol', 'image', 'current_price', 'price_change_percentage_24h')
+                ->orderBy('trend_score', 'desc')
+                ->limit($limit)
+                ->get();
+
+            Cache::put($cacheKey, $projects, 60);
+            return $projects;
         } catch (\Exception $e) {
             Log::error("Gagal mendapatkan proyek trending: " . $e->getMessage());
 

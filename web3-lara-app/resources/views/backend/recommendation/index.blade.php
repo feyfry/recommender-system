@@ -67,8 +67,8 @@
         </a>
     </div>
 
-    <!-- Personal Recommendations Preview -->
-    <div class="clay-card p-6 mb-8">
+    <!-- Personal Recommendations Preview dengan Lazy Loading -->
+    <div class="clay-card p-6 mb-8" x-data="{ loading: true, recommendations: [] }">
         <div class="flex justify-between items-center mb-6">
             <h2 class="text-xl font-bold flex items-center">
                 <i class="fas fa-user-check mr-2 text-secondary"></i>
@@ -79,57 +79,122 @@
             </a>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            @forelse($personalRecommendations ?? [] as $index => $recommendation)
-                @if($index < 4)
-                <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
-                    <div class="font-bold text-lg mb-2">{{ $recommendation->name ?? $recommendation['name'] }} ({{ $recommendation->symbol ?? $recommendation['symbol'] }})</div>
-                    <div class="text-sm mb-2">
-                        {{ $recommendation->formatted_price ?? '$'.number_format($recommendation->current_price ?? $recommendation['current_price'], 2) }}
-                        <span class="{{ ($recommendation->price_change_percentage_24h ?? $recommendation['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
-                            {{ ($recommendation->price_change_percentage_24h ?? $recommendation['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}
-                            {{ number_format($recommendation->price_change_percentage_24h ?? $recommendation['price_change_percentage_24h'] ?? 0, 2) }}%
-                        </span>
+        <!-- Loading Spinner -->
+        <div x-show="loading" class="py-4 text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-secondary"></div>
+            <p class="mt-2 text-gray-500">Memuat rekomendasi personal...</p>
+        </div>
+
+        <!-- Rekomendasi Personal Content -->
+        <div x-show="!loading" x-init="
+            // Menggunakan data dari server jika tersedia, jika tidak muat async
+            @if(!empty($personalRecommendations))
+                recommendations = {{ json_encode($personalRecommendations) }};
+                loading = false;
+            @else
+                setTimeout(() => {
+                    fetch('{{ route('panel.recommendations.personal') }}?format=json')
+                        .then(response => response.json())
+                        .then(data => {
+                            recommendations = data.slice(0, 4);
+                            loading = false;
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            loading = false;
+                        });
+                }, 100);
+            @endif">
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <template x-for="(recommendation, index) in recommendations" :key="index" x-show="index < 4">
+                    <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
+                        <div class="font-bold text-lg mb-2" x-text="recommendation.name + ' (' + recommendation.symbol + ')'"></div>
+                        <div class="text-sm mb-2">
+                            <span x-text="'$' + (recommendation.current_price ? recommendation.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></span>
+                            <span :class="(recommendation.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
+                                  x-text="((recommendation.price_change_percentage_24h || 0) > 0 ? '+' : '') +
+                                           ((recommendation.price_change_percentage_24h || 0).toFixed(2)) + '%'"></span>
+                        </div>
+                        <div class="clay-badge clay-badge-secondary mb-3" x-text="recommendation.primary_category || 'Umum'"></div>
+                        <p class="text-sm mb-3 line-clamp-2" x-text="recommendation.description || 'Tidak ada deskripsi'"></p>
+                        <div class="flex justify-between items-center">
+                            <div class="text-xs font-medium">Score: <span class="text-secondary"
+                                x-text="(recommendation.recommendation_score || 0).toFixed(2)"></span></div>
+                            <a :href="'/panel/recommendations/project/' + recommendation.id" class="clay-button clay-button-secondary py-1 px-2 text-xs">
+                                <i class="fas fa-info-circle mr-1"></i> Detail
+                            </a>
+                        </div>
                     </div>
-                    <div class="clay-badge clay-badge-secondary mb-3">
-                        {{ $recommendation->primary_category ?? $recommendation['primary_category'] ?? 'Umum' }}
-                    </div>
-                    <p class="text-sm mb-3 line-clamp-2">
-                        {{ $recommendation->description ?? $recommendation['description'] ?? 'Tidak ada deskripsi' }}
-                    </p>
-                    <div class="flex justify-between items-center">
-                        <div class="text-xs font-medium">Score: <span class="text-secondary">
-                            {{ number_format($recommendation->recommendation_score ?? $recommendation['recommendation_score'] ?? 0, 2) }}
-                        </span></div>
-                        <a href="{{ route('panel.recommendations.project', $recommendation->id ?? $recommendation['id']) }}" class="clay-button clay-button-secondary py-1 px-2 text-xs">
-                            <i class="fas fa-info-circle mr-1"></i> Detail
-                        </a>
-                    </div>
-                </div>
-                @endif
-            @empty
+                </template>
+            </div>
+
+            <template x-if="recommendations.length === 0">
                 <div class="col-span-full clay-card p-6 text-center">
                     <p>Tidak ada rekomendasi personal yang tersedia saat ini.</p>
                     <p class="text-sm mt-2 text-gray-500">Mulai berinteraksi dengan proyek untuk mendapatkan rekomendasi yang lebih baik.</p>
                     <a href="{{ route('panel.recommendations.trending') }}" class="clay-button clay-button-primary mt-4">Lihat Trending</a>
                 </div>
-            @endforelse
+            </template>
         </div>
     </div>
 
-    <!-- Trending Projects Preview -->
-    <div class="clay-card p-6 mb-8">
+    <!-- Trending Projects Preview dengan Lazy Loading -->
+    <div class="clay-card p-6 mb-8" x-data="{ loading: true, trendingProjects: [] }">
         <div class="flex justify-between items-center mb-6">
             <h2 class="text-xl font-bold flex items-center">
                 <i class="fas fa-fire mr-2 text-warning"></i>
                 Proyek Trending
             </h2>
-            <a href="{{ route('panel.recommendations.trending') }}" class="clay-button clay-button-warning py-1.5 px-3 text-sm">
-                Lihat Semua <i class="fas fa-arrow-right ml-1"></i>
-            </a>
+            <div class="flex space-x-2">
+                <button @click="
+                    loading = true;
+                    fetch('{{ route('panel.recommendations.trending-refresh') }}')
+                        .then(response => response.json())
+                        .then(data => {
+                            trendingProjects = data;
+                            loading = false;
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            loading = false;
+                        });"
+                        class="clay-button clay-button-warning py-1.5 px-3 text-sm">
+                    <i class="fas fa-sync-alt mr-1" :class="{'animate-spin': loading}"></i> Refresh
+                </button>
+                <a href="{{ route('panel.recommendations.trending') }}" class="clay-button clay-button-warning py-1.5 px-3 text-sm">
+                    Lihat Semua <i class="fas fa-arrow-right ml-1"></i>
+                </a>
+            </div>
         </div>
 
-        <div class="overflow-x-auto">
+        <!-- Loading Spinner -->
+        <div x-show="loading" class="py-4 text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-warning"></div>
+            <p class="mt-2 text-gray-500">Memuat proyek trending...</p>
+        </div>
+
+        <!-- Trending Projects Table -->
+        <div class="overflow-x-auto" x-show="!loading" x-init="
+            // Menggunakan data dari server jika tersedia, jika tidak muat async
+            @if(!empty($trendingProjects))
+                trendingProjects = {{ json_encode($trendingProjects) }};
+                loading = false;
+            @else
+                setTimeout(() => {
+                    fetch('{{ route('panel.recommendations.trending-refresh') }}')
+                        .then(response => response.json())
+                        .then(data => {
+                            trendingProjects = data;
+                            loading = false;
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            loading = false;
+                        });
+                }, 100);
+            @endif">
+
             <table class="clay-table min-w-full">
                 <thead>
                     <tr>
@@ -143,52 +208,52 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @forelse($trendingProjects ?? [] as $index => $project)
-                        @if($index < 5)
+                    <template x-for="(project, index) in trendingProjects" :key="index" x-show="index < 5">
                         <tr>
-                            <td class="py-3 px-4">{{ $index + 1 }}</td>
+                            <td class="py-3 px-4" x-text="index + 1"></td>
                             <td class="py-3 px-4 font-medium">
                                 <div class="flex items-center">
-                                    @if(isset($project['image']) && $project['image'])
-                                        <img src="{{ $project['image'] }}" alt="{{ $project['symbol'] }}" class="w-6 h-6 mr-2 rounded-full">
-                                    @endif
-                                    {{ $project['name'] }} ({{ $project['symbol'] }})
+                                    <template x-if="project.image">
+                                        <img :src="project.image" :alt="project.symbol" class="w-6 h-6 mr-2 rounded-full">
+                                    </template>
+                                    <div x-text="project.name + ' (' + project.symbol + ')'"></div>
                                 </div>
                             </td>
-                            <td class="py-3 px-4">{{ $project['formatted_price'] ?? '$'.number_format($project['current_price'], 2) }}</td>
-                            <td class="py-3 px-4 {{ ($project['price_change_percentage_24h'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
-                                {{ ($project['price_change_percentage_24h'] ?? 0) > 0 ? '+' : '' }}{{ number_format($project['price_change_percentage_24h'] ?? 0, 2) }}%
-                            </td>
-                            <td class="py-3 px-4 {{ ($project['price_change_percentage_7d_in_currency'] ?? 0) > 0 ? 'text-success' : 'text-danger' }}">
-                                {{ ($project['price_change_percentage_7d_in_currency'] ?? 0) > 0 ? '+' : '' }}{{ number_format($project['price_change_percentage_7d_in_currency'] ?? 0, 2) }}%
-                            </td>
+                            <td class="py-3 px-4" x-text="'$' + (project.current_price ? project.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></td>
+                            <td class="py-3 px-4" :class="(project.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
+                                x-text="((project.price_change_percentage_24h || 0) > 0 ? '+' : '') +
+                                         ((project.price_change_percentage_24h || 0).toFixed(2)) + '%'"></td>
+                            <td class="py-3 px-4" :class="(project.price_change_percentage_7d_in_currency || 0) > 0 ? 'text-success' : 'text-danger'"
+                                x-text="((project.price_change_percentage_7d_in_currency || 0) > 0 ? '+' : '') +
+                                         ((project.price_change_percentage_7d_in_currency || 0).toFixed(2)) + '%'"></td>
                             <td class="py-3 px-4">
                                 <div class="flex items-center">
                                     <div class="w-16 h-2 clay-progress overflow-hidden rounded-full mr-2">
-                                        <div class="h-full bg-warning" style="width: {{ $project['trend_score'] ?? 0 }}%;"></div>
+                                        <div class="h-full bg-warning" :style="'width: ' + Math.min(100, project.trend_score || 0) + '%;'"></div>
                                     </div>
-                                    <span>{{ number_format($project['trend_score'] ?? 0, 1) }}</span>
+                                    <span x-text="(project.trend_score || 0).toFixed(1)"></span>
                                 </div>
                             </td>
                             <td class="py-3 px-4">
-                                <a href="{{ route('panel.recommendations.project', $project['id']) }}" class="clay-button clay-button-warning py-1 px-2 text-xs">
+                                <a :href="'/panel/recommendations/project/' + project.id" class="clay-button clay-button-warning py-1 px-2 text-xs">
                                     <i class="fas fa-info-circle mr-1"></i> Detail
                                 </a>
                             </td>
                         </tr>
-                        @endif
-                    @empty
+                    </template>
+
+                    <template x-if="trendingProjects.length === 0">
                         <tr>
                             <td colspan="7" class="py-6 px-4 text-center text-gray-500">Tidak ada data proyek trending</td>
                         </tr>
-                    @endforelse
+                    </template>
                 </tbody>
             </table>
         </div>
     </div>
 
-    <!-- Recent Interactions -->
-    <div class="clay-card p-6 mb-8">
+    <!-- Recent Interactions dengan Lazy Loading -->
+    <div class="clay-card p-6 mb-8" x-data="{ loading: true, interactions: [] }">
         <div class="flex justify-between items-center mb-6">
             <h2 class="text-xl font-bold flex items-center">
                 <i class="fas fa-history mr-2 text-info"></i>
@@ -196,64 +261,94 @@
             </h2>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            @forelse($interactions ?? [] as $index => $interaction)
-                @if($index < 6)
-                <div class="clay-card p-4 flex items-center">
-                    <div class="mr-4">
-                        @if($interaction->interaction_type == 'view')
-                            <div class="clay-rounded-full bg-info/20 p-2">
-                                <i class="fas fa-eye text-info"></i>
-                            </div>
-                        @elseif($interaction->interaction_type == 'favorite')
-                            <div class="clay-rounded-full bg-secondary/20 p-2">
-                                <i class="fas fa-heart text-secondary"></i>
-                            </div>
-                        @elseif($interaction->interaction_type == 'portfolio_add')
-                            <div class="clay-rounded-full bg-success/20 p-2">
-                                <i class="fas fa-folder-plus text-success"></i>
-                            </div>
-                        @else
-                            <div class="clay-rounded-full bg-warning/20 p-2">
-                                <i class="fas fa-info-circle text-warning"></i>
-                            </div>
-                        @endif
-                    </div>
-                    <div class="flex-grow">
-                        <div class="font-medium">
-                            {{-- Tipe interaksi dengan bahasa yang mudah dibaca --}}
-                            @if($interaction->interaction_type == 'view')
-                                Melihat detail
-                            @elseif($interaction->interaction_type == 'favorite')
-                                Menambahkan ke favorit
-                            @elseif($interaction->interaction_type == 'portfolio_add')
-                                Menambahkan ke portfolio
-                            @elseif($interaction->interaction_type == 'research')
-                                Meriset
-                            @elseif($interaction->interaction_type == 'click')
-                                Mengklik
-                            @else
-                                Berinteraksi dengan
-                            @endif
-                            <span class="font-bold">{{ $interaction->project->name }} ({{ $interaction->project->symbol }})</span>
+        <!-- Loading Spinner -->
+        <div x-show="loading" class="py-4 text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-info"></div>
+            <p class="mt-2 text-gray-500">Memuat interaksi terbaru...</p>
+        </div>
+
+        <!-- Recent Interactions Content -->
+        <div x-show="!loading" x-init="
+            setTimeout(() => {
+                fetch('{{ route('panel.dashboard.load-interactions') }}')
+                    .then(response => response.json())
+                    .then(data => {
+                        interactions = data;
+                        loading = false;
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        loading = false;
+                    });
+            }, 200);">
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <template x-for="(interaction, index) in interactions" :key="index" x-show="index < 6">
+                    <div class="clay-card p-4 flex items-center">
+                        <div class="mr-4">
+                            <template x-if="interaction.interaction_type === 'view'">
+                                <div class="clay-rounded-full bg-info/20 p-2">
+                                    <i class="fas fa-eye text-info"></i>
+                                </div>
+                            </template>
+                            <template x-if="interaction.interaction_type === 'favorite'">
+                                <div class="clay-rounded-full bg-secondary/20 p-2">
+                                    <i class="fas fa-heart text-secondary"></i>
+                                </div>
+                            </template>
+                            <template x-if="interaction.interaction_type === 'portfolio_add'">
+                                <div class="clay-rounded-full bg-success/20 p-2">
+                                    <i class="fas fa-folder-plus text-success"></i>
+                                </div>
+                            </template>
+                            <template x-if="!['view', 'favorite', 'portfolio_add'].includes(interaction.interaction_type)">
+                                <div class="clay-rounded-full bg-warning/20 p-2">
+                                    <i class="fas fa-info-circle text-warning"></i>
+                                </div>
+                            </template>
                         </div>
-                        <div class="text-xs text-gray-500">
-                            {{ $interaction->created_at->diffForHumans() }}
+                        <div class="flex-grow">
+                            <div class="font-medium">
+                                <template x-if="interaction.interaction_type === 'view'">
+                                    <span>Melihat detail</span>
+                                </template>
+                                <template x-if="interaction.interaction_type === 'favorite'">
+                                    <span>Menambahkan ke favorit</span>
+                                </template>
+                                <template x-if="interaction.interaction_type === 'portfolio_add'">
+                                    <span>Menambahkan ke portfolio</span>
+                                </template>
+                                <template x-if="interaction.interaction_type === 'research'">
+                                    <span>Meriset</span>
+                                </template>
+                                <template x-if="interaction.interaction_type === 'click'">
+                                    <span>Mengklik</span>
+                                </template>
+                                <template x-if="!['view', 'favorite', 'portfolio_add', 'research', 'click'].includes(interaction.interaction_type)">
+                                    <span>Berinteraksi dengan</span>
+                                </template>
+
+                                <span class="font-bold" x-text="interaction.project ? (interaction.project.name + ' (' + interaction.project.symbol + ')') : 'Unknown'"></span>
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                <span x-text="new Date(interaction.created_at).toLocaleString()"></span>
+                            </div>
+                        </div>
+                        <div>
+                            <a :href="'/panel/recommendations/project/' + interaction.project_id" class="clay-button clay-button-info py-1 px-2 text-xs">
+                                Detail
+                            </a>
                         </div>
                     </div>
-                    <div>
-                        <a href="{{ route('panel.recommendations.project', $interaction->project_id) }}" class="clay-button clay-button-info py-1 px-2 text-xs">
-                            Detail
-                        </a>
+                </template>
+
+                <template x-if="interactions.length === 0">
+                    <div class="col-span-full clay-card p-6 text-center">
+                        <p>Belum ada interaksi yang tercatat.</p>
+                        <p class="text-sm mt-2 text-gray-500">Mulai berinteraksi dengan proyek untuk melihat riwayat aktivitas Anda.</p>
                     </div>
-                </div>
-                @endif
-            @empty
-                <div class="col-span-full clay-card p-6 text-center">
-                    <p>Belum ada interaksi yang tercatat.</p>
-                    <p class="text-sm mt-2 text-gray-500">Mulai berinteraksi dengan proyek untuk melihat riwayat aktivitas Anda.</p>
-                </div>
-            @endforelse
+                </template>
+            </div>
         </div>
     </div>
 
@@ -353,67 +448,93 @@
         </p>
     </div>
 
-    <!-- User Preferences -->
+    <!-- User Preferences dengan Lazy Loading -->
     @if(Auth::check())
-    <div class="clay-card p-6">
+    <div class="clay-card p-6" x-data="{ loaded: false, userPrefs: null }" x-init="
+        setTimeout(() => {
+            userPrefs = {
+                risk_tolerance: '{{ Auth::user()->risk_tolerance }}',
+                investment_style: '{{ Auth::user()->investment_style }}',
+                preferred_categories: {{ json_encode(Auth::user()->profile ? Auth::user()->profile->preferred_categories : []) }},
+                preferred_chains: {{ json_encode(Auth::user()->profile ? Auth::user()->profile->preferred_chains : []) }}
+            };
+            loaded = true;
+        }, 300);">
+
         <h2 class="text-xl font-bold mb-6 flex items-center">
             <i class="fas fa-sliders-h mr-2 text-secondary"></i>
             Preferensi Investasi Anda
         </h2>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Loading Placeholder -->
+        <div x-show="!loaded" class="py-4 text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-secondary"></div>
+            <p class="mt-2 text-gray-500">Memuat preferensi Anda...</p>
+        </div>
+
+        <div x-show="loaded" class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div class="clay-card bg-secondary/10 p-4">
                 <h3 class="font-bold mb-3">Profil Anda</h3>
                 <div class="space-y-3">
                     <div class="flex justify-between">
                         <span>Toleransi Risiko:</span>
                         <span class="font-medium">
-                            @if(Auth::user()->risk_tolerance == 'low')
+                            <template x-if="userPrefs.risk_tolerance === 'low'">
                                 <span class="clay-badge clay-badge-success">Rendah</span>
-                            @elseif(Auth::user()->risk_tolerance == 'medium')
+                            </template>
+                            <template x-if="userPrefs.risk_tolerance === 'medium'">
                                 <span class="clay-badge clay-badge-warning">Sedang</span>
-                            @elseif(Auth::user()->risk_tolerance == 'high')
+                            </template>
+                            <template x-if="userPrefs.risk_tolerance === 'high'">
                                 <span class="clay-badge clay-badge-danger">Tinggi</span>
-                            @else
+                            </template>
+                            <template x-if="!userPrefs.risk_tolerance">
                                 <span class="text-gray-400">Belum diatur</span>
-                            @endif
+                            </template>
                         </span>
                     </div>
                     <div class="flex justify-between">
                         <span>Gaya Investasi:</span>
                         <span class="font-medium">
-                            @if(Auth::user()->investment_style == 'conservative')
+                            <template x-if="userPrefs.investment_style === 'conservative'">
                                 <span class="clay-badge clay-badge-info">Konservatif</span>
-                            @elseif(Auth::user()->investment_style == 'balanced')
+                            </template>
+                            <template x-if="userPrefs.investment_style === 'balanced'">
                                 <span class="clay-badge clay-badge-warning">Seimbang</span>
-                            @elseif(Auth::user()->investment_style == 'aggressive')
+                            </template>
+                            <template x-if="userPrefs.investment_style === 'aggressive'">
                                 <span class="clay-badge clay-badge-danger">Agresif</span>
-                            @else
+                            </template>
+                            <template x-if="!userPrefs.investment_style">
                                 <span class="text-gray-400">Belum diatur</span>
-                            @endif
+                            </template>
                         </span>
                     </div>
                 </div>
 
-                @if(!Auth::user()->risk_tolerance || !Auth::user()->investment_style)
-                <div class="mt-4">
-                    <a href="{{ route('panel.profile.edit') }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
-                        <i class="fas fa-edit mr-1"></i> Lengkapi Profil
-                    </a>
-                </div>
-                @endif
+                <template x-if="!userPrefs.risk_tolerance || !userPrefs.investment_style">
+                    <div class="mt-4">
+                        <a href="{{ route('panel.profile.edit') }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
+                            <i class="fas fa-edit mr-1"></i> Lengkapi Profil
+                        </a>
+                    </div>
+                </template>
             </div>
 
             <div class="clay-card bg-primary/10 p-4">
                 <h3 class="font-bold mb-3">Rekomendasi Sesuai Preferensi</h3>
                 <p class="text-sm">
                     Sistem rekomendasi kami memperhitungkan preferensi Anda dalam memberikan rekomendasi proyek.
-                    @if(Auth::user()->risk_tolerance && Auth::user()->investment_style)
-                        Dengan profil <strong>{{ Auth::user()->risk_tolerance_text }}</strong> dan gaya investasi <strong>{{ Auth::user()->investment_style_text }}</strong>,
-                        Anda akan mendapatkan rekomendasi proyek yang sesuai dengan preferensi tersebut.
-                    @else
-                        Lengkapi profil Anda untuk mendapatkan rekomendasi yang lebih personal!
-                    @endif
+                    <template x-if="userPrefs.risk_tolerance && userPrefs.investment_style">
+                        <span>
+                            Dengan profil <strong x-text="userPrefs.risk_tolerance === 'low' ? 'Rendah' : (userPrefs.risk_tolerance === 'medium' ? 'Sedang' : 'Tinggi')"></strong>
+                            dan gaya investasi <strong x-text="userPrefs.investment_style === 'conservative' ? 'Konservatif' : (userPrefs.investment_style === 'balanced' ? 'Seimbang' : 'Agresif')"></strong>,
+                            Anda akan mendapatkan rekomendasi proyek yang sesuai dengan preferensi tersebut.
+                        </span>
+                    </template>
+                    <template x-if="!userPrefs.risk_tolerance || !userPrefs.investment_style">
+                        <span>Lengkapi profil Anda untuk mendapatkan rekomendasi yang lebih personal!</span>
+                    </template>
                 </p>
 
                 <div class="mt-4">

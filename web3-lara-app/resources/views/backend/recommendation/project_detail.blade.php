@@ -2,7 +2,7 @@
 
 @section('content')
 <div class="container mx-auto">
-    @if($isColdStart)
+    @if($isColdStart ?? false)
         <div class="clay-alert clay-alert-info mb-6">
             <p class="flex items-center"><i class="fas fa-info-circle mr-2"></i> Anda terdeteksi sebagai pengguna baru. Rekomendasi akan lebih akurat setelah Anda berinteraksi dengan lebih banyak proyek.</p>
         </div>
@@ -151,50 +151,77 @@
                 @endif
             </div>
 
-            <!-- Bagian konten lainnya (Social metrics, dll) tetap sama seperti sebelumnya -->
-            <!-- ... -->
-
-            <!-- Similar Projects -->
-            @if(!empty($similarProjects))
-            <div class="clay-card p-6 mb-6">
+            <!-- Similar Projects dengan Lazy Loading -->
+            <div class="clay-card p-6 mb-6" x-data="{ loading: true, similarProjects: [] }">
                 <h2 class="text-xl font-bold mb-4 flex items-center">
                     <i class="fas fa-project-diagram mr-2 text-warning"></i>
                     Proyek Serupa
                 </h2>
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    @forelse($similarProjects as $similarProject)
-                    <div class="clay-card p-3 hover:translate-y-[-5px] transition-transform">
-                        <div class="flex items-center mb-2">
-                            @if(isset($similarProject['image']) && $similarProject['image'])
-                                <img src="{{ $similarProject['image'] }}" alt="{{ $similarProject['symbol'] }}" class="w-8 h-8 rounded-full mr-2">
-                            @endif
-                            <div class="font-bold truncate">{{ $similarProject['name'] ?? $similarProject->name }} ({{ $similarProject['symbol'] ?? $similarProject->symbol }})</div>
-                        </div>
-                        <div class="text-sm mb-2 flex justify-between">
-                            <span>{{ isset($similarProject['current_price']) ? '$'.number_format($similarProject['current_price'], 2) : '' }}</span>
-                            @if(isset($similarProject['price_change_percentage_24h']))
-                            <span class="{{ $similarProject['price_change_percentage_24h'] >= 0 ? 'text-success' : 'text-danger' }}">
-                                {{ $similarProject['price_change_percentage_24h'] >= 0 ? '+' : '' }}{{ number_format($similarProject['price_change_percentage_24h'], 2) }}%
-                            </span>
-                            @endif
-                        </div>
-                        <a href="{{ route('panel.recommendations.project', $similarProject['id'] ?? $similarProject->id) }}" class="clay-badge clay-badge-info py-1 px-2 text-xs">
-                            <i class="fas fa-info-circle mr-1"></i> Detail
-                        </a>
+                <!-- Loading Indicator -->
+                <div x-show="loading" class="py-4 text-center">
+                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-warning"></div>
+                    <p class="mt-2 text-gray-500">Memuat proyek serupa...</p>
+                </div>
+
+                <!-- Similar Projects Content -->
+                <div x-show="!loading" x-init="
+                    @if(!empty($similarProjects))
+                        similarProjects = {{ json_encode($similarProjects) }};
+                        loading = false;
+                    @else
+                        fetch('{{ route('panel.recommendations.project', $project->id) }}?format=json&part=similar')
+                            .then(response => response.json())
+                            .then(data => {
+                                similarProjects = data.similar_projects || [];
+                                loading = false;
+                            })
+                            .catch(error => {
+                                console.error('Error loading similar projects:', error);
+                                loading = false;
+                            });
+                    @endif
+                ">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <template x-for="(similarProject, index) in similarProjects" :key="index">
+                            <div class="clay-card p-3 hover:translate-y-[-5px] transition-transform">
+                                <div class="flex items-center mb-2">
+                                    <template x-if="similarProject.image">
+                                        <img :src="similarProject.image" :alt="similarProject.symbol" class="w-8 h-8 rounded-full mr-2" loading="lazy">
+                                    </template>
+                                    <div class="font-bold truncate" x-text="similarProject.name + ' (' + similarProject.symbol + ')'"></div>
+                                </div>
+                                <div class="text-sm mb-2 flex justify-between">
+                                    <span x-text="'$' + (similarProject.current_price ? similarProject.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></span>
+                                    <span :class="(similarProject.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
+                                          x-text="((similarProject.price_change_percentage_24h || 0) > 0 ? '+' : '') +
+                                                    ((similarProject.price_change_percentage_24h || 0).toFixed(2)) + '%'"></span>
+                                </div>
+                                <a :href="'/panel/recommendations/project/' + similarProject.id" class="clay-badge clay-badge-info py-1 px-2 text-xs">
+                                    <i class="fas fa-info-circle mr-1"></i> Detail
+                                </a>
+                            </div>
+                        </template>
+
+                        <template x-if="similarProjects.length === 0">
+                            <div class="col-span-full text-center py-6">
+                                <p>Tidak ada data proyek serupa</p>
+                            </div>
+                        </template>
                     </div>
-                    @empty
-                    <div class="col-span-full text-center py-6">
-                        <p>Tidak ada data proyek serupa</p>
-                    </div>
-                    @endforelse
                 </div>
             </div>
-            @endif
         </div>
 
-        <!-- Trading Signals Column -->
-        <div class="lg:col-span-1">
+        <!-- Trading Signals Column dengan Lazy Loading -->
+        <div class="lg:col-span-1" x-data="{
+            tradingSignalsLoaded: false,
+            tradingSignals: null,
+            priceAlertSettings: {
+                target_price: {{ $project->current_price ?? 0 }},
+                alert_type: 'above'
+            }
+        }">
             <!-- Trading Signals -->
             <div class="clay-card p-6 mb-6 sticky top-24">
                 <h2 class="text-xl font-bold mb-4 flex items-center">
@@ -202,69 +229,109 @@
                     Sinyal Trading
                 </h2>
 
-                @if(isset($tradingSignals) && !empty($tradingSignals))
-                <div class="clay-card {{ $tradingSignals['action'] == 'buy' ? 'bg-success/10' : ($tradingSignals['action'] == 'sell' ? 'bg-danger/10' : 'bg-warning/10') }} p-4 mb-4">
-                    <div class="text-center">
-                        <div class="mb-2">
-                            @if($tradingSignals['action'] == 'buy')
-                                <i class="fas fa-arrow-circle-up text-5xl text-success"></i>
-                            @elseif($tradingSignals['action'] == 'sell')
-                                <i class="fas fa-arrow-circle-down text-5xl text-danger"></i>
-                            @else
-                                <i class="fas fa-minus-circle text-5xl text-warning"></i>
-                            @endif
+                <!-- Loading Indicator -->
+                <div x-show="!tradingSignalsLoaded" class="py-6 text-center">
+                    <div class="inline-block animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-success"></div>
+                    <p class="mt-3 text-gray-500">Memuat sinyal trading...</p>
+                </div>
+
+                <!-- Trading Signals Content -->
+                <div x-show="tradingSignalsLoaded" x-init="
+                    @if(isset($tradingSignals) && !empty($tradingSignals))
+                        tradingSignals = {{ json_encode($tradingSignals) }};
+                        tradingSignalsLoaded = true;
+                    @else
+                        setTimeout(() => {
+                            fetch('{{ route('panel.recommendations.project', $project->id) }}?format=json&part=trading')
+                                .then(response => response.json())
+                                .then(data => {
+                                    tradingSignals = data.trading_signals || null;
+                                    tradingSignalsLoaded = true;
+                                })
+                                .catch(error => {
+                                    console.error('Error loading trading signals:', error);
+                                    tradingSignals = {
+                                        action: 'hold',
+                                        confidence: 0.5,
+                                        evidence: ['Data tidak tersedia saat ini'],
+                                        personalized_message: 'Data analisis teknikal tidak tersedia saat ini.'
+                                    };
+                                    tradingSignalsLoaded = true;
+                                });
+                        }, 300);
+                    @endif
+                ">
+                    <template x-if="tradingSignals">
+                        <div>
+                            <div :class="'clay-card ' + (
+                                tradingSignals.action == 'buy' ? 'bg-success/10' :
+                                (tradingSignals.action == 'sell' ? 'bg-danger/10' : 'bg-warning/10')
+                            ) + ' p-4 mb-4'">
+                                <div class="text-center">
+                                    <div class="mb-2">
+                                        <template x-if="tradingSignals.action == 'buy'">
+                                            <i class="fas fa-arrow-circle-up text-5xl text-success"></i>
+                                        </template>
+                                        <template x-if="tradingSignals.action == 'sell'">
+                                            <i class="fas fa-arrow-circle-down text-5xl text-danger"></i>
+                                        </template>
+                                        <template x-if="tradingSignals.action != 'buy' && tradingSignals.action != 'sell'">
+                                            <i class="fas fa-minus-circle text-5xl text-warning"></i>
+                                        </template>
+                                    </div>
+                                    <div class="font-bold text-2xl capitalize" x-text="tradingSignals.action"></div>
+                                    <div class="text-sm mb-2" x-text="'Kepercayaan: ' + Math.round((tradingSignals.confidence || 0.5) * 100) + '%'"></div>
+
+                                    <template x-if="tradingSignals.target_price && tradingSignals.target_price > 0">
+                                        <div :class="'clay-badge ' + (tradingSignals.action == 'buy' ? 'clay-badge-success' : 'clay-badge-warning') + ' py-1 px-2'"
+                                            x-text="'Target: $' + tradingSignals.target_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></div>
+                                    </template>
+                                </div>
+                            </div>
+
+                            <template x-if="tradingSignals.evidence && tradingSignals.evidence.length > 0">
+                                <div class="clay-card bg-info/5 p-4 mb-4">
+                                    <div class="font-medium mb-2">Indikasi Sinyal:</div>
+                                    <ul class="space-y-2 text-sm">
+                                        <template x-for="(evidence, index) in tradingSignals.evidence" :key="index">
+                                            <li class="flex items-start">
+                                                <i class="fas fa-check-circle text-info mt-1 mr-2"></i>
+                                                <span x-text="evidence"></span>
+                                            </li>
+                                        </template>
+                                    </ul>
+                                </div>
+                            </template>
+
+                            <template x-if="tradingSignals.personalized_message">
+                                <div class="clay-card bg-secondary/5 p-4 mb-4">
+                                    <div class="font-medium mb-2">Pesan Personal:</div>
+                                    <p class="text-sm" x-text="tradingSignals.personalized_message"></p>
+                                </div>
+                            </template>
+
+                            <template x-if="tradingSignals.indicators && Object.keys(tradingSignals.indicators).length > 0">
+                                <div class="clay-card bg-primary/5 p-4">
+                                    <div class="font-medium mb-2">Indikator Teknikal:</div>
+                                    <div class="space-y-2 text-sm">
+                                        <template x-for="(value, indicator) in tradingSignals.indicators" :key="indicator">
+                                            <div class="flex justify-between">
+                                                <span class="uppercase" x-text="indicator"></span>
+                                                <span class="font-medium" x-text="typeof value === 'number' ? value.toFixed(2) : value"></span>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
                         </div>
-                        <div class="font-bold text-2xl capitalize">{{ $tradingSignals['action'] }}</div>
-                        <div class="text-sm mb-2">Kepercayaan: {{ number_format(($tradingSignals['confidence'] ?? 0.5) * 100, 0) }}%</div>
+                    </template>
 
-                        @if(isset($tradingSignals['target_price']) && $tradingSignals['target_price'] > 0)
-                        <div class="clay-badge {{ $tradingSignals['action'] == 'buy' ? 'clay-badge-success' : 'clay-badge-warning' }} py-1 px-2">
-                            Target: ${{ number_format($tradingSignals['target_price'], 2) }}
+                    <template x-if="!tradingSignals">
+                        <div class="clay-alert clay-alert-info">
+                            <p>Tidak ada sinyal trading yang tersedia saat ini.</p>
                         </div>
-                        @endif
-                    </div>
+                    </template>
                 </div>
-
-                @if(isset($tradingSignals['evidence']) && !empty($tradingSignals['evidence']))
-                <div class="clay-card bg-info/5 p-4 mb-4">
-                    <div class="font-medium mb-2">Indikasi Sinyal:</div>
-                    <ul class="space-y-2 text-sm">
-                        @foreach($tradingSignals['evidence'] as $evidence)
-                            <li class="flex items-start">
-                                <i class="fas fa-check-circle text-info mt-1 mr-2"></i>
-                                <span>{{ $evidence }}</span>
-                            </li>
-                        @endforeach
-                    </ul>
-                </div>
-                @endif
-
-                @if(isset($tradingSignals['personalized_message']))
-                <div class="clay-card bg-secondary/5 p-4 mb-4">
-                    <div class="font-medium mb-2">Pesan Personal:</div>
-                    <p class="text-sm">{{ $tradingSignals['personalized_message'] }}</p>
-                </div>
-                @endif
-
-                @if(isset($tradingSignals['indicators']) && !empty($tradingSignals['indicators']))
-                <div class="clay-card bg-primary/5 p-4">
-                    <div class="font-medium mb-2">Indikator Teknikal:</div>
-                    <div class="space-y-2 text-sm">
-                        @foreach($tradingSignals['indicators'] as $indicator => $value)
-                        <div class="flex justify-between">
-                            <span class="uppercase">{{ $indicator }}</span>
-                            <span class="font-medium">{{ is_numeric($value) ? number_format($value, 2) : $value }}</span>
-                        </div>
-                        @endforeach
-                    </div>
-                </div>
-                @endif
-
-                @else
-                <div class="clay-alert clay-alert-info">
-                    <p>Tidak ada sinyal trading yang tersedia saat ini.</p>
-                </div>
-                @endif
 
                 <!-- Set Price Alert -->
                 <div class="mt-6">
@@ -275,12 +342,15 @@
 
                         <div>
                             <label for="target_price" class="text-sm">Target Price ($)</label>
-                            <input type="number" name="target_price" id="target_price" step="0.000001" min="0" class="clay-input mt-1" placeholder="{{ $project->current_price }}">
+                            <input type="number" name="target_price" id="target_price" step="0.000001" min="0"
+                                   x-model="priceAlertSettings.target_price"
+                                   class="clay-input mt-1"
+                                   :placeholder="'Current: $' + {{ $project->current_price ?? 0 }}">
                         </div>
 
                         <div>
                             <label for="alert_type" class="text-sm">Alert Type</label>
-                            <select name="alert_type" id="alert_type" class="clay-select mt-1">
+                            <select name="alert_type" id="alert_type" x-model="priceAlertSettings.alert_type" class="clay-select mt-1">
                                 <option value="above">Above Target</option>
                                 <option value="below">Below Target</option>
                             </select>
