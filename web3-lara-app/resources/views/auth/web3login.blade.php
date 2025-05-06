@@ -77,9 +77,7 @@
 </div>
 
 @push('scripts')
-<!-- Web3.js library -->
-<script src="https://cdn.jsdelivr.net/npm/web3@1.10.0/dist/web3.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist.min.js"></script>
+@vite(['resources/js/app.js'])
 
 <script>
     function web3Login() {
