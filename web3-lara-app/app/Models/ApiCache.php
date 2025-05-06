@@ -1,9 +1,9 @@
 <?php
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Log;
 
 class ApiCache extends Model
 {
@@ -69,20 +69,19 @@ class ApiCache extends Model
         } catch (\Exception $e) {
             // Tangani error dengan diam-diam dan return null
             // untuk menghindari crash aplikasi hanya karena cache
-            Log::error("Cache lookup error for {$endpoint}: " . $e->getMessage());
             return null;
         }
     }
 
     /**
      * DIOPTIMALKAN: Menyimpan respons ke cache dengan penanganan error yang lebih baik
+     * dan TTL yang lebih lama
      */
-    public static function store($endpoint, $parameters, $response, $expiresInMinutes = 60)
+    public static function store($endpoint, $parameters, $response, $expiresInMinutes = 120)
     {
         try {
             // PERBAIKAN: Periksa apakah respons valid (tidak kosong/null)
             if (empty($response) || (is_array($response) && count($response) == 0)) {
-                Log::warning("Mencoba menyimpan respons kosong ke cache untuk endpoint: {$endpoint}");
                 return null;
             }
 
@@ -99,77 +98,73 @@ class ApiCache extends Model
             ]);
         } catch (\Exception $e) {
             // Mencatat error tetapi tidak menghentikan aplikasi
-            Log::error("Cache storage error for {$endpoint}: " . $e->getMessage());
             return null;
         }
     }
 
     /**
-     * DIOPTIMALKAN: Menghapus semua cache yang sudah kadaluarsa dengan batching
-     * untuk mengurangi beban database
+     * DIOPTIMALKAN: Menghapus cache yang sudah kadaluarsa dengan batching
+     * dan limit yang lebih agresif
      */
     public static function clearExpired()
     {
         try {
             $expiredCount = 0;
 
-            // Hapus dengan batching untuk mengurangi beban database
-            self::expired()->chunk(500, function ($caches) use (&$expiredCount) {
+            // Hapus dengan batching dan limit untuk mengurangi beban database
+            self::expired()->chunk(200, function ($caches) use (&$expiredCount) {
                 $ids     = $caches->pluck('id')->toArray();
-                $deleted = self::whereIn('id', $ids)->delete();
+                $deleted = self::whereIn('id', $ids)->limit(1000)->delete();
                 $expiredCount += $deleted;
             });
 
             return $expiredCount;
         } catch (\Exception $e) {
-            Log::error("Failed to clear expired cache: " . $e->getMessage());
             return 0;
         }
     }
 
     /**
-     * DIOPTIMALKAN: Menghapus semua cache dengan penanganan error yang lebih baik
+     * DIOPTIMALKAN: Hapus secara batching untuk mengurangi beban database
      */
     public static function clearAll()
     {
         try {
-            return self::truncate();
+            $count = 0;
+            // Batching delete untuk mengurangi beban database
+            self::chunk(500, function ($caches) use (&$count) {
+                $ids     = $caches->pluck('id')->toArray();
+                $deleted = self::whereIn('id', $ids)->delete();
+                $count += $deleted;
+            });
+            return $count;
         } catch (\Exception $e) {
-            Log::error("Failed to clear all cache: " . $e->getMessage());
-            // Jika truncate gagal, coba cara alternatif
-            try {
-                return self::query()->delete();
-            } catch (\Exception $e2) {
-                Log::error("Alternative cache clearing also failed: " . $e2->getMessage());
-                return false;
-            }
-        }
-    }
-
-    /**
-     * DIOPTIMALKAN: Menghapus cache untuk endpoint tertentu
-     */
-    public static function clearEndpoint($endpoint)
-    {
-        try {
-            return self::where('endpoint', $endpoint)->delete();
-        } catch (\Exception $e) {
-            Log::error("Failed to clear cache for endpoint {$endpoint}: " . $e->getMessage());
             return 0;
         }
     }
 
     /**
-     * DIOPTIMALKAN: Mendapatkan statistik cache dengan caching statistik itu sendiri
-     * untuk menghindari kalkulasi yang mahal
+     * DIOPTIMALKAN: Menghapus cache untuk endpoint tertentu dengan limit
      */
-    public static function getStats()
+    public static function clearEndpoint($endpoint)
+    {
+        try {
+            return self::where('endpoint', $endpoint)->limit(500)->delete();
+        } catch (\Exception $e) {
+            return 0;
+        }
+    }
+
+    /**
+     * DIOPTIMALKAN: Mendapatkan statistik cache dengan pagination
+     */
+    public static function getStats($page = 1, $perPage = 100)
     {
         try {
             // Hitung dengan query yang efisien
             $total     = self::count();
             $valid     = self::valid()->count();
-            $expired   = self::expired()->count();
+            $expired   = $total - $valid;
             $endpoints = self::distinct('endpoint')->count('endpoint');
 
             return [
@@ -180,7 +175,6 @@ class ApiCache extends Model
                 'hit_rate'  => $valid > 0 ? ($valid / $total) * 100 : 0,
             ];
         } catch (\Exception $e) {
-            Log::error("Failed to get cache stats: " . $e->getMessage());
             return [
                 'total'     => 0,
                 'valid'     => 0,
@@ -193,79 +187,83 @@ class ApiCache extends Model
     }
 
     /**
-     * DIOPTIMALKAN: Mendapatkan daftar endpoint yang di-cache dengan limit
+     * DIOPTIMALKAN: Mendapatkan daftar endpoint yang di-cache dengan pagination
      */
-    public static function getEndpointsList($limit = 100)
+    public static function getEndpointsList($page = 1, $perPage = 50)
     {
         try {
             return self::select('endpoint')
                 ->distinct('endpoint')
                 ->orderBy('endpoint')
-                ->limit($limit)
-                ->get()
-                ->pluck('endpoint');
+                ->paginate($perPage, ['*'], 'page', $page);
         } catch (\Exception $e) {
-            Log::error("Failed to get endpoints list: " . $e->getMessage());
             return collect([]);
         }
     }
 
     /**
-     * DIOPTIMALKAN: Mendapatkan penggunaan cache berdasarkan endpoint
+     * DIOPTIMALKAN: Mendapatkan penggunaan cache berdasarkan endpoint dengan pagination
      */
-    public static function getEndpointUsage($limit = 20)
+    public static function getEndpointUsage($page = 1, $perPage = 20)
     {
         try {
             return self::selectRaw('endpoint, COUNT(*) as count')
                 ->groupBy('endpoint')
                 ->orderBy('count', 'desc')
-                ->limit($limit)
-                ->get();
+                ->paginate($perPage, ['*'], 'page', $page);
         } catch (\Exception $e) {
-            Log::error("Failed to get endpoint usage: " . $e->getMessage());
             return collect([]);
         }
     }
 
     /**
-     * DIOPTIMALKAN: Metode baru untuk membersihkan cache secara terprogram
-     * berdasarkan pola endpoint
+     * DIOPTIMALKAN: Menghapus cache berdasarkan pola dengan batching dan limit
      */
     public static function clearByPattern($pattern)
     {
         try {
-            return self::where('endpoint', 'like', $pattern)->delete();
+            $count = 0;
+            self::where('endpoint', 'like', $pattern)
+                ->chunk(200, function ($caches) use (&$count) {
+                    $ids     = $caches->pluck('id')->toArray();
+                    $deleted = self::whereIn('id', $ids)->limit(500)->delete();
+                    $count += $deleted;
+                });
+            return $count;
         } catch (\Exception $e) {
-            Log::error("Failed to clear cache by pattern {$pattern}: " . $e->getMessage());
             return 0;
         }
     }
 
     /**
-     * DIOPTIMALKAN: Metode baru untuk maintenance cache otomatis yang dapat
-     * dijalankan oleh scheduler
+     * DIOPTIMALKAN: Metode maintenance dengan batching dan limit
      */
     public static function performMaintenance()
     {
         try {
-            // Hapus yang kadaluarsa
-            $expiredCount = self::clearExpired();
+            // Hapus yang kadaluarsa dengan limit
+            $expiredCount = self::where('expires_at', '<', now())
+                ->limit(1000)
+                ->delete();
 
-            // Hapus cache yang terlalu lama (bahkan jika belum expired)
-            // untuk mencegah penumpukan data
-            $oldCacheCount = self::where('created_at', '<', now()->subDays(7))->delete();
+            // Hapus cache yang terlalu lama dengan limit
+            $oldCacheCount = self::where('created_at', '<', now()->subDays(7))
+                ->limit(1000)
+                ->delete();
 
                                     // Hapus cache yang terlalu banyak dimulai dari yang paling lama
             $maxCacheCount = 10000; // Batasi jumlah cache pada 10,000
             $totalCache    = self::count();
 
+            $deletedExcessCount = 0;
             if ($totalCache > $maxCacheCount) {
                 $excessCount = $totalCache - $maxCacheCount;
 
-                // Hapus cache yang melebihi batas
-                $deletedExcessCount = self::orderBy('created_at')->limit($excessCount)->delete();
-            } else {
-                $deletedExcessCount = 0;
+                // Hapus dengan batching
+                self::orderBy('created_at')
+                    ->limit($excessCount < 1000 ? $excessCount : 1000)
+                    ->delete();
+                $deletedExcessCount = $excessCount < 1000 ? $excessCount : 1000;
             }
 
             // PERBAIKAN: Bersihkan cache yang tidak valid
@@ -278,37 +276,34 @@ class ApiCache extends Model
                 'invalid_removed' => $invalidCacheCount,
             ];
         } catch (\Exception $e) {
-            Log::error("Cache maintenance failed: " . $e->getMessage());
             return ['error' => $e->getMessage()];
         }
     }
 
     /**
-     * PERBAIKAN: Metode baru untuk membersihkan cache yang tidak valid
+     * DIOPTIMALKAN: Metode untuk membersihkan cache yang tidak valid dengan limit
      */
     public static function cleanInvalidCache()
     {
         try {
-            // Hapus cache dengan respons kosong atau null
-            $nullResponseCount = self::whereNull('response')->delete();
+            // Hapus cache dengan respons kosong atau null dengan limit
+            $nullResponseCount = self::whereNull('response')
+                ->limit(500)
+                ->delete();
 
-            // Hapus cache dengan array kosong (lebih kompleks karena disimpan sebagai JSON)
-            $emptyResponseCount = self::where(function($query) {
+            // Hapus cache dengan array kosong dengan limit
+            $emptyResponseCount = self::where(function ($query) {
                 $query->whereRaw("JSON_LENGTH(response) = 0")
-                      ->orWhereRaw("response = '[]'")
-                      ->orWhereRaw("response = '{}'");
-            })->delete();
+                    ->orWhereRaw("response = '[]'")
+                    ->orWhereRaw("response = '{}'");
+            })
+                ->limit(500)
+                ->delete();
 
             $totalRemoved = $nullResponseCount + $emptyResponseCount;
 
-            // Log hasil
-            if ($totalRemoved > 0) {
-                Log::info("Cleaned {$totalRemoved} invalid cache entries ({$nullResponseCount} null, {$emptyResponseCount} empty)");
-            }
-
             return $totalRemoved;
         } catch (\Exception $e) {
-            Log::error("Error cleaning invalid cache: " . $e->getMessage());
             return 0;
         }
     }

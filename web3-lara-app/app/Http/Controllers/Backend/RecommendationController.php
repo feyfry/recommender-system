@@ -107,11 +107,16 @@ class RecommendationController extends Controller
     /**
      * Menampilkan halaman proyek trending
      */
-    public function trending()
+    public function trending(Request $request)
     {
-        // DIOPTIMALKAN: Cache untuk data yang sering diakses
-        $trendingProjects = Cache::remember('rec_trending_20', 30, function() {
-            return $this->getTrendingProjects(20);
+        // Ambil parameter pagination dari request
+        $page = $request->get('page', 1);
+        $perPage = $request->get('per_page', 20);
+
+        // DIOPTIMALKAN: Cache untuk data yang sering diakses dengan parameter pagination
+        $cacheKey = "rec_trending_{$perPage}_page_{$page}";
+        $trendingProjects = Cache::remember($cacheKey, 30, function() use ($perPage, $page) {
+            return $this->getTrendingProjects($perPage, $page);
         });
 
         // DIOPTIMALKAN: Tidak catat aktivitas untuk halaman yang sering dikunjungi ini
@@ -119,6 +124,18 @@ class RecommendationController extends Controller
         return view('backend.recommendation.trending', [
             'trendingProjects' => $trendingProjects,
         ]);
+    }
+
+    /**
+    * AJAX endpoint untuk refresh trending projects
+    */
+    public function refreshTrending()
+    {
+        // Clear cache dan ambil data baru
+        Cache::forget('dashboard_trending_projects');
+        $trendingProjects = $this->getTrendingProjects(4);
+
+        return response()->json($trendingProjects);
     }
 
     /**
@@ -564,34 +581,33 @@ class RecommendationController extends Controller
     /**
      * Mendapatkan proyek trending
      */
-    private function getTrendingProjects($limit = 10)
+    private function getTrendingProjects($perPage = 20, $page = 1)
     {
-        // Cek cache terlebih dahulu
-        $cacheKey = "trending_projects_{$limit}";
-        $cachedData = ApiCache::findMatch($cacheKey, []);
-
-        if ($cachedData) {
-            return $cachedData->response;
-        }
-
-        // Ambil data dari API jika tidak ada cache
         try {
-            // DIOPTIMALKAN: Gunakan timeout untuk menghindari penantian yang terlalu lama
-            $response = Http::timeout(3)->get("{$this->apiUrl}/recommend/trending", [
-                'limit' => $limit,
+            // Cek cache terlebih dahulu
+            $cacheKey = "trending_projects_paginated_{$perPage}_page_{$page}";
+            $cachedData = ApiCache::findMatch($cacheKey, []);
+
+            if ($cachedData) {
+                return $cachedData->response;
+            }
+
+            // Ambil data dari API dengan parameter pagination
+            $response = Http::timeout(2)->get("{$this->apiUrl}/recommend/trending", [
+                'limit' => $perPage,
+                'page' => $page,
             ])->json();
 
-            // Simpan ke cache untuk 60 menit
-            ApiCache::store($cacheKey, [], $response, 60);
+            // Simpan ke cache untuk 30 menit
+            ApiCache::store($cacheKey, [], $response, 30);
 
             return $response;
         } catch (\Exception $e) {
             Log::error("Gagal mendapatkan proyek trending: " . $e->getMessage());
 
-            // Fallback ke data dari database lokal
+            // Fallback ke data dari database lokal dengan pagination
             return Project::orderBy('trend_score', 'desc')
-                ->limit($limit)
-                ->get();
+                ->paginate($perPage, ['*'], 'page', $page);
         }
     }
 

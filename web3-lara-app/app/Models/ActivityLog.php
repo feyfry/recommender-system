@@ -1,4 +1,6 @@
 <?php
+// app/Models/ActivityLog.php
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -62,25 +64,42 @@ class ActivityLog extends Model
     }
 
     /**
-     * DIOPTIMALKAN: Flag untuk mengontrol apakah akan mencatat aktivitas view/normal
-     * Berguna untuk menghindari pencatatan aktivitas yang terlalu sering
+     * DIOPTIMALKAN: Flag untuk mengontrol apakah akan mencatat aktivitas
+     * Kita matikan default logging
      *
      * @var bool
      */
     protected static $shouldLogViews = false;
 
     /**
+     * DIOPTIMALKAN: Flag untuk mengontrol apakah akan mencatat aktivitas normal
+     *
+     * @var bool
+     */
+    protected static $shouldLogNormal = false;
+
+    /**
      * DIOPTIMALKAN: Toggle apakah akan mencatat aktivitas view biasa
      *
      * @param bool $shouldLog
      */
-    public static function shouldLogViewActivities($shouldLog = true)
+    public static function shouldLogViewActivities($shouldLog = false)
     {
         self::$shouldLogViews = $shouldLog;
     }
 
     /**
-     * Mencatat aktivitas login.
+     * DIOPTIMALKAN: Toggle apakah akan mencatat aktivitas normal
+     *
+     * @param bool $shouldLog
+     */
+    public static function shouldLogNormalActivities($shouldLog = false)
+    {
+        self::$shouldLogNormal = $shouldLog;
+    }
+
+    /**
+     * Mencatat aktivitas login - tetap diaktifkan karena ini penting untuk keamanan.
      */
     public static function logLogin($user, $request)
     {
@@ -94,7 +113,7 @@ class ActivityLog extends Model
     }
 
     /**
-     * Mencatat aktivitas logout.
+     * Mencatat aktivitas logout - tetap diaktifkan karena ini penting untuk keamanan.
      */
     public static function logLogout($user, $request)
     {
@@ -108,17 +127,19 @@ class ActivityLog extends Model
     }
 
     /**
-     * DIOPTIMALKAN: Mencatat aktivitas melihat rekomendasi hanya jika penting.
+     * DIOPTIMALKAN: Mencatat aktivitas melihat rekomendasi hanya jika sangat penting.
+     * Sebagian besar view tidak perlu dilog.
      */
     public static function logViewRecommendation($user, $request, $recommendationType)
     {
-        // Hanya catat aktivitas view jika flag diaktifkan atau untuk tipe tertentu yang lebih penting
-        if (!self::$shouldLogViews && $recommendationType === 'dashboard') {
+        // Matikan hampir semua logging view
+        if (!self::$shouldLogViews) {
             return null;
         }
 
-        // Tidak catat aktivitas view pada halaman yang sering dikunjungi
-        if (in_array($recommendationType, ['trending', 'popular', 'personal'])) {
+        // Hanya log kategori tertentu jika dibutuhkan
+        $importantTypes = ['portfolio', 'chain-solana', 'chain-ethereum']; // Contoh tipe penting
+        if (!in_array($recommendationType, $importantTypes)) {
             return null;
         }
 
@@ -132,16 +153,14 @@ class ActivityLog extends Model
     }
 
     /**
-     * DIOPTIMALKAN: Mencatat aktivitas interaksi dengan project.
-     * Hanya mencatat interaksi yang benar-benar penting untuk sistem rekomendasi.
+     * DIOPTIMALKAN: Mencatat aktivitas interaksi dengan project hanya yang benar-benar penting.
      */
     public static function logInteraction($user, $request, $projectId, $interactionType)
     {
-        // Hanya catat interaksi yang benar-benar penting untuk rekomendasi
-        // Ini adalah interaksi yang ingin kita analisis dan gunakan dalam engine rekomendasi
-        $relevantInteractions = ['view', 'favorite', 'portfolio_add', 'research', 'click'];
+        // Hanya catat interaksi tertentu yang penting (dan sudah direkam di model Interaction)
+        $criticalInteractions = ['favorite', 'portfolio_add'];
 
-        if (!in_array($interactionType, $relevantInteractions)) {
+        if (!in_array($interactionType, $criticalInteractions)) {
             return null;
         }
 
@@ -158,7 +177,7 @@ class ActivityLog extends Model
     }
 
     /**
-     * Mencatat aktivitas transaksi.
+     * Mencatat aktivitas transaksi - tetap diaktifkan karena penting untuk audit keuangan.
      */
     public static function logTransaction($user, $request, $transaction)
     {
@@ -177,7 +196,7 @@ class ActivityLog extends Model
     }
 
     /**
-     * DIOPTIMALKAN: Mencatat aktivitas update profil.
+     * DIOPTIMALKAN: Hanya catat perubahan profil, bukan view profil
      */
     public static function logProfileUpdate($user, $request)
     {
@@ -195,10 +214,20 @@ class ActivityLog extends Model
      */
     public static function logAdminAction($user, $request, $action, $details = null)
     {
-        // Jangan catat aktivitas admin untuk aktivitas view sederhana
-        $viewActions = ['view_dashboard', 'view_users', 'view_projects', 'view_data_sync', 'view_activity_logs'];
-        if (in_array($action, $viewActions) && empty($details)) {
-            return null;
+        // Matikan logging untuk aktivitas admin biasa
+        if (!self::$shouldLogNormal) {
+            // Hanya log tindakan kritis admin (hapus, update, create)
+            $criticalActions = [
+                'update_user_role',
+                'train_models',
+                'clear_api_cache',
+                'trigger_data_sync',
+                'run_command'
+            ];
+
+            if (!in_array($action, $criticalActions)) {
+                return null;
+            }
         }
 
         $description = "Tindakan admin: {$action}";
@@ -217,9 +246,9 @@ class ActivityLog extends Model
     }
 
     /**
-     * Mendapatkan statistik aktivitas berdasarkan tipe.
+     * Mendapatkan statistik aktivitas berdasarkan tipe dengan pagination.
      */
-    public static function getActivityStats($userId = null, $days = 30)
+    public static function getActivityStats($userId = null, $days = 30, $page = 1, $perPage = 50)
     {
         $query = self::selectRaw('activity_type, COUNT(*) as count, DATE(created_at) as date')
             ->where('created_at', '>=', now()->subDays($days))
@@ -230,20 +259,31 @@ class ActivityLog extends Model
             $query->where('user_id', $userId);
         }
 
-        return $query->get();
+        // Tambahkan pagination
+        return $query->paginate($perPage, ['*'], 'page', $page);
     }
 
     /**
-     * Mendapatkan pengguna paling aktif.
+     * Mendapatkan pengguna paling aktif dengan pagination.
      */
-    public static function getMostActiveUsers($limit = 10, $days = 30)
+    public static function getMostActiveUsers($limit = 10, $days = 30, $page = 1)
     {
         return self::join('users', 'activity_logs.user_id', '=', 'users.user_id')
             ->selectRaw('activity_logs.user_id, COUNT(*) as activity_count')
             ->where('activity_logs.created_at', '>=', now()->subDays($days))
             ->groupBy('activity_logs.user_id')
             ->orderBy('activity_count', 'desc')
-            ->limit($limit)
-            ->get();
+            ->paginate($limit, ['*'], 'page', $page);
+    }
+
+    /**
+     * Batch insert multiple activity logs at once.
+     *
+     * @param array $logs
+     * @return bool
+     */
+    public static function batchInsert(array $logs)
+    {
+        return self::insert($logs);
     }
 }

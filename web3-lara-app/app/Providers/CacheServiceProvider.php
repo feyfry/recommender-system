@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Providers;
 
 use App\Models\ApiCache;
@@ -21,11 +22,14 @@ class CacheServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // Menjalankan pembersihan cache yang kadaluwarsa secara otomatis
-        // saat aplikasi di-bootstrap dalam interval tertentu (tidak setiap request)
-        if (! $this->app->runningInConsole() && rand(1, 100) <= 5) { // 5% chance on web requests
+        // DIOPTIMALKAN: Kurangi frekuensi pembersihan cache otomatis
+        // Dari 5% menjadi 1% probabilitas
+        if (! $this->app->runningInConsole() && rand(1, 100) <= 1) {
             try {
-                ApiCache::where('expires_at', '<', now())->limit(100)->delete();
+                // Batasi jumlah yang dihapus untuk mengurangi beban database
+                ApiCache::where('expires_at', '<', now()->subDays(1))
+                    ->limit(50)
+                    ->delete();
             } catch (\Exception $e) {
                 // Jangan biarkan kegagalan pembersihan cache menghentikan aplikasi
                 Log::info('Failed to clean expired cache during bootstrap: ' . $e->getMessage());

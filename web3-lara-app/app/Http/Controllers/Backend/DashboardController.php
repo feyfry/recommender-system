@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Controllers\Backend;
 
 use App\Http\Controllers\Controller;
@@ -6,7 +7,7 @@ use App\Models\Interaction;
 use App\Models\Portfolio;
 use App\Models\Project;
 use App\Models\Recommendation;
-use App\Models\User;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -30,54 +31,94 @@ class DashboardController extends Controller
     }
 
     /**
-     * Menampilkan dashboard pengguna
+     * Menampilkan dashboard pengguna dengan lazy loading
      */
-    public function index()
+    public function index(Request $request)
     {
         $user   = Auth::user();
         $userId = $user->user_id;
 
-        // Gunakan caching untuk meningkatkan performa
-        $personalRecommendations = Cache::remember("dashboard_personal_recs_{$userId}", 30, function () use ($userId) {
-            return $this->getPersonalRecommendations($userId, 'hybrid', 4);
+        // DIOPTIMALKAN: Load data yang penting sekaligus
+        // dan sisanya lazy loaded melalui AJAX
+        $data = [
+            'user'                    => $user,
+            // Load rekomendasi personal pada load awal
+            'personalRecommendations' => Cache::remember("dashboard_personal_recs_{$userId}", 30, function () use ($userId) {
+                return $this->getPersonalRecommendations($userId, 'hybrid', 4);
+            }),
+            // Load trending projects pada load awal dengan jumlah kecil
+            'trendingProjects'        => Cache::remember('dashboard_trending_projects', 60, function () {
+                return $this->getTrendingProjects(4);
+            }),
+            // Inisialisasi data portfolio dan interactions dengan kosong
+            // untuk mengurangi load awal, akan dimuat dengan lazy loading
+            'portfolioSummary'        => null,
+            'recentInteractions'      => null,
+        ];
+
+        return view('backend.dashboard.index', $data);
+    }
+
+    /**
+     * AJAX endpoint untuk load data portfolio asynchronously
+     */
+    public function loadPortfolio()
+    {
+        $user   = Auth::user();
+        $userId = $user->user_id;
+
+        $portfolioSummary = Cache::remember("dashboard_portfolio_{$userId}", 30, function () use ($userId) {
+            return $this->getPortfolioSummary($userId);
         });
 
-        $trendingProjects = Cache::remember('dashboard_trending_projects', 60, function () {
-            return $this->getTrendingProjects(4);
-        });
+        return response()->json($portfolioSummary);
+    }
 
-        // Ambil interaksi terbaru pengguna
+    /**
+     * AJAX endpoint untuk load interaksi terbaru asynchronously
+     */
+    public function loadInteractions()
+    {
+        $user   = Auth::user();
+        $userId = $user->user_id;
+
         $recentInteractions = Cache::remember("dashboard_interactions_{$userId}", 15, function () use ($userId) {
             return Interaction::forUser($userId)
-                ->with('project')
+                ->with(['project' => function ($query) {
+                    // Hanya select kolom yang dibutuhkan untuk optimasi
+                    $query->select('id', 'name', 'symbol', 'image');
+                }])
                 ->orderBy('created_at', 'desc')
                 ->limit(5)
                 ->get();
         });
 
-        // Ambil dan hitung data portofolio jika ada
-        $portfolioSummary = Cache::remember("dashboard_portfolio_{$userId}", 30, function () use ($userId) {
-            return $this->getPortfolioSummary($userId);
-        });
-
-        // DIOPTIMALKAN: Tidak lagi mencatat aktivitas untuk setiap kunjungan dashboard
-        // Perubahan ini sendiri akan meningkatkan kinerja secara signifikan
-
-        return view('backend.dashboard.index', [
-            'personalRecommendations' => $personalRecommendations,
-            'trendingProjects'        => $trendingProjects,
-            'recentInteractions'      => $recentInteractions,
-            'portfolioSummary'        => $portfolioSummary,
-            'user'                    => $user,
-        ]);
+        return response()->json($recentInteractions);
     }
 
     /**
-     * Mendapatkan ringkasan portofolio pengguna
+     * AJAX endpoint untuk refresh trending projects
+     */
+    public function refreshTrending()
+    {
+        // Clear cache dan ambil data baru
+        Cache::forget('dashboard_trending_projects');
+        $trendingProjects = $this->getTrendingProjects(4);
+
+        return response()->json($trendingProjects);
+    }
+
+    /**
+     * Mendapatkan ringkasan portofolio pengguna (Dioptimalkan untuk performa)
      */
     private function getPortfolioSummary($userId)
     {
-        $portfolios = Portfolio::forUser($userId)->with('project')->get();
+        $portfolios = Portfolio::forUser($userId)
+            ->with(['project' => function ($query) {
+                // Hanya select kolom yang dibutuhkan untuk optimasi
+                $query->select('id', 'name', 'symbol', 'image', 'current_price');
+            }])
+            ->get();
 
         if ($portfolios->isEmpty()) {
             return [
@@ -130,14 +171,21 @@ class DashboardController extends Controller
     }
 
     /**
-     * Mendapatkan rekomendasi personal untuk pengguna
+     * Mendapatkan rekomendasi personal untuk pengguna (Dioptimalkan)
      */
     private function getPersonalRecommendations($userId, $modelType = 'hybrid', $limit = 10)
     {
         try {
+            // DIOPTIMALKAN: Cache hasil API untuk mengurangi panggilan
+            $cacheKey   = "personal_recommendations_{$userId}_{$modelType}_{$limit}";
+            $cachedData = Cache::get($cacheKey);
+
+            if ($cachedData) {
+                return $cachedData;
+            }
+
             // DIOPTIMALKAN: Gunakan timeout yang lebih rendah untuk HTTP requests
-            // untuk menghindari menunggu terlalu lama jika API lambat
-            $response = Http::timeout(3)->post("{$this->apiUrl}/recommend/projects", [
+            $response = Http::timeout(2)->post("{$this->apiUrl}/recommend/projects", [
                 'user_id'             => $userId,
                 'model_type'          => $modelType,
                 'num_recommendations' => $limit,
@@ -148,6 +196,8 @@ class DashboardController extends Controller
 
             // Apakah respons berhasil dan memiliki format yang benar
             if ($response->successful() && isset($response['recommendations'])) {
+                // Cache result for 30 minutes
+                Cache::put($cacheKey, $response['recommendations'], 30);
                 return $response['recommendations'];
             } else {
                 // Log kesalahan dan kembalikan array kosong jika data tidak sesuai format
@@ -168,22 +218,33 @@ class DashboardController extends Controller
     }
 
     /**
-     * Mendapatkan proyek trending
+     * Mendapatkan proyek trending (Dioptimalkan)
      */
     private function getTrendingProjects($limit = 10)
     {
         try {
+            // DIOPTIMALKAN: Cache hasil API untuk mengurangi panggilan
+            $cacheKey   = "trending_projects_{$limit}";
+            $cachedData = Cache::get($cacheKey);
+
+            if ($cachedData) {
+                return $cachedData;
+            }
+
             // DIOPTIMALKAN: Gunakan timeout yang lebih rendah untuk HTTP requests
-            $response = Http::timeout(3)->get("{$this->apiUrl}/recommend/trending", [
+            $response = Http::timeout(2)->get("{$this->apiUrl}/recommend/trending", [
                 'limit' => $limit,
             ])->json();
 
+            // Cache result for 60 minutes
+            Cache::put($cacheKey, $response, 60);
             return $response;
         } catch (\Exception $e) {
             Log::error("Gagal mendapatkan proyek trending: " . $e->getMessage());
 
             // Fallback ke data dari database lokal
-            return Project::orderBy('trend_score', 'desc')
+            return Project::select('id', 'name', 'symbol', 'image', 'current_price', 'price_change_percentage_24h')
+                ->orderBy('trend_score', 'desc')
                 ->limit($limit)
                 ->get();
         }

@@ -25,6 +25,9 @@ Route::post('/logout', [Web3AuthController::class, 'logout'])->name('logout');
 Route::prefix('panel')->middleware('auth')->group(function () {
     // Dashboard Pengguna
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('panel.dashboard');
+    // Dashboard AJAX endpoints untuk lazy loading
+    Route::get('/dashboard/load-portfolio', [DashboardController::class, 'loadPortfolio'])->name('panel.dashboard.load-portfolio');
+    Route::get('/dashboard/load-interactions', [DashboardController::class, 'loadInteractions'])->name('panel.dashboard.load-interactions');
 
     // Profil Pengguna
     Route::get('/profile', [ProfileController::class, 'edit'])->name('panel.profile.edit');
@@ -42,6 +45,7 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         Route::get('/chains', [RecommendationController::class, 'chains'])->name('panel.recommendations.chains');
         Route::get('/project/{id}', [RecommendationController::class, 'projectDetail'])->name('panel.recommendations.project');
         Route::post('/favorites/add', [RecommendationController::class, 'addToFavorites'])->name('panel.recommendations.add-favorite');
+        Route::get('/trending/refresh', [RecommendationController::class, 'refreshTrending'])->name('panel.recommendations.trending-refresh');
     });
 
     // Portfolio
@@ -79,6 +83,8 @@ Route::prefix('panel')->middleware('auth')->group(function () {
 
         // Log Aktivitas
         Route::get('/activity-logs', [AdminController::class, 'activityLogs'])->name('admin.activity-logs');
+
+        Route::get('/most-interacted-projects', [AdminController::class, 'getMostInteractedProjects'])->name('admin.most-interacted-projects');
     });
 });
 

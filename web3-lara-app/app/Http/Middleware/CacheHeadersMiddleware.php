@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Middleware;
 
 use Closure;
@@ -12,7 +13,7 @@ class CacheHeadersMiddleware
      *
      * @param  \Closure(\Illuminate\Http\Request): (\Symfony\Component\HttpFoundation\Response)  $next
      */
-    public function handle(Request $request, Closure $next, int $seconds = 600): Response
+    public function handle(Request $request, Closure $next, int $seconds = 1800): Response
     {
         $response = $next($request);
 
@@ -25,6 +26,7 @@ class CacheHeadersMiddleware
         }
 
         // Tambahkan cache headers untuk halaman publik statis
+        // Ditingkatkan dari 600 detik menjadi 1800 detik
         if (! $request->user() && $request->isMethod('GET') && $response->getStatusCode() == 200) {
             $response->setCache([
                 'public'   => true,
