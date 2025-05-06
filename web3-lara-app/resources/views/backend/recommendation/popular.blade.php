@@ -120,7 +120,7 @@
                 <select x-model="perPage" @change="
                     loading = true;
                     window.location.href = '{{ route('panel.recommendations.popular') }}?page=' + currentPage + '&per_page=' + perPage;"
-                    class="clay-select py-1.5 px-3 text-sm">
+                    class="clay-select py-2 px-8 text-sm">
                     <option value="10">10 per halaman</option>
                     <option value="20">20 per halaman</option>
                     <option value="50">50 per halaman</option>
@@ -137,22 +137,30 @@
 
         <!-- Projects Table -->
         <div x-show="!loading" x-init="
-            // Inisialisasi data dari server atau muat melalui AJAX
+            // PERBAIKAN: Inisialisasi data pagination dengan benar
             @if(isset($popularProjects) && !empty($popularProjects))
                 @if(is_object($popularProjects) && method_exists($popularProjects, 'lastPage'))
                     totalPages = {{ $popularProjects->lastPage() }};
+                    currentPage = {{ $popularProjects->currentPage() }};
                     popularProjects = {{ json_encode($popularProjects->items()) }};
+                @elseif(is_array($popularProjects) && isset($popularProjects['data']))
+                    popularProjects = {{ json_encode($popularProjects['data']) }};
+                    totalPages = {{ $popularProjects['last_page'] ?? 1 }};
+                    currentPage = {{ $popularProjects['current_page'] ?? 1 }};
                 @else
                     popularProjects = {{ json_encode($popularProjects) }};
                 @endif
                 loading = false;
             @else
-                fetch('{{ route('panel.recommendations.popular') }}?format=json&page=' + currentPage + '&per_page=' + perPage)
+                // PERBAIKAN: Ambil data dengan pagination
+                fetch('{{ route('panel.recommendations.popular') }}?page=' + currentPage + '&per_page=' + perPage + '&format=json')
                     .then(response => response.json())
                     .then(data => {
+                        // PERBAIKAN: Tangani berbagai format data
                         if (data.data) {
                             popularProjects = data.data;
                             totalPages = data.last_page || 1;
+                            currentPage = data.current_page || 1;
                         } else {
                             popularProjects = data;
                         }
@@ -171,7 +179,7 @@
                             <th class="py-3 px-4 text-left">Rank</th>
                             <th class="py-3 px-4 text-left">Proyek</th>
                             <th class="py-3 px-4 text-left">Harga</th>
-                            <th class="py-3 px-4 text-left">24h %</th>
+                            <th class="py-3 px-4 text-left">24h $</th>
                             <th class="py-3 px-4 text-left">Volume 24h</th>
                             <th class="py-3 px-4 text-left">Market Cap</th>
                             <th class="py-3 px-4 text-left">Popularity Score</th>
@@ -195,7 +203,7 @@
                                 </td>
                                 <td class="py-3 px-4 font-medium" x-text="'$' + (project.current_price ? project.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></td>
                                 <td class="py-3 px-4" :class="(project.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
-                                    x-text="((project.price_change_percentage_24h || 0) > 0 ? '+' : '') + ((project.price_change_percentage_24h || 0).toFixed(2)) + '%'"></td>
+                                    x-text="((project.price_change_percentage_24h || 0) > 0 ? '+' : '') + ((project.price_change_percentage_24h || 0).toFixed(2)) + '$'"></td>
                                 <td class="py-3 px-4" x-text="'$' + (project.total_volume ? project.total_volume.toLocaleString(undefined, {maximumFractionDigits: 0}) : '0')"></td>
                                 <td class="py-3 px-4" x-text="'$' + (project.market_cap ? project.market_cap.toLocaleString(undefined, {maximumFractionDigits: 0}) : '0')"></td>
                                 <td class="py-3 px-4">
@@ -240,7 +248,13 @@
                     <span class="text-sm text-gray-600">
                         Menampilkan <span x-text="((currentPage - 1) * perPage) + 1"></span>
                         sampai <span x-text="Math.min(currentPage * perPage, ((currentPage - 1) * perPage) + popularProjects.length)"></span>
-                        dari <span x-text="totalPages * perPage"></span> proyek
+                        @if(is_object($popularProjects) && method_exists($popularProjects, 'total'))
+                        dari <span>{{ $popularProjects->total() }}</span> proyek
+                        @elseif(is_array($popularProjects) && isset($popularProjects['total']))
+                        dari <span>{{ $popularProjects['total'] }}</span> proyek
+                        @else
+                        <span x-text="'dari ' + (totalPages * perPage) + ' proyek'"></span>
+                        @endif
                     </span>
                 </div>
 
@@ -253,113 +267,24 @@
                         <i class="fas fa-chevron-left mr-1"></i> Sebelumnya
                     </button>
 
-                    <template x-for="page in Math.min(5, totalPages)">
+                    <!-- PERBAIKAN: Tampilkan halaman yang benar sesuai totalPages -->
+                    <template x-for="page in Math.min(5, totalPages)" :key="page">
                         <button
                             @click="if (page !== currentPage) { loading = true; window.location.href = '{{ route('panel.recommendations.popular') }}?page=' + page + '&per_page=' + perPage; }"
-                            :class="page === currentPage ? 'clay-button-primary' : 'clay-button-secondary'"
+                            :class="page === parseInt(currentPage) ? 'clay-button-primary' : 'clay-button-secondary'"
                             class="clay-button py-1.5 px-3 text-sm">
                             <span x-text="page"></span>
                         </button>
                     </template>
 
                     <button
-                        @click="if (currentPage < totalPages) { loading = true; window.location.href = '{{ route('panel.recommendations.popular') }}?page=' + (currentPage + 1) + '&per_page=' + perPage; }"
+                        @click="if (currentPage < totalPages) { loading = true; window.location.href = '{{ route('panel.recommendations.popular') }}?page=' + (parseInt(currentPage) + 1) + '&per_page=' + perPage; }"
                         :disabled="currentPage >= totalPages"
                         :class="currentPage >= totalPages ? 'opacity-50 cursor-not-allowed' : ''"
                         class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
                         Selanjutnya <i class="fas fa-chevron-right ml-1"></i>
                     </button>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Popular Insights dengan Lazy Loading -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8" x-data="{
-        categoriesLoaded: false,
-        chainsLoaded: false,
-        categoryData: [],
-        chainData: []
-    }">
-        <!-- Popular Categories -->
-        <div class="clay-card p-6">
-            <h2 class="text-lg font-bold mb-4 flex items-center">
-                <i class="fas fa-tags mr-2 text-secondary"></i>
-                Kategori Terpopuler
-            </h2>
-
-            <!-- Loading Indicator -->
-            <div x-show="!categoriesLoaded" class="py-4 text-center">
-                <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-secondary"></div>
-                <p class="mt-2 text-gray-500">Memuat kategori terpopuler...</p>
-            </div>
-
-            <!-- Categories Content -->
-            <div x-show="categoriesLoaded" x-init="
-                setTimeout(() => {
-                    categoryData = [
-                        { name: 'Layer-1', count: 15, percentage: 90 },
-                        { name: 'DeFi', count: 12, percentage: 75 },
-                        { name: 'Exchange', count: 8, percentage: 60 },
-                        { name: 'Stablecoin', count: 5, percentage: 45 }
-                    ];
-                    categoriesLoaded = true;
-                }, 300);" class="space-y-4">
-
-                <template x-for="category in categoryData" :key="category.name">
-                    <div class="clay-card bg-secondary/5 p-3">
-                        <div class="flex justify-between mb-1">
-                            <span class="font-medium" x-text="category.name"></span>
-                            <span class="clay-badge clay-badge-secondary py-0.5 px-2">
-                                <span x-text="category.count"></span> proyek
-                            </span>
-                        </div>
-                        <div class="clay-progress">
-                            <div class="clay-progress-bar clay-progress-secondary" :style="'width: ' + category.percentage + '%'"></div>
-                        </div>
-                    </div>
-                </template>
-            </div>
-        </div>
-
-        <!-- Popular Blockchains -->
-        <div class="clay-card p-6">
-            <h2 class="text-lg font-bold mb-4 flex items-center">
-                <i class="fas fa-link mr-2 text-info"></i>
-                Blockchain Terpopuler
-            </h2>
-
-            <!-- Loading Indicator -->
-            <div x-show="!chainsLoaded" class="py-4 text-center">
-                <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-info"></div>
-                <p class="mt-2 text-gray-500">Memuat blockchain terpopuler...</p>
-            </div>
-
-            <!-- Chains Content -->
-            <div x-show="chainsLoaded" x-init="
-                setTimeout(() => {
-                    chainData = [
-                        { name: 'Ethereum', count: 18, percentage: 95 },
-                        { name: 'Binance Smart Chain', count: 12, percentage: 70 },
-                        { name: 'Solana', count: 8, percentage: 55 },
-                        { name: 'Polygon', count: 6, percentage: 40 }
-                    ];
-                    chainsLoaded = true;
-                }, 400);" class="space-y-4">
-
-                <template x-for="chain in chainData" :key="chain.name">
-                    <div class="clay-card bg-info/5 p-3">
-                        <div class="flex justify-between mb-1">
-                            <span class="font-medium" x-text="chain.name"></span>
-                            <span class="clay-badge clay-badge-info py-0.5 px-2">
-                                <span x-text="chain.count"></span> proyek
-                            </span>
-                        </div>
-                        <div class="clay-progress">
-                            <div class="clay-progress-bar clay-progress-info" :style="'width: ' + chain.percentage + '%'"></div>
-                        </div>
-                    </div>
-                </template>
             </div>
         </div>
     </div>

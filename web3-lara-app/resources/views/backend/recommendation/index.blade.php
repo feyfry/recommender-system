@@ -67,7 +67,7 @@
         </a>
     </div>
 
-    <!-- Personal Recommendations Preview dengan Lazy Loading -->
+    <!-- Personal Recommendations Preview dengan Lazy Loading yang DIPERBAIKI -->
     <div class="clay-card p-6 mb-8" x-data="{ loading: true, recommendations: [] }">
         <div class="flex justify-between items-center mb-6">
             <h2 class="text-xl font-bold flex items-center">
@@ -87,7 +87,7 @@
 
         <!-- Rekomendasi Personal Content -->
         <div x-show="!loading" x-init="
-            // Menggunakan data dari server jika tersedia, jika tidak muat async
+            // PERBAIKAN: Prioritaskan data dari server jika tersedia
             @if(!empty($personalRecommendations))
                 recommendations = {{ json_encode($personalRecommendations) }};
                 loading = false;
@@ -96,7 +96,14 @@
                     fetch('{{ route('panel.recommendations.personal') }}?format=json')
                         .then(response => response.json())
                         .then(data => {
-                            recommendations = data.slice(0, 4);
+                            // PERBAIKAN: Tangani berbagai format data
+                            if (data.recommendations) {
+                                recommendations = data.recommendations.slice(0, 4);
+                            } else if (data.data) {
+                                recommendations = data.data.slice(0, 4);
+                            } else {
+                                recommendations = data.slice(0, 4);
+                            }
                             loading = false;
                         })
                         .catch(error => {
@@ -110,14 +117,14 @@
                 <template x-for="(recommendation, index) in recommendations" :key="index" x-show="index < 4">
                     <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
                         <div class="font-bold text-lg mb-2" x-text="recommendation.name + ' (' + recommendation.symbol + ')'"></div>
-                        <div class="text-sm mb-2">
+                        <div class="flex justify-between mb-2 text-sm">
                             <span x-text="'$' + (recommendation.current_price ? recommendation.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></span>
                             <span :class="(recommendation.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
-                                  x-text="((recommendation.price_change_percentage_24h || 0) > 0 ? '+' : '') +
-                                           ((recommendation.price_change_percentage_24h || 0).toFixed(2)) + '%'"></span>
+                                x-text="((recommendation.price_change_percentage_24h || 0) > 0 ? '+' : '') + ((recommendation.price_change_percentage_24h || 0).toFixed(2)) + '$'">
+                            </span>
                         </div>
-                        <div class="clay-badge clay-badge-secondary mb-3" x-text="recommendation.primary_category || 'Umum'"></div>
-                        <p class="text-sm mb-3 line-clamp-2" x-text="recommendation.description || 'Tidak ada deskripsi'"></p>
+                        <!-- PERBAIKAN: Tampilkan kategori dengan fallback -->
+                        <div class="clay-badge clay-badge-secondary mb-3" x-text="recommendation.primary_category || recommendation.category || 'Umum'"></div>
                         <div class="flex justify-between items-center">
                             <div class="text-xs font-medium">Score: <span class="text-secondary"
                                 x-text="(recommendation.recommendation_score || 0).toFixed(2)"></span></div>
@@ -139,7 +146,7 @@
         </div>
     </div>
 
-    <!-- Trending Projects Preview dengan Lazy Loading -->
+    <!-- Trending Projects Preview dengan Lazy Loading yang DIPERBAIKI -->
     <div class="clay-card p-6 mb-8" x-data="{ loading: true, trendingProjects: [] }">
         <div class="flex justify-between items-center mb-6">
             <h2 class="text-xl font-bold flex items-center">
@@ -152,7 +159,11 @@
                     fetch('{{ route('panel.recommendations.trending-refresh') }}')
                         .then(response => response.json())
                         .then(data => {
-                            trendingProjects = data;
+                            if (data.data) {
+                                trendingProjects = data.data;
+                            } else {
+                                trendingProjects = data;
+                            }
                             loading = false;
                         })
                         .catch(error => {
@@ -176,16 +187,24 @@
 
         <!-- Trending Projects Table -->
         <div class="overflow-x-auto" x-show="!loading" x-init="
-            // Menggunakan data dari server jika tersedia, jika tidak muat async
+            // PERBAIKAN: Prioritaskan data dari server jika tersedia
             @if(!empty($trendingProjects))
-                trendingProjects = {{ json_encode($trendingProjects) }};
+                @if(is_object($trendingProjects) && method_exists($trendingProjects, 'items'))
+                    trendingProjects = {{ json_encode($trendingProjects->items()) }};
+                @else
+                    trendingProjects = {{ json_encode(is_array($trendingProjects) && isset($trendingProjects['data']) ? $trendingProjects['data'] : $trendingProjects) }};
+                @endif
                 loading = false;
             @else
                 setTimeout(() => {
                     fetch('{{ route('panel.recommendations.trending-refresh') }}')
                         .then(response => response.json())
                         .then(data => {
-                            trendingProjects = data;
+                            if (data.data) {
+                                trendingProjects = data.data;
+                            } else {
+                                trendingProjects = data;
+                            }
                             loading = false;
                         })
                         .catch(error => {
@@ -201,7 +220,7 @@
                         <th class="py-2 px-4 text-left">#</th>
                         <th class="py-2 px-4 text-left">Project</th>
                         <th class="py-2 px-4 text-left">Harga</th>
-                        <th class="py-2 px-4 text-left">24h %</th>
+                        <th class="py-2 px-4 text-left">24h $</th>
                         <th class="py-2 px-4 text-left">7d %</th>
                         <th class="py-2 px-4 text-left">Trend Score</th>
                         <th class="py-2 px-4 text-left">Aksi</th>
@@ -220,12 +239,13 @@
                                 </div>
                             </td>
                             <td class="py-3 px-4" x-text="'$' + (project.current_price ? project.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></td>
+                            <!-- PERBAIKAN: Tampilkan price_change_percentage_24h dengan penanganan null yang lebih baik -->
                             <td class="py-3 px-4" :class="(project.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
                                 x-text="((project.price_change_percentage_24h || 0) > 0 ? '+' : '') +
-                                         ((project.price_change_percentage_24h || 0).toFixed(2)) + '%'"></td>
+                                        ((project.price_change_percentage_24h || 0).toFixed(2)) + '$'"></td>
                             <td class="py-3 px-4" :class="(project.price_change_percentage_7d_in_currency || 0) > 0 ? 'text-success' : 'text-danger'"
                                 x-text="((project.price_change_percentage_7d_in_currency || 0) > 0 ? '+' : '') +
-                                         ((project.price_change_percentage_7d_in_currency || 0).toFixed(2)) + '%'"></td>
+                                        ((project.price_change_percentage_7d_in_currency || 0).toFixed(2)) + '%'"></td>
                             <td class="py-3 px-4">
                                 <div class="flex items-center">
                                     <div class="w-16 h-2 clay-progress overflow-hidden rounded-full mr-2">

@@ -148,14 +148,18 @@
             <template x-for="(recommendation, index) in hybridRecommendations" :key="index">
                 <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
                     <div class="font-bold text-lg mb-2" x-text="recommendation.name + ' (' + recommendation.symbol + ')'"></div>
-                    <div class="text-sm mb-2">
+                    <div class="flex justify-between mb-2 text-sm">
                         <span x-text="'$' + (recommendation.current_price ? recommendation.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></span>
-                        <span :class="(recommendation.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'" x-text="((recommendation.price_change_percentage_24h || 0) > 0 ? '+' : '') + ((recommendation.price_change_percentage_24h || 0).toFixed(2)) + '%'"></span>
+                        <!-- PERBAIKAN: Tangani price_change_percentage_24h dengan lebih baik -->
+                        <span :class="(recommendation.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
+                            x-text="((recommendation.price_change_percentage_24h || 0) > 0 ? '+' : '') +
+                                    ((recommendation.price_change_percentage_24h || 0).toFixed(2)) + '$'"></span>
                     </div>
-                    <div class="clay-badge clay-badge-info mb-3" x-text="recommendation.primary_category || 'Umum'"></div>
-                    <p class="text-sm mb-3 line-clamp-2" x-text="recommendation.description || 'Tidak ada deskripsi'"></p>
+                    <!-- PERBAIKAN: Gunakan primary_category atau category -->
+                    <div class="clay-badge clay-badge-info mb-3" x-text="recommendation.primary_category || recommendation.category || 'Umum'"></div>
                     <div class="flex justify-between items-center">
-                        <div class="text-xs font-medium">Score: <span class="text-primary" x-text="(recommendation.recommendation_score || 0).toFixed(2)"></span></div>
+                        <div class="text-xs font-medium">Score: <span class="text-primary"
+                                x-text="(recommendation.recommendation_score || 0).toFixed(2)"></span></div>
                         <a :href="'/panel/recommendations/project/' + recommendation.id" class="clay-badge clay-badge-secondary px-2 py-1 text-xs">
                             <i class="fas fa-info-circle mr-1"></i> Detail
                         </a>
@@ -185,17 +189,18 @@
             <template x-for="(recommendation, index) in fecfRecommendations" :key="index">
                 <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
                     <div class="font-bold text-lg mb-2" x-text="recommendation.name + ' (' + recommendation.symbol + ')'"></div>
-                    <div class="text-sm mb-2">
+                    <div class="flex justify-between mb-2 text-sm">
                         <span x-text="'$' + (recommendation.current_price ? recommendation.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></span>
+                        <!-- PERBAIKAN: Tangani price_change_percentage_24h dengan lebih baik -->
                         <span :class="(recommendation.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
-                              x-text="((recommendation.price_change_percentage_24h || 0) > 0 ? '+' : '') +
-                                       ((recommendation.price_change_percentage_24h || 0).toFixed(2)) + '%'"></span>
+                            x-text="((recommendation.price_change_percentage_24h || 0) > 0 ? '+' : '') +
+                                    ((recommendation.price_change_percentage_24h || 0).toFixed(2)) + '$'"></span>
                     </div>
-                    <div class="clay-badge clay-badge-info mb-3" x-text="recommendation.primary_category || 'Umum'"></div>
-                    <p class="text-sm mb-3 line-clamp-2" x-text="recommendation.description || 'Tidak ada deskripsi'"></p>
+                    <!-- PERBAIKAN: Gunakan primary_category atau category -->
+                    <div class="clay-badge clay-badge-info mb-3" x-text="recommendation.primary_category || recommendation.category || 'Umum'"></div>
                     <div class="flex justify-between items-center">
                         <div class="text-xs font-medium">Score: <span class="text-primary"
-                            x-text="(recommendation.recommendation_score || 0).toFixed(2)"></span></div>
+                                x-text="(recommendation.recommendation_score || 0).toFixed(2)"></span></div>
                         <a :href="'/panel/recommendations/project/' + recommendation.id" class="clay-badge clay-badge-secondary px-2 py-1 text-xs">
                             <i class="fas fa-info-circle mr-1"></i> Detail
                         </a>
@@ -218,17 +223,18 @@
             <template x-for="(recommendation, index) in ncfRecommendations" :key="index">
                 <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
                     <div class="font-bold text-lg mb-2" x-text="recommendation.name + ' (' + recommendation.symbol + ')'"></div>
-                    <div class="text-sm mb-2">
+                    <div class="flex justify-between mb-2 text-sm">
                         <span x-text="'$' + (recommendation.current_price ? recommendation.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></span>
+                        <!-- PERBAIKAN: Tangani price_change_percentage_24h dengan lebih baik -->
                         <span :class="(recommendation.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
-                              x-text="((recommendation.price_change_percentage_24h || 0) > 0 ? '+' : '') +
-                                       ((recommendation.price_change_percentage_24h || 0).toFixed(2)) + '%'"></span>
+                            x-text="((recommendation.price_change_percentage_24h || 0) > 0 ? '+' : '') +
+                                    ((recommendation.price_change_percentage_24h || 0).toFixed(2)) + '$'"></span>
                     </div>
-                    <div class="clay-badge clay-badge-info mb-3" x-text="recommendation.primary_category || 'Umum'"></div>
-                    <p class="text-sm mb-3 line-clamp-2" x-text="recommendation.description || 'Tidak ada deskripsi'"></p>
+                    <!-- PERBAIKAN: Gunakan primary_category atau category -->
+                    <div class="clay-badge clay-badge-info mb-3" x-text="recommendation.primary_category || recommendation.category || 'Umum'"></div>
                     <div class="flex justify-between items-center">
                         <div class="text-xs font-medium">Score: <span class="text-primary"
-                            x-text="(recommendation.recommendation_score || 0).toFixed(2)"></span></div>
+                                x-text="(recommendation.recommendation_score || 0).toFixed(2)"></span></div>
                         <a :href="'/panel/recommendations/project/' + recommendation.id" class="clay-badge clay-badge-secondary px-2 py-1 text-xs">
                             <i class="fas fa-info-circle mr-1"></i> Detail
                         </a>
@@ -349,101 +355,6 @@
                         </template>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Interaction History dengan Lazy Loading -->
-    <div class="clay-card p-6 mb-8" x-data="{ loading: true, interactions: [] }">
-        <h2 class="text-xl font-bold mb-4 flex items-center">
-            <i class="fas fa-history mr-2 text-warning"></i>
-            Riwayat Interaksi Terbaru
-        </h2>
-
-        <!-- Loading Indicator -->
-        <div x-show="loading" class="py-4 text-center">
-            <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-warning"></div>
-            <p class="mt-2 text-gray-500">Memuat riwayat interaksi...</p>
-        </div>
-
-        <!-- Interactions Table -->
-        <div x-show="!loading" x-init="
-            @if(isset($interactions) && !empty($interactions))
-                interactions = {{ json_encode($interactions) }};
-                loading = false;
-            @else
-                setTimeout(() => {
-                    fetch('{{ route('panel.dashboard.load-interactions') }}')
-                        .then(response => response.json())
-                        .then(data => {
-                            interactions = data;
-                            loading = false;
-                        })
-                        .catch(error => {
-                            console.error('Error:', error);
-                            loading = false;
-                        });
-                }, 200);
-            @endif">
-
-            <div class="overflow-x-auto">
-                <table class="clay-table min-w-full">
-                    <thead>
-                        <tr>
-                            <th class="py-2 px-4 text-left">Proyek</th>
-                            <th class="py-2 px-4 text-left">Tipe Interaksi</th>
-                            <th class="py-2 px-4 text-left">Waktu</th>
-                            <th class="py-2 px-4 text-left">Aksi</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="interaction in interactions" :key="interaction.id">
-                            <tr>
-                                <td class="py-2 px-4 font-medium">
-                                    <div class="flex items-center">
-                                        <template x-if="interaction.project && interaction.project.image">
-                                            <img :src="interaction.project.image" :alt="interaction.project.symbol" class="w-6 h-6 mr-2 rounded-full">
-                                        </template>
-                                        <span x-text="interaction.project ? (interaction.project.name + ' (' + interaction.project.symbol + ')') : 'Unknown'"></span>
-                                    </div>
-                                </td>
-                                <td class="py-2 px-4">
-                                    <template x-if="interaction.interaction_type === 'view'">
-                                        <span class="clay-badge clay-badge-info">View</span>
-                                    </template>
-                                    <template x-if="interaction.interaction_type === 'favorite'">
-                                        <span class="clay-badge clay-badge-secondary">Favorite</span>
-                                    </template>
-                                    <template x-if="interaction.interaction_type === 'portfolio_add'">
-                                        <span class="clay-badge clay-badge-success">Portfolio</span>
-                                    </template>
-                                    <template x-if="!['view', 'favorite', 'portfolio_add'].includes(interaction.interaction_type)">
-                                        <span class="clay-badge clay-badge-warning" x-text="interaction.interaction_type"></span>
-                                    </template>
-                                </td>
-                                <td class="py-2 px-4 text-gray-500 text-sm" x-text="new Date(interaction.created_at).toLocaleString()"></td>
-                                <td class="py-2 px-4">
-                                    <a :href="'/panel/recommendations/project/' + interaction.project_id" class="clay-badge clay-badge-info py-1 px-2 text-xs">
-                                        <i class="fas fa-info-circle mr-1"></i> Detail
-                                    </a>
-                                </td>
-                            </tr>
-                        </template>
-
-                        <template x-if="interactions.length === 0">
-                            <tr>
-                                <td colspan="4" class="py-4 px-4 text-center">
-                                    Belum ada interaksi yang tercatat
-                                    <div class="mt-3">
-                                        <a href="{{ route('panel.recommendations.trending') }}" class="clay-button clay-button-warning py-1.5 px-3 text-sm">
-                                            <i class="fas fa-fire mr-1"></i> Jelajahi Proyek Trending
-                                        </a>
-                                    </div>
-                                </td>
-                            </tr>
-                        </template>
-                    </tbody>
-                </table>
             </div>
         </div>
     </div>

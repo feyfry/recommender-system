@@ -225,14 +225,13 @@
                 <template x-for="(project, index) in categoryProjects" :key="index">
                     <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
                         <div class="font-bold text-lg mb-2" x-text="project.name + ' (' + project.symbol + ')'"></div>
-                        <div class="text-sm mb-2">
+                        <div class="flex justify-between mb-2 text-sm">
                             <span x-text="'$' + (project.current_price ? project.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></span>
                             <span :class="(project.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
                                   x-text="((project.price_change_percentage_24h || 0) > 0 ? '+' : '') +
-                                          ((project.price_change_percentage_24h || 0).toFixed(2)) + '%'"></span>
+                                          ((project.price_change_percentage_24h || 0).toFixed(2)) + '$'"></span>
                         </div>
                         <div class="clay-badge clay-badge-info mb-3" x-text="project.chain || 'Multiple'"></div>
-                        <p class="text-sm mb-3 line-clamp-2" x-text="project.description || 'Tidak ada deskripsi'"></p>
                         <div class="flex justify-between items-center">
                             <div class="text-xs font-medium">Score: <span class="text-info"
                                 x-text="(project.recommendation_score || 0).toFixed(2)"></span></div>

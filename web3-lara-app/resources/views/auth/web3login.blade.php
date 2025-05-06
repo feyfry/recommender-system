@@ -2,7 +2,7 @@
 
 @section('content')
 <div class="relative flex flex-col justify-center items-center py-8 px-4 sm:px-6 lg:px-8">
-    <div class="w-full max-w-md z-10" x-data="web3Login()">
+    <div class="w-full max-w-md z-10" x-data="web3Login()" x-cloak>
         <!-- Header -->
         <div class="text-center mb-8">
             <h1 class="text-4xl font-bold text-primary mb-2">Web3 Auth</h1>
@@ -73,11 +73,50 @@
                 <i class="fas fa-arrow-left mr-2"></i> Kembali ke Beranda
             </a>
         </div>
+
+        <!-- Welcome Overlay Alert -->
+        <div x-show="showWelcomeAlert"
+             class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50"
+             style="display: none;">
+            <div class="bg-white rounded-lg p-8 max-w-md w-full mx-4 text-center transform transition-all shadow-xl">
+                <div class="w-20 h-20 rounded-full bg-gradient-to-r from-purple-500 via-blue-400 to-purple-600 flex items-center justify-center mx-auto mb-4">
+                    <i class="fas fa-check-circle text-4xl font-logo-color"></i>
+                </div>
+                <h3 class="text-3xl font-extrabold mb-2 solana-gradient">Selamat Datang!</h3>
+                <p class="text-gray-600 mb-4">Login berhasil. Anda akan dialihkan ke Dashboard.</p>
+                <div class="flex justify-center">
+                    <svg class="animate-spin h-8 w-8 solana-stroke" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
 @push('scripts')
 @vite(['resources/js/app.js'])
+
+<style>
+    [x-cloak] { display: none !important; }
+
+    .solana-gradient {
+        background: linear-gradient(90deg, #9945FF, #14F195);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        color: transparent;
+    }
+
+    .solana-stroke {
+        color: #9945FF;
+    }
+
+    .font-logo-color {
+        color: #6366F1;
+    }
+</style>
 
 <script>
     function web3Login() {
@@ -88,6 +127,7 @@
             walletAddress: '',
             nonce: '',
             error: '',
+            showWelcomeAlert: false,
 
             async connectWallet() {
                 this.error = '';
@@ -149,11 +189,11 @@
             },
 
             async login() {
-                this.error   = '';
+                this.error = '';
                 this.loading = true;
 
                 try {
-                    const message   = `Please sign this message to verify your identity. Nonce: ${this.nonce}`;
+                    const message = `Please sign this message to verify your identity. Nonce: ${this.nonce}`;
                     const signature = await window.ethereum.request({
                         method: 'personal_sign',
                         params: [message, this.walletAddress]
@@ -176,11 +216,21 @@
                         throw new Error(data.error || 'Verifikasi gagal');
                     }
 
-                    window.location.href = '{{ route("panel.dashboard") }}';
+                    // Tampilkan alert welcome sebelum redirect
+                    this.loading = false;
+                    this.authenticated = true;
+                    this.showWelcomeAlert = true;
+
+                    console.log("Login berhasil - Menampilkan alert selamat datang");
+
+                    // Tunggu beberapa detik sebelum redirect
+                    setTimeout(() => {
+                        window.location.href = '{{ route("panel.dashboard") }}';
+                    }, 3000);
+
                 } catch (err) {
-                    console.error(err);
-                    this.error = err.message;
-                } finally {
+                    console.error('Error during login:', err);
+                    this.error = err.message || 'Terjadi kesalahan saat proses login. Silakan coba lagi.';
                     this.loading = false;
                 }
             }

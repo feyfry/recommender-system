@@ -109,7 +109,7 @@
                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     <div>
                         <div class="text-sm text-gray-600">Market Cap</div>
-                        <div class="font-medium">{{ $project->formatted_market_cap ?? ('$'.number_format($project->market_cap, 0)) }}</div>
+                        <div class="font-medium">${{ number_format($project->market_cap, 0) }}</div>
                     </div>
                     <div>
                         <div class="text-sm text-gray-600">Volume 24h</div>
