@@ -180,7 +180,7 @@
                                 </button>
                                 <div x-show="open" class="pl-9 space-y-1 mt-1">
                                     <a href="{{ route('panel.technical-analysis') }}" class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('panel.technical-analysis') && !request()->routeIs('panel.technical-analysis.*') ? 'font-bold text-primary' : '' }}">
-                                        Periode Dinamis
+                                        Overview
                                     </a>
                                 </div>
                             </div>

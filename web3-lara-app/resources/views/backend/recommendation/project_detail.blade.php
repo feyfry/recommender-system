@@ -360,6 +360,10 @@
                         <button type="submit" class="clay-button clay-button-warning w-full">
                             <i class="fas fa-bell mr-1"></i> Set Alert
                         </button>
+
+                        <a href="{{ route('panel.technical-analysis') }}" class="clay-button clay-button-secondary w-full mt-2 py-1.5 px-3 text-sm">
+                            Untuk Lebih Detail <i class="fas fa-arrow-right ml-1"></i>
+                        </a>
                     </form>
                 </div>
             </div>
