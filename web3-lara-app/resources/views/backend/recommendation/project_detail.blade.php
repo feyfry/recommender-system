@@ -193,9 +193,10 @@
                                 </div>
                                 <div class="text-sm mb-2 flex justify-between">
                                     <span x-text="'$' + (similarProject.current_price ? similarProject.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></span>
-                                    <span :class="(similarProject.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
-                                          x-text="((similarProject.price_change_percentage_24h || 0) > 0 ? '+' : '') +
-                                                    ((similarProject.price_change_percentage_24h || 0).toFixed(2)) + '%'"></span>
+                                    <span :class="(similarProject.price_change_24h || 0) > 0 ? 'text-success' : 'text-danger'"
+                                        x-text="((similarProject.price_change_24h || 0) > 0 ? '+' : '') +
+                                                    ((similarProject.price_change_24h || 0).toFixed(2)) + '%'">
+                                    </span>
                                 </div>
                                 <a :href="'/panel/recommendations/project/' + similarProject.id" class="clay-badge clay-badge-info py-1 px-2 text-xs">
                                     <i class="fas fa-info-circle mr-1"></i> Detail

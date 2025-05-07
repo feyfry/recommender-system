@@ -496,7 +496,7 @@ class RecommendationController extends Controller
 
     /**
      * Menormalisasi data rekomendasi untuk memastikan format konsisten
-     * DIOPTIMALKAN: Perbaikan untuk handling object dan types
+     * DIOPTIMALKAN: Perbaikan untuk handling object, types, dan field perubahan harga
      */
     private function normalizeRecommendationData($recommendations)
     {
@@ -528,37 +528,47 @@ class RecommendationController extends Controller
             } else if ($id === "unknown-{$key}" && isset($data->project_id)) {
                 $id = $data->project_id;
             }
-            // PERBAIKAN: Menangani kemungkinan nama field berbeda untuk perubahan harga
-            // Cek berbagai kemungkinan field perubahan harga 24h
-            $priceChange24h = 0;
-            if (isset($data['price_change_percentage_24h'])) {
-                $priceChange24h = $data['price_change_percentage_24h'];
-            } elseif (isset($data['price_change_24h'])) {
-                // Jika hanya ada price_change_24h tanpa percentage, kita perlu mengkonversi
-                // Jika nilainya terlalu besar (langsung dalam percentage), kita gunakan langsung
-                $priceChange24h = abs($data['price_change_24h']) > 10 ? $data['price_change_24h'] : $data['price_change_24h'];
-            } elseif (isset($data['price_change_percentage_24h_in_currency'])) {
-                $priceChange24h = $data['price_change_percentage_24h_in_currency'];
-            } elseif (isset($data->price_change_percentage_24h)) {
-                $priceChange24h = $data->price_change_percentage_24h;
+
+            // PERBAIKAN: Ekstraksi data price change dengan lebih detail dan komentar
+
+            // 1. Price Change 24h (nilai absolut dalam USD)
+            $priceChange24h = null;
+            if (isset($data['price_change_24h'])) {
+                $priceChange24h = $data['price_change_24h'];
             } elseif (isset($data->price_change_24h)) {
                 $priceChange24h = $data->price_change_24h;
+            } elseif (isset($data['price_change_24h_in_currency'])) {
+                $priceChange24h = $data['price_change_24h_in_currency'];
+            } elseif (isset($data->price_change_24h_in_currency)) {
+                $priceChange24h = $data->price_change_24h_in_currency;
             }
 
-            // Sama untuk perubahan harga 7d
-            $priceChange7d = 0;
+            // 2. Price Change Percentage 24h (dalam persen)
+            $priceChangePercentage24h = null;
+            if (isset($data['price_change_percentage_24h'])) {
+                $priceChangePercentage24h = $data['price_change_percentage_24h'];
+            } elseif (isset($data->price_change_percentage_24h)) {
+                $priceChangePercentage24h = $data->price_change_percentage_24h;
+            } elseif (isset($data['price_change_percentage_24h_in_currency'])) {
+                $priceChangePercentage24h = $data['price_change_percentage_24h_in_currency'];
+            } elseif (isset($data->price_change_percentage_24h_in_currency)) {
+                $priceChangePercentage24h = $data->price_change_percentage_24h_in_currency;
+            }
+
+            // 3. Price Change 7d (nilai persentase)
+            $priceChangePercentage7d = null;
             if (isset($data['price_change_percentage_7d_in_currency'])) {
-                $priceChange7d = $data['price_change_percentage_7d_in_currency'];
-            } elseif (isset($data['price_change_percentage_7d'])) {
-                $priceChange7d = $data['price_change_percentage_7d'];
-            } elseif (isset($data['price_change_7d'])) {
-                $priceChange7d = $data['price_change_7d'];
+                $priceChangePercentage7d = $data['price_change_percentage_7d_in_currency'];
             } elseif (isset($data->price_change_percentage_7d_in_currency)) {
-                $priceChange7d = $data->price_change_percentage_7d_in_currency;
+                $priceChangePercentage7d = $data->price_change_percentage_7d_in_currency;
+            } elseif (isset($data['price_change_percentage_7d'])) {
+                $priceChangePercentage7d = $data['price_change_percentage_7d'];
             } elseif (isset($data->price_change_percentage_7d)) {
-                $priceChange7d = $data->price_change_percentage_7d;
+                $priceChangePercentage7d = $data->price_change_percentage_7d;
+            } elseif (isset($data['price_change_7d'])) {
+                $priceChangePercentage7d = $data['price_change_7d'];
             } elseif (isset($data->price_change_7d)) {
-                $priceChange7d = $data->price_change_7d;
+                $priceChangePercentage7d = $data->price_change_7d;
             }
 
             // Pastikan semua property yang diperlukan ada
@@ -568,12 +578,15 @@ class RecommendationController extends Controller
                 'symbol'                                 => $data['symbol'] ?? ($data->symbol ?? 'N/A'),
                 'image'                                  => $data['image'] ?? ($data->image ?? null),
                 'current_price'                          => floatval($data['current_price'] ?? ($data->current_price ?? 0)),
-                'price_change_percentage_24h'            => floatval($priceChange24h),
-                'price_change_percentage_7d_in_currency' => floatval($priceChange7d),
+                // Simpan kedua nilai perubahan (absolut dan persentase) jika tersedia
+                'price_change_24h'                       => $priceChange24h !== null ? floatval($priceChange24h) : null,
+                'price_change_percentage_24h'            => $priceChangePercentage24h !== null ? floatval($priceChangePercentage24h) : 0,
+                'price_change_percentage_7d_in_currency' => $priceChangePercentage7d !== null ? floatval($priceChangePercentage7d) : 0,
                 'market_cap'                             => floatval($data['market_cap'] ?? ($data->market_cap ?? 0)),
                 'total_volume'                           => floatval($data['total_volume'] ?? ($data->total_volume ?? 0)),
                 'primary_category'                       => $data['primary_category'] ?? ($data->primary_category ?? $data['category'] ?? ($data->category ?? 'Uncategorized')),
                 'chain'                                  => $data['chain'] ?? ($data->chain ?? 'Multiple'),
+                'description'                            => $data['description'] ?? ($data->description ?? null),
                 'popularity_score'                       => floatval($data['popularity_score'] ?? ($data->popularity_score ?? 0)),
                 'trend_score'                            => floatval($data['trend_score'] ?? ($data->trend_score ?? 0)),
                 // PERBAIKAN: Standardisasi score untuk konsistensi

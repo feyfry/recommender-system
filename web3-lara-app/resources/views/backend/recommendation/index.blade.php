@@ -119,8 +119,9 @@
                         <div class="font-bold text-lg mb-2" x-text="recommendation.name + ' (' + recommendation.symbol + ')'"></div>
                         <div class="flex justify-between mb-2 text-sm">
                             <span x-text="'$' + (recommendation.current_price ? recommendation.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></span>
-                            <span :class="(recommendation.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
-                                x-text="((recommendation.price_change_percentage_24h || 0) > 0 ? '+' : '') + ((recommendation.price_change_percentage_24h || 0).toFixed(2)) + '$'">
+                            <span :class="(recommendation.price_change_24h || 0) >= 0 ? 'text-success' : 'text-danger'"
+                                x-text="((recommendation.price_change_24h || 0) >= 0 ? '+' : '') +
+                                        ((recommendation.price_change_24h || 0).toFixed(2)) + '$'">
                             </span>
                         </div>
                         <!-- PERBAIKAN: Tampilkan kategori dengan fallback -->
@@ -239,10 +240,10 @@
                                 </div>
                             </td>
                             <td class="py-3 px-4" x-text="'$' + (project.current_price ? project.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></td>
-                            <!-- PERBAIKAN: Tampilkan price_change_percentage_24h dengan penanganan null yang lebih baik -->
-                            <td class="py-3 px-4" :class="(project.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
-                                x-text="((project.price_change_percentage_24h || 0) > 0 ? '+' : '') +
-                                        ((project.price_change_percentage_24h || 0).toFixed(2)) + '$'"></td>
+                            <td class="py-3 px-4" :class="(project.price_change_24h || 0) >= 0 ? 'text-success' : 'text-danger'"
+                                x-text="((project.price_change_24h || 0) >= 0 ? '+' : '') +
+                                        ((project.price_change_24h || 0).toFixed(2)) + '$'">
+                            </td>
                             <td class="py-3 px-4" :class="(project.price_change_percentage_7d_in_currency || 0) > 0 ? 'text-success' : 'text-danger'"
                                 x-text="((project.price_change_percentage_7d_in_currency || 0) > 0 ? '+' : '') +
                                         ((project.price_change_percentage_7d_in_currency || 0).toFixed(2)) + '%'"></td>

@@ -8,6 +8,7 @@ use App\Http\Controllers\Backend\DashboardController;
 use App\Http\Controllers\Backend\PortfolioController;
 use SebastianBergmann\CodeCoverage\Report\Html\Dashboard;
 use App\Http\Controllers\Backend\RecommendationController;
+use App\Http\Controllers\Backend\TechnicalAnalysisController;
 
 // Halaman Utama
 Route::get('/', function () {
@@ -46,6 +47,17 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         Route::get('/project/{id}', [RecommendationController::class, 'projectDetail'])->name('panel.recommendations.project');
         Route::post('/favorites/add', [RecommendationController::class, 'addToFavorites'])->name('panel.recommendations.add-favorite');
         Route::get('/trending/refresh', [RecommendationController::class, 'refreshTrending'])->name('panel.recommendations.trending-refresh');
+    });
+
+    // Technical Analysis dengan periode dinamis
+    Route::prefix('technical-analysis')->group(function () {
+        Route::get('/', [TechnicalAnalysisController::class, 'index'])->name('panel.technical-analysis');
+        Route::post('/trading-signals', [TechnicalAnalysisController::class, 'getTradingSignals'])->name('panel.technical-analysis.trading-signals');
+        Route::post('/indicators', [TechnicalAnalysisController::class, 'getIndicators'])->name('panel.technical-analysis.indicators');
+        Route::get('/market-events/{projectId}', [TechnicalAnalysisController::class, 'getMarketEvents'])->name('panel.technical-analysis.market-events');
+        Route::get('/alerts/{projectId}', [TechnicalAnalysisController::class, 'getAlerts'])->name('panel.technical-analysis.alerts');
+        Route::get('/price-prediction/{projectId}', [TechnicalAnalysisController::class, 'getPricePrediction'])->name('panel.technical-analysis.price-prediction');
+        Route::get('/historical-data', [TechnicalAnalysisController::class, 'getHistoricalData'])->name('panel.technical-analysis.historical-data');
     });
 
     // Portfolio

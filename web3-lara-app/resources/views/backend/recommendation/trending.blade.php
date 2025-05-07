@@ -199,8 +199,10 @@
                                     </div>
                                 </td>
                                 <td class="py-3 px-4 font-medium" x-text="'$' + (project.current_price ? project.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></td>
-                                <td class="py-3 px-4" :class="(project.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
-                                    x-text="((project.price_change_percentage_24h || 0) > 0 ? '+' : '') + ((project.price_change_percentage_24h || 0).toFixed(2)) + '$'"></td>
+                                <td class="py-3 px-4" :class="(project.price_change_24h || 0) >= 0 ? 'text-success' : 'text-danger'"
+                                    x-text="((project.price_change_24h || 0) >= 0 ? '+' : '') +
+                                            ((project.price_change_24h || 0).toFixed(2)) + '$'">
+                                </td>
                                 <td class="py-3 px-4" :class="(project.price_change_percentage_7d_in_currency || 0) > 0 ? 'text-success' : 'text-danger'"
                                     x-text="((project.price_change_percentage_7d_in_currency || 0) > 0 ? '+' : '') + ((project.price_change_percentage_7d_in_currency || 0).toFixed(2)) + '%'"></td>
                                 <td class="py-3 px-4" x-text="'$' + (project.total_volume ? project.total_volume.toLocaleString(undefined, {maximumFractionDigits: 0}) : '0')"></td>

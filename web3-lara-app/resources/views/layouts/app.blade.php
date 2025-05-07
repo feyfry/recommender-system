@@ -101,7 +101,7 @@
                 <aside class="fixed lg:sticky top-[88px] z-30 w-64 transform transition-transform duration-300 lg:translate-x-0 self-start"
                     :class="{'translate-x-0': sidebarOpen, '-translate-x-full': !sidebarOpen}"
                     style="height: calc(100vh - 88px);">
-                    <div class="h-full clay-card mx-4 overflow-y-auto">
+                    <div class="h-full clay-card mx-4 mr-1 overflow-y-auto">
                         <!-- User Profile Summary -->
                         <div class="mt-4 mb-6 px-2">
                             <div class="flex items-center mb-3">
@@ -165,6 +165,22 @@
                                     </a>
                                     <a href="{{ route('panel.recommendations.chains') }}" class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('panel.recommendations.chains') ? 'font-bold text-primary' : '' }}">
                                         Blockchain
+                                    </a>
+                                </div>
+                            </div>
+
+                            <!-- Technical Analysis Menu -->
+                            <div x-data="{ open: {{ request()->routeIs('panel.technical-analysis*') ? 'true' : 'false' }} }">
+                                <button @click="open = !open" class="clay-nav-button w-full flex justify-between">
+                                    <div class="flex items-center">
+                                        <i class="fas fa-chart-line w-5 mr-3"></i>
+                                        <span class="truncate max-w-[120px] sm:max-w-none">Analisis Teknikal</span>
+                                    </div>
+                                    <i class="fas fa-chevron-right transition-transform" :class="{'rotate-90': open}"></i>
+                                </button>
+                                <div x-show="open" class="pl-9 space-y-1 mt-1">
+                                    <a href="{{ route('panel.technical-analysis') }}" class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('panel.technical-analysis') && !request()->routeIs('panel.technical-analysis.*') ? 'font-bold text-primary' : '' }}">
+                                        Periode Dinamis
                                     </a>
                                 </div>
                             </div>

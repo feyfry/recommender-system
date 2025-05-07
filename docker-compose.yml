@@ -1,0 +1,41 @@
+version: '3'
+
+services:
+  laravel-app:
+    build:
+      context: ./web3-lara-app
+    ports:
+      - "8000:80"
+    depends_on:
+      - db
+      - recommendation-engine
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_DATABASE=web3_recommender
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=password
+      - RECOMMENDATION_API_URL=http://recommendation-engine:8001
+
+  recommendation-engine:
+    build:
+      context: ./recommendation-engine
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./recommendation-engine:/app
+      - ./data:/app/data
+
+  db:
+    image: postgres:14
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=web3_recommender
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+volumes:
+  db-data:

@@ -150,12 +150,11 @@
                     <div class="font-bold text-lg mb-2" x-text="recommendation.name + ' (' + recommendation.symbol + ')'"></div>
                     <div class="flex justify-between mb-2 text-sm">
                         <span x-text="'$' + (recommendation.current_price ? recommendation.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></span>
-                        <!-- PERBAIKAN: Tangani price_change_percentage_24h dengan lebih baik -->
-                        <span :class="(recommendation.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
-                            x-text="((recommendation.price_change_percentage_24h || 0) > 0 ? '+' : '') +
-                                    ((recommendation.price_change_percentage_24h || 0).toFixed(2)) + '$'"></span>
+                        <span :class="(recommendation.price_change_24h || 0) >= 0 ? 'text-success' : 'text-danger'"
+                            x-text="((recommendation.price_change_24h || 0) >= 0 ? '+' : '') +
+                                    ((recommendation.price_change_24h || 0).toFixed(2)) + '$'">
+                        </span>
                     </div>
-                    <!-- PERBAIKAN: Gunakan primary_category atau category -->
                     <div class="clay-badge clay-badge-info mb-3" x-text="recommendation.primary_category || recommendation.category || 'Umum'"></div>
                     <div class="flex justify-between items-center">
                         <div class="text-xs font-medium">Score: <span class="text-primary"
@@ -191,12 +190,11 @@
                     <div class="font-bold text-lg mb-2" x-text="recommendation.name + ' (' + recommendation.symbol + ')'"></div>
                     <div class="flex justify-between mb-2 text-sm">
                         <span x-text="'$' + (recommendation.current_price ? recommendation.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></span>
-                        <!-- PERBAIKAN: Tangani price_change_percentage_24h dengan lebih baik -->
-                        <span :class="(recommendation.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
-                            x-text="((recommendation.price_change_percentage_24h || 0) > 0 ? '+' : '') +
-                                    ((recommendation.price_change_percentage_24h || 0).toFixed(2)) + '$'"></span>
+                        <span :class="(recommendation.price_change_24h || 0) >= 0 ? 'text-success' : 'text-danger'"
+                            x-text="((recommendation.price_change_24h || 0) >= 0 ? '+' : '') +
+                                    ((recommendation.price_change_24h || 0).toFixed(2)) + '$'">
+                        </span>
                     </div>
-                    <!-- PERBAIKAN: Gunakan primary_category atau category -->
                     <div class="clay-badge clay-badge-info mb-3" x-text="recommendation.primary_category || recommendation.category || 'Umum'"></div>
                     <div class="flex justify-between items-center">
                         <div class="text-xs font-medium">Score: <span class="text-primary"
@@ -225,12 +223,11 @@
                     <div class="font-bold text-lg mb-2" x-text="recommendation.name + ' (' + recommendation.symbol + ')'"></div>
                     <div class="flex justify-between mb-2 text-sm">
                         <span x-text="'$' + (recommendation.current_price ? recommendation.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></span>
-                        <!-- PERBAIKAN: Tangani price_change_percentage_24h dengan lebih baik -->
-                        <span :class="(recommendation.price_change_percentage_24h || 0) > 0 ? 'text-success' : 'text-danger'"
-                            x-text="((recommendation.price_change_percentage_24h || 0) > 0 ? '+' : '') +
-                                    ((recommendation.price_change_percentage_24h || 0).toFixed(2)) + '$'"></span>
+                        <span :class="(recommendation.price_change_24h || 0) >= 0 ? 'text-success' : 'text-danger'"
+                            x-text="((recommendation.price_change_24h || 0) >= 0 ? '+' : '') +
+                                    ((recommendation.price_change_24h || 0).toFixed(2)) + '$'">
+                        </span>
                     </div>
-                    <!-- PERBAIKAN: Gunakan primary_category atau category -->
                     <div class="clay-badge clay-badge-info mb-3" x-text="recommendation.primary_category || recommendation.category || 'Umum'"></div>
                     <div class="flex justify-between items-center">
                         <div class="text-xs font-medium">Score: <span class="text-primary"

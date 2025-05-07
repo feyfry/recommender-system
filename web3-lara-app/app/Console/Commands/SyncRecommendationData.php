@@ -1,5 +1,4 @@
 <?php
-// app/Console/Commands/SyncRecommendationData.php
 
 namespace App\Console\Commands;
 
