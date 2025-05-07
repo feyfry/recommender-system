@@ -79,7 +79,7 @@
              class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50"
              style="display: none;">
             <div class="bg-white rounded-lg p-8 max-w-md w-full mx-4 text-center transform transition-all shadow-xl">
-                <div class="w-20 h-20 rounded-full bg-gradient-to-r from-purple-500 via-blue-400 to-purple-600 flex items-center justify-center mx-auto mb-4">
+                <div class="w-20 h-20 flex items-center justify-center mx-auto mb-4">
                     <i class="fas fa-check-circle text-4xl font-logo-color"></i>
                 </div>
                 <h3 class="text-3xl font-extrabold mb-2 solana-gradient">Selamat Datang!</h3>

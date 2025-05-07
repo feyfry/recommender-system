@@ -421,7 +421,7 @@
                     SKRIPSI
                 </div>
                 <p class="mt-4 font-medium">
-                    Pengembangan Sistem Rekomendasi Berbasis Popularitas dan Tren Investasi<br>Cryptocurrency dengan Metode: Neural CF, Feature-Enhanced CF dan Hybrid
+                    Pengembangan Sistem Rekomendasi Berbasis Popularitas dan Tren Investasi<br>Cryptocurrency dengan Metode: Feature-Enhanced CF dan Neural CF
                 </p>
                 <p class="mt-3 text-sm">&copy; 2025 Web3 Recommender System</p>
             </div>
