@@ -57,7 +57,6 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         Route::get('/market-events/{projectId}', [TechnicalAnalysisController::class, 'getMarketEvents'])->name('panel.technical-analysis.market-events');
         Route::get('/alerts/{projectId}', [TechnicalAnalysisController::class, 'getAlerts'])->name('panel.technical-analysis.alerts');
         Route::get('/price-prediction/{projectId}', [TechnicalAnalysisController::class, 'getPricePrediction'])->name('panel.technical-analysis.price-prediction');
-        Route::get('/historical-data', [TechnicalAnalysisController::class, 'getHistoricalData'])->name('panel.technical-analysis.historical-data');
     });
 
     // Portfolio

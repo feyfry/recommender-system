@@ -441,48 +441,4 @@ class TechnicalAnalysisController extends Controller
             }
         });
     }
-
-    /**
-     * Mendapatkan data historis untuk chart
-     */
-    public function getHistoricalData(Request $request)
-    {
-        $request->validate([
-            'project_id' => 'required|string',
-            'days' => 'integer|min:7|max:365',
-            'interval' => 'string|in:1d,4h,1h,15m',
-        ]);
-
-        $projectId = $request->input('project_id');
-        $days = $request->input('days', 30);
-        $interval = $request->input('interval', '1d');
-
-        // Tentukan cache key
-        $cacheKey = "historical_data_{$projectId}_{$days}_{$interval}";
-
-        return Cache::remember($cacheKey, 30, function () use ($projectId, $days, $interval) {
-            try {
-                $response = Http::timeout(5)->get("{$this->apiUrl}/analysis/historical-data/{$projectId}", [
-                    'days' => $days,
-                    'interval' => $interval,
-                ]);
-
-                if ($response->successful()) {
-                    return response()->json($response->json());
-                } else {
-                    Log::warning("Gagal mendapatkan data historis: " . $response->body());
-                    return response()->json([
-                        'error' => true,
-                        'message' => 'Gagal mendapatkan data historis. Coba lagi nanti.',
-                    ], 500);
-                }
-            } catch (\Exception $e) {
-                Log::error("Error mendapatkan data historis: " . $e->getMessage());
-                return response()->json([
-                    'error' => true,
-                    'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
-                ], 500);
-            }
-        });
-    }
 }

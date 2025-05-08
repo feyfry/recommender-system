@@ -2,7 +2,7 @@
 
 @section('content')
 <div class="container mx-auto">
-    <!-- Header tetap sama -->
+    <!-- Header -->
     <div class="clay-card p-6 mb-8">
         <h1 class="text-3xl font-bold mb-4 flex items-center">
             <div class="bg-warning/20 p-2 clay-badge mr-3">
@@ -53,6 +53,15 @@
                 },
                 customParams: false,
                 results: null,
+                marketEvents: null,
+                alertsData: null,
+                predictionData: null,
+                indicatorsData: null,
+                loadingIndicators: false,
+                loadingMarketEvents: false,
+                loadingAlerts: false,
+                loadingPrediction: false,
+                activeTab: 'signals', // 'signals', 'indicators', 'events', 'alerts', 'prediction'
                 presets: {
                     'short_term': {
                         rsi_period: 7,
@@ -145,12 +154,118 @@
                         }
                         this.results = data;
                         this.loading = false;
+
+                        // After getting signals, load additional data in the background
+                        this.loadIndicators();
+                        this.loadMarketEvents();
+                        this.loadAlerts();
+                        this.loadPricePrediction();
                     })
                     .catch(error => {
                         console.error('Error:', error);
                         this.loading = false;
                         alert('Terjadi kesalahan saat menganalisis: ' + error.message);
                     });
+                },
+                loadIndicators() {
+                    if (!this.projectId) return;
+
+                    this.loadingIndicators = true;
+
+                    const requestData = {
+                        project_id: this.projectId,
+                        days: this.days,
+                        interval: this.interval,
+                        indicators: ["rsi", "macd", "bollinger", "sma", "stochastic", "adx", "atr", "ichimoku"],
+                        trading_style: this.tradingStyle
+                    };
+
+                    if (this.customParams) {
+                        requestData.periods = {};
+                        Object.keys(this.params).forEach(key => {
+                            requestData.periods[key] = this.params[key];
+                        });
+                    }
+
+                    fetch('{{ route("panel.technical-analysis.indicators") }}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                        },
+                        body: JSON.stringify(requestData)
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        this.indicatorsData = data;
+                        this.loadingIndicators = false;
+                    })
+                    .catch(error => {
+                        console.error('Error loading indicators:', error);
+                        this.loadingIndicators = false;
+                    });
+                },
+                loadMarketEvents() {
+                    if (!this.projectId) return;
+
+                    this.loadingMarketEvents = true;
+
+                    fetch(`{{ url("panel/technical-analysis/market-events") }}/${this.projectId}?days=${this.days}&interval=${this.interval}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        this.marketEvents = data;
+                        this.loadingMarketEvents = false;
+                    })
+                    .catch(error => {
+                        console.error('Error loading market events:', error);
+                        this.loadingMarketEvents = false;
+                    });
+                },
+                loadAlerts() {
+                    if (!this.projectId) return;
+
+                    this.loadingAlerts = true;
+
+                    fetch(`{{ url("panel/technical-analysis/alerts") }}/${this.projectId}?days=${this.days}&interval=${this.interval}&trading_style=${this.tradingStyle}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        this.alertsData = data;
+                        this.loadingAlerts = false;
+                    })
+                    .catch(error => {
+                        console.error('Error loading alerts:', error);
+                        this.loadingAlerts = false;
+                    });
+                },
+                loadPricePrediction() {
+                    if (!this.projectId) return;
+
+                    this.loadingPrediction = true;
+
+                    fetch(`{{ url("panel/technical-analysis/price-prediction") }}/${this.projectId}?days=${this.days}&interval=${this.interval}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        this.predictionData = data;
+                        this.loadingPrediction = false;
+                    })
+                    .catch(error => {
+                        console.error('Error loading price prediction:', error);
+                        this.loadingPrediction = false;
+                    });
+                },
+                setActiveTab(tab) {
+                    this.activeTab = tab;
+
+                    // Load data if not already loaded
+                    if (tab === 'indicators' && !this.indicatorsData && !this.loadingIndicators) {
+                        this.loadIndicators();
+                    } else if (tab === 'events' && !this.marketEvents && !this.loadingMarketEvents) {
+                        this.loadMarketEvents();
+                    } else if (tab === 'alerts' && !this.alertsData && !this.loadingAlerts) {
+                        this.loadAlerts();
+                    } else if (tab === 'prediction' && !this.predictionData && !this.loadingPrediction) {
+                        this.loadPricePrediction();
+                    }
                 }
             }));
         });
@@ -363,244 +478,997 @@
             </div>
         </div>
 
-        <!-- Hasil Analisis: Penggunaan Optional Chaining untuk Mencegah Error -->
+        <!-- Hasil Analisis -->
         <div x-show="results" class="mt-8">
-            <h2 class="text-xl font-bold mb-6 flex items-center">
+            <h2 class="text-xl font-bold mb-4 flex items-center">
                 <i class="fas fa-chart-pie mr-2 text-success"></i>
                 Hasil Analisis <span x-text="results?.market_regime ? '- ' + results.market_regime.replaceAll('_', ' ').toUpperCase() : ''"></span>
             </h2>
 
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <!-- Trading Signal -->
-                <div :class="'clay-card ' + (
-                    results?.action == 'buy' ? 'bg-success/10' :
-                    (results?.action == 'sell' ? 'bg-danger/10' : 'bg-warning/10')
-                ) + ' p-4'">
-                    <div class="text-center">
-                        <div class="mb-2">
-                            <template x-if="results?.action == 'buy'">
-                                <i class="fas fa-arrow-circle-up text-6xl text-success"></i>
-                            </template>
-                            <template x-if="results?.action == 'sell'">
-                                <i class="fas fa-arrow-circle-down text-6xl text-danger"></i>
-                            </template>
-                            <template x-if="results?.action == 'hold'">
-                                <i class="fas fa-minus-circle text-6xl text-warning"></i>
-                            </template>
-                            <template x-if="results?.action != 'buy' && results?.action != 'sell' && results?.action != 'hold'">
-                                <i class="fas fa-question-circle text-6xl text-info"></i>
-                            </template>
-                        </div>
-                        <div class="font-bold text-2xl capitalize mb-2" x-text="results?.action || ''"></div>
-                        <div class="text-sm mb-2">
-                            Kepercayaan:
-                            <span class="font-medium" x-text="results?.confidence ? Math.round(results.confidence * 100) + '%' : '0%'"></span>
-                            <template x-if="results?.strong_signal">
-                                <span class="clay-badge clay-badge-success ml-2">Sinyal Kuat</span>
-                            </template>
-                        </div>
+            <!-- Tab Navigation -->
+            <div class="mb-6 flex border-b border-gray-200 overflow-x-auto">
+                <button
+                    @click="setActiveTab('signals')"
+                    :class="activeTab === 'signals' ? 'border-b-2 border-primary text-primary font-bold' : 'text-gray-600 hover:text-primary'"
+                    class="px-4 py-2 focus:outline-none">
+                    <i class="fas fa-signal mr-1"></i> Sinyal Trading
+                </button>
+                <button
+                    @click="setActiveTab('indicators')"
+                    :class="activeTab === 'indicators' ? 'border-b-2 border-primary text-primary font-bold' : 'text-gray-600 hover:text-primary'"
+                    class="px-4 py-2 focus:outline-none">
+                    <i class="fas fa-chart-bar mr-1"></i> Indikator Teknikal
+                </button>
+                <button
+                    @click="setActiveTab('events')"
+                    :class="activeTab === 'events' ? 'border-b-2 border-primary text-primary font-bold' : 'text-gray-600 hover:text-primary'"
+                    class="px-4 py-2 focus:outline-none">
+                    <i class="fas fa-exclamation-circle mr-1"></i> Market Events
+                </button>
+                <button
+                    @click="setActiveTab('alerts')"
+                    :class="activeTab === 'alerts' ? 'border-b-2 border-primary text-primary font-bold' : 'text-gray-600 hover:text-primary'"
+                    class="px-4 py-2 focus:outline-none">
+                    <i class="fas fa-bell mr-1"></i> Alerts
+                </button>
+                <button
+                    @click="setActiveTab('prediction')"
+                    :class="activeTab === 'prediction' ? 'border-b-2 border-primary text-primary font-bold' : 'text-gray-600 hover:text-primary'"
+                    class="px-4 py-2 focus:outline-none">
+                    <i class="fas fa-crystal-ball mr-1"></i> Prediksi Harga
+                </button>
+            </div>
 
-                        <div class="mt-3">
-                            <span class="text-sm">Arah Tren: </span>
-                            <span class="font-medium capitalize" x-text="results?.trend_direction || 'neutral'"></span>
-                        </div>
-
-                        <template x-if="results?.target_price && results?.target_price > 0">
-                            <div class="mt-3">
-                                <div class="text-sm font-medium mb-1">Target Harga:</div>
-                                <div :class="'clay-badge ' + (results?.action == 'buy' ? 'clay-badge-success' : 'clay-badge-warning') + ' py-1 px-2 mb-1'">
-                                    Target 1: $<span x-text="results?.target_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
-                                </div>
-                                <template x-if="results?.target_2 && results?.target_2 > 0">
-                                    <div :class="'clay-badge ' + (results?.action == 'buy' ? 'clay-badge-success' : 'clay-badge-warning') + ' py-1 px-2'">
-                                        Target 2: $<span x-text="results?.target_2.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
-                                    </div>
+            <!-- Tab Content - Signals -->
+            <div x-show="activeTab === 'signals'">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- Trading Signal -->
+                    <div :class="'clay-card ' + (
+                        results?.action == 'buy' ? 'bg-success/10' :
+                        (results?.action == 'sell' ? 'bg-danger/10' : 'bg-warning/10')
+                    ) + ' p-4'">
+                        <div class="text-center">
+                            <div class="mb-2">
+                                <template x-if="results?.action == 'buy'">
+                                    <i class="fas fa-arrow-circle-up text-6xl text-success"></i>
+                                </template>
+                                <template x-if="results?.action == 'sell'">
+                                    <i class="fas fa-arrow-circle-down text-6xl text-danger"></i>
+                                </template>
+                                <template x-if="results?.action == 'hold'">
+                                    <i class="fas fa-minus-circle text-6xl text-warning"></i>
+                                </template>
+                                <template x-if="results?.action != 'buy' && results?.action != 'sell' && results?.action != 'hold'">
+                                    <i class="fas fa-question-circle text-6xl text-info"></i>
                                 </template>
                             </div>
-                        </template>
+                            <div class="font-bold text-2xl capitalize mb-2" x-text="results?.action || ''"></div>
+                            <div class="text-sm mb-2">
+                                Kepercayaan:
+                                <span class="font-medium" x-text="results?.confidence ? Math.round(results.confidence * 100) + '%' : '0%'"></span>
+                                <template x-if="results?.strong_signal">
+                                    <span class="clay-badge clay-badge-success ml-2">Sinyal Kuat</span>
+                                </template>
+                            </div>
 
-                        <template x-if="results?.support_1 || results?.support_2">
                             <div class="mt-3">
-                                <div class="text-sm font-medium mb-1">Support Levels:</div>
-                                <template x-if="results?.support_1">
-                                    <div class="clay-badge clay-badge-info py-1 px-2 mb-1">
-                                        Support 1: $<span x-text="results?.support_1.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+                                <span class="text-sm">Arah Tren: </span>
+                                <span class="font-medium capitalize" x-text="results?.trend_direction || 'neutral'"></span>
+                            </div>
+
+                            <template x-if="results?.target_price && results?.target_price > 0">
+                                <div class="mt-3">
+                                    <div class="text-sm font-medium mb-1">Target Harga:</div>
+                                    <div :class="'clay-badge ' + (results?.action == 'buy' ? 'clay-badge-success' : 'clay-badge-warning') + ' py-1 px-2 mb-1'">
+                                        Target 1: $<span x-text="results?.target_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
                                     </div>
-                                </template>
-                                <template x-if="results?.support_2">
-                                    <div class="clay-badge clay-badge-info py-1 px-2">
-                                        Support 2: $<span x-text="results?.support_2.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
-                                    </div>
-                                </template>
+                                    <template x-if="results?.target_2 && results?.target_2 > 0">
+                                        <div :class="'clay-badge ' + (results?.action == 'buy' ? 'clay-badge-success' : 'clay-badge-warning') + ' py-1 px-2'">
+                                            Target 2: $<span x-text="results?.target_2.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+
+                            <template x-if="results?.support_1 || results?.support_2">
+                                <div class="mt-3">
+                                    <div class="text-sm font-medium mb-1">Support Levels:</div>
+                                    <template x-if="results?.support_1">
+                                        <div class="clay-badge clay-badge-info py-1 px-2 mb-1">
+                                            Support 1: $<span x-text="results?.support_1.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+                                        </div>
+                                    </template>
+                                    <template x-if="results?.support_2">
+                                        <div class="clay-badge clay-badge-info py-1 px-2">
+                                            Support 2: $<span x-text="results?.support_2.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+
+                        <template x-if="results?.personalized_message">
+                            <div class="mt-4 text-sm p-3 clay-card">
+                                <p x-text="results?.personalized_message"></p>
                             </div>
                         </template>
                     </div>
 
-                    <template x-if="results?.personalized_message">
-                        <div class="mt-4 text-sm p-3 clay-card">
-                            <p x-text="results?.personalized_message"></p>
-                        </div>
-                    </template>
-                </div>
-
-                <!-- Evidence / Indikasi -->
-                <div class="clay-card bg-info/5 p-4">
-                    <h3 class="font-bold mb-3">Indikasi Sinyal:</h3>
-                    <template x-if="results?.evidence && results?.evidence.length > 0">
-                        <ul class="space-y-2 text-sm">
-                            <template x-for="(evidence, index) in results?.evidence" :key="index">
-                                <li class="flex items-start">
-                                    <i class="fas fa-check-circle text-info mt-1 mr-2"></i>
-                                    <span x-text="evidence"></span>
-                                </li>
-                            </template>
-                        </ul>
-                    </template>
-
-                    <template x-if="results?.reversal_signals && results?.reversal_signals.length > 0">
-                        <div class="mt-4">
-                            <h4 class="font-medium mb-2">Sinyal Pembalikan:</h4>
+                    <!-- Evidence / Indikasi -->
+                    <div class="clay-card bg-info/5 p-4">
+                        <h3 class="font-bold mb-3">Indikasi Sinyal:</h3>
+                        <template x-if="results?.evidence && results?.evidence.length > 0">
                             <ul class="space-y-2 text-sm">
-                                <template x-for="(signal, index) in results?.reversal_signals" :key="index">
+                                <template x-for="(evidence, index) in results?.evidence" :key="index">
                                     <li class="flex items-start">
-                                        <i class="fas fa-exchange-alt text-warning mt-1 mr-2"></i>
-                                        <span x-text="signal"></span>
+                                        <i class="fas fa-check-circle text-info mt-1 mr-2"></i>
+                                        <span x-text="evidence"></span>
                                     </li>
                                 </template>
                             </ul>
-                            <div class="mt-2">
-                                <span class="text-sm">Probabilitas pembalikan: </span>
-                                <span class="font-medium" x-text="results?.reversal_probability ? Math.round(results.reversal_probability * 100) + '%' : '0%'"></span>
-                            </div>
-                        </div>
-                    </template>
+                        </template>
 
-                    <template x-if="(!results?.evidence || results?.evidence.length === 0) && (!results?.reversal_signals || results?.reversal_signals.length === 0)">
-                        <p class="text-center text-gray-500">Tidak ada indikasi yang tersedia</p>
-                    </template>
+                        <template x-if="results?.reversal_signals && results?.reversal_signals.length > 0">
+                            <div class="mt-4">
+                                <h4 class="font-medium mb-2">Sinyal Pembalikan:</h4>
+                                <ul class="space-y-2 text-sm">
+                                    <template x-for="(signal, index) in results?.reversal_signals" :key="index">
+                                        <li class="flex items-start">
+                                            <i class="fas fa-exchange-alt text-warning mt-1 mr-2"></i>
+                                            <span x-text="signal"></span>
+                                        </li>
+                                    </template>
+                                </ul>
+                                <div class="mt-2">
+                                    <span class="text-sm">Probabilitas pembalikan: </span>
+                                    <span class="font-medium" x-text="results?.reversal_probability ? Math.round(results.reversal_probability * 100) + '%' : '0%'"></span>
+                                </div>
+                            </div>
+                        </template>
 
-                    <template x-if="results?.buy_score !== undefined || results?.sell_score !== undefined">
-                        <div class="mt-4 p-3 clay-card">
-                            <div class="flex justify-between mb-2">
-                                <span class="text-sm font-medium">Buy Score:</span>
-                                <span class="text-sm" x-text="results?.buy_score ? Math.round(results.buy_score * 100) + '%' : '0%'"></span>
-                            </div>
-                            <div class="h-3 bg-gray-200 rounded-full overflow-hidden">
-                                <div class="h-full bg-success" :style="`width: ${results?.buy_score ? Math.round(results.buy_score * 100) : 0}%`"></div>
-                            </div>
+                        <template x-if="(!results?.evidence || results?.evidence.length === 0) && (!results?.reversal_signals || results?.reversal_signals.length === 0)">
+                            <p class="text-center text-gray-500">Tidak ada indikasi yang tersedia</p>
+                        </template>
 
-                            <div class="flex justify-between mt-3 mb-2">
-                                <span class="text-sm font-medium">Sell Score:</span>
-                                <span class="text-sm" x-text="results?.sell_score ? Math.round(results.sell_score * 100) + '%' : '0%'"></span>
+                        <template x-if="results?.buy_score !== undefined || results?.sell_score !== undefined">
+                            <div class="mt-4 p-3 clay-card">
+                                <div class="flex justify-between mb-2">
+                                    <span class="text-sm font-medium">Buy Score:</span>
+                                    <span class="text-sm" x-text="results?.buy_score ? Math.round(results.buy_score * 100) + '%' : '0%'"></span>
+                                </div>
+                                <div class="h-3 bg-gray-200 rounded-full overflow-hidden">
+                                    <div class="h-full bg-success" :style="`width: ${results?.buy_score ? Math.round(results.buy_score * 100) : 0}%`"></div>
+                                </div>
+
+                                <div class="flex justify-between mt-3 mb-2">
+                                    <span class="text-sm font-medium">Sell Score:</span>
+                                    <span class="text-sm" x-text="results?.sell_score ? Math.round(results.sell_score * 100) + '%' : '0%'"></span>
+                                </div>
+                                <div class="h-3 bg-gray-200 rounded-full overflow-hidden">
+                                    <div class="h-full bg-danger" :style="`width: ${results?.sell_score ? Math.round(results.sell_score * 100) : 0}%`"></div>
+                                </div>
                             </div>
-                            <div class="h-3 bg-gray-200 rounded-full overflow-hidden">
-                                <div class="h-full bg-danger" :style="`width: ${results?.sell_score ? Math.round(results.sell_score * 100) : 0}%`"></div>
+                        </template>
+                    </div>
+
+                    <!-- Indikator Teknikal -->
+                    <div class="clay-card bg-primary/5 p-4">
+                        <h3 class="font-bold mb-3">Indikator Teknikal:</h3>
+                        <template x-if="results?.indicators && Object.keys(results?.indicators).length > 0">
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between p-2 bg-primary/10 rounded mb-3">
+                                    <span class="font-medium">INDIKATOR</span>
+                                    <span class="font-medium">NILAI</span>
+                                </div>
+
+                                <!-- RSI -->
+                                <template x-if="results?.indicators.rsi !== undefined">
+                                    <div class="flex justify-between p-2 border-b border-gray-200">
+                                        <span class="uppercase">RSI</span>
+                                        <span class="font-medium"
+                                            :class="results?.indicators.rsi > 70 ? 'text-danger' : (results?.indicators.rsi < 30 ? 'text-success' : '')"
+                                            x-text="results?.indicators.rsi.toFixed(2)"></span>
+                                    </div>
+                                </template>
+
+                                <!-- MACD -->
+                                <template x-if="results?.indicators.macd !== undefined">
+                                    <div class="flex justify-between p-2 border-b border-gray-200">
+                                        <span class="uppercase">MACD</span>
+                                        <span class="font-medium" x-text="results?.indicators.macd.toFixed(2)"></span>
+                                    </div>
+                                </template>
+
+                                <template x-if="results?.indicators.macd_signal !== undefined">
+                                    <div class="flex justify-between p-2 border-b border-gray-200">
+                                        <span class="uppercase">MACD Signal</span>
+                                        <span class="font-medium" x-text="results?.indicators.macd_signal.toFixed(2)"></span>
+                                    </div>
+                                </template>
+
+                                <template x-if="results?.indicators.macd_histogram !== undefined">
+                                    <div class="flex justify-between p-2 border-b border-gray-200">
+                                        <span class="uppercase">MACD Histogram</span>
+                                        <span class="font-medium"
+                                            :class="results?.indicators.macd_histogram > 0 ? 'text-success' : 'text-danger'"
+                                            x-text="results?.indicators.macd_histogram.toFixed(2)"></span>
+                                    </div>
+                                </template>
+
+                                <!-- Bollinger -->
+                                <template x-if="results?.indicators.bollinger_percent !== undefined">
+                                    <div class="flex justify-between p-2 border-b border-gray-200">
+                                        <span class="uppercase">Bollinger %B</span>
+                                        <span class="font-medium"
+                                            :class="results?.indicators.bollinger_percent > 1 ? 'text-danger' : (results?.indicators.bollinger_percent < 0 ? 'text-success' : '')"
+                                            x-text="results?.indicators.bollinger_percent.toFixed(2)"></span>
+                                    </div>
+                                </template>
+
+                                <!-- Stochastic -->
+                                <template x-if="results?.indicators.stochastic_k !== undefined">
+                                    <div class="flex justify-between p-2 border-b border-gray-200">
+                                        <span class="uppercase">Stochastic %K</span>
+                                        <span class="font-medium"
+                                            :class="results?.indicators.stochastic_k > 80 ? 'text-danger' : (results?.indicators.stochastic_k < 20 ? 'text-success' : '')"
+                                            x-text="results?.indicators.stochastic_k.toFixed(2)"></span>
+                                    </div>
+                                </template>
+
+                                <template x-if="results?.indicators.stochastic_d !== undefined">
+                                    <div class="flex justify-between p-2 border-b border-gray-200">
+                                        <span class="uppercase">Stochastic %D</span>
+                                        <span class="font-medium"
+                                            :class="results?.indicators.stochastic_d > 80 ? 'text-danger' : (results?.indicators.stochastic_d < 20 ? 'text-success' : '')"
+                                            x-text="results?.indicators.stochastic_d.toFixed(2)"></span>
+                                    </div>
+                                </template>
+
+                                <!-- ADX -->
+                                <template x-if="results?.indicators.adx !== undefined">
+                                    <div class="flex justify-between p-2 border-b border-gray-200">
+                                        <span class="uppercase">ADX</span>
+                                        <span class="font-medium"
+                                            :class="results?.indicators.adx > 25 ? 'text-success' : ''"
+                                            x-text="results?.indicators.adx.toFixed(2)"></span>
+                                    </div>
+                                </template>
+
+                                <template x-if="results?.indicators.plus_di !== undefined">
+                                    <div class="flex justify-between p-2 border-b border-gray-200">
+                                        <span class="uppercase">+DI</span>
+                                        <span class="font-medium" x-text="results?.indicators.plus_di.toFixed(2)"></span>
+                                    </div>
+                                </template>
+
+                                <template x-if="results?.indicators.minus_di !== undefined">
+                                    <div class="flex justify-between p-2 border-b border-gray-200">
+                                        <span class="uppercase">-DI</span>
+                                        <span class="font-medium" x-text="results?.indicators.minus_di.toFixed(2)"></span>
+                                    </div>
+                                </template>
                             </div>
-                        </div>
-                    </template>
+                        </template>
+                        <template x-if="!results?.indicators || Object.keys(results?.indicators || {}).length === 0">
+                            <p class="text-center text-gray-500">Tidak ada indikator yang tersedia</p>
+                        </template>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab Content - Indicators -->
+            <div x-show="activeTab === 'indicators'">
+                <div x-show="loadingIndicators" class="text-center py-6">
+                    <i class="fas fa-spinner fa-spin text-2xl text-primary"></i>
+                    <p class="mt-2">Memuat indikator teknikal...</p>
                 </div>
 
-                <!-- Indikator Teknikal -->
-                <div class="clay-card bg-primary/5 p-4">
-                    <h3 class="font-bold mb-3">Indikator Teknikal:</h3>
-                    <template x-if="results?.indicators && Object.keys(results?.indicators).length > 0">
-                        <div class="space-y-2 text-sm">
-                            <div class="flex justify-between p-2 bg-primary/10 rounded mb-3">
-                                <span class="font-medium">INDIKATOR</span>
-                                <span class="font-medium">NILAI</span>
+                <div x-show="!loadingIndicators && indicatorsData">
+                    <div class="clay-card p-4 mb-4 bg-info/5">
+                        <h3 class="font-bold mb-3">Detail Indikator Teknikal</h3>
+
+                        <!-- Trend Indicators -->
+                        <template x-if="indicatorsData?.indicators?.trend">
+                            <div class="clay-card p-3 bg-primary/5 mb-4">
+                                <h4 class="font-bold mb-2 text-primary">Indikator Tren</h4>
+
+                                <!-- Moving Averages -->
+                                <template x-if="indicatorsData.indicators.trend.moving_averages">
+                                    <div class="mb-4">
+                                        <h5 class="font-medium text-sm mb-2 border-b pb-1">Moving Averages:</h5>
+                                        <table class="min-w-full bg-white">
+                                            <thead>
+                                                <tr class="bg-gray-100">
+                                                    <th class="py-1 px-2 text-left text-xs font-medium text-gray-600 uppercase">Indicator</th>
+                                                    <th class="py-1 px-2 text-right text-xs font-medium text-gray-600 uppercase">Value</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <template x-for="(value, key) in indicatorsData.indicators.trend.moving_averages" :key="key">
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm uppercase" x-text="key"></td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="typeof value === 'number' ? value.toFixed(2) : value"></td>
+                                                    </tr>
+                                                </template>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </template>
+
+                                <!-- MACD -->
+                                <template x-if="indicatorsData.indicators.trend.macd">
+                                    <div class="mb-4">
+                                        <h5 class="font-medium text-sm mb-2 border-b pb-1">MACD:</h5>
+                                        <table class="min-w-full bg-white">
+                                            <thead>
+                                                <tr class="bg-gray-100">
+                                                    <th class="py-1 px-2 text-left text-xs font-medium text-gray-600 uppercase">Parameter</th>
+                                                    <th class="py-1 px-2 text-right text-xs font-medium text-gray-600 uppercase">Value</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">MACD Line</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.trend.macd.value.toFixed(2)"></td>
+                                                </tr>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">Signal Line</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.trend.macd.signal.toFixed(2)"></td>
+                                                </tr>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">Histogram</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium"
+                                                        :class="indicatorsData.indicators.trend.macd.histogram > 0 ? 'text-success' : 'text-danger'"
+                                                        x-text="indicatorsData.indicators.trend.macd.histogram.toFixed(2)"></td>
+                                                </tr>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">Signal Type</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium capitalize" x-text="indicatorsData.indicators.trend.macd.signal_type"></td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </template>
+
+                                <!-- ADX -->
+                                <template x-if="indicatorsData.indicators.trend.adx">
+                                    <div>
+                                        <h5 class="font-medium text-sm mb-2 border-b pb-1">ADX (Trend Strength):</h5>
+                                        <table class="min-w-full bg-white">
+                                            <thead>
+                                                <tr class="bg-gray-100">
+                                                    <th class="py-1 px-2 text-left text-xs font-medium text-gray-600 uppercase">Parameter</th>
+                                                    <th class="py-1 px-2 text-right text-xs font-medium text-gray-600 uppercase">Value</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">ADX</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.trend.adx.value.toFixed(2)"></td>
+                                                </tr>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">+DI</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.trend.adx.plus_di.toFixed(2)"></td>
+                                                </tr>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">-DI</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.trend.adx.minus_di.toFixed(2)"></td>
+                                                </tr>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">Trend Strength</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium capitalize" x-text="indicatorsData.indicators.trend.adx.trend_strength"></td>
+                                                </tr>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">Direction</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium capitalize"
+                                                         :class="indicatorsData.indicators.trend.adx.trend_direction === 'bullish' ? 'text-success' : 'text-danger'"
+                                                         x-text="indicatorsData.indicators.trend.adx.trend_direction"></td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </template>
                             </div>
+                        </template>
 
-                            <!-- RSI -->
-                            <template x-if="results?.indicators.rsi !== undefined">
-                                <div class="flex justify-between p-2 border-b border-gray-200">
-                                    <span class="uppercase">RSI</span>
-                                    <span class="font-medium"
-                                        :class="results?.indicators.rsi > 70 ? 'text-danger' : (results?.indicators.rsi < 30 ? 'text-success' : '')"
-                                        x-text="results?.indicators.rsi.toFixed(2)"></span>
+                        <!-- Momentum Indicators -->
+                        <template x-if="indicatorsData?.indicators?.momentum">
+                            <div class="clay-card p-3 bg-success/5 mb-4">
+                                <h4 class="font-bold mb-2 text-success">Indikator Momentum</h4>
+
+                                <!-- RSI -->
+                                <template x-if="indicatorsData.indicators.momentum.rsi">
+                                    <div class="mb-4">
+                                        <h5 class="font-medium text-sm mb-2 border-b pb-1">RSI:</h5>
+                                        <table class="min-w-full bg-white">
+                                            <thead>
+                                                <tr class="bg-gray-100">
+                                                    <th class="py-1 px-2 text-left text-xs font-medium text-gray-600 uppercase">Parameter</th>
+                                                    <th class="py-1 px-2 text-right text-xs font-medium text-gray-600 uppercase">Value</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">Value</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium"
+                                                        :class="indicatorsData.indicators.momentum.rsi.value > 70 ? 'text-danger' :
+                                                        (indicatorsData.indicators.momentum.rsi.value < 30 ? 'text-success' : '')"
+                                                        x-text="indicatorsData.indicators.momentum.rsi.value.toFixed(2)"></td>
+                                                </tr>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">Signal</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium capitalize" x-text="indicatorsData.indicators.momentum.rsi.signal"></td>
+                                                </tr>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">Period</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.momentum.rsi.period"></td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </template>
+
+                                <!-- Stochastic -->
+                                <template x-if="indicatorsData.indicators.momentum.stochastic">
+                                    <div class="mb-4">
+                                        <h5 class="font-medium text-sm mb-2 border-b pb-1">Stochastic Oscillator:</h5>
+                                        <table class="min-w-full bg-white">
+                                            <thead>
+                                                <tr class="bg-gray-100">
+                                                    <th class="py-1 px-2 text-left text-xs font-medium text-gray-600 uppercase">Parameter</th>
+                                                    <th class="py-1 px-2 text-right text-xs font-medium text-gray-600 uppercase">Value</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">%K</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium"
+                                                        :class="indicatorsData.indicators.momentum.stochastic.k > 80 ? 'text-danger' :
+                                                        (indicatorsData.indicators.momentum.stochastic.k < 20 ? 'text-success' : '')"
+                                                        x-text="indicatorsData.indicators.momentum.stochastic.k.toFixed(2)"></td>
+                                                </tr>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">%D</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium"
+                                                        :class="indicatorsData.indicators.momentum.stochastic.d > 80 ? 'text-danger' :
+                                                        (indicatorsData.indicators.momentum.stochastic.d < 20 ? 'text-success' : '')"
+                                                        x-text="indicatorsData.indicators.momentum.stochastic.d.toFixed(2)"></td>
+                                                </tr>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">Signal</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium capitalize" x-text="indicatorsData.indicators.momentum.stochastic.signal"></td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </template>
+
+                                <!-- Other Momentum Indicators -->
+                                <template x-if="indicatorsData.indicators.momentum.roc">
+                                    <div>
+                                        <h5 class="font-medium text-sm mb-2 border-b pb-1">ROC (Rate of Change):</h5>
+                                        <table class="min-w-full bg-white">
+                                            <thead>
+                                                <tr class="bg-gray-100">
+                                                    <th class="py-1 px-2 text-left text-xs font-medium text-gray-600 uppercase">Parameter</th>
+                                                    <th class="py-1 px-2 text-right text-xs font-medium text-gray-600 uppercase">Value</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">Value</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium"
+                                                        :class="indicatorsData.indicators.momentum.roc.value > 0 ? 'text-success' : 'text-danger'"
+                                                        x-text="indicatorsData.indicators.momentum.roc.value.toFixed(2) + '%'"></td>
+                                                </tr>
+                                                <tr class="border-b">
+                                                    <td class="py-1 px-2 text-sm">Signal</td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium capitalize" x-text="indicatorsData.indicators.momentum.roc.signal"></td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <!-- Volatility Indicators -->
+                            <template x-if="indicatorsData?.indicators?.volatility">
+                                <div class="clay-card p-3 bg-warning/5">
+                                    <h4 class="font-bold mb-2 text-warning">Indikator Volatilitas</h4>
+
+                                    <!-- Bollinger Bands -->
+                                    <template x-if="indicatorsData.indicators.volatility.bollinger">
+                                        <div class="mb-4">
+                                            <h5 class="font-medium text-sm mb-2 border-b pb-1">Bollinger Bands:</h5>
+                                            <table class="min-w-full bg-white">
+                                                <thead>
+                                                    <tr class="bg-gray-100">
+                                                        <th class="py-1 px-2 text-left text-xs font-medium text-gray-600 uppercase">Parameter</th>
+                                                        <th class="py-1 px-2 text-right text-xs font-medium text-gray-600 uppercase">Value</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Upper Band</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.volatility.bollinger.upper.toFixed(2)"></td>
+                                                    </tr>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Middle Band</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.volatility.bollinger.middle.toFixed(2)"></td>
+                                                    </tr>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Lower Band</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.volatility.bollinger.lower.toFixed(2)"></td>
+                                                    </tr>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">%B</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium"
+                                                            :class="indicatorsData.indicators.volatility.bollinger.percent_b > 1 ? 'text-danger' :
+                                                            (indicatorsData.indicators.volatility.bollinger.percent_b < 0 ? 'text-success' : '')"
+                                                            x-text="indicatorsData.indicators.volatility.bollinger.percent_b.toFixed(2)"></td>
+                                                    </tr>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Bandwidth</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.volatility.bollinger.bandwidth.toFixed(4)"></td>
+                                                    </tr>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Signal</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium capitalize" x-text="indicatorsData.indicators.volatility.bollinger.signal"></td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </template>
+
+                                    <!-- ATR -->
+                                    <template x-if="indicatorsData.indicators.volatility.atr">
+                                        <div>
+                                            <h5 class="font-medium text-sm mb-2 border-b pb-1">ATR (Average True Range):</h5>
+                                            <table class="min-w-full bg-white">
+                                                <thead>
+                                                    <tr class="bg-gray-100">
+                                                        <th class="py-1 px-2 text-left text-xs font-medium text-gray-600 uppercase">Parameter</th>
+                                                        <th class="py-1 px-2 text-right text-xs font-medium text-gray-600 uppercase">Value</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Value</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.volatility.atr.value.toFixed(4)"></td>
+                                                    </tr>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Percent</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.volatility.atr.percent.toFixed(2) + '%'"></td>
+                                                    </tr>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Volatility</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium capitalize" x-text="indicatorsData.indicators.volatility.atr.volatility"></td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </template>
                                 </div>
                             </template>
 
-                            <!-- MACD -->
-                            <template x-if="results?.indicators.macd !== undefined">
-                                <div class="flex justify-between p-2 border-b border-gray-200">
-                                    <span class="uppercase">MACD</span>
-                                    <span class="font-medium" x-text="results?.indicators.macd.toFixed(2)"></span>
-                                </div>
-                            </template>
+                            <!-- Volume or Ichimoku or Market Condition -->
+                            <template x-if="indicatorsData?.indicators?.volume || indicatorsData?.indicators?.ichimoku || indicatorsData?.indicators?.market_condition">
+                                <div class="clay-card p-3 bg-secondary/5">
+                                    <template x-if="indicatorsData?.indicators?.volume">
+                                        <div class="mb-4">
+                                            <h4 class="font-bold mb-2 text-secondary">Indikator Volume</h4>
+                                            <table class="min-w-full bg-white">
+                                                <thead>
+                                                    <tr class="bg-gray-100">
+                                                        <th class="py-1 px-2 text-left text-xs font-medium text-gray-600 uppercase">Parameter</th>
+                                                        <th class="py-1 px-2 text-right text-xs font-medium text-gray-600 uppercase">Value</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Volume</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.volume.volume.value.toLocaleString()"></td>
+                                                    </tr>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Volume Ratio</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.volume.volume.ratio.toFixed(2) + 'x'"></td>
+                                                    </tr>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Signal</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium capitalize" x-text="indicatorsData.indicators.volume.volume.signal"></td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </template>
 
-                            <template x-if="results?.indicators.macd_signal !== undefined">
-                                <div class="flex justify-between p-2 border-b border-gray-200">
-                                    <span class="uppercase">MACD Signal</span>
-                                    <span class="font-medium" x-text="results?.indicators.macd_signal.toFixed(2)"></span>
-                                </div>
-                            </template>
+                                    <template x-if="indicatorsData?.indicators?.ichimoku">
+                                        <div class="mb-4">
+                                            <h4 class="font-bold mb-2 text-secondary">Ichimoku Cloud</h4>
+                                            <table class="min-w-full bg-white">
+                                                <thead>
+                                                    <tr class="bg-gray-100">
+                                                        <th class="py-1 px-2 text-left text-xs font-medium text-gray-600 uppercase">Parameter</th>
+                                                        <th class="py-1 px-2 text-right text-xs font-medium text-gray-600 uppercase">Value</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Tenkan</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.ichimoku.tenkan.toFixed(2)"></td>
+                                                    </tr>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Kijun</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.ichimoku.kijun.toFixed(2)"></td>
+                                                    </tr>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Signal</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium capitalize" x-text="indicatorsData.indicators.ichimoku.signal"></td>
+                                                    </tr>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Cloud Color</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium"
+                                                            :class="indicatorsData.indicators.ichimoku.cloud_green ? 'text-success' :
+                                                                   (indicatorsData.indicators.ichimoku.cloud_red ? 'text-danger' : '')"
+                                                            x-text="indicatorsData.indicators.ichimoku.cloud_green ? 'GREEN' :
+                                                                   (indicatorsData.indicators.ichimoku.cloud_red ? 'RED' : 'NEUTRAL')"></td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </template>
 
-                            <template x-if="results?.indicators.macd_histogram !== undefined">
-                                <div class="flex justify-between p-2 border-b border-gray-200">
-                                    <span class="uppercase">MACD Histogram</span>
-                                    <span class="font-medium"
-                                        :class="results?.indicators.macd_histogram > 0 ? 'text-success' : 'text-danger'"
-                                        x-text="results?.indicators.macd_histogram.toFixed(2)"></span>
-                                </div>
-                            </template>
-
-                            <!-- Bollinger -->
-                            <template x-if="results?.indicators.bollinger_percent !== undefined">
-                                <div class="flex justify-between p-2 border-b border-gray-200">
-                                    <span class="uppercase">Bollinger %B</span>
-                                    <span class="font-medium"
-                                        :class="results?.indicators.bollinger_percent > 1 ? 'text-danger' : (results?.indicators.bollinger_percent < 0 ? 'text-success' : '')"
-                                        x-text="results?.indicators.bollinger_percent.toFixed(2)"></span>
-                                </div>
-                            </template>
-
-                            <!-- Stochastic -->
-                            <template x-if="results?.indicators.stochastic_k !== undefined">
-                                <div class="flex justify-between p-2 border-b border-gray-200">
-                                    <span class="uppercase">Stochastic %K</span>
-                                    <span class="font-medium"
-                                        :class="results?.indicators.stochastic_k > 80 ? 'text-danger' : (results?.indicators.stochastic_k < 20 ? 'text-success' : '')"
-                                        x-text="results?.indicators.stochastic_k.toFixed(2)"></span>
-                                </div>
-                            </template>
-
-                            <template x-if="results?.indicators.stochastic_d !== undefined">
-                                <div class="flex justify-between p-2 border-b border-gray-200">
-                                    <span class="uppercase">Stochastic %D</span>
-                                    <span class="font-medium"
-                                        :class="results?.indicators.stochastic_d > 80 ? 'text-danger' : (results?.indicators.stochastic_d < 20 ? 'text-success' : '')"
-                                        x-text="results?.indicators.stochastic_d.toFixed(2)"></span>
-                                </div>
-                            </template>
-
-                            <!-- ADX -->
-                            <template x-if="results?.indicators.adx !== undefined">
-                                <div class="flex justify-between p-2 border-b border-gray-200">
-                                    <span class="uppercase">ADX</span>
-                                    <span class="font-medium"
-                                        :class="results?.indicators.adx > 25 ? 'text-success' : ''"
-                                        x-text="results?.indicators.adx.toFixed(2)"></span>
-                                </div>
-                            </template>
-
-                            <template x-if="results?.indicators.plus_di !== undefined">
-                                <div class="flex justify-between p-2 border-b border-gray-200">
-                                    <span class="uppercase">+DI</span>
-                                    <span class="font-medium" x-text="results?.indicators.plus_di.toFixed(2)"></span>
-                                </div>
-                            </template>
-
-                            <template x-if="results?.indicators.minus_di !== undefined">
-                                <div class="flex justify-between p-2 border-b border-gray-200">
-                                    <span class="uppercase">-DI</span>
-                                    <span class="font-medium" x-text="results?.indicators.minus_di.toFixed(2)"></span>
+                                    <template x-if="indicatorsData?.indicators?.market_condition">
+                                        <div>
+                                            <h4 class="font-bold mb-2 text-secondary">Kondisi Pasar</h4>
+                                            <table class="min-w-full bg-white">
+                                                <thead>
+                                                    <tr class="bg-gray-100">
+                                                        <th class="py-1 px-2 text-left text-xs font-medium text-gray-600 uppercase">Parameter</th>
+                                                        <th class="py-1 px-2 text-right text-xs font-medium text-gray-600 uppercase">Value</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Regime</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium capitalize" x-text="indicatorsData.indicators.market_condition.market_regime.replace('_', ' ')"></td>
+                                                    </tr>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Trend Strength</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.market_condition.trend_strength.toFixed(2)"></td>
+                                                    </tr>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Trend Direction</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium capitalize"
+                                                            :class="indicatorsData.indicators.market_condition.trend_direction === 'bullish' ? 'text-success' :
+                                                                   (indicatorsData.indicators.market_condition.trend_direction === 'bearish' ? 'text-danger' : '')"
+                                                            x-text="indicatorsData.indicators.market_condition.trend_direction"></td>
+                                                    </tr>
+                                                    <tr class="border-b">
+                                                        <td class="py-1 px-2 text-sm">Volatility</td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="(indicatorsData.indicators.market_condition.volatility * 100).toFixed(2) + '%'"></td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </template>
                                 </div>
                             </template>
                         </div>
-                    </template>
-                    <template x-if="!results?.indicators || Object.keys(results?.indicators || {}).length === 0">
-                        <p class="text-center text-gray-500">Tidak ada indikator yang tersedia</p>
-                    </template>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab Content - Market Events -->
+            <div x-show="activeTab === 'events'">
+                <div x-show="loadingMarketEvents" class="text-center py-6">
+                    <i class="fas fa-spinner fa-spin text-2xl text-primary"></i>
+                    <p class="mt-2">Memuat peristiwa pasar...</p>
+                </div>
+
+                <div x-show="!loadingMarketEvents && marketEvents">
+                    <div class="clay-card p-4 mb-4 bg-primary/5">
+                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4">
+                            <h3 class="font-bold mb-3 md:mb-0">Peristiwa Pasar Terbaru</h3>
+                            <div>
+                                <span class="clay-badge clay-badge-info px-3 py-1">
+                                    Regime: <span class="font-bold capitalize" x-text="marketEvents?.market_regime?.replace('_', ' ')"></span>
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <!-- Latest Event -->
+                            <div>
+                                <h4 class="font-medium mb-2">Peristiwa Terbaru:</h4>
+                                <div class="p-3 clay-card" :class="{
+                                    'bg-success/10': marketEvents?.latest_event === 'pump',
+                                    'bg-danger/10': marketEvents?.latest_event === 'dump',
+                                    'bg-warning/10': marketEvents?.latest_event === 'high_volatility',
+                                    'bg-info/10': marketEvents?.latest_event === 'volume_spike',
+                                    'bg-secondary/10': marketEvents?.latest_event === 'normal'
+                                }">
+                                    <div class="flex items-center">
+                                        <div class="mr-3">
+                                            <template x-if="marketEvents?.latest_event === 'pump'">
+                                                <i class="fas fa-arrow-circle-up text-3xl text-success"></i>
+                                            </template>
+                                            <template x-if="marketEvents?.latest_event === 'dump'">
+                                                <i class="fas fa-arrow-circle-down text-3xl text-danger"></i>
+                                            </template>
+                                            <template x-if="marketEvents?.latest_event === 'high_volatility'">
+                                                <i class="fas fa-bolt text-3xl text-warning"></i>
+                                            </template>
+                                            <template x-if="marketEvents?.latest_event === 'volume_spike'">
+                                                <i class="fas fa-chart-bar text-3xl text-info"></i>
+                                            </template>
+                                            <template x-if="marketEvents?.latest_event === 'normal'">
+                                                <i class="fas fa-minus-circle text-3xl text-secondary"></i>
+                                            </template>
+                                        </div>
+                                        <div>
+                                            <div class="font-bold text-lg capitalize" x-text="marketEvents?.latest_event?.replace('_', ' ')"></div>
+                                            <div class="text-sm text-gray-600" x-text="'Harga Saat Ini: $' + marketEvents?.close_price?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Event Counts -->
+                            <div>
+                                <h4 class="font-medium mb-2">Jumlah Peristiwa:</h4>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div class="p-2 clay-card bg-success/10 text-center">
+                                        <div class="font-bold text-lg text-success" x-text="marketEvents?.event_counts?.pump || 0"></div>
+                                        <div class="text-xs text-gray-600">Pump</div>
+                                    </div>
+                                    <div class="p-2 clay-card bg-danger/10 text-center">
+                                        <div class="font-bold text-lg text-danger" x-text="marketEvents?.event_counts?.dump || 0"></div>
+                                        <div class="text-xs text-gray-600">Dump</div>
+                                    </div>
+                                    <div class="p-2 clay-card bg-warning/10 text-center">
+                                        <div class="font-bold text-lg text-warning" x-text="marketEvents?.event_counts?.high_volatility || 0"></div>
+                                        <div class="text-xs text-gray-600">Volatilitas Tinggi</div>
+                                    </div>
+                                    <div class="p-2 clay-card bg-info/10 text-center">
+                                        <div class="font-bold text-lg text-info" x-text="marketEvents?.event_counts?.volume_spike || 0"></div>
+                                        <div class="text-xs text-gray-600">Lonjakan Volume</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Recent Events -->
+                        <template x-if="marketEvents?.recent_events && Object.keys(marketEvents.recent_events).length > 0">
+                            <div class="mt-6">
+                                <h4 class="font-medium mb-2">Peristiwa Terbaru:</h4>
+                                <div class="clay-card p-3">
+                                    <div class="space-y-2">
+                                        <template x-for="(events, type) in marketEvents.recent_events" :key="type">
+                                            <template x-if="events && events.length > 0">
+                                                <div>
+                                                    <div class="font-medium capitalize mb-1" x-text="type.replace('_', ' ')"></div>
+                                                    <ul class="pl-5 text-sm space-y-1">
+                                                        <template x-for="(event, index) in events.slice(0, 3)" :key="index">
+                                                            <li class="text-gray-600" x-text="event"></li>
+                                                        </template>
+                                                    </ul>
+                                                </div>
+                                            </template>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab Content - Alerts -->
+            <div x-show="activeTab === 'alerts'">
+                <div x-show="loadingAlerts" class="text-center py-6">
+                    <i class="fas fa-spinner fa-spin text-2xl text-primary"></i>
+                    <p class="mt-2">Memuat alert teknikal...</p>
+                </div>
+
+                <div x-show="!loadingAlerts && alertsData">
+                    <div class="clay-card p-4 mb-4 bg-warning/5">
+                        <h3 class="font-bold mb-3">Alert Teknikal</h3>
+
+                        <div class="p-3 clay-card bg-white mb-4">
+                            <div class="flex justify-between items-center mb-2">
+                                <div class="font-medium">Market Regime:</div>
+                                <div class="clay-badge clay-badge-info px-3 py-1 capitalize">
+                                    <span x-text="alertsData?.market_regime?.replace('_', ' ')"></span>
+                                </div>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <div class="font-medium">Periode:</div>
+                                <div class="text-gray-600" x-text="alertsData?.period"></div>
+                            </div>
+                        </div>
+
+                        <template x-if="alertsData?.alerts && alertsData.alerts.length > 0">
+                            <div class="space-y-3">
+                                <template x-for="(alert, index) in alertsData.alerts" :key="index">
+                                    <div class="p-3 clay-card" :class="{
+                                        'bg-success/10': alert.signal === 'buy',
+                                        'bg-danger/10': alert.signal === 'sell',
+                                        'bg-warning/10': alert.signal === 'neutral'
+                                    }">
+                                        <div class="flex justify-between items-start">
+                                            <div>
+                                                <div class="font-medium" x-text="alert.message"></div>
+                                                <div class="text-xs text-gray-600" x-text="alert.date"></div>
+                                            </div>
+                                            <div>
+                                                <span class="clay-badge clay-badge-info px-3 py-1 capitalize">
+                                                    <span x-text="alert.signal"></span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+
+                        <template x-if="!alertsData?.alerts || alertsData.alerts.length === 0">
+                            <div class="text-center p-4">
+                                <p class="text-gray-600">Tidak ada alert yang tersedia untuk periode ini</p>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab Content - Price Prediction -->
+            <div x-show="activeTab === 'prediction'">
+                <div x-show="loadingPrediction" class="text-center py-6">
+                    <i class="fas fa-spinner fa-spin text-2xl text-primary"></i>
+                    <p class="mt-2">Memuat prediksi harga...</p>
+                </div>
+
+                <div x-show="!loadingPrediction && predictionData">
+                    <div class="clay-card p-4 mb-4 bg-primary/5">
+                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4">
+                            <h3 class="font-bold mb-3 md:mb-0">Prediksi Harga</h3>
+                            <div>
+                                <span class="clay-badge px-3 py-1" :class="{
+                                    'clay-badge-success': predictionData?.prediction_direction === 'up',
+                                    'clay-badge-danger': predictionData?.prediction_direction === 'down',
+                                    'clay-badge-warning': predictionData?.prediction_direction === 'sideways'
+                                }">
+                                    Model: <span class="font-medium" x-text="predictionData?.model_type"></span>
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <!-- Prediction Overview -->
+                            <div class="clay-card p-3 bg-white">
+                                <h4 class="font-medium mb-3">Ringkasan Prediksi</h4>
+
+                                <div class="p-3 clay-card mb-3" :class="{
+                                    'bg-success/10': predictionData?.prediction_direction === 'up',
+                                    'bg-danger/10': predictionData?.prediction_direction === 'down',
+                                    'bg-warning/10': predictionData?.prediction_direction === 'sideways'
+                                }">
+                                    <div class="flex items-center justify-between">
+                                        <div>
+                                            <div class="text-sm text-gray-600">Arah Prediksi:</div>
+                                            <div class="font-bold text-lg capitalize" x-text="predictionData?.prediction_direction"></div>
+                                        </div>
+                                        <div>
+                                            <template x-if="predictionData?.prediction_direction === 'up'">
+                                                <i class="fas fa-arrow-circle-up text-3xl text-success"></i>
+                                            </template>
+                                            <template x-if="predictionData?.prediction_direction === 'down'">
+                                                <i class="fas fa-arrow-circle-down text-3xl text-danger"></i>
+                                            </template>
+                                            <template x-if="predictionData?.prediction_direction === 'sideways'">
+                                                <i class="fas fa-minus-circle text-3xl text-warning"></i>
+                                            </template>
+                                        </div>
+                                    </div>
+
+                                    <div class="mt-2">
+                                        <div class="text-sm text-gray-600">Perubahan yang Diprediksi:</div>
+                                        <div class="font-bold" x-text="predictionData?.predicted_change_percent.toFixed(2) + '%'"></div>
+                                    </div>
+
+                                    <div class="mt-2">
+                                        <div class="text-sm text-gray-600">Kepercayaan:</div>
+                                        <div class="font-medium" x-text="(predictionData?.confidence * 100).toFixed(0) + '%'"></div>
+                                    </div>
+                                </div>
+
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div class="p-2 clay-card bg-info/5">
+                                        <div class="text-xs text-gray-600">Harga Saat Ini:</div>
+                                        <div class="font-bold">$<span x-text="predictionData?.current_price?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span></div>
+                                    </div>
+
+                                    <div class="p-2 clay-card bg-info/5">
+                                        <div class="text-xs text-gray-600">Market Regime:</div>
+                                        <div class="font-medium capitalize" x-text="predictionData?.market_regime?.replace('_', ' ')"></div>
+                                    </div>
+
+                                    <div class="p-2 clay-card bg-info/5">
+                                        <div class="text-xs text-gray-600">Probabilitas Pembalikan:</div>
+                                        <div class="font-medium" x-text="predictionData?.reversal_probability ? (predictionData.reversal_probability * 100).toFixed(0) + '%' : 'N/A'"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Support & Resistance -->
+                            <div class="clay-card p-3 bg-white">
+                                <h4 class="font-medium mb-3">Level Support & Resistance</h4>
+
+                                <div class="space-y-3">
+                                    <template x-if="predictionData?.resistance_levels && Object.keys(predictionData.resistance_levels).length > 0">
+                                        <div class="p-2 clay-card bg-danger/5">
+                                            <h5 class="font-medium text-sm text-danger mb-2">Resistance Levels</h5>
+                                            <div class="grid grid-cols-2 gap-2">
+                                                <template x-for="(value, level) in predictionData.resistance_levels" :key="level">
+                                                    <template x-if="value">
+                                                        <div class="flex justify-between items-center">
+                                                            <span class="capitalize" x-text="level.replace('_', ' ')"></span>
+                                                            <span class="font-medium">$<span x-text="value?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span></span>
+                                                        </div>
+                                                    </template>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+
+                                    <template x-if="predictionData?.support_levels && Object.keys(predictionData.support_levels).length > 0">
+                                        <div class="p-2 clay-card bg-success/5">
+                                            <h5 class="font-medium text-sm text-success mb-2">Support Levels</h5>
+                                            <div class="grid grid-cols-2 gap-2">
+                                                <template x-for="(value, level) in predictionData.support_levels" :key="level">
+                                                    <template x-if="value">
+                                                        <div class="flex justify-between items-center">
+                                                            <span class="capitalize" x-text="level.replace('_', ' ')"></span>
+                                                            <span class="font-medium">$<span x-text="value?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span></span>
+                                                        </div>
+                                                    </template>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Predictions Table -->
+                        <template x-if="predictionData?.predictions && predictionData.predictions.length > 0">
+                            <div class="mt-6">
+                                <h4 class="font-medium mb-3">Prediksi Harga Selanjutnya</h4>
+                                <div class="overflow-x-auto">
+                                    <table class="min-w-full bg-white clay-card">
+                                        <thead>
+                                            <tr>
+                                                <th class="py-2 px-4 border-b text-left">Tanggal</th>
+                                                <th class="py-2 px-4 border-b text-right">Harga Prediksi</th>
+                                                <th class="py-2 px-4 border-b text-right">Kepercayaan</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <template x-for="(prediction, index) in predictionData.predictions" :key="index">
+                                                <tr :class="index % 2 === 0 ? 'bg-gray-50' : ''">
+                                                    <td class="py-2 px-4 border-b" x-text="prediction.date"></td>
+                                                    <td class="py-2 px-4 border-b text-right font-medium">$<span x-text="prediction.value?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span></td>
+                                                    <td class="py-2 px-4 border-b text-right" x-text="(prediction.confidence * 100).toFixed(0) + '%'"></td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
                 </div>
             </div>
 
@@ -665,7 +1533,7 @@
         </div>
     </div>
 
-    <!-- Info Panel (tidak diubah) -->
+    <!-- Info Panel -->
     <div class="clay-card p-6 mb-8">
         <h2 class="text-xl font-bold mb-4 flex items-center">
             <i class="fas fa-info-circle mr-2 text-primary"></i>
@@ -673,7 +1541,6 @@
         </h2>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
-            <!-- Konten info panel tidak diubah -->
             <div class="clay-card bg-primary/10 p-4">
                 <h3 class="font-bold mb-2">Periode Indikator</h3>
                 <p>
@@ -726,7 +1593,7 @@
         </div>
     </div>
 
-    <!-- Penjelasan Indikator (tidak diubah) -->
+    <!-- Penjelasan Indikator -->
     <div class="clay-card p-6">
         <h2 class="text-xl font-bold mb-4 flex items-center">
             <i class="fas fa-lightbulb mr-2 text-warning"></i>
@@ -734,7 +1601,6 @@
         </h2>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
-            <!-- Konten penjelasan indikator tidak diubah -->
             <div class="clay-card bg-info/5 p-4">
                 <h3 class="font-bold mb-2">RSI (Relative Strength Index)</h3>
                 <p class="mb-2">
@@ -788,6 +1654,88 @@
                     <li>- Periode umum: 20-50-200 (standard), 10-30-60 (short-term), 50-100-200 (long-term)</li>
                 </ul>
             </div>
+
+            <div class="clay-card bg-info/5 p-4">
+                <h3 class="font-bold mb-2">Stochastic Oscillator</h3>
+                <p class="mb-2">
+                    Indikator momentum yang membandingkan harga penutupan dengan rentang harga dalam periode tertentu.
+                </p>
+                <ul class="space-y-1">
+                    <li>- %K: Line utama (kecepatan perubahan)</li>
+                    <li>- %D: SMA dari %K</li>
+                    <li>- Nilai di atas 80: Kondisi overbought</li>
+                    <li>- Nilai di bawah 20: Kondisi oversold</li>
+                    <li>- Crossover di area ekstrem: Sinyal untuk entry/exit</li>
+                    <li>- Periode umum: %K=14, %D=3 (standard), %K=7, %D=3 (short-term)</li>
+                </ul>
+            </div>
+
+            <div class="clay-card bg-info/5 p-4">
+                <h3 class="font-bold mb-2">ADX (Average Directional Index)</h3>
+                <p class="mb-2">
+                    Mengukur kekuatan tren terlepas dari arahnya. Nilai ADX antara 0-100.
+                </p>
+                <ul class="space-y-1">
+                    <li>- ADX > 25: Tren kuat</li>
+                    <li>- ADX < 20: Tren lemah (sideways/ranging)</li>
+                    <li>- +DI > -DI: Tren bullish</li>
+                    <li>- -DI > +DI: Tren bearish</li>
+                    <li>- Crossover +DI dan -DI: Potensi sinyal entry/exit</li>
+                    <li>- Periode umum: 14 (standard), 7 (short-term), 21 (long-term)</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Market Regimes Explanation -->
+    <div class="clay-card p-6 mb-8">
+        <h2 class="text-xl font-bold mb-4 flex items-center">
+            <i class="fas fa-globe mr-2 text-primary"></i>
+            Penjelasan Market Regime
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+            <div class="clay-card bg-success/10 p-4">
+                <h3 class="font-bold mb-2">Trending Markets</h3>
+                <ul class="space-y-2">
+                    <li class="flex items-start">
+                        <i class="fas fa-arrow-up text-success mt-1 mr-2"></i>
+                        <span><strong>Trending Bullish:</strong> Tren naik dengan volatilitas normal. Gunakan indikator tren seperti Moving Averages dan MACD.</span>
+                    </li>
+                    <li class="flex items-start">
+                        <i class="fas fa-arrow-down text-danger mt-1 mr-2"></i>
+                        <span><strong>Trending Bearish:</strong> Tren turun dengan volatilitas normal. Perhatikan level support dan RSI untuk potential reversals.</span>
+                    </li>
+                    <li class="flex items-start">
+                        <i class="fas fa-bolt text-warning mt-1 mr-2"></i>
+                        <span><strong>Trending Volatile:</strong> Tren kuat dengan volatilitas tinggi. Gunakan stop loss yang lebih lebar dan take profit yang agresif.</span>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="clay-card bg-warning/10 p-4">
+                <h3 class="font-bold mb-2">Ranging Markets</h3>
+                <ul class="space-y-2">
+                    <li class="flex items-start">
+                        <i class="fas fa-arrows-alt-h text-info mt-1 mr-2"></i>
+                        <span><strong>Ranging Low Volatility:</strong> Pasar sideways dengan volatilitas rendah. Gunakan oscillator seperti RSI dan Stochastic.</span>
+                    </li>
+                    <li class="flex items-start">
+                        <i class="fas fa-exchange-alt text-warning mt-1 mr-2"></i>
+                        <span><strong>Ranging Volatile:</strong> Pasar sideways dengan volatilitas tinggi. Efektif untuk strategi range-bound dengan stop loss yang cukup.</span>
+                    </li>
+                    <li class="flex items-start">
+                        <i class="fas fa-compress-arrows-alt text-secondary mt-1 mr-2"></i>
+                        <span><strong>Volatile Sideways:</strong> Pasar dengan volatilitas ekstrem tanpa arah yang jelas. Hati-hati dengan false breakouts.</span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="mt-4 p-4 clay-card bg-info/5 text-sm">
+            <p>
+                <strong>Strategi adaptif berdasarkan regime:</strong> Market regime mempengaruhi efektivitas indikator teknikal. Sistem trading adaptif mengubah parameternya secara dinamis untuk menyesuaikan dengan kondisi pasar saat ini. Untuk trending markets, indikator seperti Moving Averages dan MACD bekerja lebih baik. Untuk ranging markets, oscillator seperti RSI dan Stochastic lebih efektif.
+            </p>
         </div>
     </div>
 </div>
