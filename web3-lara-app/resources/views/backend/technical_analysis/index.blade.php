@@ -38,7 +38,14 @@
                 tradingStyle: 'standard',
                 riskTolerance: 'medium',
                 days: 30,
-                interval: '1d',
+                interval: '1d', // Default interval
+                lookback: 5,     // Default lookback
+                predictionDays: 7, // Default predictionDays
+                windowSize: 14,    // Default windowSize
+                pumpThreshold: 10, // Default pumpThreshold (%)
+                dumpThreshold: 10, // Default dumpThreshold (%)
+                volatilityThreshold: 15, // Default volatilityThreshold
+                showAdvanced: false, // Toggle untuk advanced settings
                 params: {
                     rsi_period: 14,
                     macd_fast: 12,
@@ -123,7 +130,7 @@
                     const requestData = {
                         project_id: this.projectId,
                         days: this.days,
-                        interval: this.interval,
+                        interval: this.interval, // Sekarang menggunakan interval dari UI
                         risk_tolerance: this.riskTolerance,
                         trading_style: this.tradingStyle
                     };
@@ -175,7 +182,7 @@
                     const requestData = {
                         project_id: this.projectId,
                         days: this.days,
-                        interval: this.interval,
+                        interval: this.interval, // Gunakan interval dari UI
                         indicators: ["rsi", "macd", "bollinger", "sma", "stochastic", "adx", "atr", "ichimoku"],
                         trading_style: this.tradingStyle
                     };
@@ -210,7 +217,26 @@
 
                     this.loadingMarketEvents = true;
 
-                    fetch(`{{ url("panel/technical-analysis/market-events") }}/${this.projectId}?days=${this.days}&interval=${this.interval}`)
+                    // Tambahkan parameter window_size dan thresholds jika digunakan
+                    let url = `{{ url("panel/technical-analysis/market-events") }}/${this.projectId}?days=${this.days}&interval=${this.interval}`;
+
+                    // Tambahkan parameter lanjutan jika advanced settings diaktifkan
+                    if (this.showAdvanced) {
+                        url += `&window_size=${this.windowSize}`;
+
+                        // Buat objek thresholds jika nilai tidak default
+                        const thresholds = {};
+                        if (this.pumpThreshold !== 10) thresholds.pump = this.pumpThreshold;
+                        if (this.dumpThreshold !== 10) thresholds.dump = this.dumpThreshold;
+                        if (this.volatilityThreshold !== 15) thresholds.volatility = this.volatilityThreshold;
+
+                        // Tambahkan ke URL jika ada thresholds yang berbeda dari default
+                        if (Object.keys(thresholds).length > 0) {
+                            url += `&thresholds=${encodeURIComponent(JSON.stringify(thresholds))}`;
+                        }
+                    }
+
+                    fetch(url)
                     .then(response => response.json())
                     .then(data => {
                         this.marketEvents = data;
@@ -226,7 +252,21 @@
 
                     this.loadingAlerts = true;
 
-                    fetch(`{{ url("panel/technical-analysis/alerts") }}/${this.projectId}?days=${this.days}&interval=${this.interval}&trading_style=${this.tradingStyle}`)
+                    let url = `{{ url("panel/technical-analysis/alerts") }}/${this.projectId}?days=${this.days}&interval=${this.interval}&lookback=${this.lookback}&trading_style=${this.tradingStyle}`;
+
+                    // Tambahkan periods jika menggunakan custom params
+                    if (this.customParams) {
+                        const periods = {};
+                        Object.keys(this.params).forEach(key => {
+                            periods[key] = this.params[key];
+                        });
+
+                        if (Object.keys(periods).length > 0) {
+                            url += `&periods=${encodeURIComponent(JSON.stringify(periods))}`;
+                        }
+                    }
+
+                    fetch(url)
                     .then(response => response.json())
                     .then(data => {
                         this.alertsData = data;
@@ -242,7 +282,8 @@
 
                     this.loadingPrediction = true;
 
-                    fetch(`{{ url("panel/technical-analysis/price-prediction") }}/${this.projectId}?days=${this.days}&interval=${this.interval}`)
+                    // Sekarang menggunakan predictionDays dari UI
+                    fetch(`{{ url("panel/technical-analysis/price-prediction") }}/${this.projectId}?days=${this.days}&interval=${this.interval}&prediction_days=${this.predictionDays}`)
                     .then(response => response.json())
                     .then(data => {
                         this.predictionData = data;
@@ -280,6 +321,7 @@
                 Pilih Proyek
             </h2>
 
+            <!-- Tambahkan dropdown interval di bawah dropdown days -->
             <div class="flex flex-col md:flex-row gap-4">
                 <div class="md:w-3/4">
                     <label for="project_id" class="block mb-1 font-medium">Proyek Cryptocurrency:</label>
@@ -319,6 +361,70 @@
                         <option value="180">180 hari</option>
                         <option value="365">365 hari</option>
                     </select>
+                </div>
+            </div>
+
+            <!-- Tambahkan baris baru untuk Interval dan Parameter Lanjutan -->
+            <div class="flex flex-col md:flex-row gap-4 mt-4">
+                <div class="md:w-1/3">
+                    <label for="interval" class="block mb-1 font-medium">Interval Data:</label>
+                    <select id="interval" x-model="interval" class="clay-select w-full">
+                        <option value="1d" selected>Harian (1d)</option>
+                        <option value="4h">4 Jam (4h)</option>
+                        <option value="1h">1 Jam (1h)</option>
+                        <option value="15m">15 Menit (15m)</option>
+                    </select>
+                </div>
+                <div class="md:w-1/3">
+                    <label for="lookback" class="block mb-1 font-medium">Periode Lookback Alert:</label>
+                    <select id="lookback" x-model="lookback" class="clay-select w-full">
+                        <option value="3">3 periode</option>
+                        <option value="5" selected>5 periode</option>
+                        <option value="10">10 periode</option>
+                        <option value="15">15 periode</option>
+                    </select>
+                </div>
+                <div class="md:w-1/3">
+                    <label for="prediction_days" class="block mb-1 font-medium">Hari Prediksi:</label>
+                    <select id="prediction_days" x-model="predictionDays" class="clay-select w-full">
+                        <option value="3">3 hari</option>
+                        <option value="7" selected>7 hari</option>
+                        <option value="14">14 hari</option>
+                        <option value="30">30 hari</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Opsional: Tambahkan bagian Advanced Settings yang bisa ditoggle -->
+            <div class="mt-4">
+                <div class="clay-checkbox-container">
+                    <input type="checkbox" id="show_advanced" x-model="showAdvanced" class="clay-checkbox">
+                    <label for="show_advanced">Tampilkan Parameter Lanjutan</label>
+                </div>
+
+                <div x-show="showAdvanced" class="clay-card bg-secondary/5 p-4 mt-2">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="window_size" class="block mb-1 font-medium">Window Size (Market Events):</label>
+                            <input type="number" id="window_size" x-model="windowSize" min="5" max="30" class="clay-input w-full">
+                            <p class="text-xs text-gray-500 mt-1">Ukuran jendela untuk mendeteksi perubahan signifikan</p>
+                        </div>
+                        <div>
+                            <label for="pump_threshold" class="block mb-1 font-medium">Pump Threshold (%):</label>
+                            <input type="number" id="pump_threshold" x-model="pumpThreshold" min="1" max="50" step="0.5" class="clay-input w-full">
+                            <p class="text-xs text-gray-500 mt-1">Persentase kenaikan minimum untuk dianggap pump</p>
+                        </div>
+                        <div>
+                            <label for="dump_threshold" class="block mb-1 font-medium">Dump Threshold (%):</label>
+                            <input type="number" id="dump_threshold" x-model="dumpThreshold" min="1" max="50" step="0.5" class="clay-input w-full">
+                            <p class="text-xs text-gray-500 mt-1">Persentase penurunan minimum untuk dianggap dump</p>
+                        </div>
+                        <div>
+                            <label for="volatility_threshold" class="block mb-1 font-medium">Volatility Threshold:</label>
+                            <input type="number" id="volatility_threshold" x-model="volatilityThreshold" min="1" max="50" step="0.5" class="clay-input w-full">
+                            <p class="text-xs text-gray-500 mt-1">Tingkat volatilitas minimum untuk dianggap volatil</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -662,89 +768,103 @@
                                 </div>
 
                                 <!-- RSI -->
-                                <template x-if="results?.indicators.rsi !== undefined">
+                                <template x-if="results?.indicators?.rsi !== undefined">
                                     <div class="flex justify-between p-2 border-b border-gray-200">
                                         <span class="uppercase">RSI</span>
                                         <span class="font-medium"
-                                            :class="results?.indicators.rsi > 70 ? 'text-danger' : (results?.indicators.rsi < 30 ? 'text-success' : '')"
-                                            x-text="results?.indicators.rsi.toFixed(2)"></span>
+                                            :class="results?.indicators?.rsi > 70 ? 'text-danger' : (results?.indicators?.rsi < 30 ? 'text-success' : '')"
+                                            x-text="results?.indicators?.rsi !== null && results?.indicators?.rsi !== undefined ?
+                                                    results?.indicators?.rsi.toFixed(2) : 'N/A'"></span>
                                     </div>
                                 </template>
 
                                 <!-- MACD -->
-                                <template x-if="results?.indicators.macd !== undefined">
+                                <template x-if="results?.indicators?.macd !== undefined">
                                     <div class="flex justify-between p-2 border-b border-gray-200">
                                         <span class="uppercase">MACD</span>
-                                        <span class="font-medium" x-text="results?.indicators.macd.toFixed(2)"></span>
+                                        <span class="font-medium"
+                                            x-text="results?.indicators?.macd !== null && results?.indicators?.macd !== undefined ?
+                                                    results?.indicators?.macd.toFixed(2) : 'N/A'"></span>
                                     </div>
                                 </template>
 
-                                <template x-if="results?.indicators.macd_signal !== undefined">
+                                <template x-if="results?.indicators?.macd_signal !== undefined">
                                     <div class="flex justify-between p-2 border-b border-gray-200">
                                         <span class="uppercase">MACD Signal</span>
-                                        <span class="font-medium" x-text="results?.indicators.macd_signal.toFixed(2)"></span>
+                                        <span class="font-medium"
+                                            x-text="results?.indicators?.macd_signal !== null && results?.indicators?.macd_signal !== undefined ?
+                                                    results?.indicators?.macd_signal.toFixed(2) : 'N/A'"></span>
                                     </div>
                                 </template>
 
-                                <template x-if="results?.indicators.macd_histogram !== undefined">
+                                <template x-if="results?.indicators?.macd_histogram !== undefined">
                                     <div class="flex justify-between p-2 border-b border-gray-200">
                                         <span class="uppercase">MACD Histogram</span>
                                         <span class="font-medium"
-                                            :class="results?.indicators.macd_histogram > 0 ? 'text-success' : 'text-danger'"
-                                            x-text="results?.indicators.macd_histogram.toFixed(2)"></span>
+                                            :class="results?.indicators?.macd_histogram > 0 ? 'text-success' : 'text-danger'"
+                                            x-text="results?.indicators?.macd_histogram !== null && results?.indicators?.macd_histogram !== undefined ?
+                                                    results?.indicators?.macd_histogram.toFixed(2) : 'N/A'"></span>
                                     </div>
                                 </template>
 
                                 <!-- Bollinger -->
-                                <template x-if="results?.indicators.bollinger_percent !== undefined">
+                                <template x-if="results?.indicators?.bollinger_percent !== undefined">
                                     <div class="flex justify-between p-2 border-b border-gray-200">
                                         <span class="uppercase">Bollinger %B</span>
                                         <span class="font-medium"
-                                            :class="results?.indicators.bollinger_percent > 1 ? 'text-danger' : (results?.indicators.bollinger_percent < 0 ? 'text-success' : '')"
-                                            x-text="results?.indicators.bollinger_percent.toFixed(2)"></span>
+                                            :class="results?.indicators?.bollinger_percent > 1 ? 'text-danger' : (results?.indicators?.bollinger_percent < 0 ? 'text-success' : '')"
+                                            x-text="results?.indicators?.bollinger_percent !== null && results?.indicators?.bollinger_percent !== undefined ?
+                                                    results?.indicators?.bollinger_percent.toFixed(2) : 'N/A'"></span>
                                     </div>
                                 </template>
 
                                 <!-- Stochastic -->
-                                <template x-if="results?.indicators.stochastic_k !== undefined">
+                                <template x-if="results?.indicators?.stochastic_k !== undefined">
                                     <div class="flex justify-between p-2 border-b border-gray-200">
                                         <span class="uppercase">Stochastic %K</span>
                                         <span class="font-medium"
-                                            :class="results?.indicators.stochastic_k > 80 ? 'text-danger' : (results?.indicators.stochastic_k < 20 ? 'text-success' : '')"
-                                            x-text="results?.indicators.stochastic_k.toFixed(2)"></span>
+                                            :class="results?.indicators?.stochastic_k > 80 ? 'text-danger' : (results?.indicators?.stochastic_k < 20 ? 'text-success' : '')"
+                                            x-text="results?.indicators?.stochastic_k !== null && results?.indicators?.stochastic_k !== undefined ?
+                                                    results?.indicators?.stochastic_k.toFixed(2) : 'N/A'"></span>
                                     </div>
                                 </template>
 
-                                <template x-if="results?.indicators.stochastic_d !== undefined">
+                                <template x-if="results?.indicators?.stochastic_d !== undefined">
                                     <div class="flex justify-between p-2 border-b border-gray-200">
                                         <span class="uppercase">Stochastic %D</span>
                                         <span class="font-medium"
-                                            :class="results?.indicators.stochastic_d > 80 ? 'text-danger' : (results?.indicators.stochastic_d < 20 ? 'text-success' : '')"
-                                            x-text="results?.indicators.stochastic_d.toFixed(2)"></span>
+                                            :class="results?.indicators?.stochastic_d > 80 ? 'text-danger' : (results?.indicators?.stochastic_d < 20 ? 'text-success' : '')"
+                                            x-text="results?.indicators?.stochastic_d !== null && results?.indicators?.stochastic_d !== undefined ?
+                                                    results?.indicators?.stochastic_d.toFixed(2) : 'N/A'"></span>
                                     </div>
                                 </template>
 
                                 <!-- ADX -->
-                                <template x-if="results?.indicators.adx !== undefined">
+                                <template x-if="results?.indicators?.adx !== undefined">
                                     <div class="flex justify-between p-2 border-b border-gray-200">
                                         <span class="uppercase">ADX</span>
                                         <span class="font-medium"
-                                            :class="results?.indicators.adx > 25 ? 'text-success' : ''"
-                                            x-text="results?.indicators.adx.toFixed(2)"></span>
+                                            :class="results?.indicators?.adx > 25 ? 'text-success' : ''"
+                                            x-text="results?.indicators?.adx !== null && results?.indicators?.adx !== undefined ?
+                                                    results?.indicators?.adx.toFixed(2) : 'N/A'"></span>
                                     </div>
                                 </template>
 
-                                <template x-if="results?.indicators.plus_di !== undefined">
+                                <template x-if="results?.indicators?.plus_di !== undefined">
                                     <div class="flex justify-between p-2 border-b border-gray-200">
                                         <span class="uppercase">+DI</span>
-                                        <span class="font-medium" x-text="results?.indicators.plus_di.toFixed(2)"></span>
+                                        <span class="font-medium"
+                                            x-text="results?.indicators?.plus_di !== null && results?.indicators?.plus_di !== undefined ?
+                                                    results?.indicators?.plus_di.toFixed(2) : 'N/A'"></span>
                                     </div>
                                 </template>
 
-                                <template x-if="results?.indicators.minus_di !== undefined">
+                                <template x-if="results?.indicators?.minus_di !== undefined">
                                     <div class="flex justify-between p-2 border-b border-gray-200">
                                         <span class="uppercase">-DI</span>
-                                        <span class="font-medium" x-text="results?.indicators.minus_di.toFixed(2)"></span>
+                                        <span class="font-medium"
+                                            x-text="results?.indicators?.minus_di !== null && results?.indicators?.minus_di !== undefined ?
+                                                    results?.indicators?.minus_di.toFixed(2) : 'N/A'"></span>
                                     </div>
                                 </template>
                             </div>
@@ -796,7 +916,7 @@
                                 </template>
 
                                 <!-- MACD -->
-                                <template x-if="indicatorsData.indicators.trend.macd">
+                                <template x-if="indicatorsData?.indicators?.trend?.macd">
                                     <div class="mb-4">
                                         <h5 class="font-medium text-sm mb-2 border-b pb-1">MACD:</h5>
                                         <table class="min-w-full bg-white">
@@ -809,21 +929,28 @@
                                             <tbody>
                                                 <tr class="border-b">
                                                     <td class="py-1 px-2 text-sm">MACD Line</td>
-                                                    <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.trend.macd.value.toFixed(2)"></td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium"
+                                                        x-text="indicatorsData.indicators.trend.macd.value !== null && indicatorsData.indicators.trend.macd.value !== undefined ?
+                                                                indicatorsData.indicators.trend.macd.value.toFixed(2) : 'N/A'"></td>
                                                 </tr>
                                                 <tr class="border-b">
                                                     <td class="py-1 px-2 text-sm">Signal Line</td>
-                                                    <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.trend.macd.signal.toFixed(2)"></td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium"
+                                                        x-text="indicatorsData.indicators.trend.macd.signal !== null && indicatorsData.indicators.trend.macd.signal !== undefined ?
+                                                                indicatorsData.indicators.trend.macd.signal.toFixed(2) : 'N/A'"></td>
                                                 </tr>
                                                 <tr class="border-b">
                                                     <td class="py-1 px-2 text-sm">Histogram</td>
                                                     <td class="py-1 px-2 text-sm text-right font-medium"
-                                                        :class="indicatorsData.indicators.trend.macd.histogram > 0 ? 'text-success' : 'text-danger'"
-                                                        x-text="indicatorsData.indicators.trend.macd.histogram.toFixed(2)"></td>
+                                                        :class="indicatorsData.indicators.trend.macd.histogram > 0 ? 'text-success' :
+                                                            (indicatorsData.indicators.trend.macd.histogram < 0 ? 'text-danger' : '')"
+                                                        x-text="indicatorsData.indicators.trend.macd.histogram !== null && indicatorsData.indicators.trend.macd.histogram !== undefined ?
+                                                                indicatorsData.indicators.trend.macd.histogram.toFixed(2) : 'N/A'"></td>
                                                 </tr>
                                                 <tr class="border-b">
                                                     <td class="py-1 px-2 text-sm">Signal Type</td>
-                                                    <td class="py-1 px-2 text-sm text-right font-medium capitalize" x-text="indicatorsData.indicators.trend.macd.signal_type"></td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium capitalize"
+                                                        x-text="indicatorsData.indicators.trend.macd.signal_type || 'N/A'"></td>
                                                 </tr>
                                             </tbody>
                                         </table>
@@ -877,7 +1004,7 @@
                                 <h4 class="font-bold mb-2 text-success">Indikator Momentum</h4>
 
                                 <!-- RSI -->
-                                <template x-if="indicatorsData.indicators.momentum.rsi">
+                                <template x-if="indicatorsData?.indicators?.momentum?.rsi">
                                     <div class="mb-4">
                                         <h5 class="font-medium text-sm mb-2 border-b pb-1">RSI:</h5>
                                         <table class="min-w-full bg-white">
@@ -892,16 +1019,19 @@
                                                     <td class="py-1 px-2 text-sm">Value</td>
                                                     <td class="py-1 px-2 text-sm text-right font-medium"
                                                         :class="indicatorsData.indicators.momentum.rsi.value > 70 ? 'text-danger' :
-                                                        (indicatorsData.indicators.momentum.rsi.value < 30 ? 'text-success' : '')"
-                                                        x-text="indicatorsData.indicators.momentum.rsi.value.toFixed(2)"></td>
+                                                            (indicatorsData.indicators.momentum.rsi.value < 30 ? 'text-success' : '')"
+                                                        x-text="indicatorsData.indicators.momentum.rsi.value !== null && indicatorsData.indicators.momentum.rsi.value !== undefined ?
+                                                                indicatorsData.indicators.momentum.rsi.value.toFixed(2) : 'N/A'"></td>
                                                 </tr>
                                                 <tr class="border-b">
                                                     <td class="py-1 px-2 text-sm">Signal</td>
-                                                    <td class="py-1 px-2 text-sm text-right font-medium capitalize" x-text="indicatorsData.indicators.momentum.rsi.signal"></td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium capitalize"
+                                                        x-text="indicatorsData.indicators.momentum.rsi.signal || 'N/A'"></td>
                                                 </tr>
                                                 <tr class="border-b">
                                                     <td class="py-1 px-2 text-sm">Period</td>
-                                                    <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.momentum.rsi.period"></td>
+                                                    <td class="py-1 px-2 text-sm text-right font-medium"
+                                                        x-text="indicatorsData.indicators.momentum.rsi.period || 'N/A'"></td>
                                                 </tr>
                                             </tbody>
                                         </table>
@@ -979,7 +1109,7 @@
                                     <h4 class="font-bold mb-2 text-warning">Indikator Volatilitas</h4>
 
                                     <!-- Bollinger Bands -->
-                                    <template x-if="indicatorsData.indicators.volatility.bollinger">
+                                    <template x-if="indicatorsData?.indicators?.volatility?.bollinger">
                                         <div class="mb-4">
                                             <h5 class="font-medium text-sm mb-2 border-b pb-1">Bollinger Bands:</h5>
                                             <table class="min-w-full bg-white">
@@ -992,30 +1122,45 @@
                                                 <tbody>
                                                     <tr class="border-b">
                                                         <td class="py-1 px-2 text-sm">Upper Band</td>
-                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.volatility.bollinger.upper.toFixed(2)"></td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium"
+                                                            x-text="indicatorsData.indicators.volatility.bollinger.upper !== null &&
+                                                                    indicatorsData.indicators.volatility.bollinger.upper !== undefined ?
+                                                                    indicatorsData.indicators.volatility.bollinger.upper.toFixed(2) : 'N/A'"></td>
                                                     </tr>
                                                     <tr class="border-b">
                                                         <td class="py-1 px-2 text-sm">Middle Band</td>
-                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.volatility.bollinger.middle.toFixed(2)"></td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium"
+                                                            x-text="indicatorsData.indicators.volatility.bollinger.middle !== null &&
+                                                                    indicatorsData.indicators.volatility.bollinger.middle !== undefined ?
+                                                                    indicatorsData.indicators.volatility.bollinger.middle.toFixed(2) : 'N/A'"></td>
                                                     </tr>
                                                     <tr class="border-b">
                                                         <td class="py-1 px-2 text-sm">Lower Band</td>
-                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.volatility.bollinger.lower.toFixed(2)"></td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium"
+                                                            x-text="indicatorsData.indicators.volatility.bollinger.lower !== null &&
+                                                                    indicatorsData.indicators.volatility.bollinger.lower !== undefined ?
+                                                                    indicatorsData.indicators.volatility.bollinger.lower.toFixed(2) : 'N/A'"></td>
                                                     </tr>
                                                     <tr class="border-b">
                                                         <td class="py-1 px-2 text-sm">%B</td>
                                                         <td class="py-1 px-2 text-sm text-right font-medium"
                                                             :class="indicatorsData.indicators.volatility.bollinger.percent_b > 1 ? 'text-danger' :
-                                                            (indicatorsData.indicators.volatility.bollinger.percent_b < 0 ? 'text-success' : '')"
-                                                            x-text="indicatorsData.indicators.volatility.bollinger.percent_b.toFixed(2)"></td>
+                                                                (indicatorsData.indicators.volatility.bollinger.percent_b < 0 ? 'text-success' : '')"
+                                                            x-text="indicatorsData.indicators.volatility.bollinger.percent_b !== null &&
+                                                                    indicatorsData.indicators.volatility.bollinger.percent_b !== undefined ?
+                                                                    indicatorsData.indicators.volatility.bollinger.percent_b.toFixed(2) : 'N/A'"></td>
                                                     </tr>
                                                     <tr class="border-b">
                                                         <td class="py-1 px-2 text-sm">Bandwidth</td>
-                                                        <td class="py-1 px-2 text-sm text-right font-medium" x-text="indicatorsData.indicators.volatility.bollinger.bandwidth.toFixed(4)"></td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium"
+                                                            x-text="indicatorsData.indicators.volatility.bollinger.bandwidth !== null &&
+                                                                    indicatorsData.indicators.volatility.bollinger.bandwidth !== undefined ?
+                                                                    indicatorsData.indicators.volatility.bollinger.bandwidth.toFixed(4) : 'N/A'"></td>
                                                     </tr>
                                                     <tr class="border-b">
                                                         <td class="py-1 px-2 text-sm">Signal</td>
-                                                        <td class="py-1 px-2 text-sm text-right font-medium capitalize" x-text="indicatorsData.indicators.volatility.bollinger.signal"></td>
+                                                        <td class="py-1 px-2 text-sm text-right font-medium capitalize"
+                                                            x-text="indicatorsData.indicators.volatility.bollinger.signal || 'N/A'"></td>
                                                     </tr>
                                                 </tbody>
                                             </table>
