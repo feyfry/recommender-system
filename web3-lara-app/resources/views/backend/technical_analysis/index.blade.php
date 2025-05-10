@@ -666,11 +666,11 @@
                                 <div class="mt-3">
                                     <div class="text-sm font-medium mb-1">Target Harga:</div>
                                     <div :class="'clay-badge ' + (results?.action == 'buy' ? 'clay-badge-success' : 'clay-badge-warning') + ' py-1 px-2 mb-1'">
-                                        Target 1: $<span x-text="results?.target_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+                                        Target 1: $<span x-text="results?.target_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span>
                                     </div>
                                     <template x-if="results?.target_2 && results?.target_2 > 0">
                                         <div :class="'clay-badge ' + (results?.action == 'buy' ? 'clay-badge-success' : 'clay-badge-warning') + ' py-1 px-2'">
-                                            Target 2: $<span x-text="results?.target_2.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+                                            Target 2: $<span x-text="results?.target_2.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span>
                                         </div>
                                     </template>
                                 </div>
@@ -681,12 +681,12 @@
                                     <div class="text-sm font-medium mb-1">Support Levels:</div>
                                     <template x-if="results?.support_1">
                                         <div class="clay-badge clay-badge-info py-1 px-2 mb-1">
-                                            Support 1: $<span x-text="results?.support_1.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+                                            Support 1: $<span x-text="results?.support_1.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span>
                                         </div>
                                     </template>
                                     <template x-if="results?.support_2">
                                         <div class="clay-badge clay-badge-info py-1 px-2">
-                                            Support 2: $<span x-text="results?.support_2.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+                                            Support 2: $<span x-text="results?.support_2.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span>
                                         </div>
                                     </template>
                                 </div>
@@ -1355,7 +1355,7 @@
                                         </div>
                                         <div>
                                             <div class="font-bold text-lg capitalize" x-text="marketEvents?.latest_event?.replace('_', ' ')"></div>
-                                            <div class="text-sm text-gray-600" x-text="'Harga Saat Ini: $' + marketEvents?.close_price?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></div>
+                                            <div class="text-sm text-gray-600" x-text="'Harga Saat Ini: $' + marketEvents?.close_price?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></div>
                                         </div>
                                     </div>
                                 </div>
@@ -1532,7 +1532,7 @@
                                 <div class="grid grid-cols-2 gap-2">
                                     <div class="p-2 clay-card bg-info/5">
                                         <div class="text-xs text-gray-600">Harga Saat Ini:</div>
-                                        <div class="font-bold">$<span x-text="predictionData?.current_price?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span></div>
+                                        <div class="font-bold">$<span x-text="predictionData?.current_price?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span></div>
                                     </div>
 
                                     <div class="p-2 clay-card bg-info/5">
@@ -1560,7 +1560,7 @@
                                                     <template x-if="value">
                                                         <div class="flex justify-between items-center">
                                                             <span class="capitalize" x-text="level.replace('_', ' ')"></span>
-                                                            <span class="font-medium">$<span x-text="value?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span></span>
+                                                            <span class="font-medium">$<span x-text="value?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span></span>
                                                         </div>
                                                     </template>
                                                 </template>
@@ -1576,7 +1576,7 @@
                                                     <template x-if="value">
                                                         <div class="flex justify-between items-center">
                                                             <span class="capitalize" x-text="level.replace('_', ' ')"></span>
-                                                            <span class="font-medium">$<span x-text="value?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span></span>
+                                                            <span class="font-medium">$<span x-text="value?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span></span>
                                                         </div>
                                                     </template>
                                                 </template>
@@ -1604,7 +1604,7 @@
                                             <template x-for="(prediction, index) in predictionData.predictions" :key="index">
                                                 <tr :class="index % 2 === 0 ? 'bg-gray-50' : ''">
                                                     <td class="py-2 px-4 border-b" x-text="prediction.date"></td>
-                                                    <td class="py-2 px-4 border-b text-right font-medium">$<span x-text="prediction.value?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span></td>
+                                                    <td class="py-2 px-4 border-b text-right font-medium">$<span x-text="prediction.value?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span></td>
                                                     <td class="py-2 px-4 border-b text-right" x-text="(prediction.confidence * 100).toFixed(0) + '%'"></td>
                                                 </tr>
                                             </template>
