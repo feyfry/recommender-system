@@ -2,7 +2,6 @@
 namespace App\Http\Controllers\Backend;
 
 use App\Http\Controllers\Controller;
-use App\Models\ActivityLog;
 use App\Models\Interaction;
 use App\Models\Project;
 use App\Models\Recommendation;
@@ -217,11 +216,6 @@ class RecommendationController extends Controller
             return $this->getCategories();
         });
 
-        // Catat aktivitas hanya untuk kategori yang jarang dikunjungi
-        if (! in_array($category, ['defi', 'gaming', 'layer1', 'nft'])) {
-            ActivityLog::logViewRecommendation($user, request(), 'category-' . $category);
-        }
-
         return view('backend.recommendation.categories', [
             'categoryRecommendations' => $categoryRecommendations,
             'selectedCategory'        => $category,
@@ -249,11 +243,6 @@ class RecommendationController extends Controller
         $chains = Cache::remember('all_chains', 60, function () { // 1 jam
             return $this->getChains();
         });
-
-        // Catat aktivitas hanya untuk chain yang jarang dikunjungi
-        if (! in_array($chain, ['ethereum', 'binance-smart-chain', 'polygon', 'solana'])) {
-            ActivityLog::logViewRecommendation($user, request(), 'chain-' . $chain);
-        }
 
         return view('backend.recommendation.chains', [
             'chainRecommendations' => $chainRecommendations,
@@ -402,9 +391,6 @@ class RecommendationController extends Controller
 
         // PENTING: Catat interaksi favorite karena ini penting untuk sistem rekomendasi
         $this->recordInteraction($user->user_id, $projectId, 'favorite');
-
-        // PENTING: Interaksi favorite adalah aktivitas penting untuk log dan sistem rekomendasi
-        ActivityLog::logInteraction($user, request(), $projectId, 'favorite');
 
         return redirect()->back()->with('success', 'Proyek berhasil ditambahkan ke favorit.');
     }

@@ -5,7 +5,6 @@ use Elliptic\EC;
 use App\Models\User;
 use kornrunner\Keccak;
 use App\Models\Profile;
-use App\Models\ActivityLog;
 use Illuminate\Support\Str;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -109,16 +108,6 @@ class Web3AuthController extends Controller
             $user->save();
             Auth::login($user);
 
-            ActivityLog::create([
-                'user_id'       => $user->user_id,
-                'activity_type' => 'login',
-                'description'   => 'Login dengan wallet ' . substr($wallet, 0, 10) . '...',
-                'ip_address'    => $request->ip(),
-                'user_agent'    => $request->userAgent(),
-            ]);
-
-            Cache::forget("last_profile_view_{$user->id}");
-
             return response()->json([
                 'success' => true,
                 'message' => 'Authentication successful',
@@ -142,17 +131,6 @@ class Web3AuthController extends Controller
      */
     public function logout(Request $request)
     {
-        // PENTING: Catat aktivitas logout sebelum menghancurkan sesi - ini penting untuk keamanan
-        if (Auth::check()) {
-            ActivityLog::create([
-                'user_id'       => Auth::user()->user_id,
-                'activity_type' => 'logout',
-                'description'   => 'Logout dari sistem',
-                'ip_address'    => $request->ip(),
-                'user_agent'    => $request->userAgent(),
-            ]);
-        }
-
         // DIOPTIMALKAN: Hapus cache user-specific sebelum logout
         if (Auth::check()) {
             $userId       = Auth::user()->id;

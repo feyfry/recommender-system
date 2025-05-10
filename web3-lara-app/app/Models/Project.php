@@ -115,14 +115,6 @@ class Project extends Model
     }
 
     /**
-     * Mendapatkan harga historis untuk proyek ini.
-     */
-    public function historicalPrices(): HasMany
-    {
-        return $this->hasMany(HistoricalPrice::class, 'project_id', 'id');
-    }
-
-    /**
      * Mendapatkan rekomendasi untuk proyek ini.
      */
     public function recommendations(): HasMany
@@ -167,16 +159,6 @@ class Project extends Model
             'id',         // Kunci utama di tabel projects
             'user_id'     // Kunci utama di tabel interactions yang merujuk ke users
         );
-    }
-
-    /**
-     * Mendapatkan harga terbaru.
-     */
-    public function getLatestPriceAttribute()
-    {
-        return $this->historicalPrices()
-            ->orderBy('timestamp', 'desc')
-            ->first();
     }
 
     /**

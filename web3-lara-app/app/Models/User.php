@@ -105,11 +105,15 @@ class User extends Authenticatable
     }
 
     /**
-     * Mendapatkan relasi ke log aktivitas pengguna.
+     * Mendapatkan aktivitas terbaru pengguna.
      */
-    public function activityLogs(): HasMany
+    public function getRecentActivities($limit = 10)
     {
-        return $this->hasMany(ActivityLog::class, 'user_id', 'user_id');
+        return $this->interactions()
+            ->with('project')
+            ->orderBy('created_at', 'desc')
+            ->limit($limit)
+            ->get();
     }
 
     /**

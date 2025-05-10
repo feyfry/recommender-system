@@ -207,25 +207,6 @@
         </div>
     </div>
 
-    <!-- Portfolio Performance Chart -->
-    <div class="clay-card p-6 mb-8">
-        <h2 class="text-xl font-bold mb-4 flex items-center">
-            <i class="fas fa-chart-line mr-2 text-primary"></i>
-            Performa Portfolio (30 Hari)
-        </h2>
-
-        @if(count($performanceData) > 0)
-        <div class="h-80">
-            <!-- Canvas untuk chart -->
-            <canvas id="portfolioChart"></canvas>
-        </div>
-        @else
-        <div class="text-center py-6">
-            <p class="text-gray-500">Tidak ada data performa portfolio</p>
-        </div>
-        @endif
-    </div>
-
     <!-- Add Transaction Modal -->
     <div id="add-transaction-modal" class="fixed inset-0 z-50 hidden">
         <div class="clay-modal-backdrop"></div>
@@ -305,69 +286,6 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // Setup data for chart
-        @if(count($performanceData) > 0)
-        const ctx = document.getElementById('portfolioChart').getContext('2d');
-
-        const chartData = {
-            labels: @json(array_column($performanceData, 'date')),
-            datasets: [{
-                label: 'Portfolio Value ($)',
-                data: @json(array_column($performanceData, 'value')),
-                borderColor: '#6366f1',
-                backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                borderWidth: 2,
-                fill: true,
-                tension: 0.1
-            }]
-        };
-
-        new Chart(ctx, {
-            type: 'line',
-            data: chartData,
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    tooltip: {
-                        mode: 'index',
-                        intersect: false,
-                        callbacks: {
-                            label: function(context) {
-                                let label = context.dataset.label || '';
-                                if (label) {
-                                    label += ': ';
-                                }
-                                if (context.parsed.y !== null) {
-                                    label += new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(context.parsed.y);
-                                }
-                                return label;
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        grid: {
-                            display: false
-                        }
-                    },
-                    y: {
-                        beginAtZero: false,
-                        ticks: {
-                            callback: function(value) {
-                                return ' + value.toLocaleString();
-                            }
-                        }
-                    }
-                }
-            }
-        });
-        @endif
-
         // Transaction modal script
         const radios = document.querySelectorAll('input[name="transaction_type"]');
         for (const radio of radios) {

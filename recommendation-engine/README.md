@@ -411,7 +411,7 @@ python main.py process --users 500
 python main.py train --fecf --ncf --hybrid
 
 # Evaluasi model
-python main.py evaluate --cold-start --cold-start-runs 5
+python main.py evaluate --cold-start --regular-runs 5
 
 # Menghasilkan rekomendasi untuk pengguna
 python main.py recommend --user-id user_1 --model hybrid --num 10

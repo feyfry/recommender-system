@@ -193,9 +193,6 @@
                     <button @click="activeTab = 'recommendations'" :class="{ 'active': activeTab === 'recommendations' }" class="clay-tab">
                         <i class="fas fa-star mr-2"></i> Rekomendasi
                     </button>
-                    <button @click="activeTab = 'activities'" :class="{ 'active': activeTab === 'activities' }" class="clay-tab">
-                        <i class="fas fa-history mr-2"></i> Log Aktivitas
-                    </button>
                 </div>
 
                 <!-- Tab Contents -->
@@ -390,49 +387,6 @@
                                 @empty
                                 <tr>
                                     <td colspan="5" class="py-4 px-4 text-center text-gray-500">Tidak ada rekomendasi yang tersedia untuk pengguna ini.</td>
-                                </tr>
-                                @endforelse
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Activity Logs Tab -->
-                <div x-show="activeTab === 'activities'" class="clay-card p-6 mb-6">
-                    <h3 class="text-xl font-bold mb-4">Log Aktivitas</h3>
-                    <div class="overflow-x-auto">
-                        <table class="clay-table min-w-full">
-                            <thead>
-                                <tr>
-                                    <th class="py-2 px-4 text-left">Waktu</th>
-                                    <th class="py-2 px-4 text-left">Tipe Aktivitas</th>
-                                    <th class="py-2 px-4 text-left">Deskripsi</th>
-                                    <th class="py-2 px-4 text-left">IP Address</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @forelse($activities ?? [] as $activity)
-                                <tr>
-                                    <td class="py-2 px-4 text-sm">{{ $activity->created_at->format('j M Y H:i:s') }}</td>
-                                    <td class="py-2 px-4">
-                                        @if($activity->activity_type == 'login')
-                                            <span class="clay-badge clay-badge-info">Login</span>
-                                        @elseif($activity->activity_type == 'project_interaction')
-                                            <span class="clay-badge clay-badge-success">Interaksi</span>
-                                        @elseif($activity->activity_type == 'transaction')
-                                            <span class="clay-badge clay-badge-primary">Transaksi</span>
-                                        @elseif($activity->activity_type == 'profile_update')
-                                            <span class="clay-badge clay-badge-warning">Profil</span>
-                                        @else
-                                            <span class="clay-badge clay-badge-secondary">{{ $activity->activity_type }}</span>
-                                        @endif
-                                    </td>
-                                    <td class="py-2 px-4">{{ $activity->description }}</td>
-                                    <td class="py-2 px-4 text-sm">{{ $activity->ip_address }}</td>
-                                </tr>
-                                @empty
-                                <tr>
-                                    <td colspan="4" class="py-4 px-4 text-center text-gray-500">Tidak ada aktivitas yang tercatat untuk pengguna ini.</td>
                                 </tr>
                                 @endforelse
                             </tbody>

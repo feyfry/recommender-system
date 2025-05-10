@@ -2,7 +2,6 @@
 
 namespace App\Providers;
 
-use App\Models\ActivityLog;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -23,15 +22,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // DIOPTIMALKAN: Matikan pencatatan aktivitas view dan normal
-        if (method_exists(ActivityLog::class, 'shouldLogViewActivities')) {
-            ActivityLog::shouldLogViewActivities(false);
-        }
-
-        if (method_exists(ActivityLog::class, 'shouldLogNormalActivities')) {
-            ActivityLog::shouldLogNormalActivities(false);
-        }
-
         // DIOPTIMALKAN: Log query lambat hanya dalam mode debug dan dengan threshold lebih tinggi
         if (config('app.debug')) {
             DB::listen(function ($query) {

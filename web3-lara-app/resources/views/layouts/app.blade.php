@@ -238,9 +238,6 @@
                                         <a href="{{ route('admin.data-sync') }}" class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('admin.data-sync*') ? 'font-bold text-primary' : '' }}">
                                             Sinkronisasi Data
                                         </a>
-                                        <a href="{{ route('admin.activity-logs') }}" class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('admin.activity-logs*') ? 'font-bold text-primary' : '' }}">
-                                            Log Aktivitas
-                                        </a>
                                     </div>
                                 </div>
                             </div>

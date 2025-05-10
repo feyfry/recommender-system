@@ -115,11 +115,6 @@
                     <span class="font-bold">{{ $interactionStats['recent'] ?? 0 }}</span>
                 </div>
             </div>
-            <div class="mt-4">
-                <a href="{{ route('admin.activity-logs') }}" class="clay-button clay-button-info py-1.5 px-3 text-sm">
-                    Lihat Log Aktivitas
-                </a>
-            </div>
         </div>
 
         <!-- Transaction Stats -->
@@ -159,11 +154,11 @@
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        <!-- Recent Activity -->
+        <!-- Recent Interactions -->
         <div class="clay-card p-6 lg:col-span-2">
             <h2 class="text-xl font-bold mb-4 flex items-center">
-                <i class="fas fa-history mr-2 text-secondary"></i>
-                Aktivitas Terbaru
+                <i class="fas fa-exchange-alt mr-2 text-secondary"></i>
+                Interaksi Terbaru
             </h2>
 
             <div class="overflow-x-auto">
@@ -171,43 +166,43 @@
                     <thead>
                         <tr>
                             <th class="py-2 px-4 text-left">Pengguna</th>
-                            <th class="py-2 px-4 text-left">Tipe Aktivitas</th>
-                            <th class="py-2 px-4 text-left">Deskripsi</th>
+                            <th class="py-2 px-4 text-left">Proyek</th>
+                            <th class="py-2 px-4 text-left">Tipe</th>
                             <th class="py-2 px-4 text-left">Waktu</th>
                         </tr>
                     </thead>
                     <tbody>
-                        @forelse($recentActivity ?? [] as $activity)
+                        @forelse($recentInteractions ?? [] as $interaction)
                         <tr>
-                            <td class="py-2 px-4 font-medium">{{ $activity->user?->profile?->username ?? $activity->user?->wallet_address ?? 'Sistem' }}</td>
+                            <td class="py-2 px-4 font-medium">{{ $interaction->user?->profile?->username ?? substr($interaction->user?->user_id, 0, 10) . '...' }}</td>
                             <td class="py-2 px-4">
-                                @if($activity->activity_type == 'login')
-                                    <span class="clay-badge clay-badge-info">Login</span>
-                                @elseif($activity->activity_type == 'project_interaction')
-                                    <span class="clay-badge clay-badge-success">Interaksi</span>
-                                @elseif($activity->activity_type == 'admin_action')
-                                    <span class="clay-badge clay-badge-warning">Admin</span>
-                                @elseif($activity->activity_type == 'transaction')
-                                    <span class="clay-badge clay-badge-primary">Transaksi</span>
+                                <div class="flex items-center">
+                                    @if($interaction->project && $interaction->project->image)
+                                        <img src="{{ $interaction->project->image }}" alt="{{ $interaction->project->symbol }}" class="w-6 h-6 rounded-full mr-2">
+                                    @endif
+                                    <span>{{ $interaction->project?->symbol ?? 'Unknown' }}</span>
+                                </div>
+                            </td>
+                            <td class="py-2 px-4">
+                                @if($interaction->interaction_type == 'view')
+                                    <span class="clay-badge clay-badge-info">View</span>
+                                @elseif($interaction->interaction_type == 'favorite')
+                                    <span class="clay-badge clay-badge-secondary">Favorite</span>
+                                @elseif($interaction->interaction_type == 'portfolio_add')
+                                    <span class="clay-badge clay-badge-success">Portfolio</span>
                                 @else
-                                    <span class="clay-badge clay-badge-secondary">{{ $activity->activity_type }}</span>
+                                    <span class="clay-badge clay-badge-primary">{{ $interaction->interaction_type }}</span>
                                 @endif
                             </td>
-                            <td class="py-2 px-4">{{ $activity->description }}</td>
-                            <td class="py-2 px-4 text-gray-500 text-sm">{{ $activity->created_at->diffForHumans() }}</td>
+                            <td class="py-2 px-4 text-gray-500 text-sm">{{ $interaction->created_at->diffForHumans() }}</td>
                         </tr>
                         @empty
                         <tr>
-                            <td colspan="4" class="py-4 px-4 text-center text-gray-500">Tidak ada aktivitas terbaru.</td>
+                            <td colspan="4" class="py-4 px-4 text-center text-gray-500">Tidak ada interaksi terbaru.</td>
                         </tr>
                         @endforelse
                     </tbody>
                 </table>
-            </div>
-            <div class="mt-4 text-right">
-                <a href="{{ route('admin.activity-logs') }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
-                    Lihat Semua Log <i class="fas fa-arrow-right ml-1"></i>
-                </a>
             </div>
         </div>
 
@@ -289,12 +284,6 @@
                 <i class="fas fa-sync text-3xl text-warning mb-2"></i>
                 <div class="font-bold">Sinkronisasi Data</div>
                 <p class="text-sm mt-1">Sinkronkan data dengan engine rekomendasi</p>
-            </a>
-
-            <a href="{{ route('admin.activity-logs') }}" class="clay-card p-4 bg-info/10 text-center hover:translate-y-[-5px] transition-transform">
-                <i class="fas fa-history text-3xl text-info mb-2"></i>
-                <div class="font-bold">Log Aktivitas</div>
-                <p class="text-sm mt-1">Lihat semua aktivitas sistem</p>
             </a>
         </div>
     </div>

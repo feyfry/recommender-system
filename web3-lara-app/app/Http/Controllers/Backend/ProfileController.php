@@ -2,7 +2,6 @@
 namespace App\Http\Controllers\Backend;
 
 use App\Http\Controllers\Controller;
-use App\Models\ActivityLog;
 use App\Models\Profile;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -31,20 +30,6 @@ class ProfileController extends Controller
             ['user_id' => $user->id],
             []
         );
-
-        // DIOPTIMALKAN: Hanya catat aktivitas melihat profil pertama kali dalam 24 jam
-        $lastProfileView = Cache::get("last_profile_view_{$user->id}");
-        if (! $lastProfileView || now()->diffInHours($lastProfileView) > 24) {
-            ActivityLog::create([
-                'user_id'       => $user->user_id,
-                'activity_type' => 'profile_view',
-                'description'   => 'Melihat halaman profil',
-                'ip_address'    => request()->ip(),
-                'user_agent'    => request()->userAgent(),
-            ]);
-
-            Cache::put("last_profile_view_{$user->id}", now(), 60 * 24);
-        }
 
         return view('backend.profile.edit', [
             'user'    => $user,
@@ -107,15 +92,6 @@ class ProfileController extends Controller
 
             // Simpan perubahan
             $profile->save();
-
-            // Catat aktivitas - Ini adalah aktivitas penting untuk dicatat
-            ActivityLog::create([
-                'user_id'       => $user->user_id,
-                'activity_type' => 'profile_update',
-                'description'   => 'Memperbarui profil pengguna',
-                'ip_address'    => request()->ip(),
-                'user_agent'    => request()->userAgent(),
-            ]);
 
             // DIOPTIMALKAN: Hapus semua cache terkait rekomendasi untuk user ini
             // karena preferensi baru bisa mempengaruhi rekomendasi
@@ -197,15 +173,6 @@ class ProfileController extends Controller
 
             $profile->notification_settings = $notificationSettings;
             $profile->save();
-
-            // Catat aktivitas - Ini adalah perubahan penting untuk dicatat
-            ActivityLog::create([
-                'user_id'       => $user->user_id,
-                'activity_type' => 'notification_settings_update',
-                'description'   => 'Memperbarui pengaturan notifikasi',
-                'ip_address'    => request()->ip(),
-                'user_agent'    => request()->userAgent(),
-            ]);
 
             return redirect()->route('panel.profile.notification-settings')
                 ->with('success', 'Pengaturan notifikasi berhasil diperbarui.');

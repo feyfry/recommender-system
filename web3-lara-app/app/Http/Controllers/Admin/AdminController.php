@@ -1,20 +1,20 @@
 <?php
 namespace App\Http\Controllers\Admin;
 
-use App\Http\Controllers\Controller;
-use App\Models\ActivityLog;
-use App\Models\ApiCache;
-use App\Models\Interaction;
-use App\Models\Portfolio;
-use App\Models\Project;
-use App\Models\Recommendation;
-use App\Models\Transaction;
 use App\Models\User;
+use App\Models\Project;
+use App\Models\ApiCache;
+use App\Models\Portfolio;
+use App\Models\Interaction;
+use App\Models\Transaction;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
+use App\Models\Recommendation;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Http\Controllers\Controller;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Validator;
 
 class AdminController extends Controller
@@ -87,17 +87,17 @@ class AdminController extends Controller
         });
 
         // DIOPTIMALKAN: Menyimpan aktivitas terbaru selama 5 menit
-        $recentActivity = Cache::remember('admin_recent_activity', 5, function () {
-            return ActivityLog::with('user')
-                ->orderBy('created_at', 'desc')
-                ->limit(20)
-                ->get();
-        });
+        $recentInteractions = Interaction::with(['user', 'project'])
+            ->orderBy('created_at', 'desc')
+            ->limit(20)
+            ->get();
 
         // DIOPTIMALKAN: Menyimpan pengguna paling aktif selama 30 menit
-        $mostActiveUsers = Cache::remember('admin_most_active_users', 30, function () {
-            return ActivityLog::getMostActiveUsers(10);
-        });
+        $mostActiveUsers = Interaction::select('user_id', DB::raw('COUNT(*) as interaction_count'))
+            ->groupBy('user_id')
+            ->orderBy('interaction_count', 'desc')
+            ->limit(10)
+            ->get();
 
         // DIOPTIMALKAN: Menyimpan proyek dengan interaksi terbanyak selama 30 menit
         $mostInteractedProjects = Cache::remember('admin_most_interacted_projects', 30, function () {
@@ -113,14 +113,13 @@ class AdminController extends Controller
         });
 
         // DIOPTIMALKAN: Tidak catat aktivitas melihat dashboard admin karena sangat sering diakses
-
         return view('admin.dashboard', [
             'userStats'              => $userStats,
             'projectStats'           => $projectStats,
             'interactionStats'       => $interactionStats,
             'transactionStats'       => $transactionStats,
-            'recentActivity'         => $recentActivity,
-            'mostActiveUsers'        => $mostActiveUsers,
+            'recentInteractions' => $recentInteractions,
+            'mostActiveUsers' => $mostActiveUsers,
             'mostInteractedProjects' => $mostInteractedProjects,
         ]);
     }
@@ -195,11 +194,6 @@ class AdminController extends Controller
                 ->limit(20)
                 ->get();
 
-            $activities = ActivityLog::forUser($userId)
-                ->orderBy('created_at', 'desc')
-                ->limit(50)
-                ->get();
-
             $recommendations = Recommendation::where('user_id', $userId)
                 ->with('project')
                 ->orderBy('created_at', 'desc')
@@ -211,13 +205,9 @@ class AdminController extends Controller
                 'interactionStats' => $interactionStats,
                 'portfolios'       => $portfolios,
                 'transactions'     => $transactions,
-                'activities'       => $activities,
                 'recommendations'  => $recommendations,
             ];
         });
-
-        // Catat aktivitas - detail pengguna adalah aktivitas yang ingin dicatat karena penting
-        ActivityLog::logAdminAction(Auth::user(), request(), 'view_user_detail', "User: {$userId}");
 
         return view('admin.user_detail', [
             'user'             => $user,
@@ -225,7 +215,6 @@ class AdminController extends Controller
             'interactionStats' => $userData['interactionStats'],
             'portfolios'       => $userData['portfolios'],
             'transactions'     => $userData['transactions'],
-            'activities'       => $userData['activities'],
             'recommendations'  => $userData['recommendations'],
         ]);
     }
@@ -250,9 +239,6 @@ class AdminController extends Controller
 
         $user->role = $request->role;
         $user->save();
-
-        // Catat aktivitas - perubahan role adalah aktivitas penting untuk dicatat
-        ActivityLog::logAdminAction(Auth::user(), request(), 'update_user_role', "User: {$userId}, Role: {$oldRole} -> {$request->role}");
 
         // DIOPTIMALKAN: Hapus cache statistik karena data telah berubah
         Cache::forget('admin_user_stats');
@@ -379,9 +365,6 @@ class AdminController extends Controller
         $tradingSignals = Cache::remember("trading_signals_{$projectId}_medium", 30, function () use ($projectId) {
             return $this->getTradingSignals($projectId, 'medium');
         });
-
-        // Catat aktivitas - detail proyek adalah aktivitas yang ingin dicatat
-        ActivityLog::logAdminAction(Auth::user(), request(), 'view_project_detail', "Project: {$projectId}");
 
         return view('admin.project_detail', [
             'project'          => $project,
@@ -539,9 +522,6 @@ class AdminController extends Controller
             \Illuminate\Support\Facades\Artisan::call($command);
             $output = \Illuminate\Support\Facades\Artisan::output();
 
-            // Log aktivitas
-            ActivityLog::logAdminAction(Auth::user(), request(), 'run_command', "Command: {$command}");
-
             // Log output untuk debugging
             Log::info("Command output: " . $output);
 
@@ -607,9 +587,6 @@ class AdminController extends Controller
                 'users_count'      => User::count(),
             ])->json();
 
-            // Log aktivitas - ini adalah aktivitas penting untuk sistem
-            ActivityLog::logAdminAction(Auth::user(), request(), 'trigger_data_sync', "Type: {$syncType}");
-
             // DIOPTIMALKAN: Hapus cache yang berkaitan dengan data sync
             Cache::forget('data_sync_project_stats');
             Cache::forget('data_sync_cache_stats');
@@ -643,9 +620,6 @@ class AdminController extends Controller
             $message = "Semua cache berhasil dihapus ({$count} item).";
         }
 
-        // Log aktivitas - ini adalah aktivitas penting untuk sistem
-        ActivityLog::logAdminAction(Auth::user(), request(), 'clear_api_cache', $endpoint ? "Endpoint: {$endpoint}" : "All cache");
-
         // DIOPTIMALKAN: Hapus cache Laravel juga untuk memulai bersih
         Cache::flush();
 
@@ -674,9 +648,6 @@ class AdminController extends Controller
                 'body' => $response->body()
             ]);
 
-            // Log aktivitas - ini adalah aktivitas penting untuk sistem
-            ActivityLog::logAdminAction(Auth::user(), request(), 'train_models', "Models: " . implode(', ', $models));
-
             // DIOPTIMALKAN: Hapus cache rekomendasi global
             $this->clearAllRecommendationCaches();
 
@@ -686,55 +657,6 @@ class AdminController extends Controller
             return redirect()->route('admin.data-sync')
                 ->with('error', 'Gagal memicu pelatihan model: ' . $e->getMessage());
         }
-    }
-
-    /**
-     * Menampilkan log aktivitas
-     */
-    public function activityLogs(Request $request)
-    {
-        $query = ActivityLog::query();
-
-        // Filter berdasarkan tipe aktivitas
-        if ($request->has('activity_type') && ! empty($request->activity_type)) {
-            $query->where('activity_type', $request->activity_type);
-        }
-
-        // Filter berdasarkan pengguna
-        if ($request->has('user_id') && ! empty($request->user_id)) {
-            $query->where('user_id', $request->user_id);
-        }
-
-        // Filter berdasarkan tanggal
-        if ($request->has('date_from') && ! empty($request->date_from)) {
-            $query->where('created_at', '>=', $request->date_from);
-        }
-
-        if ($request->has('date_to') && ! empty($request->date_to)) {
-            $query->where('created_at', '<=', $request->date_to . ' 23:59:59');
-        }
-
-        // Urutkan
-        $query->orderBy('created_at', 'desc');
-
-        // Pagination
-        $logs = $query->with('user')->paginate(50);
-
-                                                                                 // DIOPTIMALKAN: Cache daftar tipe aktivitas
-        $activityTypes = Cache::remember('all_activity_types', 60, function () { // 1 jam
-            return ActivityLog::select('activity_type')
-                ->distinct()
-                ->orderBy('activity_type')
-                ->pluck('activity_type');
-        });
-
-        // DIOPTIMALKAN: Tidak catat melihat log sebagai aktivitas (akan redundan)
-
-        return view('admin.activity_logs', [
-            'logs'          => $logs,
-            'activityTypes' => $activityTypes,
-            'filters'       => $request->only(['activity_type', 'user_id', 'date_from', 'date_to']),
-        ]);
     }
 
     /**

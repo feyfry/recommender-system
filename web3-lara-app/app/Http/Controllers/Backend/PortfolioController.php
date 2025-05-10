@@ -2,7 +2,6 @@
 namespace App\Http\Controllers\Backend;
 
 use App\Http\Controllers\Controller;
-use App\Models\ActivityLog;
 use App\Models\Portfolio;
 use App\Models\PriceAlert;
 use App\Models\Project;
@@ -41,12 +40,6 @@ class PortfolioController extends Controller
         // Hitung distribusi blockchain
         $chainDistribution = Portfolio::getChainDistribution($user->user_id);
 
-        // Data performa portfolio
-        $performanceData = Portfolio::getPerformanceData($user->user_id, 30);
-
-        // Catat aktivitas
-        ActivityLog::logViewRecommendation($user, request(), 'portfolio');
-
         return view('backend.portfolio.index', [
             'portfolios'           => $portfolios,
             'totalValue'           => $totalValue,
@@ -55,7 +48,6 @@ class PortfolioController extends Controller
             'profitLossPercentage' => $totalCost > 0 ? (($totalValue - $totalCost) / $totalCost) * 100 : 0,
             'categoryDistribution' => $categoryDistribution,
             'chainDistribution'    => $chainDistribution,
-            'performanceData'      => $performanceData,
         ]);
     }
 
@@ -166,9 +158,6 @@ class PortfolioController extends Controller
         } else {
             $this->processSellTransaction($user->user_id, $request->project_id, $request->amount, $request->price);
         }
-
-        // Catat aktivitas
-        ActivityLog::logTransaction($user, request(), $transaction);
 
         return redirect()->route('panel.portfolio.transactions')
             ->with('success', 'Transaksi berhasil ditambahkan.');
