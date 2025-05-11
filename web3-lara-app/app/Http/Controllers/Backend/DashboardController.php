@@ -198,7 +198,7 @@ class DashboardController extends Controller
                 'symbol'                                 => $data['symbol'] ?? ($data->symbol ?? 'N/A'),
                 'image'                                  => $data['image'] ?? ($data->image ?? null),
                 'current_price'                          => floatval($data['current_price'] ?? ($data->current_price ?? 0)),
-                'price_change_percentage_24h'            => floatval($data['price_change_percentage_24h'] ?? ($data->price_change_percentage_24h ?? 0)),
+                'price_change_24h'                       => floatval($data['price_change_24h'] ?? ($data->price_change_24h ?? 0)),
                 'price_change_percentage_7d_in_currency' => floatval($data['price_change_percentage_7d_in_currency'] ?? ($data->price_change_percentage_7d_in_currency ?? 0)),
                 'market_cap'                             => floatval($data['market_cap'] ?? ($data->market_cap ?? 0)),
                 'total_volume'                           => floatval($data['total_volume'] ?? ($data->total_volume ?? 0)),
