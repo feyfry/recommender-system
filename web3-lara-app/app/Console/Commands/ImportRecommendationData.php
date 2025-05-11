@@ -49,6 +49,9 @@ class ImportRecommendationData extends Command
 
         $this->info("Mengimpor proyek dari {$csvPath}...");
 
+        // Simpan proyek yang gagal untuk dicoba ulang nanti
+        $failedProjects = [];
+
         try {
             // Baca CSV dengan penanganan BOM
             $content = file_get_contents($csvPath);
@@ -85,9 +88,9 @@ class ImportRecommendationData extends Command
             $bar = $this->output->createProgressBar($totalRows);
             $bar->start();
 
-            $successCount  = 0;
-            $failedCount   = 0;
-            $rowNumber     = 0;
+            $successCount = 0;
+            $failedCount  = 0;
+            $rowNumber    = 0;
 
             while (($row = fgetcsv($handle)) !== false) {
                 $rowNumber++;
@@ -96,17 +99,21 @@ class ImportRecommendationData extends Command
                     if ($this->debug) {
                         $this->warn("Baris {$rowNumber} tidak valid, header count: " . count($headers) . ", row count: " . count($row));
                     }
+                    $failedProjects["row_{$rowNumber}"] = "Header count mismatch";
                     $failedCount++;
                     $bar->advance();
                     continue;
                 }
 
-                $record = array_combine($headers, $row);
+                $record    = array_combine($headers, $row);
+                $projectId = $record['id'] ?? "unknown_row_{$rowNumber}";
 
                 // Gunakan transaction terpisah untuk setiap record
                 DB::beginTransaction();
                 try {
-                    // Proses field ROI - perbaikan parsing JSON
+                    // Tidak perlu truncate string fields lagi karena sudah TEXT
+
+                    // Handle ROI field
                     if (isset($record['roi'])) {
                         if (empty($record['roi']) || $record['roi'] === '?') {
                             $record['roi'] = null;
@@ -137,7 +144,6 @@ class ImportRecommendationData extends Command
                             } else {
                                 // Hapus quotes yang mungkin ada di sekitar JSON
                                 $jsonData = trim($record[$field], '"');
-                                // Ganti quotes ganda dengan single untuk platforms yang menggunakan format berbeda
                                 if ($field === 'platforms') {
                                     $jsonData = str_replace('""', '"', $jsonData);
                                 }
@@ -155,7 +161,7 @@ class ImportRecommendationData extends Command
                         }
                     }
 
-                    // Konversi nilai numerik yang kosong ke null
+                    // Handle numeric overflow
                     $numericFields = [
                         'current_price', 'market_cap', 'market_cap_rank', 'fully_diluted_valuation',
                         'total_volume', 'high_24h', 'low_24h', 'price_change_24h',
@@ -177,7 +183,15 @@ class ImportRecommendationData extends Command
                             if ($record[$field] === '' || $record[$field] === 'null' || $record[$field] === '?') {
                                 $record[$field] = null;
                             } else {
-                                $record[$field] = floatval($record[$field]);
+                                $value = floatval($record[$field]);
+                                // Check untuk numeric overflow
+                                if ($value > 9999999999999999999.9999999999) {
+                                    $record[$field] = 9999999999999999999.9999999999;
+                                } elseif ($value < -9999999999999999999.9999999999) {
+                                    $record[$field] = -9999999999999999999.9999999999;
+                                } else {
+                                    $record[$field] = $value;
+                                }
                             }
                         }
                     }
@@ -199,6 +213,11 @@ class ImportRecommendationData extends Command
                     $record['created_at'] = now();
                     $record['updated_at'] = now();
 
+                    // Debug: tampilkan data yang akan diinsert jika ada error
+                    if ($this->debug) {
+                        $this->info("Processing project: {$projectId}");
+                    }
+
                     // Insert atau update ke database
                     DB::table('projects')
                         ->updateOrInsert(
@@ -210,10 +229,33 @@ class ImportRecommendationData extends Command
                     $successCount++;
                 } catch (\Exception $e) {
                     DB::rollBack();
+
+                    // Simpan detail error yang lebih lengkap
+                    $errorMessage = $e->getMessage();
+                    $errorClass = get_class($e);
+                    $errorTrace = $e->getTraceAsString();
+
+                    $failedProjects[$projectId] = [
+                        'error' => $errorMessage,
+                        'type' => $errorClass,
+                        'row' => $rowNumber,
+                        'data' => $record // Simpan data yang bermasalah untuk debug
+                    ];
+
+                    // Log error yang lebih detail
+                    Log::error("Error importing project {$projectId} (row {$rowNumber}): " . $errorMessage, [
+                        'error_type' => $errorClass,
+                        'project_id' => $projectId,
+                        'row_number' => $rowNumber,
+                        'data' => $record,
+                        'trace' => $errorTrace
+                    ]);
+
                     if ($this->debug) {
-                        $this->error("Error importing project {$record['id']}: " . $e->getMessage());
+                        $this->error("Error importing project {$projectId} (row {$rowNumber}): " . $errorMessage);
+                        $this->error("Error type: " . $errorClass);
                     }
-                    Log::error("Error importing project {$record['id']}: " . $e->getMessage());
+
                     $failedCount++;
                 }
 
@@ -226,6 +268,22 @@ class ImportRecommendationData extends Command
             $bar->finish();
             $this->info("\nImport proyek selesai!");
             $this->info("Berhasil: {$successCount}, Gagal: {$failedCount}");
+
+            // Tampilkan detail proyek yang gagal jika ada
+            if (!empty($failedProjects)) {
+                $this->warn("\nProyek yang gagal diimport:");
+                foreach ($failedProjects as $id => $errorData) {
+                    if (is_array($errorData)) {
+                        $this->warn("- {$id} (row {$errorData['row']}): {$errorData['error']}");
+                        if ($this->debug) {
+                            $this->warn("  Type: {$errorData['type']}");
+                            $this->warn("  Data: " . json_encode($errorData['data'], JSON_PRETTY_PRINT));
+                        }
+                    } else {
+                        $this->warn("- {$id}: {$errorData}");
+                    }
+                }
+            }
 
         } catch (\Exception $e) {
             $this->error("Error membaca file CSV: " . $e->getMessage());
@@ -244,6 +302,8 @@ class ImportRecommendationData extends Command
         }
 
         $this->info("Mengimpor interaksi dari {$csvPath}...");
+
+        $importedInteractions = [];
 
         try {
             // Baca CSV dengan penanganan BOM
@@ -282,11 +342,11 @@ class ImportRecommendationData extends Command
                 $this->info('Interaksi lama dihapus');
             }
 
-            $successCount = 0;
-            $failedCount  = 0;
-            $usersMissing = [];
+            $successCount    = 0;
+            $failedCount     = 0;
+            $usersMissing    = [];
             $projectsMissing = [];
-            $rowNumber = 0;
+            $rowNumber       = 0;
 
             foreach ($csv as $row) {
                 $rowNumber++;
@@ -302,19 +362,30 @@ class ImportRecommendationData extends Command
 
                 $record = array_combine($headers, $row);
 
+                // Buat unique key untuk deteksi duplikasi
+                $uniqueKey = "{$record['user_id']}:{$record['project_id']}:{$record['interaction_type']}:{$record['timestamp']}";
+
+                // Skip jika sudah pernah diimport
+                if (isset($importedInteractions[$uniqueKey])) {
+                    if ($this->debug) {
+                        $this->warn("Duplikasi interaksi ditemukan, skip: {$uniqueKey}");
+                    }
+                    continue;
+                }
+
                 DB::beginTransaction();
                 try {
                     // Cek apakah user ada
                     $userExists = DB::table('users')->where('user_id', $record['user_id'])->exists();
 
-                    if (!$userExists) {
+                    if (! $userExists) {
                         // Buat user baru TANPA prefix synthetic_
                         DB::table('users')->insert([
-                            'user_id' => $record['user_id'],
+                            'user_id'        => $record['user_id'],
                             'wallet_address' => $record['user_id'] . '_wallet', // Gunakan format yang lebih sederhana
-                            'role' => 'community',
-                            'created_at' => now(),
-                            'updated_at' => now(),
+                            'role'           => 'community',
+                            'created_at'     => now(),
+                            'updated_at'     => now(),
                         ]);
 
                         $usersMissing[] = $record['user_id'];
@@ -323,15 +394,15 @@ class ImportRecommendationData extends Command
                     // Cek apakah project ada
                     $projectExists = DB::table('projects')->where('id', $record['project_id'])->exists();
 
-                    if (!$projectExists) {
+                    if (! $projectExists) {
                         // Kita punya 2 opsi:
                         // Opsi 1: Skip interaksi ini
-                        if (!$this->option('create-missing-projects')) {
+                        if (! $this->option('create-missing-projects')) {
                             if ($this->debug) {
                                 $this->warn("Project tidak ditemukan: {$record['project_id']}");
                             }
 
-                            if (!in_array($record['project_id'], $projectsMissing)) {
+                            if (! in_array($record['project_id'], $projectsMissing)) {
                                 $projectsMissing[] = $record['project_id'];
                             }
 
@@ -345,15 +416,31 @@ class ImportRecommendationData extends Command
                         // Opsi 2: Buat project placeholder (jika opsi diaktifkan)
                         else {
                             DB::table('projects')->insert([
-                                'id' => $record['project_id'],
-                                'name' => 'Unknown ' . $record['project_id'],
-                                'symbol' => strtoupper(substr($record['project_id'], 0, 4)),
+                                'id'         => $record['project_id'],
+                                'name'       => 'Unknown ' . $record['project_id'],
+                                'symbol'     => strtoupper(substr($record['project_id'], 0, 4)),
                                 'created_at' => now(),
                                 'updated_at' => now(),
                             ]);
 
                             $projectsMissing[] = $record['project_id'];
                         }
+                    }
+
+                    // Cek jika interaction sudah ada untuk menghindari duplikasi
+                    $existingInteraction = DB::table('interactions')
+                        ->where('user_id', $record['user_id'])
+                        ->where('project_id', $record['project_id'])
+                        ->where('interaction_type', $record['interaction_type'])
+                        ->where('created_at', $record['timestamp'] ?? now())
+                        ->exists();
+
+                    if ($existingInteraction) {
+                        if ($this->debug) {
+                            $this->warn("Interaction sudah ada, skip: {$uniqueKey}");
+                        }
+                        DB::rollBack();
+                        continue;
                     }
 
                     // Mapping timestamp ke created_at & updated_at
@@ -367,7 +454,7 @@ class ImportRecommendationData extends Command
                     }
 
                     // Set default values untuk field yang tidak ada di CSV
-                    $record['context'] = null;
+                    $record['context']    = null;
                     $record['session_id'] = null;
 
                     // Konversi weight ke integer
@@ -378,6 +465,7 @@ class ImportRecommendationData extends Command
                     // Insert data
                     DB::table('interactions')->insert($record);
                     DB::commit();
+                    $importedInteractions[$uniqueKey] = true;
                     $successCount++;
 
                 } catch (\Exception $e) {
@@ -396,11 +484,11 @@ class ImportRecommendationData extends Command
             $this->info("\nImport interaksi selesai!");
             $this->info("Berhasil: {$successCount}, Gagal: {$failedCount}");
 
-            if (!empty($usersMissing)) {
+            if (! empty($usersMissing)) {
                 $this->info("Users yang dibuat: " . count($usersMissing));
             }
 
-            if (!empty($projectsMissing)) {
+            if (! empty($projectsMissing)) {
                 $this->info("Projects yang tidak ditemukan: " . count($projectsMissing));
                 if ($this->debug) {
                     $this->info("Project IDs: " . implode(', ', array_slice($projectsMissing, 0, 10)) . (count($projectsMissing) > 10 ? '...' : ''));

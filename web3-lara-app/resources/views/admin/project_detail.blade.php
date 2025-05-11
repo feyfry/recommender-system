@@ -64,14 +64,14 @@
                     <div>
                         <label class="block text-sm text-gray-600">Kategori</label>
                         <div class="font-medium">
-                            <span class="clay-badge clay-badge-primary py-1 px-2">{{ $project->primary_category ?? 'Tidak Diketahui' }}</span>
+                            <span class="clay-badge clay-badge-primary py-1 px-2">{{ $project->clean_primary_category }}</span>
                         </div>
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Blockchain</label>
+                        <label class="block text-sm text-gray-600">Chain</label>
                         <div class="font-medium">
-                            <span class="clay-badge clay-badge-secondary py-1 px-2">{{ $project->chain ?? 'Tidak Diketahui' }}</span>
+                            <span class="clay-badge clay-badge-secondary py-1 px-2">{{ $project->clean_chain }}</span>
                         </div>
                     </div>
 

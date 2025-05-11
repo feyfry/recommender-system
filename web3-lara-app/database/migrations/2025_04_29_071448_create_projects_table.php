@@ -18,7 +18,7 @@ return new class extends Migration
             // Basic info
             $table->string('symbol', 50);
             $table->string('name');
-            $table->string('image')->nullable();
+            $table->text('image')->nullable();
 
             // Price data
             $table->decimal('current_price', 30, 10)->nullable();
@@ -49,7 +49,7 @@ return new class extends Migration
             $table->timestamp('atl_date')->nullable();
 
             // ROI
-            $table->jsonb('roi')->nullable();
+            $table->text('roi')->nullable();
 
             // Time data
             $table->timestamp('last_updated')->nullable();
@@ -62,8 +62,8 @@ return new class extends Migration
 
             // Categories and platforms
             $table->string('query_category', 100)->nullable();
-            $table->jsonb('platforms')->nullable();
-            $table->jsonb('categories')->nullable();
+            $table->text('platforms')->nullable();
+            $table->text('categories')->nullable();
 
             // Social metrics
             $table->integer('twitter_followers')->nullable();

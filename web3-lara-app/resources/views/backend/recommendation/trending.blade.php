@@ -265,7 +265,7 @@
                         :disabled="currentPage <= 1"
                         :class="currentPage <= 1 ? 'opacity-50 cursor-not-allowed' : ''"
                         class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
-                        <i class="fas fa-chevron-left mr-1"></i> Sebelumnya
+                        <i class="fas fa-chevron-left"></i>
                     </button>
 
                     <!-- PERBAIKAN: Tampilkan halaman yang benar sesuai totalPages -->
@@ -283,7 +283,7 @@
                         :disabled="currentPage >= totalPages"
                         :class="currentPage >= totalPages ? 'opacity-50 cursor-not-allowed' : ''"
                         class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
-                        Selanjutnya <i class="fas fa-chevron-right ml-1"></i>
+                        <i class="fas fa-chevron-right"></i>
                     </button>
                 </div>
             </div>

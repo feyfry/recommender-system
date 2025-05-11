@@ -156,10 +156,15 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         <!-- Recent Interactions -->
         <div class="clay-card p-6 lg:col-span-2">
-            <h2 class="text-xl font-bold mb-4 flex items-center">
-                <i class="fas fa-exchange-alt mr-2 text-secondary"></i>
-                Interaksi Terbaru
-            </h2>
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold flex items-center">
+                    <i class="fas fa-exchange-alt mr-2 text-secondary"></i>
+                    Interaksi Terbaru
+                </h2>
+                <a href="{{ route('admin.interactions') }}" class="clay-button clay-button-secondary py-1 px-3 text-sm">
+                    <i class="fas fa-external-link-alt mr-1"></i> Lihat Semua
+                </a>
+            </div>
 
             <div class="overflow-x-auto">
                 <table class="clay-table min-w-full">
@@ -204,16 +209,27 @@
                     </tbody>
                 </table>
             </div>
+
+            @if(count($recentInteractions ?? []) >= 10)
+            <div class="mt-4 text-center">
+                <p class="text-sm text-gray-600">Menampilkan 10 interaksi terbaru</p>
+            </div>
+            @endif
         </div>
 
-        <!-- User & Project Highlights -->
+        <!-- User & Project Highlights dengan keterangan limit -->
         <div class="flex flex-col gap-6">
             <!-- Active Users -->
             <div class="clay-card p-6">
-                <h2 class="text-lg font-bold mb-4 flex items-center">
-                    <i class="fas fa-user-check mr-2 text-primary"></i>
-                    Pengguna Paling Aktif
-                </h2>
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold flex items-center">
+                        <i class="fas fa-user-check mr-2 text-primary"></i>
+                        Pengguna Paling Aktif
+                    </h2>
+                    <a href="{{ route('admin.users') }}?sort=interactions&direction=desc" class="text-sm text-primary hover:text-primary-dark">
+                        Lihat Semua →
+                    </a>
+                </div>
                 <div class="space-y-2">
                     @forelse($mostActiveUsers ?? [] as $index => $activeUser)
                     <div class="clay-card bg-primary/5 p-3 flex justify-between items-center">
@@ -223,7 +239,9 @@
                             </div>
                             <span>{{ $activeUser->user?->profile?->username ?? substr($activeUser->user_id, 0, 10) . '...' }}</span>
                         </div>
-                        <span class="clay-badge clay-badge-primary">{{ $activeUser->activity_count }} aktivitas</span>
+                        <span class="clay-badge clay-badge-primary">
+                            {{ $activeUser->interaction_count ?? 0 }} interaksi
+                        </span>
                     </div>
                     @empty
                     <div class="text-center py-4 text-gray-500">
@@ -231,14 +249,25 @@
                     </div>
                     @endforelse
                 </div>
+
+                @if(count($mostActiveUsers ?? []) >= 10)
+                <div class="mt-2 text-center">
+                    <p class="text-xs text-gray-600">Top 10 pengguna</p>
+                </div>
+                @endif
             </div>
 
             <!-- Popular Projects -->
             <div class="clay-card p-6">
-                <h2 class="text-lg font-bold mb-4 flex items-center">
-                    <i class="fas fa-trophy mr-2 text-warning"></i>
-                    Proyek Terpopuler
-                </h2>
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-bold flex items-center">
+                        <i class="fas fa-trophy mr-2 text-warning"></i>
+                        Proyek Terpopuler
+                    </h2>
+                    <a href="{{ route('admin.projects') }}?sort=interactions&direction=desc" class="text-sm text-primary hover:text-primary-dark">
+                        Lihat Semua →
+                    </a>
+                </div>
                 <div class="space-y-2">
                     @forelse($mostInteractedProjects ?? [] as $index => $interactedProject)
                     <div class="clay-card bg-warning/5 p-3 flex justify-between items-center">
@@ -256,18 +285,24 @@
                     </div>
                     @endforelse
                 </div>
+
+                @if(count($mostInteractedProjects ?? []) >= 10)
+                <div class="mt-2 text-center">
+                    <p class="text-xs text-gray-600">Top 10 proyek</p>
+                </div>
+                @endif
             </div>
         </div>
     </div>
 
-    <!-- Quick Action Buttons -->
+    <!-- Quick Action Buttons dengan Pagination Info -->
     <div class="clay-card p-6 mb-8">
-        <h2 class="text-xl font-bold mb-4 flex items-center">
+        <h2 class="text-xl font-bold flex items-center">
             <i class="fas fa-bolt mr-2 text-info"></i>
             Aksi Cepat
         </h2>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-3 gap-4">
             <a href="{{ route('admin.users') }}" class="clay-card p-4 bg-primary/10 text-center hover:translate-y-[-5px] transition-transform">
                 <i class="fas fa-users text-3xl text-primary mb-2"></i>
                 <div class="font-bold">Kelola Pengguna</div>

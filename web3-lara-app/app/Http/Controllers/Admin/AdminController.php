@@ -89,7 +89,7 @@ class AdminController extends Controller
         // DIOPTIMALKAN: Menyimpan aktivitas terbaru selama 5 menit
         $recentInteractions = Interaction::with(['user', 'project'])
             ->orderBy('created_at', 'desc')
-            ->limit(20)
+            ->limit(10)
             ->get();
 
         // DIOPTIMALKAN: Menyimpan pengguna paling aktif selama 30 menit
@@ -125,6 +125,42 @@ class AdminController extends Controller
     }
 
     /**
+     * Menampilkan halaman semua interaksi
+     */
+    public function interactions(Request $request)
+    {
+        $query = Interaction::with(['user', 'project']);
+
+        // Filter berdasarkan tipe
+        if ($request->has('type') && !empty($request->type)) {
+            $query->where('interaction_type', $request->type);
+        }
+
+        // Filter berdasarkan tanggal
+        if ($request->has('from_date') && !empty($request->from_date)) {
+            $query->where('created_at', '>=', $request->from_date);
+        }
+
+        if ($request->has('to_date') && !empty($request->to_date)) {
+            $query->where('created_at', '<=', $request->to_date);
+        }
+
+        // Urutkan
+        $query->orderBy($request->get('sort', 'created_at'), $request->get('direction', 'desc'));
+
+        // Pagination 10 per halaman
+        $interactions = $query->paginate(10);
+
+        $interactionTypes = Interaction::$validTypes;
+
+        return view('admin.interactions', [
+            'interactions' => $interactions,
+            'interactionTypes' => $interactionTypes,
+            'filters' => $request->only(['type', 'from_date', 'to_date', 'sort', 'direction']),
+        ]);
+    }
+
+    /**
      * Menampilkan halaman pengelolaan pengguna
      */
     public function users(Request $request)
@@ -148,7 +184,7 @@ class AdminController extends Controller
         $query->orderBy($request->get('sort', 'created_at'), $request->get('direction', 'desc'));
 
         // Pagination
-        $users = $query->paginate(20);
+        $users = $query->paginate(10);
 
         // DIOPTIMALKAN: Menyimpan statistik role
         $roleStats = Cache::remember('admin_role_stats', 60, function () {
@@ -179,7 +215,7 @@ class AdminController extends Controller
             $interactions = Interaction::forUser($userId)
                 ->with('project')
                 ->orderBy('created_at', 'desc')
-                ->limit(50)
+                ->limit(20)
                 ->get();
 
             $interactionStats = Interaction::getTypeDistribution($userId);
@@ -191,13 +227,13 @@ class AdminController extends Controller
             $transactions = Transaction::forUser($userId)
                 ->with('project')
                 ->orderBy('created_at', 'desc')
-                ->limit(20)
+                ->limit(10)
                 ->get();
 
             $recommendations = Recommendation::where('user_id', $userId)
                 ->with('project')
                 ->orderBy('created_at', 'desc')
-                ->limit(20)
+                ->limit(10)
                 ->get();
 
             return [
@@ -258,7 +294,12 @@ class AdminController extends Controller
 
         // Filter berdasarkan kategori
         if ($request->has('category') && ! empty($request->category)) {
-            $query->where('primary_category', $request->category);
+            // Handle filter untuk kategori yang berbentuk array
+            $query->where(function($q) use ($request) {
+                $q->where('primary_category', $request->category)
+                ->orWhere('primary_category', 'like', '%"' . $request->category . '"%')
+                ->orWhere('primary_category', 'like', "['" . $request->category . "']");
+            });
         }
 
         // Filter berdasarkan blockchain
@@ -280,27 +321,62 @@ class AdminController extends Controller
         $direction = $request->get('direction', 'desc');
         $query->orderBy($sortField, $direction);
 
-        // Pagination
-        $projects = $query->paginate(20);
+        // Pagination dikurangi dari 20 ke 10
+        $projects = $query->paginate(10);
 
-                                                                                    // DIOPTIMALKAN: Cache daftar kategori dan blockchain
+        // DIOPTIMALKAN: Cache daftar kategori dan blockchain yang sudah dibersihkan
+        // dan unique tanpa filter "Unknown" atau kosong
         $categories = Cache::remember('all_project_categories', 1440, function () { // 24 jam
-            return Project::select('primary_category')
+            $rawCategories = Project::select('primary_category')
                 ->distinct()
                 ->whereNotNull('primary_category')
+                ->where('primary_category', '!=', '')
                 ->orderBy('primary_category')
                 ->pluck('primary_category');
+
+            $cleanCategories = [];
+            foreach ($rawCategories as $category) {
+                // Bersihkan format array jika ada
+                if (str_starts_with($category, '[') && str_ends_with($category, ']')) {
+                    try {
+                        $parsed = json_decode($category, true);
+                        if (is_array($parsed) && !empty($parsed)) {
+                            foreach ($parsed as $cat) {
+                                if (!empty($cat) && strtolower($cat) !== 'unknown') {
+                                    $cleanCategories[] = $cat;
+                                }
+                            }
+                            continue;
+                        }
+                    } catch (\Exception $e) {
+                        // Fallback ke nilai asli jika parsing gagal
+                    }
+                }
+
+                // Tambahkan kategori jika bukan Unknown atau kosong
+                if (!empty($category) && strtolower($category) !== 'unknown') {
+                    $cleanCategories[] = $category;
+                }
+            }
+
+            // Kembalikan kategori unik dan diurutkan
+            return collect($cleanCategories)
+                ->unique()
+                ->filter()
+                ->sort()
+                ->values();
         });
 
         $chains = Cache::remember('all_project_chains', 1440, function () { // 24 jam
             return Project::select('chain')
                 ->distinct()
                 ->whereNotNull('chain')
+                ->where('chain', '!=', '')
                 ->orderBy('chain')
-                ->pluck('chain');
+                ->pluck('chain')
+                ->filter()
+                ->values();
         });
-
-        // DIOPTIMALKAN: Tidak catat aktivitas untuk page view admin yang sering diakses
 
         return view('admin.projects', [
             'projects'   => $projects,
@@ -324,7 +400,7 @@ class AdminController extends Controller
             $interactions = Interaction::forProject($projectId)
                 ->with('user')
                 ->orderBy('created_at', 'desc')
-                ->limit(50)
+                ->limit(20)
                 ->get();
 
             // Statistik interaksi
@@ -337,14 +413,14 @@ class AdminController extends Controller
             $recommendations = Recommendation::where('project_id', $projectId)
                 ->with('user')
                 ->orderBy('created_at', 'desc')
-                ->limit(20)
+                ->limit(10)
                 ->get();
 
             // Transaksi yang melibatkan proyek ini
             $transactions = Transaction::where('project_id', $projectId)
                 ->with('user')
                 ->orderBy('created_at', 'desc')
-                ->limit(20)
+                ->limit(10)
                 ->get();
 
             // Portfolio yang berisi proyek ini

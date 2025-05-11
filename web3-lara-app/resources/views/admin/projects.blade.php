@@ -24,30 +24,42 @@
             Filter Proyek
         </h2>
 
-        <form action="{{ route('admin.projects') }}" method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <form action="{{ route('admin.projects') }}" method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-4" id="filterForm">
+            <!-- Preserve sort and direction -->
+            <input type="hidden" name="sort" value="{{ $filters['sort'] ?? 'popularity_score' }}">
+            <input type="hidden" name="direction" value="{{ $filters['direction'] ?? 'desc' }}">
+
             <div>
                 <label for="category" class="block mb-2 font-medium">Kategori</label>
                 <select name="category" id="category" class="clay-select w-full">
                     <option value="">-- Semua Kategori --</option>
                     @foreach($categories as $category)
-                        <option value="{{ $category }}" {{ $filters['category'] ?? '' == $category ? 'selected' : '' }}>{{ $category }}</option>
+                        <option value="{{ $category }}"
+                            {{ ($filters['category'] ?? '') == $category ? 'selected' : '' }}>
+                            {{ ucfirst($category) }}
+                        </option>
                     @endforeach
                 </select>
             </div>
 
             <div>
-                <label for="chain" class="block mb-2 font-medium">Blockchain</label>
+                <label for="chain" class="block mb-2 font-medium">Chain</label>
                 <select name="chain" id="chain" class="clay-select w-full">
-                    <option value="">-- Semua Blockchain --</option>
+                    <option value="">-- Semua Chain --</option>
                     @foreach($chains as $chain)
-                        <option value="{{ $chain }}" {{ $filters['chain'] ?? '' == $chain ? 'selected' : '' }}>{{ $chain }}</option>
+                        <option value="{{ $chain }}"
+                            {{ ($filters['chain'] ?? '') == $chain ? 'selected' : '' }}>
+                            {{ ucfirst($chain) }}
+                        </option>
                     @endforeach
                 </select>
             </div>
 
             <div>
                 <label for="search" class="block mb-2 font-medium">Pencarian</label>
-                <input type="text" name="search" id="search" class="clay-input w-full" placeholder="Cari nama, simbol, atau ID..." value="{{ $filters['search'] ?? '' }}">
+                <input type="text" name="search" id="search" class="clay-input w-full"
+                    placeholder="Cari nama, simbol, atau ID..."
+                    value="{{ $filters['search'] ?? '' }}">
             </div>
 
             <div class="flex items-end space-x-2">
@@ -87,7 +99,7 @@
                 <div class="text-3xl font-bold mb-2">
                     {{ $chains->count() }}
                 </div>
-                <div class="text-sm">Blockchain</div>
+                <div class="text-sm">Chain</div>
             </div>
 
             <div class="clay-card bg-warning/10 p-4 text-center">
@@ -154,8 +166,8 @@
                         <td class="py-3 px-4 {{ $project->price_change_percentage_24h > 0 ? 'text-success' : 'text-danger' }}">
                             {{ $project->price_change_percentage_24h > 0 ? '+' : '' }}{{ number_format($project->price_change_percentage_24h, 2) }}%
                         </td>
-                        <td class="py-3 px-4">{{ $project->primary_category ?? '-' }}</td>
-                        <td class="py-3 px-4">{{ $project->chain ?? '-' }}</td>
+                        <td class="py-3 px-4">{{ $project->clean_primary_category }} ...</td>
+                        <td class="py-3 px-4">{{ $project->clean_chain }}</td>
                         <td class="py-3 px-4">
                             <div class="flex items-center">
                                 <span class="font-medium mr-2">{{ number_format($project->popularity_score, 1) }}</span>
@@ -196,9 +208,49 @@
 
         <!-- Pagination -->
         @if($projects->hasPages())
-        <div class="mt-6">
-            {{ $projects->appends(request()->query())->links() }}
-        </div>
+            <div class="mt-6">
+                <div class="flex flex-col md:flex-row justify-between items-center">
+                    <div class="mb-4 md:mb-0">
+                        <p class="text-sm text-gray-600">
+                            Menampilkan {{ $projects->firstItem() }} sampai {{ $projects->lastItem() }}
+                            dari {{ $projects->total() }} proyek
+                        </p>
+                    </div>
+
+                    <div class="flex space-x-2">
+                        {{-- Previous Button --}}
+                        @if ($projects->onFirstPage())
+                            <span class="clay-button clay-button-secondary py-1.5 px-3 text-sm opacity-50 cursor-not-allowed">
+                                <i class="fas fa-chevron-left"></i>
+                            </span>
+                        @else
+                            <a href="{{ $projects->previousPageUrl() }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
+                                <i class="fas fa-chevron-left"></i>
+                            </a>
+                        @endif
+
+                        {{-- Pagination Elements --}}
+                        @foreach ($projects->getUrlRange(max(1, $projects->currentPage() - 2), min($projects->lastPage(), $projects->currentPage() + 2)) as $page => $url)
+                            @if ($page == $projects->currentPage())
+                                <span class="clay-button clay-button-primary py-1.5 px-3 text-sm">{{ $page }}</span>
+                            @else
+                                <a href="{{ $url }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">{{ $page }}</a>
+                            @endif
+                        @endforeach
+
+                        {{-- Next Button --}}
+                        @if ($projects->hasMorePages())
+                            <a href="{{ $projects->nextPageUrl() }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
+                                <i class="fas fa-chevron-right"></i>
+                            </a>
+                        @else
+                            <span class="clay-button clay-button-secondary py-1.5 px-3 text-sm opacity-50 cursor-not-allowed">
+                                <i class="fas fa-chevron-right"></i>
+                            </span>
+                        @endif
+                    </div>
+                </div>
+            </div>
         @endif
     </div>
 
@@ -225,3 +277,26 @@
     </div>
 </div>
 @endsection
+
+@push('scripts')
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Preserve form state pada page load
+        const urlParams = new URLSearchParams(window.location.search);
+
+        // Set selected value untuk kategori
+        const categorySelect = document.getElementById('category');
+        const categoryParam = urlParams.get('category');
+        if (categoryParam && categorySelect) {
+            categorySelect.value = categoryParam;
+        }
+
+        // Set selected value untuk chain
+        const chainSelect = document.getElementById('chain');
+        const chainParam = urlParams.get('chain');
+        if (chainParam && chainSelect) {
+            chainSelect.value = chainParam;
+        }
+    });
+</script>
+@endpush

@@ -384,7 +384,15 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @forelse($endpointUsage ?? [] as $endpoint)
+                    @php
+                        $endpointPage = request()->get('endpoint_page', 1);
+                        $endpointPerPage = 10;
+                        $endpointData = $endpointUsage ? $endpointUsage->forPage($endpointPage, $endpointPerPage) : collect([]);
+                        $totalEndpoints = $endpointUsage ? $endpointUsage->count() : 0;
+                        $totalPages = ceil($totalEndpoints / $endpointPerPage);
+                    @endphp
+
+                    @forelse($endpointData as $endpoint)
                     <tr>
                         <td class="py-3 px-4 font-medium">{{ $endpoint->endpoint }}</td>
                         <td class="py-3 px-4">{{ $endpoint->count }}</td>
@@ -408,6 +416,32 @@
                 </tbody>
             </table>
         </div>
+
+        @if($totalPages > 1)
+        <div class="mt-6">
+            <div class="flex justify-center space-x-2">
+                @if($endpointPage > 1)
+                    <a href="{{ request()->fullUrlWithQuery(['endpoint_page' => $endpointPage - 1]) }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
+                        <i class="fas fa-chevron-left mr-1"></i> Sebelumnya
+                    </a>
+                @endif
+
+                @for($i = max(1, $endpointPage - 2); $i <= min($totalPages, $endpointPage + 2); $i++)
+                    @if($i == $endpointPage)
+                        <span class="clay-button clay-button-primary py-1.5 px-3 text-sm">{{ $i }}</span>
+                    @else
+                        <a href="{{ request()->fullUrlWithQuery(['endpoint_page' => $i]) }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">{{ $i }}</a>
+                    @endif
+                @endfor
+
+                @if($endpointPage < $totalPages)
+                    <a href="{{ request()->fullUrlWithQuery(['endpoint_page' => $endpointPage + 1]) }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
+                        Selanjutnya <i class="fas fa-chevron-right ml-1"></i>
+                    </a>
+                @endif
+            </div>
+        </div>
+        @endif
     </div>
 
     <!-- Import/Export Data -->

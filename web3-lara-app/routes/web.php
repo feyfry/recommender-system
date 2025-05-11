@@ -92,6 +92,8 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         // Import/Export Command
         Route::post('/import-command', [AdminController::class, 'runImportCommand'])->name('admin.import-command');
 
+        Route::get('/interactions', [AdminController::class, 'interactions'])->name('admin.interactions');
+
         Route::get('/most-interacted-projects', [AdminController::class, 'getMostInteractedProjects'])->name('admin.most-interacted-projects');
     });
 });

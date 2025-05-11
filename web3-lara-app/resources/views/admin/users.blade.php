@@ -158,9 +158,49 @@
 
         <!-- Pagination -->
         @if($users->hasPages())
-        <div class="mt-6">
-            {{ $users->appends(request()->query())->links() }}
-        </div>
+            <div class="mt-6">
+                <div class="flex flex-col md:flex-row justify-between items-center">
+                    <div class="mb-4 md:mb-0">
+                        <p class="text-sm text-gray-600">
+                            Menampilkan {{ $users->firstItem() }} sampai {{ $users->lastItem() }}
+                            dari {{ $users->total() }} pengguna
+                        </p>
+                    </div>
+
+                    <div class="flex space-x-2">
+                        {{-- Previous Button --}}
+                        @if ($users->onFirstPage())
+                            <span class="clay-button clay-button-secondary py-1.5 px-3 text-sm opacity-50 cursor-not-allowed">
+                                <i class="fas fa-chevron-left"></i>
+                            </span>
+                        @else
+                            <a href="{{ $users->previousPageUrl() }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
+                                <i class="fas fa-chevron-left"></i>
+                            </a>
+                        @endif
+
+                        {{-- Pagination Elements --}}
+                        @foreach ($users->getUrlRange(max(1, $users->currentPage() - 2), min($users->lastPage(), $users->currentPage() + 2)) as $page => $url)
+                            @if ($page == $users->currentPage())
+                                <span class="clay-button clay-button-primary py-1.5 px-3 text-sm">{{ $page }}</span>
+                            @else
+                                <a href="{{ $url }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">{{ $page }}</a>
+                            @endif
+                        @endforeach
+
+                        {{-- Next Button --}}
+                        @if ($users->hasMorePages())
+                            <a href="{{ $users->nextPageUrl() }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
+                                <i class="fas fa-chevron-right"></i>
+                            </a>
+                        @else
+                            <span class="clay-button clay-button-secondary py-1.5 px-3 text-sm opacity-50 cursor-not-allowed">
+                                <i class="fas fa-chevron-right"></i>
+                            </span>
+                        @endif
+                    </div>
+                </div>
+            </div>
         @endif
     </div>
 </div>

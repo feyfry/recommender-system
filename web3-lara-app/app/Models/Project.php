@@ -215,4 +215,57 @@ class Project extends Model
         $prefix = $this->price_change_percentage_24h >= 0 ? '+' : '';
         return $prefix . number_format($this->price_change_percentage_24h, 2) . '%';
     }
+
+    /**
+     * Mendapatkan primary category yang sudah dibersihkan
+     */
+    public function getCleanPrimaryCategoryAttribute()
+    {
+        $category = $this->primary_category;
+
+        if (empty($category)) {
+            return '-';
+        }
+
+        // Jika kategori dalam format JSON array
+        if (str_starts_with($category, '[') && str_ends_with($category, ']')) {
+            try {
+                $parsed = json_decode($category, true);
+                if (is_array($parsed) && !empty($parsed)) {
+                    // Ambil kategori pertama sebagai primary
+                    return $parsed[0];
+                }
+            } catch (\Exception $e) {
+                // Fallback ke nilai asli jika parsing gagal
+            }
+        }
+
+        return $category;
+    }
+
+    /**
+     * Mendapatkan chain yang sudah dibersihkan
+     */
+    public function getCleanChainAttribute()
+    {
+        $chain = $this->chain;
+
+        if (empty($chain)) {
+            return '-';
+        }
+
+        // Jika chain dalam format array (seharusnya tidak, tapi jaga-jaga)
+        if (str_starts_with($chain, '[') && str_ends_with($chain, ']')) {
+            try {
+                $parsed = json_decode($chain, true);
+                if (is_array($parsed) && !empty($parsed)) {
+                    return $parsed[0];
+                }
+            } catch (\Exception $e) {
+                // Fallback ke nilai asli jika parsing gagal
+            }
+        }
+
+        return $chain;
+    }
 }

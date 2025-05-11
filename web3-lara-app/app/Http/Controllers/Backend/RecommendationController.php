@@ -259,6 +259,10 @@ class RecommendationController extends Controller
         $user   = Auth::user();
         $userId = $user->user_id;
 
+        // Cek apakah ini adalah request AJAX atau refresh
+        $isAjax    = $request->ajax();
+        $isRefresh = $request->input('refresh') === 'true';
+
         // Format JSON untuk AJAX request
         if ($request->has('format') && $request->format === 'json') {
             $part = $request->input('part', 'all');
@@ -285,7 +289,7 @@ class RecommendationController extends Controller
         $projectExistsInDatabase = $project ? true : false;
 
         // DIOPTIMALKAN: Caching untuk project detail
-        if (! $project) {
+        if (!$project) {
             $cacheKey    = "api_project_detail_{$projectId}";
             $projectData = Cache::remember($cacheKey, 60, function () use ($projectId) {
                 try {
@@ -349,9 +353,18 @@ class RecommendationController extends Controller
             }
         }
 
-        // DIOPTIMALKAN: Mencatat interaksi menggunakan job di background untuk mengurangi waktu respons
-        if ($project && $projectExistsInDatabase) {
-            $this->recordInteraction($userId, $projectId, 'view');
+        // DIOPTIMALKAN: Mencatat interaksi hanya sekali, bukan setiap refresh
+        if ($project && $projectExistsInDatabase && !$isAjax && !$isRefresh) {
+            // Cek apakah sudah ada interaksi view dalam 5 menit terakhir
+            $recentView = Interaction::where('user_id', $userId)
+                ->where('project_id', $projectId)
+                ->where('interaction_type', 'view')
+                ->where('created_at', '>=', now()->subMinutes(5))
+                ->exists();
+
+            if (! $recentView) {
+                $this->recordInteraction($userId, $projectId, 'view');
+            }
         }
 
         $similarProjects = [];
@@ -418,6 +431,18 @@ class RecommendationController extends Controller
         }
 
         try {
+            // Cek duplikasi untuk mencegah double entry
+            $existingInteraction = Interaction::where('user_id', $userId)
+                ->where('project_id', $projectId)
+                ->where('interaction_type', $interactionType)
+                ->where('created_at', '>=', now()->subSeconds(5))
+                ->first();
+
+            if ($existingInteraction) {
+                Log::info("Interaction sudah ada, skip duplikasi: {$userId}:{$projectId}:{$interactionType}");
+                return $existingInteraction;
+            }
+
             // Catat interaksi di database lokal
             $interaction = Interaction::create([
                 'user_id'          => $userId,
@@ -429,7 +454,7 @@ class RecommendationController extends Controller
                     'timestamp' => now()->timestamp,
                 ],
             ]);
-
+            
             // DIOPTIMALKAN: Kirim interaksi ke API dengan penanganan error yang lebih baik
             try {
                 Http::timeout(2)->post("{$this->apiUrl}/interactions/record", [

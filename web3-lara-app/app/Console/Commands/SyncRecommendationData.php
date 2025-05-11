@@ -73,10 +73,12 @@ class SyncRecommendationData extends Command
         $this->info('Mengekspor interaksi ke engine rekomendasi...');
 
         try {
-            // Ambil semua interaksi dari database
+            // Ambil semua interaksi dari database dengan distinct untuk menghindari duplikasi
             $interactions = DB::table('interactions')
+                ->select(['user_id', 'project_id', 'interaction_type', 'weight', 'context', 'created_at'])
+                ->distinct()
                 ->orderBy('created_at')
-                ->get(['user_id', 'project_id', 'interaction_type', 'weight', 'context', 'created_at'])
+                ->get()
                 ->toArray();
 
             $this->info('Ditemukan ' . count($interactions) . ' interaksi untuk diekspor');
@@ -88,8 +90,17 @@ class SyncRecommendationData extends Command
             // Tulis header
             fputcsv($file, ['user_id', 'project_id', 'interaction_type', 'weight', 'context', 'timestamp']);
 
-            // Tulis data
+            // Tulis data dengan pengecekan duplikasi
+            $exportedInteractions = [];
             foreach ($interactions as $interaction) {
+                // Buat unique key
+                $uniqueKey = "{$interaction->user_id}:{$interaction->project_id}:{$interaction->interaction_type}:{$interaction->created_at}";
+
+                // Skip jika sudah diekspor
+                if (isset($exportedInteractions[$uniqueKey])) {
+                    continue;
+                }
+
                 fputcsv($file, [
                     $interaction->user_id,
                     $interaction->project_id,
@@ -98,6 +109,8 @@ class SyncRecommendationData extends Command
                     is_string($interaction->context) ? $interaction->context : json_encode($interaction->context),
                     $interaction->created_at,
                 ]);
+
+                $exportedInteractions[$uniqueKey] = true;
             }
 
             fclose($file);
