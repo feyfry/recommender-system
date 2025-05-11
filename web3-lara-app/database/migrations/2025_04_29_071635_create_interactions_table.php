@@ -31,6 +31,13 @@ return new class extends Migration
             $table->index('project_id');
             $table->index('interaction_type');
             $table->index('created_at');
+
+            // Composite index untuk deduplication
+            // Format yang benar: index(array_kolom, nama_index)
+            $table->index(
+                ['user_id', 'project_id', 'interaction_type', 'created_at'],
+                'unique_interaction_index'
+            );
         });
     }
 
