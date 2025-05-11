@@ -47,53 +47,53 @@
 
                 <div class="space-y-4">
                     <div>
-                        <label class="block text-sm text-gray-600">Nama</label>
+                        <label for="name" class="block text-sm text-gray-600">Nama</label>
                         <div class="font-medium">{{ $project->name }}</div>
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Simbol</label>
+                        <label for="symbol" class="block text-sm text-gray-600">Simbol</label>
                         <div class="font-medium">{{ $project->symbol }}</div>
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">ID</label>
+                        <label for="id" class="block text-sm text-gray-600">ID</label>
                         <div class="font-mono text-xs break-all">{{ $project->id }}</div>
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Kategori</label>
+                        <label for="primary-category" class="block text-sm text-gray-600">Kategori</label>
                         <div class="font-medium">
                             <span class="clay-badge clay-badge-primary py-1 px-2">{{ $project->clean_primary_category }}</span>
                         </div>
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Chain</label>
+                        <label for="chain" class="block text-sm text-gray-600">Chain</label>
                         <div class="font-medium">
                             <span class="clay-badge clay-badge-secondary py-1 px-2">{{ $project->clean_chain }}</span>
                         </div>
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Harga Saat Ini</label>
+                        <label for="price" class="block text-sm text-gray-600">Harga Saat Ini</label>
                         <div class="font-medium">{{ $project->formatted_price }}</div>
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Persentase Perubahan 24 Jam</label>
+                        <label for="price-change" class="block text-sm text-gray-600">Persentase Perubahan 24 Jam</label>
                         <div class="font-medium {{ $project->price_change_percentage_24h >= 0 ? 'text-success' : 'text-danger' }}">
                             {{ $project->formatted_price_change }}
                         </div>
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Market Cap</label>
+                        <label for="market-cap" class="block text-sm text-gray-600">Market Cap</label>
                         <div class="font-medium">{{ $project->formatted_market_cap }}</div>
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Popularity Score</label>
+                        <label for="popularity-score" class="block text-sm text-gray-600">Popularity Score</label>
                         <div class="flex items-center">
                             <span class="font-medium mr-2">{{ number_format($project->popularity_score, 1) }}</span>
                             <div class="clay-progress w-32 h-2">
@@ -103,7 +103,7 @@
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Trend Score</label>
+                        <label for="trend-score" class="block text-sm text-gray-600">Trend Score</label>
                         <div class="flex items-center">
                             <span class="font-medium mr-2">{{ number_format($project->trend_score, 1) }}</span>
                             <div class="clay-progress w-32 h-2">

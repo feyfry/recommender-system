@@ -89,7 +89,7 @@ class AdminController extends Controller
         // DIOPTIMALKAN: Menyimpan aktivitas terbaru selama 5 menit
         $recentInteractions = Interaction::with(['user', 'project'])
             ->orderBy('created_at', 'desc')
-            ->limit(10)
+            ->limit(20)
             ->get();
 
         // DIOPTIMALKAN: Menyimpan pengguna paling aktif selama 30 menit

@@ -45,22 +45,22 @@
 
                 <div class="space-y-4">
                     <div>
-                        <label class="block text-sm text-gray-600">Username</label>
+                        <label for="username" class="block text-sm text-gray-600">Username</label>
                         <div class="font-medium">{{ $user->profile?->username ?? 'Belum diatur' }}</div>
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">User ID</label>
+                        <label for="user-id" class="block text-sm text-gray-600">User ID</label>
                         <div class="font-medium">{{ $user->user_id }}</div>
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Wallet Address</label>
+                        <label for="wallet-address" class="block text-sm text-gray-600">Wallet Address</label>
                         <div class="font-mono text-xs break-all">{{ $user->wallet_address }}</div>
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Peran</label>
+                        <label for="role" class="block text-sm text-gray-600">Peran</label>
                         <div class="flex justify-between items-center">
                             @if($user->role == 'admin')
                                 <span class="clay-badge clay-badge-success py-1 px-2">Admin</span>
@@ -76,22 +76,22 @@
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Profil Risiko</label>
+                        <label for="risk-tolerance" class="block text-sm text-gray-600">Profil Risiko</label>
                         <div class="font-medium">{{ $user->profile?->risk_tolerance_text ?? 'Belum diatur' }}</div>
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Gaya Investasi</label>
+                        <label for="investment-style" class="block text-sm text-gray-600">Gaya Investasi</label>
                         <div class="font-medium">{{ $user->profile?->investment_style_text ?? 'Belum diatur' }}</div>
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Tanggal Registrasi</label>
+                        <label for="created-at" class="block text-sm text-gray-600">Tanggal Registrasi</label>
                         <div class="font-medium">{{ $user->created_at->format('j F Y H:i') }}</div>
                     </div>
 
                     <div>
-                        <label class="block text-sm text-gray-600">Login Terakhir</label>
+                        <label for="last-login" class="block text-sm text-gray-600">Login Terakhir</label>
                         <div class="font-medium">{{ $user->last_login ? $user->last_login->format('j F Y H:i') : 'Belum pernah' }}</div>
                     </div>
                 </div>

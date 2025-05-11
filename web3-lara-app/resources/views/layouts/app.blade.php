@@ -25,7 +25,7 @@
 
     <div x-data="{ sidebarOpen: false, mobileMenuOpen: false }">
         <!-- Top Navbar -->
-        <nav class="sticky top-0 z-50 w-full p-4">
+        <nav class="sticky top-0 z-50 w-full p-4" aria-label="Global">
             <div class="clay-card container mx-auto py-2 px-4">
                 <div class="flex justify-between items-center">
                     <div class="flex items-center">
@@ -131,7 +131,7 @@
                         </div>
 
                         <!-- Sidebar Menu -->
-                        <nav class="space-y-1 px-2">
+                        <nav class="space-y-1 px-2" aria-label="Sidebar">
                             <!-- Dashboard -->
                             <a href="{{ route('panel.dashboard') }}" class="clay-nav-button {{ request()->routeIs('panel.dashboard') ? 'active' : '' }}">
                                 <i class="fas fa-home w-5 mr-3"></i>

@@ -245,47 +245,53 @@
             </div>
 
             <!-- Pagination -->
-            <div class="mt-6 flex justify-between items-center">
-                <div>
-                    <span class="text-sm text-gray-600">
-                        Menampilkan <span x-text="((currentPage - 1) * perPage) + 1"></span>
-                        sampai <span x-text="Math.min(currentPage * perPage, ((currentPage - 1) * perPage) + popularProjects.length)"></span>
-                        @if(is_object($popularProjects) && method_exists($popularProjects, 'total'))
-                        dari <span>{{ $popularProjects->total() }}</span> proyek
-                        @elseif(is_array($popularProjects) && isset($popularProjects['total']))
-                        dari <span>{{ $popularProjects['total'] }}</span> proyek
-                        @else
-                        <span x-text="'dari ' + (totalPages * perPage) + ' proyek'"></span>
-                        @endif
-                    </span>
-                </div>
+            <div class="mt-6">
+                <div class="flex flex-col md:flex-row justify-between items-center">
+                    <!-- Info pages - stacks on mobile -->
+                    <div class="mb-4 md:mb-0">
+                        <span class="text-sm text-gray-600">
+                            Menampilkan <span x-text="((currentPage - 1) * perPage) + 1"></span>
+                            sampai <span x-text="Math.min(currentPage * perPage, ((currentPage - 1) * perPage) + popularProjects.length)"></span>
+                            @if(is_object($popularProjects) && method_exists($popularProjects, 'total'))
+                            dari <span>{{ $popularProjects->total() }}</span> proyek
+                            @elseif(is_array($popularProjects) && isset($popularProjects['total']))
+                            dari <span>{{ $popularProjects['total'] }}</span> proyek
+                            @else
+                            <span x-text="'dari ' + (totalPages * perPage) + ' proyek'"></span>
+                            @endif
+                        </span>
+                    </div>
 
-                <div class="flex space-x-2">
-                    <button
-                        @click="if (currentPage > 1) { loading = true; window.location.href = '{{ route('panel.recommendations.popular') }}?page=' + (currentPage - 1) + '&per_page=' + perPage; }"
-                        :disabled="currentPage <= 1"
-                        :class="currentPage <= 1 ? 'opacity-50 cursor-not-allowed' : ''"
-                        class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
-                        <i class="fas fa-chevron-left"></i>
-                    </button>
-
-                    <!-- PERBAIKAN: Tampilkan halaman yang benar sesuai totalPages -->
-                    <template x-for="page in Math.min(5, totalPages)" :key="page">
+                    <!-- Pagination buttons - centered on mobile -->
+                    <div class="flex justify-center space-x-2">
+                        <!-- Previous -->
                         <button
-                            @click="if (page !== currentPage) { loading = true; window.location.href = '{{ route('panel.recommendations.popular') }}?page=' + page + '&per_page=' + perPage; }"
-                            :class="page === parseInt(currentPage) ? 'clay-button-primary' : 'clay-button-secondary'"
-                            class="clay-button py-1.5 px-3 text-sm">
-                            <span x-text="page"></span>
+                            @click="if (currentPage > 1) { loading = true; window.location.href = '{{ route('panel.recommendations.popular') }}?page=' + (currentPage - 1) + '&per_page=' + perPage; }"
+                            :disabled="currentPage <= 1"
+                            :class="currentPage <= 1 ? 'opacity-50 cursor-not-allowed' : ''"
+                            class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
+                            <i class="fas fa-chevron-left"></i>
                         </button>
-                    </template>
 
-                    <button
-                        @click="if (currentPage < totalPages) { loading = true; window.location.href = '{{ route('panel.recommendations.popular') }}?page=' + (parseInt(currentPage) + 1) + '&per_page=' + perPage; }"
-                        :disabled="currentPage >= totalPages"
-                        :class="currentPage >= totalPages ? 'opacity-50 cursor-not-allowed' : ''"
-                        class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
-                        <i class="fas fa-chevron-right"></i>
-                    </button>
+                        <!-- Pages -->
+                        <template x-for="page in [...Array(Math.min(5, totalPages)).keys()].map(i => i + Math.max(1, Math.min(currentPage - 2, totalPages - 4)))" :key="page">
+                            <button
+                                @click="if (page !== currentPage) { loading = true; window.location.href = '{{ route('panel.recommendations.popular') }}?page=' + page + '&per_page=' + perPage; }"
+                                :class="page === parseInt(currentPage) ? 'clay-button-primary' : 'clay-button-secondary'"
+                                class="clay-button py-1.5 px-3 text-sm">
+                                <span x-text="page"></span>
+                            </button>
+                        </template>
+
+                        <!-- Next -->
+                        <button
+                            @click="if (currentPage < totalPages) { loading = true; window.location.href = '{{ route('panel.recommendations.popular') }}?page=' + (parseInt(currentPage) + 1) + '&per_page=' + perPage; }"
+                            :disabled="currentPage >= totalPages"
+                            :class="currentPage >= totalPages ? 'opacity-50 cursor-not-allowed' : ''"
+                            class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

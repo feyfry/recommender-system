@@ -212,7 +212,7 @@
 
             @if(count($recentInteractions ?? []) >= 10)
             <div class="mt-4 text-center">
-                <p class="text-sm text-gray-600">Menampilkan 10 interaksi terbaru</p>
+                <p class="text-sm text-gray-600">Menampilkan 20 interaksi terbaru</p>
             </div>
             @endif
         </div>
@@ -297,7 +297,7 @@
 
     <!-- Quick Action Buttons dengan Pagination Info -->
     <div class="clay-card p-6 mb-8">
-        <h2 class="text-xl font-bold flex items-center">
+        <h2 class="text-xl font-bold flex items-center mb-4">
             <i class="fas fa-bolt mr-2 text-info"></i>
             Aksi Cepat
         </h2>
