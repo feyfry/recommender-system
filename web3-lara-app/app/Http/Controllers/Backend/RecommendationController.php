@@ -80,23 +80,22 @@ class RecommendationController extends Controller
         $user   = Auth::user();
         $userId = $user->user_id;
 
-        // DIOPTIMALKAN: Cached recommendations dengan normalisasi yang konsisten
-        $hybridRecommendations = Cache::remember("rec_personal_hybrid_{$userId}", 15, function () use ($userId) {
+        // PERBAIKAN: Menggunakan cache key yang konsisten
+        $hybridRecommendations = Cache::remember("rec_personal_hybrid_{$userId}_10", 15, function () use ($userId) {
             $recommendations = $this->getPersonalRecommendations($userId, 'hybrid', 10);
             return $this->normalizeRecommendationData($recommendations);
         });
 
-        $fecfRecommendations = Cache::remember("rec_personal_fecf_{$userId}", 15, function () use ($userId) {
+        $fecfRecommendations = Cache::remember("rec_personal_fecf_{$userId}_10", 15, function () use ($userId) {
             $recommendations = $this->getPersonalRecommendations($userId, 'fecf', 10);
             return $this->normalizeRecommendationData($recommendations);
         });
 
-        $ncfRecommendations = Cache::remember("rec_personal_ncf_{$userId}", 15, function () use ($userId) {
+        $ncfRecommendations = Cache::remember("rec_personal_ncf_{$userId}_10", 15, function () use ($userId) {
             $recommendations = $this->getPersonalRecommendations($userId, 'ncf', 10);
             return $this->normalizeRecommendationData($recommendations);
         });
 
-        // DIOPTIMALKAN: Deteksi cold-start user tanpa query tambahan
         $interactionCount = Cache::remember("user_interactions_count_{$userId}", 30, function () use ($userId) {
             return Interaction::where('user_id', $userId)->count();
         });

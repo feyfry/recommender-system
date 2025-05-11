@@ -114,7 +114,7 @@
             @endif">
 
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <template x-for="(recommendation, index) in recommendations" :key="index" x-show="index < 4">
+                <template x-for="(recommendation, index) in recommendations.slice(0, 4)" :key="index">
                     <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
                         <div class="font-bold text-lg mb-2" x-text="recommendation.name + ' (' + recommendation.symbol + ')'"></div>
                         <div class="flex justify-between mb-2 text-sm">
@@ -194,7 +194,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <template x-for="(project, index) in trendingProjects" :key="index" x-show="index < 5">
+                    <template x-for="(project, index) in trendingProjects.slice(0, 5)" :key="index">
                         <tr>
                             <td class="py-3 px-4" x-text="index + 1"></td>
                             <td class="py-3 px-4 font-medium">
@@ -270,7 +270,7 @@
             }, 200);">
 
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <template x-for="(interaction, index) in interactions" :key="index" x-show="index < 6">
+                <template x-for="(interaction, idx) in interactions.slice(0, 6)" :key="interaction.id">
                     <div class="clay-card p-4 flex items-center">
                         <div class="mr-4">
                             <template x-if="interaction.interaction_type === 'view'">
@@ -308,10 +308,7 @@
                                 <template x-if="interaction.interaction_type === 'research'">
                                     <span>Meriset</span>
                                 </template>
-                                <template x-if="interaction.interaction_type === 'click'">
-                                    <span>Mengklik</span>
-                                </template>
-                                <template x-if="!['view', 'favorite', 'portfolio_add', 'research', 'click'].includes(interaction.interaction_type)">
+                                <template x-if="!['view', 'favorite', 'portfolio_add', 'research'].includes(interaction.interaction_type)">
                                     <span>Berinteraksi dengan</span>
                                 </template>
 
@@ -440,10 +437,10 @@
     <div class="clay-card p-6" x-data="{ loaded: false, userPrefs: null }" x-init="
         setTimeout(() => {
             userPrefs = {
-                risk_tolerance: '{{ Auth::user()->risk_tolerance }}',
-                investment_style: '{{ Auth::user()->investment_style }}',
-                preferred_categories: {{ json_encode(Auth::user()->profile ? Auth::user()->profile->preferred_categories : []) }},
-                preferred_chains: {{ json_encode(Auth::user()->profile ? Auth::user()->profile->preferred_chains : []) }}
+                risk_tolerance: '{{ Auth::user()->profile?->risk_tolerance ?? '' }}',
+                investment_style: '{{ Auth::user()->profile?->investment_style ?? '' }}',
+                preferred_categories: {{ json_encode(Auth::user()->profile?->preferred_categories ?? []) }},
+                preferred_chains: {{ json_encode(Auth::user()->profile?->preferred_chains ?? []) }}
             };
             loaded = true;
         }, 300);">
@@ -466,16 +463,16 @@
                     <div class="flex justify-between">
                         <span>Toleransi Risiko:</span>
                         <span class="font-medium">
-                            <template x-if="userPrefs.risk_tolerance === 'low'">
+                            <template x-if="userPrefs && userPrefs.risk_tolerance === 'low'">
                                 <span class="clay-badge clay-badge-success">Rendah</span>
                             </template>
-                            <template x-if="userPrefs.risk_tolerance === 'medium'">
+                            <template x-if="userPrefs && userPrefs.risk_tolerance === 'medium'">
                                 <span class="clay-badge clay-badge-warning">Sedang</span>
                             </template>
-                            <template x-if="userPrefs.risk_tolerance === 'high'">
+                            <template x-if="userPrefs && userPrefs.risk_tolerance === 'high'">
                                 <span class="clay-badge clay-badge-danger">Tinggi</span>
                             </template>
-                            <template x-if="!userPrefs.risk_tolerance">
+                            <template x-if="!userPrefs || !userPrefs.risk_tolerance">
                                 <span class="text-gray-400">Belum diatur</span>
                             </template>
                         </span>
@@ -483,23 +480,23 @@
                     <div class="flex justify-between">
                         <span>Gaya Investasi:</span>
                         <span class="font-medium">
-                            <template x-if="userPrefs.investment_style === 'conservative'">
+                            <template x-if="userPrefs && userPrefs.investment_style === 'conservative'">
                                 <span class="clay-badge clay-badge-info">Konservatif</span>
                             </template>
-                            <template x-if="userPrefs.investment_style === 'balanced'">
+                            <template x-if="userPrefs && userPrefs.investment_style === 'balanced'">
                                 <span class="clay-badge clay-badge-warning">Seimbang</span>
                             </template>
-                            <template x-if="userPrefs.investment_style === 'aggressive'">
+                            <template x-if="userPrefs && userPrefs.investment_style === 'aggressive'">
                                 <span class="clay-badge clay-badge-danger">Agresif</span>
                             </template>
-                            <template x-if="!userPrefs.investment_style">
+                            <template x-if="!userPrefs || !userPrefs.investment_style">
                                 <span class="text-gray-400">Belum diatur</span>
                             </template>
                         </span>
                     </div>
                 </div>
 
-                <template x-if="!userPrefs.risk_tolerance || !userPrefs.investment_style">
+                <template x-if="userPrefs && (!userPrefs.risk_tolerance || !userPrefs.investment_style)">
                     <div class="mt-4">
                         <a href="{{ route('panel.profile.edit') }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
                             <i class="fas fa-edit mr-1"></i> Lengkapi Profil
@@ -512,14 +509,14 @@
                 <h3 class="font-bold mb-3">Rekomendasi Sesuai Preferensi</h3>
                 <p class="text-sm">
                     Sistem rekomendasi kami memperhitungkan preferensi Anda dalam memberikan rekomendasi proyek.
-                    <template x-if="userPrefs.risk_tolerance && userPrefs.investment_style">
+                    <template x-if="userPrefs && userPrefs.risk_tolerance && userPrefs.investment_style">
                         <span>
                             Dengan profil <strong x-text="userPrefs.risk_tolerance === 'low' ? 'Rendah' : (userPrefs.risk_tolerance === 'medium' ? 'Sedang' : 'Tinggi')"></strong>
                             dan gaya investasi <strong x-text="userPrefs.investment_style === 'conservative' ? 'Konservatif' : (userPrefs.investment_style === 'balanced' ? 'Seimbang' : 'Agresif')"></strong>,
                             Anda akan mendapatkan rekomendasi proyek yang sesuai dengan preferensi tersebut.
                         </span>
                     </template>
-                    <template x-if="!userPrefs.risk_tolerance || !userPrefs.investment_style">
+                    <template x-if="!userPrefs || !userPrefs.risk_tolerance || !userPrefs.investment_style">
                         <span>Lengkapi profil Anda untuk mendapatkan rekomendasi yang lebih personal!</span>
                     </template>
                 </p>

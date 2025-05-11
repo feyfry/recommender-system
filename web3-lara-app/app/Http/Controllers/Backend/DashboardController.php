@@ -37,24 +37,23 @@ class DashboardController extends Controller
         $user   = Auth::user();
         $userId = $user->user_id;
 
-        // DIOPTIMALKAN: Load data yang penting sekaligus
-        // dan sisanya lazy loaded melalui AJAX
+        // PERBAIKAN: Menggunakan cache key yang konsisten dengan RecommendationController
+        // dan mengambil subset dari hasil yang sudah di-cache
         $data = [
             'user'                    => $user,
-            // Load rekomendasi personal pada load awal
-            'personalRecommendations' => Cache::remember("dashboard_personal_recs_{$userId}", 30, function () use ($userId) {
-                $recommendations = $this->getPersonalRecommendations($userId, 'hybrid', 4);
+            'personalRecommendations' => Cache::remember("rec_personal_hybrid_{$userId}_10", 15, function () use ($userId) {
+                $recommendations = $this->getPersonalRecommendations($userId, 'hybrid', 10);
                 return $this->normalizeRecommendations($recommendations);
             }),
-            // Load trending projects pada load awal dengan jumlah kecil
             'trendingProjects'        => Cache::remember('dashboard_trending_projects', 60, function () {
                 return $this->getTrendingProjects(4);
             }),
-            // Inisialisasi data portfolio dan interactions dengan kosong
-            // untuk diisi dengan lazy loading
             'portfolioSummary'        => null,
             'recentInteractions'      => null,
         ];
+
+        // Ambil hanya 4 rekomendasi pertama untuk dashboard
+        $data['personalRecommendations'] = array_slice($data['personalRecommendations'], 0, 4);
 
         return view('backend.dashboard.index', $data);
     }
@@ -164,6 +163,12 @@ class DashboardController extends Controller
      */
     private function normalizeRecommendations($recommendations)
     {
+        // PERBAIKAN: Sinkronkan dengan normalizeRecommendationData di RecommendationController
+        return $this->normalizeRecommendationData($recommendations);
+    }
+
+    private function normalizeRecommendationData($recommendations)
+    {
         if (empty($recommendations)) {
             return [];
         }
@@ -175,15 +180,12 @@ class DashboardController extends Controller
         $normalized = [];
 
         foreach ($recommendations as $key => $item) {
-            // Skip jika item adalah string
             if (is_string($item)) {
                 continue;
             }
 
-            // Konversi object ke array jika diperlukan
             $data = is_object($item) ? (array) $item : $item;
 
-            // Pastikan ID ada
             $id = $data['id'] ?? ($data['project_id'] ?? "unknown-{$key}");
             if ($id === "unknown-{$key}" && isset($data->id)) {
                 $id = $data->id;
@@ -191,15 +193,53 @@ class DashboardController extends Controller
                 $id = $data->project_id;
             }
 
-            // Pastikan semua property yang diperlukan ada
+            // Extract price change data
+            $priceChange24h = null;
+            if (isset($data['price_change_24h'])) {
+                $priceChange24h = $data['price_change_24h'];
+            } elseif (isset($data->price_change_24h)) {
+                $priceChange24h = $data->price_change_24h;
+            } elseif (isset($data['price_change_24h_in_currency'])) {
+                $priceChange24h = $data['price_change_24h_in_currency'];
+            } elseif (isset($data->price_change_24h_in_currency)) {
+                $priceChange24h = $data->price_change_24h_in_currency;
+            }
+
+            $priceChangePercentage24h = null;
+            if (isset($data['price_change_percentage_24h'])) {
+                $priceChangePercentage24h = $data['price_change_percentage_24h'];
+            } elseif (isset($data->price_change_percentage_24h)) {
+                $priceChangePercentage24h = $data->price_change_percentage_24h;
+            } elseif (isset($data['price_change_percentage_24h_in_currency'])) {
+                $priceChangePercentage24h = $data['price_change_percentage_24h_in_currency'];
+            } elseif (isset($data->price_change_percentage_24h_in_currency)) {
+                $priceChangePercentage24h = $data->price_change_percentage_24h_in_currency;
+            }
+
+            $priceChangePercentage7d = null;
+            if (isset($data['price_change_percentage_7d_in_currency'])) {
+                $priceChangePercentage7d = $data['price_change_percentage_7d_in_currency'];
+            } elseif (isset($data->price_change_percentage_7d_in_currency)) {
+                $priceChangePercentage7d = $data->price_change_percentage_7d_in_currency;
+            } elseif (isset($data['price_change_percentage_7d'])) {
+                $priceChangePercentage7d = $data['price_change_percentage_7d'];
+            } elseif (isset($data->price_change_percentage_7d)) {
+                $priceChangePercentage7d = $data->price_change_percentage_7d;
+            } elseif (isset($data['price_change_7d'])) {
+                $priceChangePercentage7d = $data['price_change_7d'];
+            } elseif (isset($data->price_change_7d)) {
+                $priceChangePercentage7d = $data->price_change_7d;
+            }
+
             $normalized[] = [
                 'id'                                     => $id,
                 'name'                                   => $data['name'] ?? ($data->name ?? 'Unknown'),
                 'symbol'                                 => $data['symbol'] ?? ($data->symbol ?? 'N/A'),
                 'image'                                  => $data['image'] ?? ($data->image ?? null),
                 'current_price'                          => floatval($data['current_price'] ?? ($data->current_price ?? 0)),
-                'price_change_24h'                       => floatval($data['price_change_24h'] ?? ($data->price_change_24h ?? 0)),
-                'price_change_percentage_7d_in_currency' => floatval($data['price_change_percentage_7d_in_currency'] ?? ($data->price_change_percentage_7d_in_currency ?? 0)),
+                'price_change_24h'                       => $priceChange24h !== null ? floatval($priceChange24h) : null,
+                'price_change_percentage_24h'            => $priceChangePercentage24h !== null ? floatval($priceChangePercentage24h) : 0,
+                'price_change_percentage_7d_in_currency' => $priceChangePercentage7d !== null ? floatval($priceChangePercentage7d) : 0,
                 'market_cap'                             => floatval($data['market_cap'] ?? ($data->market_cap ?? 0)),
                 'total_volume'                           => floatval($data['total_volume'] ?? ($data->total_volume ?? 0)),
                 'primary_category'                       => $data['primary_category'] ?? ($data->primary_category ?? $data['category'] ?? ($data->category ?? 'Uncategorized')),
@@ -207,7 +247,6 @@ class DashboardController extends Controller
                 'description'                            => $data['description'] ?? ($data->description ?? null),
                 'popularity_score'                       => floatval($data['popularity_score'] ?? ($data->popularity_score ?? 0)),
                 'trend_score'                            => floatval($data['trend_score'] ?? ($data->trend_score ?? 0)),
-                // PERBAIKAN: Standardisasi score untuk konsistensi dengan RecommendationController
                 'recommendation_score'                   => floatval($data['recommendation_score'] ??
                     ($data->recommendation_score ??
                         $data['similarity_score'] ??

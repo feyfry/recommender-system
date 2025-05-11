@@ -294,16 +294,16 @@
             @if(isset($personalRecommendations) && count($personalRecommendations) > 0)
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     @foreach($personalRecommendations as $recommendation)
-                        <a href="{{ route('panel.recommendations.project', $recommendation['project_id'] ?? $recommendation['id'] ?? 0) }}"
-                           class="clay-card hover:shadow-lg transition-shadow p-4"
-                           loading="lazy">
+                        <a href="{{ route('panel.recommendations.project', $recommendation['id']) }}"
+                        class="clay-card hover:shadow-lg transition-shadow p-4"
+                        loading="lazy">
                             <div class="flex justify-between items-center mb-3">
                                 <div class="flex items-center">
                                     @if(isset($recommendation['image']) && $recommendation['image'])
                                         <img src="{{ $recommendation['image'] }}"
-                                             alt="{{ $recommendation['symbol'] }}"
-                                             class="w-8 h-8 rounded-full mr-2"
-                                             loading="lazy">
+                                            alt="{{ $recommendation['symbol'] }}"
+                                            class="w-8 h-8 rounded-full mr-2"
+                                            loading="lazy">
                                     @endif
                                     <div>
                                         <div class="font-medium">{{ $recommendation['symbol'] ?? $recommendation['project_id'] }}</div>
@@ -317,9 +317,9 @@
                             @if(isset($recommendation['current_price']))
                                 <div class="flex justify-between text-sm">
                                     <span>${{ number_format($recommendation['current_price'], 8) }}</span>
-                                    <span class="{{ isset($recommendation['price_change_24h']) && $recommendation['price_change_24h'] >= 0 ? 'text-success' : 'text-danger' }}">
-                                        @if(isset($recommendation['price_change_24h']))
-                                            {{ ($recommendation['price_change_24h'] >= 0 ? '+' : '') . number_format($recommendation['price_change_24h'], 8) . '$' }}
+                                    <span class="{{ ($recommendation['price_change_percentage_24h'] ?? 0) >= 0 ? 'text-success' : 'text-danger' }}">
+                                        @if(isset($recommendation['price_change_percentage_24h']))
+                                            {{ ($recommendation['price_change_percentage_24h'] >= 0 ? '+' : '') . number_format($recommendation['price_change_percentage_24h'], 2) . '%' }}
                                         @else
                                             -
                                         @endif
