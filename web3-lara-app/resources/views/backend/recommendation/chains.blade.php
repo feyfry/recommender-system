@@ -81,24 +81,6 @@
                 <i class="fas fa-list mr-2 text-primary"></i>
                 <span>Proyek <span x-text="selectedChain.charAt(0).toUpperCase() + selectedChain.slice(1)"></span></span>
             </h2>
-
-            <div class="flex space-x-2">
-                <button @click="
-                    loading = true;
-                    fetch('{{ route('panel.recommendations.chains') }}?chain=' + selectedChain + '&format=json&refresh=true')
-                        .then(response => response.json())
-                        .then(data => {
-                            chainRecommendations = data.recommendations || [];
-                            loading = false;
-                        })
-                        .catch(error => {
-                            console.error('Error refreshing chains:', error);
-                            loading = false;
-                        });"
-                    type="button" class="clay-button py-1.5 px-3 text-sm">
-                    <i class="fas fa-sync-alt mr-1" :class="{'animate-spin': loading}"></i> Refresh
-                </button>
-            </div>
         </div>
 
         <!-- Loading Indicator -->

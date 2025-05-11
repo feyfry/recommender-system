@@ -95,24 +95,7 @@
             </h2>
 
             <div class="flex space-x-2">
-                <button @click="
-                    loading = true;
-                    fetch('{{ route('panel.recommendations.trending-refresh') }}')
-                        .then(response => response.json())
-                        .then(data => {
-                            if (Array.isArray(data)) {
-                                trendingProjects = data;
-                                loading = false;
-                            }
-                        })
-                        .catch(error => {
-                            console.error('Error:', error);
-                            loading = false;
-                        });"
-                    class="clay-button py-1.5 px-3 text-sm">
-                    <i class="fas fa-sync-alt mr-1" :class="{'animate-spin': loading}"></i> Refresh
-                </button>
-
+                <!-- PERBAIKAN: Hapus button refresh, hanya tinggalkan dropdown perPage -->
                 <select x-model="perPage" @change="
                     loading = true;
                     window.location.href = '{{ route('panel.recommendations.trending') }}?page=' + currentPage + '&per_page=' + perPage;"
@@ -133,7 +116,7 @@
 
         <!-- Projects Table -->
         <div x-show="!loading" x-init="
-            // PERBAIKAN: Inisialisasi data pagination dengan benar
+            // PERBAIKAN: Hanya gunakan data dari server
             @if(isset($trendingProjects) && !empty($trendingProjects))
                 @if(is_object($trendingProjects) && method_exists($trendingProjects, 'lastPage'))
                     totalPages = {{ $trendingProjects->lastPage() }};
@@ -148,24 +131,7 @@
                 @endif
                 loading = false;
             @else
-                // PERBAIKAN: Ambil data dengan pagination
-                fetch('{{ route('panel.recommendations.trending') }}?page=' + currentPage + '&per_page=' + perPage + '&format=json')
-                    .then(response => response.json())
-                    .then(data => {
-                        // PERBAIKAN: Tangani berbagai format data
-                        if (data.data) {
-                            trendingProjects = data.data;
-                            totalPages = data.last_page || 1;
-                            currentPage = data.current_page || 1;
-                        } else {
-                            trendingProjects = data;
-                        }
-                        loading = false;
-                    })
-                    .catch(error => {
-                        console.error('Error loading trending projects:', error);
-                        loading = false;
-                    });
+                loading = false;
             @endif
         ">
             <div class="overflow-x-auto">
@@ -176,7 +142,6 @@
                             <th class="py-3 px-4 text-left">Proyek</th>
                             <th class="py-3 px-4 text-left">Harga</th>
                             <th class="py-3 px-4 text-left">24h $</th>
-                            <th class="py-3 px-4 text-left">7d %</th>
                             <th class="py-3 px-4 text-left">Volume 24h</th>
                             <th class="py-3 px-4 text-left">Market Cap</th>
                             <th class="py-3 px-4 text-left">Trend Score</th>
@@ -198,13 +163,11 @@
                                         </div>
                                     </div>
                                 </td>
-                                <td class="py-3 px-4 font-medium" x-text="'$' + (project.current_price ? project.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></td>
+                                <td class="py-3 px-4 font-medium" x-text="'$' + (project.current_price ? project.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8}) : '0.00')"></td>
                                 <td class="py-3 px-4" :class="(project.price_change_24h || 0) >= 0 ? 'text-success' : 'text-danger'"
                                     x-text="((project.price_change_24h || 0) >= 0 ? '+' : '') +
-                                            ((project.price_change_24h || 0).toFixed(2)) + '$'">
+                                            ((project.price_change_24h || 0).toFixed(8)) + '$'">
                                 </td>
-                                <td class="py-3 px-4" :class="(project.price_change_percentage_7d_in_currency || 0) > 0 ? 'text-success' : 'text-danger'"
-                                    x-text="((project.price_change_percentage_7d_in_currency || 0) > 0 ? '+' : '') + ((project.price_change_percentage_7d_in_currency || 0).toFixed(2)) + '%'"></td>
                                 <td class="py-3 px-4" x-text="'$' + (project.total_volume ? project.total_volume.toLocaleString(undefined, {maximumFractionDigits: 0}) : '0')"></td>
                                 <td class="py-3 px-4" x-text="'$' + (project.market_cap ? project.market_cap.toLocaleString(undefined, {maximumFractionDigits: 0}) : '0')"></td>
                                 <td class="py-3 px-4">
@@ -216,9 +179,9 @@
                                     </div>
                                 </td>
                                 <td class="py-3 px-4">
-                                    <div class="flex space-x-2">
+                                    <div class="flex space-x-1">
                                         <a :href="'/panel/recommendations/project/' + project.id" class="clay-badge clay-badge-info py-1 px-2 text-xs">
-                                            <i class="fas fa-info-circle"></i> Detail
+                                            <i class="fas fa-info-circle"></i>
                                         </a>
                                         <form method="POST" action="{{ route('panel.recommendations.add-favorite') }}" class="inline">
                                             @csrf

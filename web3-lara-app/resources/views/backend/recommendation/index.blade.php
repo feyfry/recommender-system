@@ -118,10 +118,10 @@
                     <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
                         <div class="font-bold text-lg mb-2" x-text="recommendation.name + ' (' + recommendation.symbol + ')'"></div>
                         <div class="flex justify-between mb-2 text-sm">
-                            <span x-text="'$' + (recommendation.current_price ? recommendation.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></span>
+                            <span x-text="'$' + (recommendation.current_price ? recommendation.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8}) : '0.00')"></span>
                             <span :class="(recommendation.price_change_24h || 0) >= 0 ? 'text-success' : 'text-danger'"
                                 x-text="((recommendation.price_change_24h || 0) >= 0 ? '+' : '') +
-                                        ((recommendation.price_change_24h || 0).toFixed(2)) + '$'">
+                                        ((recommendation.price_change_24h || 0).toFixed(8)) + '$'">
                             </span>
                         </div>
                         <!-- PERBAIKAN: Tampilkan kategori dengan fallback -->
@@ -154,30 +154,10 @@
                 <i class="fas fa-fire mr-2 text-warning"></i>
                 Proyek Trending
             </h2>
-            <div class="flex space-x-2">
-                <button @click="
-                    loading = true;
-                    fetch('{{ route('panel.recommendations.trending-refresh') }}')
-                        .then(response => response.json())
-                        .then(data => {
-                            if (data.data) {
-                                trendingProjects = data.data;
-                            } else {
-                                trendingProjects = data;
-                            }
-                            loading = false;
-                        })
-                        .catch(error => {
-                            console.error('Error:', error);
-                            loading = false;
-                        });"
-                        class="clay-button clay-button-warning py-1.5 px-3 text-sm">
-                    <i class="fas fa-sync-alt mr-1" :class="{'animate-spin': loading}"></i> Refresh
-                </button>
-                <a href="{{ route('panel.recommendations.trending') }}" class="clay-button clay-button-warning py-1.5 px-3 text-sm">
-                    Lihat Semua <i class="fas fa-arrow-right ml-1"></i>
-                </a>
-            </div>
+            <!-- PERBAIKAN: Hapus button refresh dan hanya sisakan link ke halaman trending -->
+            <a href="{{ route('panel.recommendations.trending') }}" class="clay-button clay-button-warning py-1.5 px-3 text-sm">
+                Lihat Semua <i class="fas fa-arrow-right ml-1"></i>
+            </a>
         </div>
 
         <!-- Loading Spinner -->
@@ -188,7 +168,7 @@
 
         <!-- Trending Projects Table -->
         <div class="overflow-x-auto" x-show="!loading" x-init="
-            // PERBAIKAN: Prioritaskan data dari server jika tersedia
+            // PERBAIKAN: Hanya gunakan data dari server tanpa refresh
             @if(!empty($trendingProjects))
                 @if(is_object($trendingProjects) && method_exists($trendingProjects, 'items'))
                     trendingProjects = {{ json_encode($trendingProjects->items()) }};
@@ -197,22 +177,8 @@
                 @endif
                 loading = false;
             @else
-                setTimeout(() => {
-                    fetch('{{ route('panel.recommendations.trending-refresh') }}')
-                        .then(response => response.json())
-                        .then(data => {
-                            if (data.data) {
-                                trendingProjects = data.data;
-                            } else {
-                                trendingProjects = data;
-                            }
-                            loading = false;
-                        })
-                        .catch(error => {
-                            console.error('Error:', error);
-                            loading = false;
-                        });
-                }, 100);
+                // PERBAIKAN: Langsung set loading false jika tidak ada data
+                loading = false;
             @endif">
 
             <table class="clay-table min-w-full">
@@ -239,10 +205,10 @@
                                     <div x-text="project.name + ' (' + project.symbol + ')'"></div>
                                 </div>
                             </td>
-                            <td class="py-3 px-4" x-text="'$' + (project.current_price ? project.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00')"></td>
+                            <td class="py-3 px-4" x-text="'$' + (project.current_price ? project.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8}) : '0.00')"></td>
                             <td class="py-3 px-4" :class="(project.price_change_24h || 0) >= 0 ? 'text-success' : 'text-danger'"
                                 x-text="((project.price_change_24h || 0) >= 0 ? '+' : '') +
-                                        ((project.price_change_24h || 0).toFixed(2)) + '$'">
+                                        ((project.price_change_24h || 0).toFixed(8)) + '$'">
                             </td>
                             <td class="py-3 px-4" :class="(project.price_change_percentage_7d_in_currency || 0) > 0 ? 'text-success' : 'text-danger'"
                                 x-text="((project.price_change_percentage_7d_in_currency || 0) > 0 ? '+' : '') +

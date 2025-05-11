@@ -157,24 +157,6 @@
             </h2>
 
             <div class="flex space-x-2">
-                <button
-                    @click="
-                        loading = true;
-                        fetch('{{ route('panel.recommendations.categories') }}?category={{ $selectedCategory }}&format=json&refresh=true')
-                            .then(response => response.json())
-                            .then(data => {
-                                categoryProjects = data.projects || [];
-                                totalPages = data.total_pages || 1;
-                                loading = false;
-                            })
-                            .catch(error => {
-                                console.error('Error:', error);
-                                loading = false;
-                            });"
-                    class="clay-button py-1.5 px-3 text-sm">
-                    <i class="fas fa-sync-alt mr-1" :class="{'animate-spin': loading}"></i> Refresh
-                </button>
-
                 <select x-model="perPage" @change="
                     loading = true;
                     fetch('{{ route('panel.recommendations.categories') }}?category={{ $selectedCategory }}&format=json&per_page=' + perPage)
@@ -188,7 +170,7 @@
                             console.error('Error:', error);
                             loading = false;
                         });"
-                    class="clay-select py-1.5 px-2 text-sm">
+                    class="clay-select py-2 px-8 text-sm">
                     <option value="8">8 per halaman</option>
                     <option value="16" selected>16 per halaman</option>
                     <option value="32">32 per halaman</option>

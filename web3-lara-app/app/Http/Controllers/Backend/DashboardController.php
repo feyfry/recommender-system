@@ -98,18 +98,6 @@ class DashboardController extends Controller
     }
 
     /**
-     * AJAX endpoint untuk refresh trending projects
-     */
-    public function refreshTrending()
-    {
-        // Clear cache dan ambil data baru
-        Cache::forget('dashboard_trending_projects');
-        $trendingProjects = $this->getTrendingProjects(4);
-
-        return response()->json($trendingProjects);
-    }
-
-    /**
      * Mendapatkan ringkasan portofolio pengguna (Dioptimalkan untuk performa)
      */
     private function getPortfolioSummary($userId)

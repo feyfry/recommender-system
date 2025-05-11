@@ -266,11 +266,7 @@
                             </div>
                         </template>
 
-                        <div class="mt-4">
-                            <a href="{{ route('panel.recommendations') }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
-                                Lihat Aktivitas
-                            </a>
-                        </div>
+                        <!-- PERBAIKAN: Tidak perlu button "Lihat Aktivitas" karena sudah ada di dashboard -->
                     </div>
                 </template>
 
@@ -321,8 +317,12 @@
                             @if(isset($recommendation['current_price']))
                                 <div class="flex justify-between text-sm">
                                     <span>${{ number_format($recommendation['current_price'], 2) }}</span>
-                                    <span class="{{ isset($recommendation['price_change_24h']) && $recommendation['price_change_24h'] >= 0 ? 'text-success' : 'text-danger' }}">
-                                        {{ isset($recommendation['price_change_24h']) ? (($recommendation['price_change_24h'] >= 0 ? '+' : '') . number_format($recommendation['price_change_24h'], 2) . '%') : '' }}
+                                    <span class="{{ isset($recommendation['price_change_percentage_24h']) && $recommendation['price_change_percentage_24h'] >= 0 ? 'text-success' : 'text-danger' }}">
+                                        @if(isset($recommendation['price_change_percentage_24h']))
+                                            {{ ($recommendation['price_change_percentage_24h'] >= 0 ? '+' : '') . number_format($recommendation['price_change_percentage_24h'], 2) . '%' }}
+                                        @else
+                                            -
+                                        @endif
                                     </span>
                                 </div>
                             @endif
@@ -353,25 +353,7 @@
             <h2 class="text-xl font-bold mb-6 flex items-center">
                 <i class="fas fa-chart-line mr-2 text-info"></i>
                 Proyek Trending
-                <button @click="
-                    if (!loading) {
-                        loading = true;
-                        fetch('{{ route('panel.recommendations.trending-refresh') }}')
-                            .then(response => response.json())
-                            .then(data => {
-                                trendingProjects = data;
-                                loading = false;
-                            })
-                            .catch(error => {
-                                console.error('Error:', error);
-                                loading = false;
-                            });
-                    }
-                " class="ml-2 text-sm clay-button clay-button-secondary py-1 px-2 flex items-center">
-                    <i class="fas fa-sync-alt mr-1" :class="{'animate-spin': loading}"></i>
-                    <span x-show="!loading">Refresh</span>
-                    <span x-show="loading">Loading...</span>
-                </button>
+                <!-- PERBAIKAN: Hapus button refresh karena tidak berguna -->
             </h2>
 
             <template x-if="trendingProjects && trendingProjects.length > 0">
@@ -394,9 +376,16 @@
                             </div>
                             <template x-if="project.current_price">
                                 <div class="flex justify-between text-sm">
-                                    <span x-text="'$' + project.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
-                                    <span :class="project.price_change_percentage_24h >= 0 ? 'text-success' : 'text-danger'"
-                                          x-text="(project.price_change_percentage_24h >= 0 ? '+' : '') + project.price_change_percentage_24h.toFixed(2) + '%'"></span>
+                                    <span x-text="'$' + (project.current_price || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
+                                    <!-- PERBAIKAN: Handle undefined price_change_percentage_24h -->
+                                    <span :class="(project.price_change_percentage_24h || 0) >= 0 ? 'text-success' : 'text-danger'">
+                                        <template x-if="project.price_change_percentage_24h !== undefined && project.price_change_percentage_24h !== null">
+                                            <span x-text="((project.price_change_percentage_24h || 0) >= 0 ? '+' : '') + (project.price_change_percentage_24h || 0).toFixed(2) + '%'"></span>
+                                        </template>
+                                        <template x-if="project.price_change_percentage_24h === undefined || project.price_change_percentage_24h === null">
+                                            <span>-</span>
+                                        </template>
+                                    </span>
                                 </div>
                             </template>
                         </a>

@@ -157,19 +157,6 @@ class RecommendationController extends Controller
     }
 
     /**
-     * AJAX endpoint untuk refresh trending projects
-     */
-    public function refreshTrending()
-    {
-        // Clear cache dan ambil data baru
-        Cache::forget('rec_trending_4');
-        Cache::forget('dashboard_trending_projects');
-        $trendingProjects = $this->getTrendingProjects(4);
-
-        return response()->json($trendingProjects);
-    }
-
-    /**
      * Menampilkan halaman proyek populer
      */
     public function popular(Request $request)
@@ -454,7 +441,7 @@ class RecommendationController extends Controller
                     'timestamp' => now()->timestamp,
                 ],
             ]);
-            
+
             // DIOPTIMALKAN: Kirim interaksi ke API dengan penanganan error yang lebih baik
             try {
                 Http::timeout(2)->post("{$this->apiUrl}/interactions/record", [

@@ -3,11 +3,12 @@
 use Psr\SimpleCache\CacheException;
 use Illuminate\Foundation\Application;
 use Illuminate\Console\Scheduling\Schedule;
+use App\Http\Middleware\CheckRoleMiddleware;
+use App\Http\Middleware\HandleCorsMiddleware;
 use App\Http\Middleware\CacheHeadersMiddleware;
 use Illuminate\Http\Middleware\SetCacheHeaders;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use App\Http\Middleware\CheckRoleMiddleware; // Middleware baru untuk manajemen cache
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -19,17 +20,21 @@ return Application::configure(basePath: dirname(__DIR__))
         // Mendaftarkan alias middleware
         $middleware->alias([
             'role'          => CheckRoleMiddleware::class,
-            'cache.headers' => CacheHeadersMiddleware::class, // Daftarkan middleware cache
+            'cache.headers' => CacheHeadersMiddleware::class,
+            'cors'          => HandleCorsMiddleware::class,
         ]);
 
-        // Menambahkan middleware cache untuk semua response publik
-        // menggunakan sintaks yang benar untuk Laravel 12
+        // Menambahkan middleware untuk semua response
         $middleware->web(append: [
             SetCacheHeaders::class,
         ]);
+
+        // Tambahkan CORS middleware untuk route web3
+        $middleware->group('web3', [
+            HandleCorsMiddleware::class,
+        ]);
     })
     ->withCommands([
-        // Daftar perintah artisan yang akan digunakan
         App\Console\Commands\ImportRecommendationData::class,
         App\Console\Commands\SyncRecommendationData::class,
         App\Console\Commands\ClearApiCache::class
@@ -52,9 +57,7 @@ return Application::configure(basePath: dirname(__DIR__))
             ->description('Bersihkan cache API yang kadaluwarsa');
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        // Konfigurasi exception handling
         $exceptions->dontReport([
-            // Tipe exception yang tidak perlu dilaporkan
             CacheException::class,
         ]);
     })

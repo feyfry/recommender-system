@@ -41,8 +41,8 @@
                         <i class="fas fa-wallet mr-2"></i>
                         <span class="font-medium">Wallet Terhubung:</span>
                     </div>
-                    <div class="clay-input font-mono text-sm break-all py-2">
-                        <span x-text="walletAddress"></span>
+                    <div class="font-mono text-sm break-all bg-white p-3 rounded border border-gray-200">
+                        <span x-text="walletAddress" class="text-gray-800"></span>
                     </div>
                 </div>
 
@@ -126,35 +126,61 @@
             loading: false,
             walletAddress: '',
             nonce: '',
+            message: '',
             error: '',
             showWelcomeAlert: false,
+
+            async init() {
+                // Check if MetaMask is installed on component init
+                if (typeof window.ethereum === 'undefined') {
+                    this.error = 'MetaMask tidak terdeteksi. Silakan instal MetaMask terlebih dahulu.';
+                }
+            },
 
             async connectWallet() {
                 this.error = '';
                 this.loading = true;
 
                 try {
-                    // Periksa apakah MetaMask tersedia
-                    if (!window.ethereum) {
+                    // Check if MetaMask is available
+                    if (typeof window.ethereum === 'undefined') {
                         throw new Error('MetaMask tidak terdeteksi. Silakan instal MetaMask dan refresh halaman.');
                     }
 
-                    // Minta akun dari MetaMask
-                    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-
-                    if (accounts.length === 0) {
-                        throw new Error('Tidak ada akun MetaMask yang terdeteksi atau akses ditolak.');
+                    // Check if ethereum is connected
+                    if (!window.ethereum.isConnected()) {
+                        // Try to enable ethereum
+                        await window.ethereum.enable();
                     }
 
-                    this.walletAddress = accounts[0];
+                    // Request accounts with proper error handling
+                    let accounts;
+                    try {
+                        accounts = await window.ethereum.request({
+                            method: 'eth_requestAccounts'
+                        });
+                    } catch (error) {
+                        if (error.code === 4001) {
+                            throw new Error('Anda menolak permintaan koneksi wallet.');
+                        }
+                        throw error;
+                    }
+
+                    if (!accounts || accounts.length === 0) {
+                        throw new Error('Tidak ada akun MetaMask yang terdeteksi.');
+                    }
+
+                    // Normalize address
+                    this.walletAddress = accounts[0].toLowerCase();
                     this.connected = true;
 
-                    // Dapatkan nonce dari server
+                    // Get nonce from server
                     await this.getNonce();
 
                 } catch (error) {
                     console.error('Error connecting wallet:', error);
                     this.error = error.message || 'Gagal menghubungkan wallet. Silakan coba lagi.';
+                    this.connected = false;
                 } finally {
                     this.loading = false;
                 }
@@ -185,6 +211,7 @@
                 } catch (error) {
                     console.error('Error getting nonce:', error);
                     this.error = error.message || 'Gagal mendapatkan nonce. Silakan coba lagi.';
+                    throw error;
                 }
             },
 
@@ -193,13 +220,43 @@
                 this.loading = true;
 
                 try {
-                    const message = `Please sign this message to verify your identity. Nonce: ${this.nonce}`;
-                    const signature = await window.ethereum.request({
-                        method: 'personal_sign',
-                        params: [message, this.walletAddress]
-                    });
+                    // Make sure wallet is still connected
+                    if (!window.ethereum || !this.walletAddress) {
+                        throw new Error('Wallet tidak terhubung. Silakan hubungkan wallet terlebih dahulu.');
+                    }
 
-                    const res = await fetch('{{ route("web3.verify") }}', {
+                    // Sign message with proper error handling
+                    let signature;
+                    try {
+                        // Use the exact message from server
+                        signature = await window.ethereum.request({
+                            method: 'personal_sign',
+                            params: [this.message, this.walletAddress, ''] // Add empty password parameter
+                        });
+                    } catch (error) {
+                        if (error.code === 4001) {
+                            throw new Error('Anda menolak permintaan tanda tangan.');
+                        }
+                        if (error.code === -32603) {
+                            // Internal JSON-RPC error - try alternative signing method
+                            try {
+                                signature = await window.ethereum.request({
+                                    method: 'eth_sign',
+                                    params: [this.walletAddress, this.message]
+                                });
+                            } catch (altError) {
+                                throw new Error('Gagal menandatangani pesan. Pastikan MetaMask terbuka dan Anda sudah login.');
+                            }
+                        }
+                        throw error;
+                    }
+
+                    if (!signature) {
+                        throw new Error('Tanda tangan kosong. Silakan coba lagi.');
+                    }
+
+                    // Verify signature on server
+                    const verifyResponse = await fetch('{{ route("web3.verify") }}', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -211,31 +268,75 @@
                         })
                     });
 
-                    const data = await res.json();
-                    if (!res.ok) {
-                        throw new Error(data.error || 'Verifikasi gagal');
+                    const verifyData = await verifyResponse.json();
+
+                    if (!verifyResponse.ok) {
+                        throw new Error(verifyData.error || 'Verifikasi tanda tangan gagal');
                     }
 
-                    // Tampilkan alert welcome sebelum redirect
+                    if (verifyData.success) {
+                        // Show welcome alert before redirect
+                        this.loading = false;
+                        this.authenticated = true;
+                        this.showWelcomeAlert = true;
+
+                        // Redirect after animation
+                        setTimeout(() => {
+                            window.location.href = '{{ route("panel.dashboard") }}';
+                        }, 2000);
+                    } else {
+                        throw new Error('Autentikasi gagal. Silakan coba lagi.');
+                    }
+
+                } catch (error) {
+                    console.error('Error during login:', error);
+
+                    // Provide more specific error messages
+                    if (error.code === -32603) {
+                        this.error = 'MetaMask mengalami error internal. Silakan coba lagi atau restart MetaMask.';
+                    } else if (error.code === 4001) {
+                        this.error = 'Anda membatalkan proses login.';
+                    } else {
+                        this.error = error.message || 'Terjadi kesalahan saat proses login.';
+                    }
+
                     this.loading = false;
-                    this.authenticated = true;
-                    this.showWelcomeAlert = true;
+                }
+            },
 
-                    console.log("Login berhasil - Menampilkan alert selamat datang");
+            // Handle account changes
+            setupEventListeners() {
+                if (window.ethereum) {
+                    window.ethereum.on('accountsChanged', (accounts) => {
+                        if (accounts.length === 0) {
+                            this.connected = false;
+                            this.walletAddress = '';
+                            this.error = 'Wallet terputus. Silakan hubungkan kembali.';
+                        } else if (accounts[0].toLowerCase() !== this.walletAddress) {
+                            // Account changed, reset state
+                            this.walletAddress = accounts[0].toLowerCase();
+                            this.getNonce();
+                        }
+                    });
 
-                    // Tunggu beberapa detik sebelum redirect
-                    setTimeout(() => {
-                        window.location.href = '{{ route("panel.dashboard") }}';
-                    }, 3000);
-
-                } catch (err) {
-                    console.error('Error during login:', err);
-                    this.error = err.message || 'Terjadi kesalahan saat proses login. Silakan coba lagi.';
-                    this.loading = false;
+                    window.ethereum.on('chainChanged', () => {
+                        // Reload page when chain changes
+                        window.location.reload();
+                    });
                 }
             }
         }
     }
+
+    // Initialize Alpine component with event listeners
+    document.addEventListener('alpine:init', () => {
+        Alpine.data('web3Login', () => {
+            const data = web3Login();
+            data.init();
+            data.setupEventListeners();
+            return data;
+        });
+    });
 </script>
 @endpush
 @endsection
