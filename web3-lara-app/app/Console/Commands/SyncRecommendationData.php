@@ -90,16 +90,36 @@ class SyncRecommendationData extends Command
             // Tulis header
             fputcsv($file, ['user_id', 'project_id', 'interaction_type', 'weight', 'context', 'timestamp']);
 
-            // Tulis data dengan pengecekan duplikasi
+            // PERBAIKAN: Track interaksi yang sudah ditulis untuk menghindari duplikasi
             $exportedInteractions = [];
-            foreach ($interactions as $interaction) {
-                // Buat unique key
-                $uniqueKey = "{$interaction->user_id}:{$interaction->project_id}:{$interaction->interaction_type}:{$interaction->created_at}";
+            $duplicateCount = 0;
 
-                // Skip jika sudah diekspor
-                if (isset($exportedInteractions[$uniqueKey])) {
+            foreach ($interactions as $interaction) {
+                // Buat unique key berdasarkan data penting (tanpa timestamp untuk menghindari masalah timezone)
+                $uniqueKey = "{$interaction->user_id}:{$interaction->project_id}:{$interaction->interaction_type}";
+
+                // PERBAIKAN: Cek duplikasi berdasarkan key yang sama dalam rentang waktu dekat
+                $interactionTime = strtotime($interaction->created_at);
+                $isDuplicate = false;
+
+                foreach ($exportedInteractions as $existingKey => $existingTime) {
+                    if (strpos($existingKey, $uniqueKey) === 0) {
+                        // Jika ada interaksi serupa dalam 60 detik, anggap duplikat
+                        if (abs($interactionTime - $existingTime) < 60) {
+                            $isDuplicate = true;
+                            $duplicateCount++;
+                            break;
+                        }
+                    }
+                }
+
+                // Skip jika duplikat
+                if ($isDuplicate) {
                     continue;
                 }
+
+                // PERBAIKAN: Format timestamp dengan benar untuk konsistensi
+                $timestamp = date('Y-m-d\TH:i:s\Z', strtotime($interaction->created_at));
 
                 fputcsv($file, [
                     $interaction->user_id,
@@ -107,24 +127,32 @@ class SyncRecommendationData extends Command
                     $interaction->interaction_type,
                     $interaction->weight,
                     is_string($interaction->context) ? $interaction->context : json_encode($interaction->context),
-                    $interaction->created_at,
+                    $timestamp, // Gunakan format ISO8601 dengan timezone UTC
                 ]);
 
-                $exportedInteractions[$uniqueKey] = true;
+                // Simpan interaksi yang sudah diekspor dengan timestamp
+                $exportedInteractions[$uniqueKey . ':' . $timestamp] = $interactionTime;
             }
 
             fclose($file);
 
+            if ($duplicateCount > 0) {
+                $this->warn("Ditemukan dan dihapus {$duplicateCount} interaksi duplikat");
+            }
+
             // Kirim file ini ke engine rekomendasi
-            // Implementasi pengiriman file bisa melalui API atau dengan menyalin file
             $this->info('Interaksi berhasil diekspor ke: ' . $csvPath);
             $this->info('Sekarang menyalin file ke direktori engine rekomendasi...');
 
             // Salin ke direktori engine rekomendasi
-            $targetPath = '../recommendation-engine/data/processed/interactions.csv';
+            $targetPath = base_path('../recommendation-engine/data/processed/interactions.csv');
             copy($csvPath, $targetPath);
 
             $this->info('File interaksi berhasil disalin ke engine rekomendasi');
+
+            // Hapus file temporary
+            unlink($csvPath);
+
         } catch (\Exception $e) {
             $this->error('Terjadi kesalahan: ' . $e->getMessage());
             Log::error('Sinkronisasi interaksi gagal: ' . $e->getMessage());

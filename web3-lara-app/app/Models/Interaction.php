@@ -130,6 +130,45 @@ class Interaction extends Model
     }
 
     /**
+     * Override method save untuk mengirim interaksi ke engine rekomendasi
+     */
+    public function save(array $options = [])
+    {
+        // PERBAIKAN: Cek duplikasi sebelum menyimpan
+        if (!$this->exists && $this->isDuplicate()) {
+            Log::info("Interaction duplikat terdeteksi, skip: {$this->user_id}:{$this->project_id}:{$this->interaction_type}");
+            return false;
+        }
+
+        $result = parent::save($options);
+
+        // Kirim ke engine rekomendasi setelah disimpan di database
+        if ($result && !$this->wasRecentlyCreated) {
+            // Hanya kirim ke engine untuk interaksi yang baru dibuat
+            try {
+                $this->sendToRecommendationEngine();
+            } catch (\Exception $e) {
+                Log::error("Gagal mengirim interaksi ke engine rekomendasi: " . $e->getMessage());
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Cek apakah interaksi ini duplikat
+     */
+    protected function isDuplicate()
+    {
+        // Cek interaksi serupa dalam 60 detik terakhir
+        return static::where('user_id', $this->user_id)
+            ->where('project_id', $this->project_id)
+            ->where('interaction_type', $this->interaction_type)
+            ->where('created_at', '>=', now()->subSeconds(60))
+            ->exists();
+    }
+
+    /**
      * Kirim interaksi ke engine rekomendasi
      */
     public function sendToRecommendationEngine(): bool
@@ -144,11 +183,15 @@ class Interaction extends Model
                 'interaction_type' => $this->interaction_type,
                 'weight' => $this->weight,
                 'context' => $this->context,
-                'timestamp' => $this->created_at->toIso8601String(),
+                'timestamp' => $this->created_at->toIso8601String(), // Format ISO8601 dengan timezone
             ];
 
-            // Kirim ke API dengan timeout
-            $response = Http::timeout(2)->post("{$apiUrl}/interactions/record", $data);
+            // PERBAIKAN: Tambahkan header untuk mencegah duplikasi di sisi API
+            $response = Http::timeout(2)
+                ->withHeaders([
+                    'X-Interaction-ID' => md5("{$this->user_id}:{$this->project_id}:{$this->interaction_type}:{$this->created_at->timestamp}")
+                ])
+                ->post("{$apiUrl}/interactions/record", $data);
 
             if ($response->successful()) {
                 return true;
@@ -160,23 +203,5 @@ class Interaction extends Model
             Log::error("Error mengirim interaksi ke engine: " . $e->getMessage());
             return false;
         }
-    }
-
-    /**
-     * Override method save untuk mengirim interaksi ke engine rekomendasi
-     */
-    public function save(array $options = [])
-    {
-        $result = parent::save($options);
-
-        // Kirim ke engine rekomendasi setelah disimpan di database
-        // Gunakan try-catch untuk menjaga aplikasi tetap berjalan
-        try {
-            $this->sendToRecommendationEngine();
-        } catch (\Exception $e) {
-            Log::error("Gagal mengirim interaksi ke engine rekomendasi: " . $e->getMessage());
-        }
-
-        return $result;
     }
 }
