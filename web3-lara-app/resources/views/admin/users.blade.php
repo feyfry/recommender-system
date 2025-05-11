@@ -22,22 +22,42 @@
             Filter Pengguna
         </h2>
 
-        <form action="{{ route('admin.users') }}" method="GET" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <form action="{{ route('admin.users') }}" method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
                 <label for="role" class="block mb-2 font-medium">Peran</label>
                 <select name="role" id="role" class="clay-select w-full">
                     <option value="">-- Semua Peran --</option>
-                    <option value="admin" {{ $filters['role'] ?? '' == 'admin' ? 'selected' : '' }}>Admin</option>
-                    <option value="community" {{ $filters['role'] ?? '' == 'community' ? 'selected' : '' }}>Community</option>
+                    <option value="admin" {{ ($filters['role'] ?? '') == 'admin' ? 'selected' : '' }}>Admin</option>
+                    <option value="community" {{ ($filters['role'] ?? '') == 'community' ? 'selected' : '' }}>Community</option>
                 </select>
             </div>
 
             <div>
                 <label for="search" class="block mb-2 font-medium">Pencarian</label>
-                <input type="text" name="search" id="search" class="clay-input w-full" placeholder="Cari user_id atau wallet..." value="{{ $filters['search'] ?? '' }}">
+                <input type="text" name="search" id="search" class="clay-input w-full"
+                       placeholder="Cari user_id atau wallet..."
+                       value="{{ $filters['search'] ?? '' }}">
             </div>
 
-            <div class="flex items-end space-x-2">
+            <!-- Opsi sorting -->
+            <div>
+                <label for="sort" class="block mb-2 font-medium">Urutkan Berdasarkan</label>
+                <select name="sort" id="sort" class="clay-select w-full">
+                    <option value="created_at" {{ ($filters['sort'] ?? '') == 'created_at' ? 'selected' : '' }}>Tanggal Bergabung</option>
+                    <option value="last_login" {{ ($filters['sort'] ?? '') == 'last_login' ? 'selected' : '' }}>Login Terakhir</option>
+                    <option value="interactions" {{ ($filters['sort'] ?? '') == 'interactions' ? 'selected' : '' }}>Jumlah Interaksi</option>
+                </select>
+            </div>
+
+            <div>
+                <label for="direction" class="block mb-2 font-medium">Arah Urutan</label>
+                <select name="direction" id="direction" class="clay-select w-full">
+                    <option value="desc" {{ ($filters['direction'] ?? 'desc') == 'desc' ? 'selected' : '' }}>Terbanyak/Terbaru</option>
+                    <option value="asc" {{ ($filters['direction'] ?? 'desc') == 'asc' ? 'selected' : '' }}>Tersedikit/Terlama</option>
+                </select>
+            </div>
+
+            <div class="md:col-span-4 flex items-end space-x-2">
                 <button type="submit" class="clay-button clay-button-primary py-2 px-4">
                     <i class="fas fa-search mr-1"></i> Cari
                 </button>
@@ -112,6 +132,16 @@
                         <th class="py-3 px-4 text-left">Wallet Address</th>
                         <th class="py-3 px-4 text-left">Username</th>
                         <th class="py-3 px-4 text-left">Peran</th>
+                        <!-- TAMBAHAN: Kolom Interaksi dengan link sortable -->
+                        <th class="py-3 px-4 text-left">
+                            <a href="{{ route('admin.users', array_merge($filters ?? [], ['sort' => 'interactions', 'direction' => (($filters['sort'] ?? '') == 'interactions' && ($filters['direction'] ?? 'desc') == 'desc') ? 'asc' : 'desc'])) }}"
+                               class="flex items-center hover:text-primary">
+                                Interaksi
+                                @if(($filters['sort'] ?? '') == 'interactions')
+                                    <i class="fas fa-sort-{{ ($filters['direction'] ?? 'desc') == 'asc' ? 'up' : 'down' }} ml-1"></i>
+                                @endif
+                            </a>
+                        </th>
                         <th class="py-3 px-4 text-left">Bergabung</th>
                         <th class="py-3 px-4 text-left">Login Terakhir</th>
                         <th class="py-3 px-4 text-left">Aksi</th>
@@ -132,6 +162,12 @@
                                 <span class="clay-badge clay-badge-secondary">{{ $user->role }}</span>
                             @endif
                         </td>
+                        <!-- TAMBAHAN: Tampilkan jumlah interaksi -->
+                        <td class="py-3 px-4">
+                            <span class="clay-badge clay-badge-info">
+                                {{ isset($user->interaction_count) ? $user->interaction_count : $user->interactions->count() }} interaksi
+                            </span>
+                        </td>
                         <td class="py-3 px-4 text-sm">{{ $user->created_at->format('j M Y') }}</td>
                         <td class="py-3 px-4 text-sm">{{ $user->last_login ? $user->last_login->diffForHumans() : 'Belum pernah' }}</td>
                         <td class="py-3 px-4">
@@ -147,7 +183,7 @@
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="7" class="py-6 px-4 text-center">
+                        <td colspan="8" class="py-6 px-4 text-center">
                             <p class="text-gray-500">Tidak ada pengguna yang ditemukan.</p>
                         </td>
                     </tr>

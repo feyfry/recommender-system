@@ -180,8 +180,19 @@ class AdminController extends Controller
             });
         }
 
-        // Urutkan
-        $query->orderBy($request->get('sort', 'created_at'), $request->get('direction', 'desc'));
+        // PERBAIKAN: Handle sorting berdasarkan jumlah interactions
+        if ($request->get('sort') === 'interactions') {
+            $direction = $request->get('direction', 'desc');
+
+            // Join dengan interactions dan group by untuk menghitung jumlah interaksi
+            $query->leftJoin('interactions', 'users.user_id', '=', 'interactions.user_id')
+                ->select('users.*', DB::raw('COUNT(interactions.id) as interaction_count'))
+                ->groupBy('users.id', 'users.user_id', 'users.wallet_address', 'users.nonce', 'users.role', 'users.last_login', 'users.created_at', 'users.updated_at')
+                ->orderBy('interaction_count', $direction);
+        } else {
+            // Urutkan normal jika bukan berdasarkan interactions
+            $query->orderBy($request->get('sort', 'created_at'), $request->get('direction', 'desc'));
+        }
 
         // Pagination
         $users = $query->paginate(10);
@@ -192,8 +203,6 @@ class AdminController extends Controller
                 ->groupBy('role')
                 ->get();
         });
-
-        // DIOPTIMALKAN: Tidak catat aktivitas melihat halaman users admin
 
         return view('admin.users', [
             'users'     => $users,
