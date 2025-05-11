@@ -316,10 +316,10 @@
                             </div>
                             @if(isset($recommendation['current_price']))
                                 <div class="flex justify-between text-sm">
-                                    <span>${{ number_format($recommendation['current_price'], 2) }}</span>
-                                    <span class="{{ isset($recommendation['price_change_percentage_24h']) && $recommendation['price_change_percentage_24h'] >= 0 ? 'text-success' : 'text-danger' }}">
-                                        @if(isset($recommendation['price_change_percentage_24h']))
-                                            {{ ($recommendation['price_change_percentage_24h'] >= 0 ? '+' : '') . number_format($recommendation['price_change_percentage_24h'], 2) . '%' }}
+                                    <span>${{ number_format($recommendation['current_price'], 8) }}</span>
+                                    <span class="{{ isset($recommendation['price_change_24h']) && $recommendation['price_change_24h'] >= 0 ? 'text-success' : 'text-danger' }}">
+                                        @if(isset($recommendation['price_change_24h']))
+                                            {{ ($recommendation['price_change_24h'] >= 0 ? '+' : '') . number_format($recommendation['price_change_24h'], 8) . '$' }}
                                         @else
                                             -
                                         @endif
@@ -376,13 +376,13 @@
                             </div>
                             <template x-if="project.current_price">
                                 <div class="flex justify-between text-sm">
-                                    <span x-text="'$' + (project.current_price || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})"></span>
-                                    <!-- PERBAIKAN: Handle undefined price_change_percentage_24h -->
-                                    <span :class="(project.price_change_percentage_24h || 0) >= 0 ? 'text-success' : 'text-danger'">
-                                        <template x-if="project.price_change_percentage_24h !== undefined && project.price_change_percentage_24h !== null">
-                                            <span x-text="((project.price_change_percentage_24h || 0) >= 0 ? '+' : '') + (project.price_change_percentage_24h || 0).toFixed(2) + '%'"></span>
+                                    <span x-text="'$' + (project.current_price || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span>
+                                    <!-- PERBAIKAN: Handle undefined price_change_24h -->
+                                    <span :class="(project.price_change_24h || 0) >= 0 ? 'text-success' : 'text-danger'">
+                                        <template x-if="project.price_change_24h !== undefined && project.price_change_24h !== null">
+                                            <span x-text="((project.price_change_24h || 0) >= 0 ? '+' : '') + (project.price_change_24h || 0).toFixed(8) + '$'"></span>
                                         </template>
-                                        <template x-if="project.price_change_percentage_24h === undefined || project.price_change_percentage_24h === null">
+                                        <template x-if="project.price_change_24h === undefined || project.price_change_24h === null">
                                             <span>-</span>
                                         </template>
                                     </span>
