@@ -359,6 +359,7 @@ class AdminController extends Controller
                         }
                     } catch (\Exception $e) {
                         // Fallback ke nilai asli jika parsing gagal
+                        $cleanCategories[] = $category;
                     }
                 }
 
