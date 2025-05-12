@@ -1204,11 +1204,14 @@ class DataProcessor:
         return features_df
     
     def _create_synthetic_interactions(self, projects_df: pd.DataFrame, n_users: int = 500) -> pd.DataFrame:
+        """
+        Membuat interaksi sintetis dengan pola yang lebih realistis dan lebih acak
+        """
         logger.info(f"Creating synthetic interactions for {n_users} users")
         
         # Create global RNG instance with fixed seed for reproducibility
         base_seed = EVAL_RANDOM_SEED
-        global_rng = np.random.default_rng(base_seed)
+        global_rng = np.random.RandomState(base_seed)
         
         # Create total time range for all interactions (now - max_days_ago to now)
         now = datetime.now()
@@ -1225,14 +1228,14 @@ class DataProcessor:
         # Create multiple persona distributions for different user batches
         num_batches = 5  # Divide users into batches with different distributions
         for i in range(num_batches):
-            batch_seed = global_rng.integers(1000, 10000)
-            batch_rng = np.random.default_rng(batch_seed)
+            batch_seed = global_rng.randint(1000, 10000)
+            batch_rng = np.random.RandomState(batch_seed)
             
             weights = batch_rng.random(size=num_personas)
             weights = weights / weights.sum()  # Normalize
             
             # Add some skew to make certain personas more common in each batch
-            skew_factor = batch_rng.integers(0, num_personas)
+            skew_factor = batch_rng.randint(0, num_personas)
             weights[skew_factor] *= batch_rng.uniform(1.5, 2.5)
             weights = weights / weights.sum()  # Re-normalize
             
@@ -1284,7 +1287,7 @@ class DataProcessor:
                 'probs': 0.25  # Dinaikkan dari 0.20
             },
             'power_user': {
-                'interaction_count_range': (100, 150),
+                'interaction_count_range': (100, 200),
                 'session_patterns': ['random_spread', 'regular_sessions'],
                 'exploration_rate': (0.4, 0.6),
                 'popularity_bias': (0.3, 0.5),
@@ -1304,8 +1307,8 @@ class DataProcessor:
         # Generate users with much greater randomness and significantly different patterns
         for user_idx in range(1, n_users + 1):
             # Create user-specific RNG with unique seed
-            user_seed = global_rng.integers(10000, 1000000) + user_idx
-            user_rng = np.random.default_rng(user_seed)
+            user_seed = global_rng.randint(10000, 1000000) + user_idx
+            user_rng = np.random.RandomState(user_seed)
             
             # Determine which batch this user belongs to
             batch_idx = user_idx % num_batches
@@ -1328,16 +1331,26 @@ class DataProcessor:
             min_count, max_count = activity_profile['interaction_count_range']
             
             if activity_type == 'power_user':
-                # Power users follow a different distribution - sometimes have extreme numbers
+                # Power users follow a power-law distribution
                 if user_rng.random() < 0.2:  # 20% chance of super-user
-                    n_interactions = user_rng.integers(150, 300)
+                    # Use actual power law distribution for power users
+                    alpha = 2.5  # Power law exponent
+                    lower_bound = min_count
+                    upper_bound = 300  # Allow very active users
+                    
+                    # Generate from power law distribution
+                    u = user_rng.random()
+                    x_min_pow = lower_bound**(1-alpha)
+                    x_max_pow = upper_bound**(1-alpha)
+                    n_interactions = int((x_min_pow + u * (x_max_pow - x_min_pow))**(1/(1-alpha)))
                 else:
-                    n_interactions = user_rng.integers(min_count, max_count + 1)
+                    n_interactions = user_rng.randint(min_count, max_count + 1)
             else:
-                # Normal distribution centered in the range
-                mean = (min_count + max_count) / 2
-                std = (max_count - min_count) / 4
-                n_interactions = max(min_count, min(max_count, int(user_rng.normal(mean, std))))
+                # For regular users, use log-normal distribution for more realistic tails
+                mu = np.log((min_count + max_count) / 2)
+                sigma = (np.log(max_count) - np.log(min_count)) / 4
+                n_interactions = int(user_rng.lognormal(mu, sigma))
+                n_interactions = max(min_count, min(max_count, n_interactions))
             
             # TAMBAHAN: Pastikan minimum 5 interaksi
             n_interactions = max(5, n_interactions)
@@ -1365,7 +1378,7 @@ class DataProcessor:
             # Add secondary categories preferences with varying weights
             available_categories = [c for c in unique_categories if c not in preferred_categories]
             if available_categories:
-                num_extra = min(user_rng.integers(1, 4), len(available_categories))
+                num_extra = min(user_rng.randint(1, 4), len(available_categories))
                 extra_categories = user_rng.choice(available_categories, size=num_extra, replace=False)
                 
                 # Create new arrays with extra capacity
@@ -1416,9 +1429,9 @@ class DataProcessor:
             
             # NEW: Create user-specific time window within the global time range
             # This ensures better user interleaving while maintaining realistic patterns per user
-            user_start_offset = user_rng.integers(0, global_max_days_ago // 2)  # Random start within first half of global range
+            user_start_offset = user_rng.randint(0, global_max_days_ago // 2)  # Random start within first half of global range
             user_time_range = global_max_days_ago - user_start_offset
-            user_max_days_ago = min(user_time_range, 30 + user_rng.integers(0, 60))  # User's active period
+            user_max_days_ago = min(user_time_range, 30 + user_rng.randint(0, 60))  # User's active period
             
             # Generate timestamps with improved distribution
             timestamps = self._generate_user_timestamps(n_interactions, user_max_days_ago, user_start_offset, user_rng)
@@ -1446,7 +1459,7 @@ class DataProcessor:
             phase_categories = {}
             if interest_pattern == 'fad_chaser':
                 # Divide interactions into 2-4 phases with different category focus
-                num_phases = user_rng.integers(2, 5)
+                num_phases = user_rng.randint(2, 5)
                 shift_points = sorted(user_rng.choice(
                     range(1, n_interactions), 
                     size=min(num_phases-1, n_interactions-1),
@@ -1473,7 +1486,7 @@ class DataProcessor:
                 exploration_probability /= 2
                 # Use only top 1-2 categories
                 if len(preferred_categories) > 2:
-                    top_categories = preferred_categories[:user_rng.integers(1, 3)]
+                    top_categories = preferred_categories[:user_rng.randint(1, 3)]
                     category_weights = category_weights[:len(top_categories)]
                     # Normalize weights
                     category_weights = category_weights / category_weights.sum()
@@ -1736,48 +1749,32 @@ class DataProcessor:
                     selected_project = category_projects['id'].iloc[0]
                     selected_projects.append(selected_project)
                 
-                # Generate interaction type based on user persona and project
+                # Generate interaction type based on user persona and project but with more noise
+                # Apply much more randomization to interaction types
+                base_probs = {
+                    'view': 0.4, 
+                    'favorite': 0.3, 
+                    'portfolio_add': 0.2, 
+                    'research': 0.1
+                }
+                
+                # Start with base probs but add massive noise
+                interaction_type_probs = {}
+                for k, v in base_probs.items():
+                    # Multiply by a random factor between 0.5 and 1.5
+                    interaction_type_probs[k] = v * user_rng.uniform(0.5, 1.5)
+                
+                # Add persona-specific adjustment with noise
                 if user_persona == 'defi_enthusiast':
-                    interaction_type_probs = {
-                        'view': 0.3, 'favorite': 0.2, 'portfolio_add': 0.4, 'research': 0.1
-                    }
+                    interaction_type_probs['portfolio_add'] *= user_rng.uniform(1.3, 1.7)
                 elif user_persona == 'nft_collector':
-                    interaction_type_probs = {
-                        'view': 0.3, 'favorite': 0.45, 'portfolio_add': 0.15, 'research': 0.1
-                    }
+                    interaction_type_probs['favorite'] *= user_rng.uniform(1.3, 1.7)
                 elif user_persona == 'trader':
-                    interaction_type_probs = {
-                        'view': 0.2, 'favorite': 0.15, 'portfolio_add': 0.45, 'research': 0.2
-                    }
-                elif user_persona == 'conservative_investor':
-                    interaction_type_probs = {
-                        'view': 0.35, 'favorite': 0.15, 'portfolio_add': 0.3, 'research': 0.2
-                    }
-                elif user_persona == 'risk_taker':
-                    interaction_type_probs = {
-                        'view': 0.3, 'favorite': 0.3, 'portfolio_add': 0.3, 'research': 0.1
-                    }
+                    interaction_type_probs['view'] *= user_rng.uniform(0.8, 1.2)
+                    interaction_type_probs['research'] *= user_rng.uniform(1.3, 1.7)
                 elif user_persona == 'tech_enthusiast':
-                    interaction_type_probs = {
-                        'view': 0.25, 'favorite': 0.2, 'portfolio_add': 0.2, 'research': 0.35
-                    }
-                elif user_persona == 'yield_farmer':
-                    interaction_type_probs = {
-                        'view': 0.2, 'favorite': 0.15, 'portfolio_add': 0.5, 'research': 0.15
-                    }
-                elif user_persona == 'metaverse_builder':
-                    interaction_type_probs = {
-                        'view': 0.3, 'favorite': 0.4, 'portfolio_add': 0.2, 'research': 0.1
-                    }
-                else:
-                    interaction_type_probs = {
-                        'view': 0.4, 'favorite': 0.3, 'portfolio_add': 0.2, 'research': 0.1
-                    }
-                
-                # Add massive random variation to base probabilities
-                for interaction_type in interaction_type_probs:
-                    interaction_type_probs[interaction_type] *= user_rng.uniform(0.5, 1.5)
-                
+                    interaction_type_probs['research'] *= user_rng.uniform(1.5, 2.0)
+                    
                 # Normalize probabilities
                 total = sum(interaction_type_probs.values())
                 interaction_type_probs = {k: v/total for k, v in interaction_type_probs.items()}
@@ -1793,6 +1790,11 @@ class DataProcessor:
                     pop_impact = user_rng.uniform(0.8, 1.8)
                     trend_impact = user_rng.uniform(0.8, 1.8)
                     maturity_impact = user_rng.uniform(0.8, 1.8)
+                    
+                    # Add more random noise - sometimes behavior is completely opposite to expected
+                    if user_rng.random() < 0.1:  # 10% chance of contrary behavior
+                        pop_impact *= -1
+                        trend_impact *= -1
                     
                     # Adjust probabilities based on project characteristics with high variability
                     if project_popularity > 0.6:  # Very popular projects
@@ -1822,88 +1824,130 @@ class DataProcessor:
                         interaction_type_probs['favorite'] *= 1.3
                         interaction_type_probs['portfolio_add'] *= 1.3
                     
-                    # Normalize probabilities
-                    total = sum(interaction_type_probs.values())
-                    interaction_type_probs = {k: v/total for k, v in interaction_type_probs.items()}
+                    # Occasional completely random behavior
+                    if user_rng.random() < 0.05:  # 5% chance
+                        # Choose a random interaction type without regard to probabilities
+                        interaction_types = list(interaction_type_probs.keys())
+                        interaction_type = user_rng.choice(interaction_types)
+                    else:
+                        # Normalize probabilities
+                        total = sum(interaction_type_probs.values())
+                        interaction_type_probs = {k: v/total for k, v in interaction_type_probs.items()}
+                        
+                        # Convert to list format for random choice
+                        interaction_types = list(interaction_type_probs.keys())
+                        interaction_probs = list(interaction_type_probs.values())
+                        
+                        # Select interaction type
+                        interaction_type = user_rng.choice(interaction_types, p=interaction_probs)
+                
                 except Exception as e:
                     # Fallback if project not found or missing fields
                     logger.debug(f"Error adjusting interaction probs: {e}")
-                
-                # Convert to list format for random choice
-                interaction_types = list(interaction_type_probs.keys())
-                interaction_probs = list(interaction_type_probs.values())
-                
-                # Select interaction type
-                interaction_type = user_rng.choice(interaction_types, p=interaction_probs)
+                    # Choose a random interaction type with basic probabilities
+                    interaction_types = list(base_probs.keys())
+                    interaction_probs = list(base_probs.values())
+                    interaction_type = user_rng.choice(interaction_types, p=interaction_probs)
                 
                 # Determine interaction weight with extreme variability
                 # Add activity profile boost
                 weight_min, weight_max = activity_profile['weight_boost']
                 boost_factor = user_rng.uniform(weight_min, weight_max)
                 
-                if interaction_type == 'view':
-                    # Views have lower weights with high variability
-                    weight_distribution = user_rng.choice(['exponential', 'normal', 'uniform'])
-                    
-                    if weight_distribution == 'exponential':
-                        # Mostly low values, occasional high
-                        weight = max(1, min(5, int(user_rng.exponential(1.2 * boost_factor))))
-                    elif weight_distribution == 'normal':
-                        # Centered distribution
-                        weight = max(1, min(5, int(user_rng.normal(2.0 * boost_factor, 1.2))))
-                    else:  # uniform
-                        # Evenly distributed
-                        weight = user_rng.integers(1, max(2, int(4 * boost_factor)))
+                # Use different approaches for weight generation
+                weight_approach = user_rng.choice([
+                    'standard',      # Standard weight based on interaction type
+                    'extreme',       # More extreme weights (very high or very low)
+                    'contrarian',    # Opposite of expected weights
+                    'random'         # Completely random weights
+                ], p=[0.6, 0.2, 0.1, 0.1])  # Standard is most common
+                
+                if weight_approach == 'standard':
+                    if interaction_type == 'view':
+                        # Views have lower weights with high variability
+                        weight_distribution = user_rng.choice(['exponential', 'normal', 'uniform'])
                         
-                elif interaction_type == 'favorite':
-                    # Favorites have medium weights with high variance
-                    if user_rng.random() < 0.3:  # 30% chance of special weight 
-                        # Either very low or very high
-                        if user_rng.random() < 0.5:
-                            weight = 1  # Very casual favorite
+                        if weight_distribution == 'exponential':
+                            # Mostly low values, occasional high
+                            weight = max(1, min(5, int(user_rng.exponential(1.2 * boost_factor))))
+                        elif weight_distribution == 'normal':
+                            # Centered distribution
+                            weight = max(1, min(5, int(user_rng.normal(2.0 * boost_factor, 1.2))))
+                        else:  # uniform
+                            # Evenly distributed
+                            weight = user_rng.randint(1, max(2, int(4 * boost_factor)))
+                            
+                    elif interaction_type == 'favorite':
+                        # Favorites have medium weights with high variance
+                        if user_rng.random() < 0.3:  # 30% chance of special weight 
+                            # Either very low or very high
+                            if user_rng.random() < 0.5:
+                                weight = 1  # Very casual favorite
+                            else:
+                                weight = max(1, min(7, int(user_rng.normal(5.0 * boost_factor, 1.0))))  # Very strong favorite
                         else:
-                            weight = max(1, min(7, int(user_rng.normal(5.0 * boost_factor, 1.0))))  # Very strong favorite
-                    else:
-                        # Normal distribution with high variance
-                        weight = max(1, min(5, int(user_rng.normal(3.0 * boost_factor, 1.5))))
-                        
-                elif interaction_type == 'portfolio_add':
-                    # Portfolio adds have higher weights with extreme variability
-                    if user_rng.random() < 0.15:  # 15% chance of very low conviction
-                        weight = 1
-                    elif user_rng.random() < 0.25:  # 25% chance of extremely high conviction
-                        weight = max(1, min(10, int(user_rng.normal(6.0 * boost_factor, 2.0))))
-                    else:  # 60% normal range
-                        weight = max(1, min(7, int(user_rng.normal(3.5 * boost_factor, 1.5))))
-                        
-                else:  # research
-                    # Research has varied weights depending on depth and user pattern
-                    depth = user_rng.choice(['very_shallow', 'shallow', 'medium', 'deep', 'very_deep'], 
+                            # Normal distribution with high variance
+                            weight = max(1, min(5, int(user_rng.normal(3.0 * boost_factor, 1.5))))
+                            
+                    elif interaction_type == 'portfolio_add':
+                        # Portfolio adds have higher weights with extreme variability
+                        if user_rng.random() < 0.15:  # 15% chance of very low conviction
+                            weight = 1
+                        elif user_rng.random() < 0.25:  # 25% chance of extremely high conviction
+                            weight = max(1, min(10, int(user_rng.normal(6.0 * boost_factor, 2.0))))
+                        else:  # 60% normal range
+                            weight = max(1, min(7, int(user_rng.normal(3.5 * boost_factor, 1.5))))
+                            
+                    else:  # research
+                        # Research has varied weights depending on depth and user pattern
+                        depth = user_rng.choice(['very_shallow', 'shallow', 'medium', 'deep', 'very_deep'], 
                                         p=[0.1, 0.25, 0.4, 0.2, 0.05])  # Very uneven distribution
-                    
-                    if depth == 'very_shallow':
-                        weight = 1
-                    elif depth == 'shallow':
-                        weight = max(1, min(3, int(user_rng.normal(1.8 * boost_factor, 0.8))))
-                    elif depth == 'medium':
-                        weight = max(1, min(5, int(user_rng.normal(3.0 * boost_factor, 1.0))))
-                    elif depth == 'deep':
-                        weight = max(1, min(7, int(user_rng.normal(4.5 * boost_factor, 1.2))))
-                    else:  # very_deep - thorough research
-                        weight = max(1, min(10, int(user_rng.normal(6.0 * boost_factor, 1.5))))
-                    
-                    # Pattern-specific adjustments
-                    if interest_pattern == 'deep_diver':
-                        # Deep divers go deeper in research
-                        weight = min(10, int(weight * 1.5))
+                        
+                        if depth == 'very_shallow':
+                            weight = 1
+                        elif depth == 'shallow':
+                            weight = max(1, min(3, int(user_rng.normal(1.8 * boost_factor, 0.8))))
+                        elif depth == 'medium':
+                            weight = max(1, min(5, int(user_rng.normal(3.0 * boost_factor, 1.0))))
+                        elif depth == 'deep':
+                            weight = max(1, min(7, int(user_rng.normal(4.5 * boost_factor, 1.2))))
+                        else:  # very_deep - thorough research
+                            weight = max(1, min(10, int(user_rng.normal(6.0 * boost_factor, 1.5))))
+                        
+                        # Pattern-specific adjustments
+                        if interest_pattern == 'deep_diver':
+                            # Deep divers go deeper in research
+                            weight = min(10, int(weight * 1.5))
+                            
+                elif weight_approach == 'extreme':
+                    # Either very high or very low weights regardless of interaction type
+                    if user_rng.random() < 0.5:
+                        weight = 1  # Very low
+                    else:
+                        weight = max(1, min(10, int(user_rng.normal(8.0, 1.5))))  # Very high
+                        
+                elif weight_approach == 'contrarian':
+                    # Opposite of expected (high weights for views, low for portfolio)
+                    if interaction_type == 'view':
+                        weight = max(1, min(10, int(user_rng.normal(7.0, 1.5))))  # High for views
+                    elif interaction_type == 'favorite':
+                        weight = max(1, min(5, int(user_rng.normal(3.0, 1.0))))  # Medium
+                    elif interaction_type == 'portfolio_add':
+                        weight = max(1, min(3, int(user_rng.normal(1.5, 0.5))))  # Low for portfolio
+                    else:  # research
+                        weight = max(1, min(4, int(user_rng.normal(2.0, 1.0))))  # Medium-low
+                        
+                else:  # random
+                    # Completely random weights
+                    weight = max(1, min(10, int(user_rng.normal(4.0, 2.5))))
                 
                 # Get timestamp for this interaction
                 if interaction_idx < len(timestamps):
                     interaction_time = timestamps[interaction_idx]
                 else:
                     # Fallback if not enough timestamps
-                    days_ago = int(user_rng.integers(0, user_max_days_ago))
-                    random_seconds = int(user_rng.integers(0, 86400))
+                    days_ago = int(user_rng.randint(0, user_max_days_ago))
+                    random_seconds = int(user_rng.randint(0, 86400))
                     interaction_time = now - timedelta(days=int(days_ago+user_start_offset), seconds=int(random_seconds))
                 
                 # Add to all interactions
@@ -1973,11 +2017,11 @@ class DataProcessor:
             active_day_indices = sorted(user_rng.choice(range(active_days), size=min(active_day_count, active_days), replace=False))
         elif user_pattern == 'bursty':
             # Active in 1-3 short periods
-            burst_count = user_rng.integers(1, 4)
+            burst_count = user_rng.randint(1, 4)
             active_day_indices = []
             for _ in range(burst_count):
-                burst_center = user_rng.integers(0, active_days)
-                burst_length = user_rng.integers(1, 5)
+                burst_center = user_rng.randint(0, active_days)
+                burst_length = user_rng.randint(1, 5)
                 for day in range(max(0, burst_center - burst_length), min(active_days, burst_center + burst_length)):
                     active_day_indices.append(day)
             active_day_indices = sorted(set(active_day_indices))
@@ -2080,16 +2124,16 @@ class DataProcessor:
             
             for _ in range(count):
                 if day_pattern == 'morning':
-                    hour = user_rng.integers(6, 12)
+                    hour = user_rng.randint(6, 12)
                 elif day_pattern == 'evening':
-                    hour = user_rng.integers(17, 23)
+                    hour = user_rng.randint(17, 23)
                 elif day_pattern == 'work_hours':
-                    hour = user_rng.integers(9, 18)
+                    hour = user_rng.randint(9, 18)
                 else:  # random
-                    hour = user_rng.integers(0, 24)
+                    hour = user_rng.randint(0, 24)
                     
-                minute = user_rng.integers(0, 60)
-                second = user_rng.integers(0, 60)
+                minute = user_rng.randint(0, 60)
+                second = user_rng.randint(0, 60)
                 
                 # Apply start_offset to better distribute users in time
                 total_days_ago = day + start_offset
@@ -2104,10 +2148,10 @@ class DataProcessor:
         
         # If there are remaining interactions to allocate, add them randomly
         while remaining > 0:
-            day = user_rng.integers(0, active_days)
-            hour = user_rng.integers(0, 24)
-            minute = user_rng.integers(0, 60)
-            second = user_rng.integers(0, 60)
+            day = user_rng.randint(0, active_days)
+            hour = user_rng.randint(0, 24)
+            minute = user_rng.randint(0, 60)
+            second = user_rng.randint(0, 60)
             
             # Apply start_offset to better distribute users in time
             total_days_ago = day + start_offset

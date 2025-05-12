@@ -399,17 +399,20 @@ def evaluate_model(model_name: str,
     return results
 
 def prepare_test_data(user_item_matrix: pd.DataFrame, 
-                    test_ratio: float = EVAL_TEST_RATIO, 
-                    min_interactions: int = 5,
-                    random_seed: int = EVAL_RANDOM_SEED,
-                    max_test_users: int = 100) -> Tuple[List[str], Dict[str, List[str]]]:
+                  interactions_df: pd.DataFrame,
+                  test_ratio: float = EVAL_TEST_RATIO, 
+                  min_interactions: int = 5,
+                  random_seed: int = EVAL_RANDOM_SEED,
+                  max_test_users: int = 100,
+                  temporal_split: bool = True) -> Tuple[List[str], Dict[str, List[str]]]:
     """
-    Perbaikan untuk prepare_test_data dengan konsistensi hasil yang lebih baik
+    Menyiapkan data test dengan strategi temporal split yang lebih realistis
     """
     logger.info(f"Preparing test data with test_ratio={test_ratio}, "
-               f"min_interactions={min_interactions}, random_seed={random_seed}")
+               f"min_interactions={min_interactions}, random_seed={random_seed}, "
+               f"temporal_split={temporal_split}")
     
-    # Fiter users with minimum number of interactions
+    # Filter users with minimum number of interactions
     user_interactions = {}
     test_interactions = {}
     test_users = []
@@ -443,7 +446,7 @@ def prepare_test_data(user_item_matrix: pd.DataFrame,
         return [], {}
     
     # OPTIMIZATION: Limit total test users with minimum representatives
-    target_test_users = min(int(total_eligible * 0.3), max_test_users)  # Target 30% of eligible users, but cap at max
+    target_test_users = min(int(total_eligible * 0.3), max_test_users)
     logger.info(f"Target test users: {target_test_users} from {total_eligible} eligible")
     
     # Fixed seed RNG for each range to ensure consistency
@@ -455,7 +458,7 @@ def prepare_test_data(user_item_matrix: pd.DataFrame,
             
         # Calculate proportion based on stratum size
         stratum_ratio = len(users) / total_eligible
-        target_count = max(3, int(target_test_users * stratum_ratio))  # At least 3 users per stratum if available
+        target_count = max(3, int(target_test_users * stratum_ratio))
         
         # Create a predictable seed for this range
         range_seed = random_seed + hash(str(low) + str(high)) % 10000
@@ -467,33 +470,63 @@ def prepare_test_data(user_item_matrix: pd.DataFrame,
         sampled_users.extend(sampled)
         logger.info(f"Sampled {len(sampled)} users from range {low}-{high}")
     
-    # Split interactions for each user with consistent seed
-    for user_id in sampled_users:
-        items = user_interactions[user_id]
+    # Use temporal split if requested
+    if temporal_split and 'timestamp' in interactions_df.columns:
+        logger.info("Using temporal split for test data")
         
-        # Determine test size based on interaction count
-        n_items = len(items)
-        if n_items < 10:
-            test_ratio_adjusted = 0.3  # 30% for users with few interactions
-        elif n_items < 20:
-            test_ratio_adjusted = 0.25  # 25% for users with moderate interactions
-        else:
-            test_ratio_adjusted = 0.2   # 20% for users with many interactions
+        # Convert timestamp to datetime if it's a string
+        if interactions_df['timestamp'].dtype == 'object':
+            interactions_df['timestamp'] = pd.to_datetime(interactions_df['timestamp'])
         
-        # Split into train and test with user-specific but consistent seed
-        user_seed = random_seed + hash(user_id) % 10000
-        user_rng = np.random.RandomState(user_seed)
+        # For each sampled user, split interactions temporally
+        for user_id in sampled_users:
+            # Get user's interactions in chronological order
+            user_inters = interactions_df[interactions_df['user_id'] == user_id].sort_values('timestamp')
+            
+            if len(user_inters) < min_interactions:
+                continue
+                
+            # Determine split point - use last test_ratio% of interactions
+            split_idx = int(len(user_inters) * (1 - test_ratio))
+            
+            # Ensure at least min_interactions/2 for testing
+            split_idx = min(split_idx, len(user_inters) - max(2, min_interactions // 2))
+            
+            # Use last interactions for testing
+            test_items = user_inters.iloc[split_idx:]['project_id'].tolist()
+            
+            if test_items:
+                test_interactions[user_id] = test_items
+                test_users.append(user_id)
+    else:
+        # Use random split if temporal split not requested or timestamp not available
+        logger.info("Using random split for test data")
         
-        test_size = max(int(n_items * test_ratio_adjusted), 2)  # At least 2 test items
-        test_size = min(test_size, n_items - 1)  # Leave at least 1 for training
-        
-        # Predictable shuffle
-        shuffled_items = items.copy()
-        user_rng.shuffle(shuffled_items)
-        test_items = shuffled_items[:test_size]
-        
-        test_interactions[user_id] = test_items
-        test_users.append(user_id)
+        # Split interactions for each user with consistent seed
+        for user_id in sampled_users:
+            items = user_interactions[user_id]
+            
+            # Determine test size based on interaction count
+            n_items = len(items)
+            test_ratio_adjusted = test_ratio
+            
+            if n_items < 10:
+                test_ratio_adjusted = min(0.4, max(0.2, test_ratio))  # 20-40% for few interactions
+            
+            # Split into train and test with user-specific but consistent seed
+            user_seed = random_seed + hash(user_id) % 10000
+            user_rng = np.random.RandomState(user_seed)
+            
+            test_size = max(int(n_items * test_ratio_adjusted), 2)  # At least 2 test items
+            test_size = min(test_size, n_items - 1)  # Leave at least 1 for training
+            
+            # Predictable shuffle
+            shuffled_items = items.copy()
+            user_rng.shuffle(shuffled_items)
+            test_items = shuffled_items[:test_size]
+            
+            test_interactions[user_id] = test_items
+            test_users.append(user_id)
     
     logger.info(f"Prepared test data with {len(test_users)} users "
                 f"and {sum(len(items) for items in test_interactions.values())} test interactions")
@@ -520,9 +553,20 @@ def evaluate_all_models(models: Dict[str, Any],
     # Main evaluation start time
     evaluation_start_time = time.perf_counter()
     
-    # Prepare test data
+    interactions_df = None
+
+    for model_name, model in models.items():
+        if hasattr(model, 'interactions_df') and model.interactions_df is not None:
+            interactions_df = model.interactions_df
+            break
+
+    if interactions_df is None:
+        logger.error("No interactions data found in any model")
+        return {"error": "No interactions data found"}
+
     test_users, test_interactions = prepare_test_data(
         user_item_matrix, 
+        interactions_df,
         test_ratio=test_ratio,
         min_interactions=min_interactions,
         random_seed=EVAL_RANDOM_SEED,

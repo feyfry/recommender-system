@@ -468,123 +468,403 @@ class HybridRecommender:
         
         return normalized_recs
     
-    def get_effective_weights(self, user_id: str) -> Tuple[float, float, float]:
-        # Check model health
-        fecf_health = 1.0  # Default full health
-        ncf_health = 1.0   # Default full health
-        
-        if self.fecf_model is None or not hasattr(self.fecf_model, 'model') or self.fecf_model.model is None:
-            logger.warning("FECF model not available, falling back to NCF only")
-            fecf_health = 0.0
-        
-        if self.ncf_model is None or not hasattr(self.ncf_model, 'model') or self.ncf_model.model is None:
-            logger.warning("NCF model not available, falling back to FECF only")
-            ncf_health = 0.0
-            
-        # Get base weights from params
-        base_fecf_weight = self.params.get('fecf_weight', 0.8)
-        base_ncf_weight = self.params.get('ncf_weight', 0.2)
+    def get_effective_weights(self, user_id: str, context: Optional[Dict] = None) -> Tuple[float, float, float]:
+        """
+        Mendapatkan bobot model yang benar-benar adaptif berdasarkan berbagai faktor kontekstual
+        """
+        # Base weights - mulai dengan bobot yang lebih seimbang
+        base_fecf_weight = self.params.get('fecf_weight', 0.65)  # Default sedang, tidak terlalu tinggi
+        base_ncf_weight = self.params.get('ncf_weight', 0.35)  # NCF mendapat peran yang lebih signifikan
         diversity_factor = self.params.get('diversity_factor', 0.25)
         
-        # Count user interactions if available
-        user_interaction_count = 0
+        # Mengekstrak informasi kontekstual
+        user_context = self._extract_user_context(user_id)
+        temporal_context = self._extract_temporal_context()
+        domain_context = self._extract_domain_context(context)
+        
+        # Menghitung adaptasi bobot berdasarkan berbagai faktor
+        # 1. Faktor User - Interaksi, aktivitas, preferensi
+        user_fecf_adj, user_ncf_adj = self._calculate_user_adjustments(user_context)
+        
+        # 2. Faktor Temporal - Waktu, tren, peristiwa market
+        temp_fecf_adj, temp_ncf_adj = self._calculate_temporal_adjustments(temporal_context)
+        
+        # 3. Faktor Domain - Volatilitas pasar, perilaku kategori spesifik
+        domain_fecf_adj, domain_ncf_adj = self._calculate_domain_adjustments(domain_context)
+        
+        # 4. Performa model - Adaptasi berdasarkan history performa
+        perf_fecf_adj, perf_ncf_adj = self._calculate_performance_adjustments()
+        
+        # Menghitung bobot akhir dengan semua faktor
+        # Menggunakan weighted sum dari semua faktor
+        fecf_weight = base_fecf_weight + (
+            user_fecf_adj * 0.4 +    # User context sangat penting
+            temp_fecf_adj * 0.2 +    # Temporal context cukup penting 
+            domain_fecf_adj * 0.2 +  # Domain context juga cukup penting
+            perf_fecf_adj * 0.2      # Performa historis penting
+        )
+        
+        ncf_weight = base_ncf_weight + (
+            user_ncf_adj * 0.4 +
+            temp_ncf_adj * 0.2 +
+            domain_ncf_adj * 0.2 +
+            perf_ncf_adj * 0.2
+        )
+        
+        # Pastikan bobot dalam range valid dan ternormalisasi
+        fecf_weight = max(0.3, min(0.9, fecf_weight))  # Min 0.3, max 0.9
+        ncf_weight = max(0.1, min(0.7, ncf_weight))    # Min 0.1, max 0.7
+        
+        # Normalisasi bobot
+        total = fecf_weight + ncf_weight
+        fecf_weight /= total
+        ncf_weight /= total
+        
+        # Menyesuaikan diversity factor berdasarkan konteks
+        effective_diversity = self._adjust_diversity_factor(diversity_factor, user_context)
+        
+        return fecf_weight, ncf_weight, effective_diversity
+    
+    def _extract_user_context(self, user_id: str) -> Dict:
+        """Ekstrak faktor kontekstual pengguna"""
+        context = {
+            'interaction_count': 0,
+            'recency': 'new',      # new, regular, established
+            'activity_pattern': 'unknown',  # casual, regular, power
+            'category_focus': 0.5,  # 0 (broad) to 1 (narrow)
+            'chain_diversity': 0.5, # 0 (single chain) to 1 (multi-chain)
+            'exploration_rate': 0.3 # 0 (conservative) to 1 (explorer)
+        }
+        
+        # Menghitung jumlah interaksi
         if self.user_item_matrix is not None and user_id in self.user_item_matrix.index:
             user_interactions = self.user_item_matrix.loc[user_id]
-            user_interaction_count = (user_interactions > 0).sum()
+            positive_interactions = user_interactions[user_interactions > 0]
+            context['interaction_count'] = len(positive_interactions)
             
-        # Get thresholds
-        interaction_threshold_low = self.params.get('interaction_threshold_low', 5)
-        interaction_threshold_high = self.params.get('interaction_threshold_high', 15)
+            # Menentukan recency
+            # Implementasi sebenarnya akan menggunakan data timestamp
+            if context['interaction_count'] < 10:
+                context['recency'] = 'new'
+            elif context['interaction_count'] < 50:
+                context['recency'] = 'regular'
+            else:
+                context['recency'] = 'established'
+                
+            # Menentukan pola aktivitas
+            # Implementasi sebenarnya akan menggunakan analisis pola aktivitas yang lebih kompleks
+            if context['interaction_count'] < 15:
+                context['activity_pattern'] = 'casual'
+            elif context['interaction_count'] < 75:
+                context['activity_pattern'] = 'regular'
+            else:
+                context['activity_pattern'] = 'power'
+                
+            # Menghitung kategori fokus
+            if 'primary_category' in self.projects_df.columns:
+                interacted_items = positive_interactions.index
+                interacted_categories = []
+                
+                for item in interacted_items:
+                    item_data = self.projects_df[self.projects_df['id'] == item]
+                    if not item_data.empty and 'primary_category' in item_data:
+                        category = item_data.iloc[0]['primary_category']
+                        interacted_categories.append(category)
+                
+                # Hitung rasio kategori unik terhadap total interaksi
+                if interacted_categories:
+                    unique_categories = len(set(interacted_categories))
+                    context['category_focus'] = 1 - (unique_categories / len(interacted_categories))
+                    
+            # Menghitung diversitas chain dengan cara serupa
+            if 'chain' in self.projects_df.columns:
+                interacted_items = positive_interactions.index
+                interacted_chains = []
+                
+                for item in interacted_items:
+                    item_data = self.projects_df[self.projects_df['id'] == item]
+                    if not item_data.empty and 'chain' in item_data:
+                        chain = item_data.iloc[0]['chain']
+                        interacted_chains.append(chain)
+                
+                # Hitung rasio chain unik terhadap total interaksi
+                if interacted_chains:
+                    unique_chains = len(set(interacted_chains))
+                    context['chain_diversity'] = unique_chains / min(len(interacted_chains), 5)  # Normalisasi ke max 5 chain
+                    
+            # Estimasi exploration rate
+            # Implementasi sebenarnya akan menganalisis pola eksplorasi dari waktu ke waktu
+            if context['recency'] == 'new':
+                context['exploration_rate'] = 0.6  # New users biasanya lebih suka eksplorasi
+            else:
+                context['exploration_rate'] = max(0.2, min(0.8, 
+                                            0.5 * context['category_focus'] + 0.5 * context['chain_diversity']))
         
-        # Look at model performance for adaptive weighting
+        return context
+    
+    def _extract_temporal_context(self) -> Dict:
+        """Ekstrak konteks temporal (waktu, musim, tren pasar)"""
+        # Dalam implementasi sebenarnya, ini bisa jauh lebih canggih
+        context = {
+            'time_of_day': 'regular', # morning, afternoon, evening, night
+            'day_of_week': 'weekday', # weekday, weekend
+            'market_trend': 'neutral' # bull, bear, neutral, volatile
+        }
+        
+        # Menghitung time of day
+        current_hour = datetime.now().hour
+        if 5 <= current_hour < 12:
+            context['time_of_day'] = 'morning'
+        elif 12 <= current_hour < 17:
+            context['time_of_day'] = 'afternoon'
+        elif 17 <= current_hour < 22:
+            context['time_of_day'] = 'evening'
+        else:
+            context['time_of_day'] = 'night'
+            
+        # Menghitung day of week
+        weekday = datetime.now().weekday()
+        context['day_of_week'] = 'weekday' if weekday < 5 else 'weekend'
+        
+        # Market trend - dalam implementasi sebenarnya akan menggunakan data pasar crypto real-time
+        # Misalnya mengambil dari API eksternal
+        # Di sini kita gunakan pendekatan sederhana berdasarkan rata-rata perubahan trend_score
+        if self.projects_df is not None and 'trend_score' in self.projects_df.columns:
+            avg_trend = self.projects_df['trend_score'].mean()
+            if avg_trend > 60:
+                context['market_trend'] = 'bull'
+            elif avg_trend < 40:
+                context['market_trend'] = 'bear'
+            elif avg_trend.std() > 25:  # Volatilitas tinggi
+                context['market_trend'] = 'volatile'
+            else:
+                context['market_trend'] = 'neutral'
+        
+        return context
+    
+    def _extract_domain_context(self, additional_context: Optional[Dict] = None) -> Dict:
+        """Ekstrak faktor kontekstual domain cryptocurrency"""
+        context = {
+            'top_categories': [],
+            'trending_chains': [],
+            'market_volatility': 0.5,  # 0 (stabil) to 1 (sangat volatil)
+            'innovation_rate': 0.5     # 0 (lambat) to 1 (cepat)
+        }
+        
+        # Menghitung top categories
+        if self.projects_df is not None and 'primary_category' in self.projects_df.columns:
+            # Top categories berdasarkan trend_score
+            if 'trend_score' in self.projects_df.columns:
+                trending_by_category = self.projects_df.groupby('primary_category')['trend_score'].mean()
+                context['top_categories'] = trending_by_category.nlargest(3).index.tolist()
+        
+        # Menghitung trending chains
+        if self.projects_df is not None and 'chain' in self.projects_df.columns:
+            # Trending chains berdasarkan trend_score
+            if 'trend_score' in self.projects_df.columns:
+                trending_by_chain = self.projects_df.groupby('chain')['trend_score'].mean()
+                context['trending_chains'] = trending_by_chain.nlargest(3).index.tolist()
+        
+        # Estimasi market volatility
+        if self.projects_df is not None and 'trend_score' in self.projects_df.columns:
+            trend_std = self.projects_df['trend_score'].std()
+            # Normalize to 0-1 range assuming std range of 0-50
+            context['market_volatility'] = min(1.0, trend_std / 50)
+        
+        # Merge dengan additional context jika ada
+        if additional_context:
+            context.update(additional_context)
+        
+        return context
+    
+    def _calculate_user_adjustments(self, user_context: Dict) -> Tuple[float, float]:
+        """Hitung penyesuaian bobot berdasarkan konteks pengguna"""
+        fecf_adj = 0.0
+        ncf_adj = 0.0
+        
+        # 1. Adjustment berdasarkan jumlah interaksi
+        interaction_count = user_context.get('interaction_count', 0)
+        if interaction_count < 10:
+            # Cold start - FECF lebih bagus
+            fecf_adj += 0.15
+            ncf_adj -= 0.15
+        elif interaction_count > 50:
+            # Banyak interaksi - NCF mulai unggul untuk personalisasi
+            fecf_adj -= 0.1
+            ncf_adj += 0.1
+        
+        # 2. Adjustment berdasarkan recency
+        recency = user_context.get('recency', 'new')
+        if recency == 'new':
+            # Pengguna baru - FECF lebih bagus
+            fecf_adj += 0.1
+            ncf_adj -= 0.1
+        elif recency == 'established':
+            # Pengguna lama - NCF lebih tahu preferensi
+            fecf_adj -= 0.05
+            ncf_adj += 0.05
+        
+        # 3. Adjustment berdasarkan kategori fokus
+        category_focus = user_context.get('category_focus', 0.5)
+        if category_focus > 0.7:
+            # Fokus sempit - NCF lebih bagus karena bisa menangkap preferensi spesifik
+            fecf_adj -= 0.1
+            ncf_adj += 0.1
+        elif category_focus < 0.3:
+            # Fokus luas - FECF lebih bagus karena bisa menangkap kesamaan berbasis fitur
+            fecf_adj += 0.05
+            ncf_adj -= 0.05
+        
+        # 4. Adjustment berdasarkan tingkat eksplorasi
+        exploration_rate = user_context.get('exploration_rate', 0.3)
+        if exploration_rate > 0.6:
+            # Tingkat eksplorasi tinggi - FECF lebih bagus
+            fecf_adj += 0.1
+            ncf_adj -= 0.1
+        elif exploration_rate < 0.3:
+            # Tingkat eksplorasi rendah - NCF lebih bagus karena lebih tepat pada preferensi spesifik
+            fecf_adj -= 0.05
+            ncf_adj += 0.05
+        
+        # Cap adjustments
+        fecf_adj = max(-0.2, min(0.2, fecf_adj))
+        ncf_adj = max(-0.2, min(0.2, ncf_adj))
+        
+        return fecf_adj, ncf_adj
+    
+    def _calculate_temporal_adjustments(self, temporal_context: Dict) -> Tuple[float, float]:
+        """Hitung penyesuaian bobot berdasarkan konteks temporal"""
+        fecf_adj = 0.0
+        ncf_adj = 0.0
+        
+        # 1. Market trend adjustment
+        market_trend = temporal_context.get('market_trend', 'neutral')
+        if market_trend == 'bull':
+            # Bull market - NCF bisa lebih baik karena preferensi lebih stabil
+            fecf_adj -= 0.05
+            ncf_adj += 0.05
+        elif market_trend == 'bear':
+            # Bear market - FECF bisa lebih baik karena feature-based
+            fecf_adj += 0.05
+            ncf_adj -= 0.05
+        elif market_trend == 'volatile':
+            # Volatile market - FECF jauh lebih baik karena feature-based
+            fecf_adj += 0.15
+            ncf_adj -= 0.15
+        
+        # 2. Time of day adjustment (bisa ditingkatkan berdasarkan pola aktivitas cryptocurrency)
+        time_of_day = temporal_context.get('time_of_day', 'regular')
+        if time_of_day == 'night':
+            # Malam hari - pengguna mungkin lebih exploratory
+            fecf_adj += 0.05
+            ncf_adj -= 0.05
+        
+        # Cap adjustments
+        fecf_adj = max(-0.15, min(0.15, fecf_adj))
+        ncf_adj = max(-0.15, min(0.15, ncf_adj))
+        
+        return fecf_adj, ncf_adj
+    
+    def _calculate_domain_adjustments(self, domain_context: Dict) -> Tuple[float, float]:
+        """Hitung penyesuaian bobot berdasarkan konteks domain cryptocurrency"""
+        fecf_adj = 0.0
+        ncf_adj = 0.0
+        
+        # 1. Market volatility adjustment
+        volatility = domain_context.get('market_volatility', 0.5)
+        if volatility > 0.7:
+            # Pasar sangat volatil - FECF lebih handal
+            fecf_adj += 0.1
+            ncf_adj -= 0.1
+        elif volatility < 0.3:
+            # Pasar stabil - kedua model bisa baik
+            pass
+        
+        # 2. Innovation rate adjustment
+        innovation_rate = domain_context.get('innovation_rate', 0.5)
+        if innovation_rate > 0.7:
+            # Banyak inovasi/coin baru - FECF lebih baik karena bisa mengatasi cold-start item
+            fecf_adj += 0.1
+            ncf_adj -= 0.1
+        
+        # Cap adjustments
+        fecf_adj = max(-0.1, min(0.1, fecf_adj))
+        ncf_adj = max(-0.1, min(0.1, ncf_adj))
+        
+        return fecf_adj, ncf_adj
+    
+    def _calculate_performance_adjustments(self) -> Tuple[float, float]:
+        """Hitung penyesuaian bobot berdasarkan performa historis model"""
+        fecf_adj = 0.0
+        ncf_adj = 0.0
+        
+        # Get metrics from model performance records
         fecf_perf = self.model_performance.get('fecf', {})
         ncf_perf = self.model_performance.get('ncf', {})
         
-        # Get average performance across metrics
-        fecf_avg_perf = np.mean([fecf_perf.get(m, 0) for m in ['precision', 'recall', 'ndcg', 'hit_ratio']])
-        ncf_avg_perf = np.mean([ncf_perf.get(m, 0) for m in ['precision', 'recall', 'ndcg', 'hit_ratio']])
+        # Calculate average performance across multiple metrics
+        metrics = ['precision', 'recall', 'ndcg', 'hit_ratio']
         
-        # Adjust weights based on performance difference if meaningful
-        performance_diff = fecf_avg_perf - ncf_avg_perf
+        fecf_avg = np.mean([fecf_perf.get(m, 0) for m in metrics])
+        ncf_avg = np.mean([ncf_perf.get(m, 0) for m in metrics])
         
-        # Apply adaptive performance adjustment if using adaptive ensemble method
-        if self.params.get('ensemble_method') == 'adaptive' and fecf_avg_perf > 0 and ncf_avg_perf > 0:
-            # Calculate performance ratio
-            if ncf_avg_perf > 0:
-                perf_ratio = fecf_avg_perf / ncf_avg_perf
-            else:
-                perf_ratio = 10.0  # Default high ratio if NCF performance is 0
-                
-            # Apply performance-based adjustment
-            perf_adjustment = min(0.3, max(-0.3, (perf_ratio - 1.0) * 0.15))
+        # Only adjust if we have meaningful performance data
+        if fecf_avg > 0 and ncf_avg > 0:
+            # Compute performance ratio
+            ratio = fecf_avg / (ncf_avg + 1e-10)  # Avoid division by zero
             
-            # Adjust weights based on performance
-            base_fecf_weight = min(0.95, max(0.05, base_fecf_weight + perf_adjustment))
-            base_ncf_weight = 1.0 - base_fecf_weight
-            
-            logger.debug(f"Adaptive weights based on performance: FECF {base_fecf_weight:.2f}, NCF {base_ncf_weight:.2f}")
+            # Map ratio to adjustments
+            if ratio > 1.3:  # FECF substantially better
+                fecf_adj = 0.1
+                ncf_adj = -0.1
+            elif 1.1 < ratio <= 1.3:  # FECF moderately better
+                fecf_adj = 0.05
+                ncf_adj = -0.05
+            elif 0.9 <= ratio <= 1.1:  # Similar performance
+                pass  # No adjustment
+            elif 0.7 <= ratio < 0.9:  # NCF moderately better
+                fecf_adj = -0.05
+                ncf_adj = 0.05
+            else:  # NCF substantially better
+                fecf_adj = -0.1
+                ncf_adj = 0.1
         
-        # Determine effective weights based on interaction count and model health
-        if fecf_health == 0.0:
-            # No FECF model available, use only NCF
-            effective_fecf_weight = 0.0
-            effective_ncf_weight = 1.0
-            effective_diversity_weight = diversity_factor * 0.5  # Reduce diversity without FECF
-        elif ncf_health == 0.0:
-            # No NCF model available, use only FECF
-            effective_fecf_weight = 1.0
-            effective_ncf_weight = 0.0
-            effective_diversity_weight = diversity_factor * 1.2  # Increase diversity with just FECF
-        else:
-            # Both models available, apply adaptive weighting based on interaction count
-            if user_interaction_count < interaction_threshold_low:
-                # For cold-start users, rely more on FECF
-                cold_start_fecf_weight = self.params.get('cold_start_fecf_weight', 0.95)
-                effective_fecf_weight = cold_start_fecf_weight * fecf_health
-                effective_ncf_weight = (1.0 - cold_start_fecf_weight) * ncf_health
-                effective_diversity_weight = diversity_factor * 0.8  # Slightly lower diversity for cold-start
-            elif user_interaction_count < interaction_threshold_high:
-                # Linear interpolation between thresholds
-                ratio = (user_interaction_count - interaction_threshold_low) / (interaction_threshold_high - interaction_threshold_low)
-                fecf_low = self.params.get('cold_start_fecf_weight', 0.95)
-                fecf_high = base_fecf_weight
-                effective_fecf_weight = (fecf_low - (fecf_low - fecf_high) * ratio) * fecf_health
-                effective_ncf_weight = (1.0 - fecf_low + (fecf_low - fecf_high) * ratio) * ncf_health
-                effective_diversity_weight = diversity_factor * (0.8 + ratio * 0.4)
-            else:
-                # For active users, use performance-adjusted weights
-                effective_fecf_weight = base_fecf_weight * fecf_health
-                effective_ncf_weight = base_ncf_weight * ncf_health
-                effective_diversity_weight = diversity_factor
-                
-                # Additional adjustment for very active users
-                if user_interaction_count > interaction_threshold_high * 2:
-                    # For very active users, increase NCF weight slightly as it may have more personalized patterns
-                    activity_boost = min(0.1, 0.05 * user_interaction_count / (interaction_threshold_high * 2))
-                    effective_ncf_weight = min(0.6, effective_ncf_weight + activity_boost)
-                    effective_fecf_weight = 1.0 - effective_ncf_weight
-                    # Also increase diversity for very active users
-                    effective_diversity_weight = min(0.4, diversity_factor * 1.5)
+        return fecf_adj, ncf_adj
+    
+    def _adjust_diversity_factor(self, base_diversity: float, user_context: Dict) -> float:
+        """Menyesuaikan faktor diversitas berdasarkan konteks pengguna"""
+        diversity = base_diversity
         
-        # Normalize weights to sum to 1.0
-        total_weight = effective_fecf_weight + effective_ncf_weight
-        if total_weight > 0:
-            effective_fecf_weight /= total_weight
-            effective_ncf_weight /= total_weight
-            
-        return effective_fecf_weight, effective_ncf_weight, effective_diversity_weight
+        # Pengguna dengan tingkat eksplorasi tinggi mendapatkan diversitas lebih tinggi
+        exploration_rate = user_context.get('exploration_rate', 0.3)
+        if exploration_rate > 0.6:
+            diversity += 0.1
+        elif exploration_rate < 0.3:
+            diversity -= 0.05
+        
+        # Pengguna baru mendapatkan diversitas lebih tinggi untuk discovery
+        recency = user_context.get('recency', 'new')
+        if recency == 'new':
+            diversity += 0.1
+        
+        # Bounds check
+        diversity = max(0.1, min(0.5, diversity))
+        
+        return diversity
     
     def get_ensemble_recommendations(self, 
-                                   fecf_recs: List[Tuple[str, float]], 
-                                   ncf_recs: List[Tuple[str, float]],
-                                   fecf_weight: float = 0.8, 
-                                   ncf_weight: float = 0.2,
-                                   ensemble_method: Optional[str] = None) -> List[Tuple[str, float]]:
+                               fecf_recs: List[Tuple[str, float]], 
+                               ncf_recs: List[Tuple[str, float]],
+                               fecf_weight: float = 0.65, 
+                               ncf_weight: float = 0.35,
+                               user_id: Optional[str] = None,
+                               context: Optional[Dict] = None,
+                               ensemble_method: Optional[str] = None) -> List[Tuple[str, float]]:
+        """
+        Menggabungkan rekomendasi dengan strategi fusion yang sadar konteks
+        """
         if not fecf_recs and not ncf_recs:
             return []
-            
-        # Use specified method or default from params
-        ensemble_method = ensemble_method or self.params.get('ensemble_method', 'adaptive')
             
         # Quick return if only one model's recommendations are available
         if not fecf_recs:
@@ -592,6 +872,9 @@ class HybridRecommender:
         if not ncf_recs:
             return fecf_recs
             
+        # Use specified method or default from params
+        ensemble_method = ensemble_method or self.params.get('ensemble_method', 'adaptive')
+        
         # Normalize scores first
         fecf_normalized = self.normalize_scores(fecf_recs, method=self.params.get('normalization', 'sigmoid'))
         ncf_normalized = self.normalize_scores(ncf_recs, method=self.params.get('normalization', 'sigmoid'))
@@ -603,106 +886,281 @@ class HybridRecommender:
         # Get all unique items
         all_items = set(fecf_dict.keys()) | set(ncf_dict.keys())
         
-        # Get confidence threshold for selective methods
-        confidence_threshold = self.params.get('confidence_threshold', 0.65)
+        # Extract additional context if available
+        user_context = {}
+        temporal_context = {}
+        domain_context = {}
         
-        if ensemble_method == 'max':
-            # Maximum score ensemble - ambil nilai tertinggi dari kedua model
-            results = {}
-            for item in all_items:
-                fecf_score = fecf_dict.get(item, 0)
-                ncf_score = ncf_dict.get(item, 0)
-                results[item] = max(fecf_score, ncf_score)
-                
-        elif ensemble_method == 'rank_fusion':
-            # Reciprocal Rank Fusion - menggabungkan berdasarkan posisi (rank) item
-            # Hitung rank untuk setiap model
-            fecf_ranks = {item: i+1 for i, (item, _) in enumerate(sorted(fecf_dict.items(), key=lambda x: x[1], reverse=True))}
-            ncf_ranks = {item: i+1 for i, (item, _) in enumerate(sorted(ncf_dict.items(), key=lambda x: x[1], reverse=True))}
-            
-            # Konstanta k untuk RRF (biasanya 60)
-            k = 60
-            
-            # Hitung RRF score
-            results = {}
-            for item in all_items:
-                # Gunakan rank maksimum jika item tidak ada di salah satu model
-                fecf_rank = fecf_ranks.get(item, len(fecf_ranks) + 1)
-                ncf_rank = ncf_ranks.get(item, len(ncf_ranks) + 1)
-                
-                # RRF formula: sum(1 / (k + rank_i))
-                fecf_score = 1.0 / (k + fecf_rank)
-                ncf_score = 1.0 / (k + ncf_rank)
-                
-                # Weighted sum
-                results[item] = fecf_weight * fecf_score + ncf_weight * ncf_score
+        if user_id:
+            user_context = self._extract_user_context(user_id)
         
-        elif ensemble_method == 'selective':
-            # Selective ensemble - only use NCF when confidence is high
-            results = {}
+        temporal_context = self._extract_temporal_context()
+        domain_context = self._extract_domain_context(context)
+        
+        # Prepare results dictionary
+        results = {}
+        
+        # Multi-strategy fusion based on method
+        if ensemble_method == 'contextual':
+            # Context-aware fusion - decide strategy per item!
             for item in all_items:
                 fecf_score = fecf_dict.get(item, 0)
                 ncf_score = ncf_dict.get(item, 0)
                 
-                if item in ncf_dict and ncf_score > confidence_threshold:
-                    # High confidence in NCF prediction, use it
-                    results[item] = ncf_score
-                elif item in fecf_dict:
-                    # Otherwise use FECF
-                    results[item] = fecf_score
-                else:
-                    # Fallback case
-                    results[item] = ncf_score
+                # Get item metadata for context-aware weighting
+                item_context = self._get_item_context(item)
+                
+                # Compute item-specific weights
+                item_fecf_weight, item_ncf_weight = self._compute_item_weights(
+                    item_context, user_context, temporal_context, domain_context, 
+                    base_fecf=fecf_weight, base_ncf=ncf_weight
+                )
+                
+                # Special case handling
+                if item in fecf_dict and item in ncf_dict:
+                    # Both models recommend this item
                     
+                    # Check for high confidence case
+                    if fecf_score > 0.8 and ncf_score > 0.8:
+                        # High agreement - boost score
+                        confidence_boost = 0.1 * min(fecf_score, ncf_score)
+                        results[item] = (fecf_score * item_fecf_weight + 
+                                    ncf_score * item_ncf_weight + 
+                                    confidence_boost)
+                    elif abs(fecf_score - ncf_score) > 0.5:
+                        # High disagreement - trust more confident model more
+                        if fecf_score > ncf_score:
+                            confidence_ratio = min(0.9, fecf_score / (ncf_score + 0.1))
+                            # Adjust weights based on confidence
+                            adj_fecf_weight = min(0.9, item_fecf_weight * confidence_ratio)
+                            adj_ncf_weight = 1.0 - adj_fecf_weight
+                            results[item] = fecf_score * adj_fecf_weight + ncf_score * adj_ncf_weight
+                        else:
+                            confidence_ratio = min(0.9, ncf_score / (fecf_score + 0.1))
+                            # Adjust weights based on confidence
+                            adj_ncf_weight = min(0.9, item_ncf_weight * confidence_ratio)
+                            adj_fecf_weight = 1.0 - adj_ncf_weight
+                            results[item] = fecf_score * adj_fecf_weight + ncf_score * adj_ncf_weight
+                    else:
+                        # Normal case - weighted average
+                        results[item] = fecf_score * item_fecf_weight + ncf_score * item_ncf_weight
+                
+                elif item in fecf_dict:
+                    # Only FECF recommends it
+                    # Apply penalty only if score is not very high
+                    if fecf_score > 0.85:
+                        results[item] = fecf_score * 0.95  # Minor penalty for very confident
+                    else:
+                        results[item] = fecf_score * 0.9  # Moderate penalty
+                
+                else:
+                    # Only NCF recommends it
+                    # More significant penalty since NCF tends to be less robust
+                    if ncf_score > 0.9:
+                        results[item] = ncf_score * 0.9  # Minor penalty for very confident
+                    else:
+                        results[item] = ncf_score * 0.8  # Higher penalty
+        
         elif ensemble_method == 'adaptive':
-            # Adaptive ensemble with confidence-based weighting
-            results = {}
+            # Enhanced adaptive method
+            for item in all_items:
+                fecf_score = fecf_dict.get(item, 0)
+                ncf_score = ncf_dict.get(item, 0)
+                
+                # Dynamic confidence-based weighting
+                if item in fecf_dict and item in ncf_dict:
+                    # Calculate confidence values
+                    fecf_conf = (fecf_score - 0.5) * 2  # Scale to [-1, 1]
+                    ncf_conf = (ncf_score - 0.5) * 2    # Scale to [-1, 1]
+                    
+                    # Use sigmoid to get dynamic weights
+                    import scipy.special
+                    fecf_weight_adj = scipy.special.expit(fecf_conf * 3) - 0.5
+                    ncf_weight_adj = scipy.special.expit(ncf_conf * 3) - 0.5
+                    
+                    # Calculate dynamic weights with bounds
+                    dynamic_fecf_weight = max(0.4, min(0.8, fecf_weight + fecf_weight_adj * 0.2 - ncf_weight_adj * 0.1))
+                    dynamic_ncf_weight = 1.0 - dynamic_fecf_weight
+                    
+                    # Enhanced weighted average
+                    results[item] = fecf_score * dynamic_fecf_weight + ncf_score * dynamic_ncf_weight
+                
+                elif item in fecf_dict:
+                    # Only FECF recommends - slight penalty
+                    results[item] = fecf_score * 0.9
+                
+                else:
+                    # Only NCF recommends - more penalty
+                    results[item] = ncf_score * 0.8
+                    
+        elif ensemble_method == 'selective':
+            # Selective fusion - choose best model per item
+            confidence_threshold = self.params.get('confidence_threshold', 0.7)
+            
             for item in all_items:
                 fecf_score = fecf_dict.get(item, 0)
                 ncf_score = ncf_dict.get(item, 0)
                 
                 if item in fecf_dict and item in ncf_dict:
-                    # Calculate confidence-adjusted weights
-                    fecf_conf = (fecf_score - 0.5) * 2  # Scale to [-1, 1]
-                    ncf_conf = (ncf_score - 0.5) * 2    # Scale to [-1, 1]
-                    
-                    # Apply sigmoid to get weight adjustment
-                    fecf_adj = expit(fecf_conf * 3) - 0.5
-                    ncf_adj = expit(ncf_conf * 3) - 0.5
-                    
-                    # Calculate dynamic weights
-                    dynamic_fecf_weight = max(0.3, min(0.9, fecf_weight + fecf_adj * 0.3 - ncf_adj * 0.3))
-                    dynamic_ncf_weight = 1.0 - dynamic_fecf_weight
-                    
-                    # Weighted average with dynamic weights
-                    results[item] = fecf_score * dynamic_fecf_weight + ncf_score * dynamic_ncf_weight
+                    # Both models recommend - choose based on confidence
+                    if fecf_score > confidence_threshold and ncf_score > confidence_threshold:
+                        # Both models confident - average
+                        results[item] = (fecf_score + ncf_score) / 2
+                    elif fecf_score > confidence_threshold:
+                        # FECF confident - use it
+                        results[item] = fecf_score
+                    elif ncf_score > confidence_threshold:
+                        # NCF confident - use it
+                        results[item] = ncf_score
+                    else:
+                        # Neither confident - weighted average
+                        results[item] = fecf_score * fecf_weight + ncf_score * ncf_weight
                 elif item in fecf_dict:
-                    # Only FECF recommends
-                    results[item] = fecf_score * 0.9  # Slight confidence reduction
+                    results[item] = fecf_score
                 else:
-                    # Only NCF recommends
-                    results[item] = ncf_score * 0.85  # More confidence reduction
+                    results[item] = ncf_score
+        
         else:  # default to weighted_avg
-            # Weighted average ensemble
-            results = {}
+            # Enhanced weighted average
             for item in all_items:
                 fecf_score = fecf_dict.get(item, 0)
                 ncf_score = ncf_dict.get(item, 0)
                 
-                # Enhanced weighted average logic
                 if item in fecf_dict and item in ncf_dict:
                     # Both models recommend - weighted average
                     results[item] = fecf_score * fecf_weight + ncf_score * ncf_weight
                 elif item in fecf_dict:
-                    # Only FECF recommends - reduce confidence slightly
-                    results[item] = fecf_score * fecf_weight * 0.95
+                    # Only FECF recommends - apply confidence adjustment
+                    results[item] = fecf_score * fecf_weight * 0.95  # Slight penalty
                 else:
-                    # Only NCF recommends - reduce confidence more
-                    results[item] = ncf_score * ncf_weight * 0.9
+                    # Only NCF recommends - apply confidence adjustment
+                    results[item] = ncf_score * ncf_weight * 0.9  # More penalty
         
         # Apply trending boost if available
+        self._apply_trending_boost(results)
+        
+        # Convert to list of tuples and sort
+        combined_recs = [(item, score) for item, score in results.items()]
+        combined_recs.sort(key=lambda x: x[1], reverse=True)
+        
+        return combined_recs
+    
+    def _get_item_context(self, item_id: str) -> Dict:
+        """Extract contextual information about an item"""
+        context = {
+            'category': 'unknown',
+            'chain': 'unknown',
+            'trend_score': 50,
+            'market_cap_tier': 'medium',  # low, medium, high
+            'age': 'unknown',  # new, established
+            'popularity': 0.5   # 0 to 1
+        }
+        
+        if self.projects_df is not None:
+            item_data = self.projects_df[self.projects_df['id'] == item_id]
+            
+            if not item_data.empty:
+                item = item_data.iloc[0]
+                
+                # Extract category
+                if 'primary_category' in item:
+                    context['category'] = item['primary_category']
+                    
+                # Extract chain
+                if 'chain' in item:
+                    context['chain'] = item['chain']
+                    
+                # Extract trend score
+                if 'trend_score' in item:
+                    context['trend_score'] = item['trend_score']
+                    
+                # Determine market cap tier
+                if 'market_cap' in item:
+                    market_cap = item['market_cap']
+                    if market_cap > 1e9:  # $1B+
+                        context['market_cap_tier'] = 'high'
+                    elif market_cap > 1e8:  # $100M+
+                        context['market_cap_tier'] = 'medium'
+                    else:
+                        context['market_cap_tier'] = 'low'
+                        
+                # Determine age
+                if 'genesis_date' in item:
+                    try:
+                        genesis = pd.to_datetime(item['genesis_date'])
+                        if (datetime.now() - genesis).days < 180:  # Less than 6 months
+                            context['age'] = 'new'
+                        else:
+                            context['age'] = 'established'
+                    except:
+                        pass
+                        
+                # Extract popularity
+                if 'popularity_score' in item:
+                    context['popularity'] = item['popularity_score'] / 100
+        
+        return context
+    
+    def _compute_item_weights(self, item_context: Dict, user_context: Dict, 
+                      temporal_context: Dict, domain_context: Dict,
+                      base_fecf: float = 0.65, base_ncf: float = 0.35) -> Tuple[float, float]:
+        """
+        Compute optimal model weights for a specific item based on multiple contexts
+        """
+        fecf_weight = base_fecf
+        ncf_weight = base_ncf
+        
+        # 1. Item-specific adjustments
+        
+        # Age-based adjustment
+        if item_context['age'] == 'new':
+            # New items - FECF is better
+            fecf_weight += 0.05
+            ncf_weight -= 0.05
+        
+        # Market cap adjustment
+        if item_context['market_cap_tier'] == 'low':
+            # Low market cap (long tail) - FECF is better
+            fecf_weight += 0.05
+            ncf_weight -= 0.05
+        elif item_context['market_cap_tier'] == 'high':
+            # High market cap (popular) - Both models work well
+            pass
+        
+        # Trend based adjustment
+        if item_context['trend_score'] > 70:
+            # Highly trending - increase NCF slightly 
+            # (trend is often captured by collaborative effects)
+            fecf_weight -= 0.03
+            ncf_weight += 0.03
+        
+        # 2. User-Item interaction patterns
+        
+        # User's category focus x item category
+        if user_context.get('category_focus', 0.5) > 0.7 and item_context['category'] in user_context.get('preferred_categories', []):
+            # User focuses on this category - NCF better at capturing this
+            fecf_weight -= 0.05
+            ncf_weight += 0.05
+            
+        # 3. Market condition adjustments
+        
+        # Volatility x item type
+        if domain_context.get('market_volatility', 0.5) > 0.7:
+            if item_context['market_cap_tier'] == 'low':
+                # Volatile market + small caps = FECF much better
+                fecf_weight += 0.1
+                ncf_weight -= 0.1
+        
+        # Ensure weights are in valid range
+        fecf_weight = max(0.4, min(0.8, fecf_weight))
+        ncf_weight = 1.0 - fecf_weight
+        
+        return fecf_weight, ncf_weight
+
+    def _apply_trending_boost(self, results: Dict[str, float]) -> None:
+        """Apply trending boost to results"""
         if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
-            trend_boost_factor = self.params.get('trending_boost_factor', 0.3)
+            trend_boost_factor = self.params.get('trending_boost_factor', 0.35)
             
             if trend_boost_factor > 0:
                 # Create item to trend lookup
@@ -720,12 +1178,6 @@ class HybridRecommender:
                         if norm_trend > 0.6:  # More than 60/100 trending score
                             boost = (norm_trend - 0.6) * trend_boost_factor
                             results[item] = min(1.0, results[item] + boost)
-                                
-        # Convert to list of tuples and sort
-        combined_recs = [(item, score) for item, score in results.items()]
-        combined_recs.sort(key=lambda x: x[1], reverse=True)
-        
-        return combined_recs
     
     def apply_diversity(self, recommendations: List[Tuple[str, float]], 
                     n: int, diversity_weight: float = 0.25) -> List[Tuple[str, float]]:

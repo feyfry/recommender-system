@@ -61,21 +61,21 @@ FECF_PARAMS = {
     "content_alpha": 0.55            # Lebih banyak bobot untuk collaborative filtering
 }
 
-# Hybrid Model - OPTIMIZED WEIGHTS AND SETTINGS
+# Hybrid Model - BALANCED ADAPTIVE SETTINGS
 HYBRID_PARAMS = {
-    "ncf_weight": 0.2,              # Kurangi bobot NCF karena underperform
-    "fecf_weight": 0.8,             # Tingkatkan bobot FECF
+    "ncf_weight": 0.35,             # Bobot NCF yang lebih signifikan
+    "fecf_weight": 0.65,            # FECF tetap dominan tapi tidak terlalu tinggi
     "interaction_threshold_low": 5,  # Sesuaikan dengan minimal interaksi
-    "interaction_threshold_high": 15, # Tingkatkan threshold interaksi tinggi
-    "diversity_factor": 0.25,        # Tingkatkan sedikit faktor diversitas
-    "cold_start_fecf_weight": 0.95,  # Hampir sepenuhnya FECF untuk cold start
-    "explore_ratio": 0.2,            # Tingkatkan eksplorasi
-    "normalization": "sigmoid",      # Tetap gunakan sigmoid normalization
-    "ensemble_method": "adaptive",   # Metode ensemble baru: adaptive
+    "interaction_threshold_high": 20, # Tingkatkan threshold high
+    "diversity_factor": 0.3,        # Tingkatkan faktor diversitas
+    "cold_start_fecf_weight": 0.85,  # FECF lebih dominan untuk cold start tapi tidak ekstrem
+    "explore_ratio": 0.25,          # Tingkatkan eksplorasi
+    "normalization": "sigmoid",     # Tetap gunakan sigmoid normalization
+    "ensemble_method": "contextual", # Metode ensemble baru yang context-aware
     "n_candidates_factor": 4,        # Lebih banyak kandidat vs. hasil akhir
-    "category_diversity_weight": 0.2, # Tingkatkan bobot diversitas kategori
-    "trending_boost_factor": 0.3,    # Faktor boost untuk trending items
-    "confidence_threshold": 0.65,    # Threshold kepercayaan untuk NCF
+    "category_diversity_weight": 0.25, # Tingkatkan bobot diversitas kategori
+    "trending_boost_factor": 0.35,    # Faktor boost untuk trending items
+    "confidence_threshold": 0.7,     # Threshold kepercayaan untuk metode selective
 }
 
 # Category Configuration - ENHANCED SETTINGS
