@@ -1660,6 +1660,623 @@ class NCFRecommender:
         
         return detailed_recommendations
     
+    def get_recommendations_by_category(self, user_id: str, category: str, n: int = 10, chain: Optional[str] = None, strict: bool = False) -> List[Dict[str, Any]]:
+        """
+        Mendapatkan rekomendasi berdasarkan kategori dengan opsional filter chain
+        """
+        logger.info(f"Getting category-filtered recommendations for user {user_id}, category={category}, chain={chain}, strict={strict}")
+        
+        # Check if user exists
+        if user_id not in self.users:
+            logger.warning(f"User {user_id} not found in training data, falling back to category-based popular items")
+            # In strict mode, we apply the strict filter to the category-based populars as well
+            return self._get_category_based_recommendations(category, n, chain, strict=strict)
+        
+        # Get initial recommendations with increased count for filtering
+        multiplier = 4  # NCF may need more filtering headroom
+        recommendations = self.recommend_for_user(user_id, n=n*multiplier)
+        
+        # Filter projects by category (and chain if provided)
+        filtered_recommendations = []
+        
+        for project_id, score in recommendations:
+            # Find project data
+            project_df_row = self.projects_df[self.projects_df['id'] == project_id]
+            
+            if not project_df_row.empty:
+                # Check category match
+                category_match = False
+                
+                # Try different category fields
+                if 'categories_list' in project_df_row.columns:
+                    for _, row in project_df_row.iterrows():
+                        cats = row['categories_list']
+                        
+                        # Handle different category formats
+                        categories_list = []
+                        if isinstance(cats, list):
+                            categories_list = cats
+                        elif isinstance(cats, str) and cats.startswith('[') and cats.endswith(']'):
+                            try:
+                                categories_list = eval(cats)
+                            except:
+                                categories_list = [cats]
+                        else:
+                            categories_list = [cats]
+                        
+                        # Check for category match
+                        for cat in categories_list:
+                            if isinstance(cat, str) and (category.lower() in cat.lower() or cat.lower() in category.lower()):
+                                category_match = True
+                                break
+                
+                if not category_match and 'primary_category' in project_df_row.columns:
+                    for _, row in project_df_row.iterrows():
+                        if isinstance(row['primary_category'], str) and (
+                            category.lower() in row['primary_category'].lower() or 
+                            row['primary_category'].lower() in category.lower()
+                        ):
+                            category_match = True
+                            break
+                
+                if not category_match and 'category' in project_df_row.columns:
+                    for _, row in project_df_row.iterrows():
+                        if isinstance(row['category'], str) and (
+                            category.lower() in row['category'].lower() or 
+                            row['category'].lower() in category.lower()
+                        ):
+                            category_match = True
+                            break
+                
+                # Apply chain filter if provided
+                chain_match = True  # Default to True if no chain filter
+                if chain and 'chain' in project_df_row.columns:
+                    chain_match = False
+                    for _, row in project_df_row.iterrows():
+                        if isinstance(row['chain'], str) and (
+                            chain.lower() in row['chain'].lower() or 
+                            row['chain'].lower() in chain.lower()
+                        ):
+                            chain_match = True
+                            break
+                
+                # Add to filtered recommendations if both category and chain match
+                if category_match and chain_match:
+                    filtered_recommendations.append((project_id, score))
+        
+        # Convert to detailed recommendations
+        detailed_recommendations = []
+        
+        # Add filtered recommendations to detailed_recommendations
+        for project_id, score in filtered_recommendations[:n]:
+            # Find project data
+            project_data = self.projects_df[self.projects_df['id'] == project_id]
+            
+            if not project_data.empty:
+                # Convert to dictionary
+                project_dict = project_data.iloc[0].to_dict()
+                
+                # Add recommendation score
+                project_dict['recommendation_score'] = float(score)
+                
+                # Add to results
+                detailed_recommendations.append(project_dict)
+        
+        logger.info(f"Found {len(filtered_recommendations)} filtered recommendations")
+        
+        # If strict mode, return only exact matches
+        if strict:
+            return detailed_recommendations[:n]
+        
+        # If we have too few recommendations, backfill with category-based popular items
+        if len(detailed_recommendations) < n // 2:
+            logger.warning(f"Too few filtered recommendations, adding category-based popular items")
+            
+            # Get IDs of already added recommendations
+            existing_ids = {rec['id'] for rec in detailed_recommendations}
+            
+            # Get category-based popular items
+            category_popular = self._get_category_based_recommendations(category, n*2, chain)
+            
+            # Add non-duplicate items
+            for rec in category_popular:
+                if rec['id'] not in existing_ids and len(detailed_recommendations) < n:
+                    # Mark as popular supplementary item
+                    rec['recommendation_source'] = 'category-popular'
+                    detailed_recommendations.append(rec)
+        
+        return detailed_recommendations[:n]
+    
+    def _get_category_based_recommendations(self, category: str, n: int = 10, chain: Optional[str] = None, strict: bool = False) -> List[Dict[str, Any]]:
+        """Helper method to get category-based popular items without personalization"""
+        if not self.projects_df is None:
+            # Find projects matching the category and optionally chain
+            matching_projects = []
+            
+            for _, row in self.projects_df.iterrows():
+                # Check category match
+                category_match = False
+                
+                # Try different category fields
+                if 'categories_list' in self.projects_df.columns:
+                    cats = row['categories_list']
+                    
+                    # Handle different category formats
+                    categories_list = []
+                    if isinstance(cats, list):
+                        categories_list = cats
+                    elif isinstance(cats, str) and cats.startswith('[') and cats.endswith(']'):
+                        try:
+                            categories_list = eval(cats)
+                        except:
+                            categories_list = [cats]
+                    else:
+                        categories_list = [cats]
+                    
+                    # Check for category match
+                    for cat in categories_list:
+                        if isinstance(cat, str) and (category.lower() in cat.lower() or cat.lower() in category.lower()):
+                            category_match = True
+                            break
+                
+                if not category_match and 'primary_category' in self.projects_df.columns:
+                    if isinstance(row['primary_category'], str) and (
+                        category.lower() in row['primary_category'].lower() or 
+                        row['primary_category'].lower() in category.lower()
+                    ):
+                        category_match = True
+                
+                if not category_match and 'category' in self.projects_df.columns:
+                    if isinstance(row['category'], str) and (
+                        category.lower() in row['category'].lower() or 
+                        row['category'].lower() in category.lower()
+                    ):
+                        category_match = True
+                
+                # Apply chain filter if provided
+                chain_match = True  # Default to True if no chain filter
+                if chain and 'chain' in self.projects_df.columns:
+                    chain_match = isinstance(row['chain'], str) and (
+                        chain.lower() in row['chain'].lower() or 
+                        row['chain'].lower() in chain.lower()
+                    )
+                
+                # Add to matching projects if both category and chain match
+                if category_match and chain_match:
+                    matching_projects.append(row)
+            
+            # If strict mode and no matches, return empty list
+            if strict and len(matching_projects) == 0:
+                return []
+            
+            # Sort by popularity score if available
+            result = []
+            
+            if 'trend_score' in self.projects_df.columns and 'popularity_score' in self.projects_df.columns:
+                # Sort by combined trend and popularity
+                sorted_projects = sorted(
+                    matching_projects,
+                    key=lambda x: (
+                        x.get('trend_score', 0) * 0.7 + 
+                        x.get('popularity_score', 0) * 0.3
+                    ),
+                    reverse=True
+                )
+                
+                for row in sorted_projects[:n]:
+                    project_dict = row.to_dict()
+                    score = (row.get('trend_score', 0) * 0.7 + row.get('popularity_score', 0) * 0.3) / 100
+                    project_dict['recommendation_score'] = float(min(0.95, score))
+                    result.append(project_dict)
+            elif 'trend_score' in self.projects_df.columns:
+                # Sort by trend score
+                sorted_projects = sorted(matching_projects, key=lambda x: x.get('trend_score', 0), reverse=True)
+                
+                for row in sorted_projects[:n]:
+                    project_dict = row.to_dict()
+                    project_dict['recommendation_score'] = float(min(0.9, row.get('trend_score', 0) / 100))
+                    result.append(project_dict)
+            elif 'popularity_score' in self.projects_df.columns:
+                # Sort by popularity score
+                sorted_projects = sorted(matching_projects, key=lambda x: x.get('popularity_score', 0), reverse=True)
+                
+                for row in sorted_projects[:n]:
+                    project_dict = row.to_dict()
+                    project_dict['recommendation_score'] = float(min(0.85, row.get('popularity_score', 0) / 100))
+                    result.append(project_dict)
+            elif 'market_cap' in self.projects_df.columns:
+                # Sort by market cap
+                sorted_projects = sorted(matching_projects, key=lambda x: x.get('market_cap', 0), reverse=True)
+                
+                # Calculate max market cap for normalization
+                max_market_cap = max([row.get('market_cap', 0) for row in sorted_projects]) if sorted_projects else 1
+                
+                for row in sorted_projects[:n]:
+                    project_dict = row.to_dict()
+                    score = 0.8 * row.get('market_cap', 0) / max_market_cap if max_market_cap > 0 else 0.5
+                    project_dict['recommendation_score'] = float(score)
+                    result.append(project_dict)
+            else:
+                # Just return the matching projects with a default score
+                for row in matching_projects[:n]:
+                    project_dict = row.to_dict()
+                    project_dict['recommendation_score'] = 0.7  # Default score
+                    result.append(project_dict)
+            
+            # In strict mode, don't add any fallbacks
+            if strict:
+                return result
+            
+            # If we don't have enough results and not in strict mode, find similar categories
+            if len(result) < n // 2 and not strict:
+                # Try to find projects with similar categories (partial match)
+                similar_matches = []
+                existing_ids = {rec['id'] for rec in result}
+                
+                for _, row in self.projects_df.iterrows():
+                    if row['id'] in existing_ids:
+                        continue
+                    
+                    partial_match = False
+                    
+                    # Check for broader category matches
+                    if 'primary_category' in self.projects_df.columns:
+                        primary_cat = row['primary_category']
+                        if isinstance(primary_cat, str):
+                            # Try simple word overlap
+                            cat_words = set(primary_cat.lower().split())
+                            search_words = set(category.lower().split())
+                            if cat_words.intersection(search_words):
+                                partial_match = True
+                    
+                    # Only consider chain if specified
+                    chain_match = True
+                    if chain and 'chain' in self.projects_df.columns:
+                        chain_match = isinstance(row['chain'], str) and (
+                            chain.lower() in row['chain'].lower() or 
+                            row['chain'].lower() in chain.lower()
+                        )
+                    
+                    if partial_match and chain_match:
+                        project_dict = row.to_dict()
+                        # Use lower score for partial matches
+                        if 'trend_score' in row:
+                            score = min(0.75, row['trend_score'] / 150)
+                        else:
+                            score = 0.6
+                        project_dict['recommendation_score'] = float(score)
+                        similar_matches.append(project_dict)
+                
+                # Add similar matches up to the desired count
+                for match in similar_matches:
+                    if len(result) >= n:
+                        break
+                    result.append(match)
+            
+            return result
+        
+        # Fallback to empty list if no projects data
+        return []
+    
+    def get_recommendations_by_chain(self, user_id: str, chain: str, n: int = 10, category: Optional[str] = None, strict: bool = False) -> List[Dict[str, Any]]:
+        """
+        Mendapatkan rekomendasi berdasarkan blockchain dengan opsional filter kategori
+        """
+        logger.info(f"Getting chain-filtered recommendations for user {user_id}, chain={chain}, category={category}, strict={strict}")
+        
+        # Check if user exists
+        if user_id not in self.users:
+            logger.warning(f"User {user_id} not found in training data, falling back to chain-based popular items")
+            return self._get_chain_based_recommendations(chain, n, category, strict=strict)
+        
+        # Get initial recommendations with increased count for filtering
+        multiplier = 4  # NCF may need more filtering headroom
+        recommendations = self.recommend_for_user(user_id, n=n*multiplier)
+        
+        # Filter projects by chain (and category if provided)
+        filtered_recommendations = []
+        
+        for project_id, score in recommendations:
+            # Find project data
+            project_df_row = self.projects_df[self.projects_df['id'] == project_id]
+            
+            if not project_df_row.empty:
+                # Check chain match
+                chain_match = False
+                
+                if 'chain' in project_df_row.columns:
+                    for _, row in project_df_row.iterrows():
+                        if isinstance(row['chain'], str) and (
+                            chain.lower() in row['chain'].lower() or 
+                            row['chain'].lower() in chain.lower()
+                        ):
+                            chain_match = True
+                            break
+                
+                # Apply category filter if provided
+                category_match = True  # Default to True if no category filter
+                if category:
+                    category_match = False
+                    
+                    # Try different category fields
+                    if 'categories_list' in project_df_row.columns:
+                        for _, row in project_df_row.iterrows():
+                            cats = row['categories_list']
+                            
+                            # Handle different category formats
+                            categories_list = []
+                            if isinstance(cats, list):
+                                categories_list = cats
+                            elif isinstance(cats, str) and cats.startswith('[') and cats.endswith(']'):
+                                try:
+                                    categories_list = eval(cats)
+                                except:
+                                    categories_list = [cats]
+                            else:
+                                categories_list = [cats]
+                            
+                            # Check for category match
+                            for cat in categories_list:
+                                if isinstance(cat, str) and (category.lower() in cat.lower() or cat.lower() in category.lower()):
+                                    category_match = True
+                                    break
+                    
+                    if not category_match and 'primary_category' in project_df_row.columns:
+                        for _, row in project_df_row.iterrows():
+                            if isinstance(row['primary_category'], str) and (
+                                category.lower() in row['primary_category'].lower() or 
+                                row['primary_category'].lower() in category.lower()
+                            ):
+                                category_match = True
+                                break
+                    
+                    if not category_match and 'category' in project_df_row.columns:
+                        for _, row in project_df_row.iterrows():
+                            if isinstance(row['category'], str) and (
+                                category.lower() in row['category'].lower() or 
+                                row['category'].lower() in category.lower()
+                            ):
+                                category_match = True
+                                break
+                
+                # Add to filtered recommendations if both chain and category match
+                if chain_match and category_match:
+                    filtered_recommendations.append((project_id, score))
+        
+        # Convert to detailed recommendations
+        detailed_recommendations = []
+        
+        for project_id, score in filtered_recommendations[:n]:
+            # Find project data
+            project_data = self.projects_df[self.projects_df['id'] == project_id]
+            
+            if not project_data.empty:
+                # Convert to dictionary
+                project_dict = project_data.iloc[0].to_dict()
+                
+                # Add recommendation score
+                project_dict['recommendation_score'] = float(score)
+                
+                # Add to results
+                detailed_recommendations.append(project_dict)
+        
+        logger.info(f"Found {len(detailed_recommendations)} filtered recommendations")
+        
+        # If strict mode, only return exact matches
+        if strict:
+            return detailed_recommendations[:n]
+        
+        # If we have too few recommendations, backfill with chain-based popular items
+        if len(detailed_recommendations) < n // 2:
+            logger.warning(f"Too few filtered recommendations, adding chain-based popular items")
+            
+            # Get IDs of already added recommendations
+            existing_ids = {rec['id'] for rec in detailed_recommendations}
+            
+            # Get chain-based popular items
+            chain_popular = self._get_chain_based_recommendations(chain, n*2, category)
+            
+            # Add non-duplicate items
+            for rec in chain_popular:
+                if rec['id'] not in existing_ids and len(detailed_recommendations) < n:
+                    # Mark as popular supplementary item
+                    rec['recommendation_source'] = 'chain-popular'
+                    detailed_recommendations.append(rec)
+        
+        return detailed_recommendations[:n]
+    
+    def _get_chain_based_recommendations(self, chain: str, n: int = 10, category: Optional[str] = None, strict: bool = False) -> List[Dict[str, Any]]:
+        """Helper method to get chain-based popular items without personalization"""
+        if not self.projects_df is None:
+            # Find projects matching the chain and optionally category
+            matching_projects = []
+            
+            for _, row in self.projects_df.iterrows():
+                # Check chain match
+                chain_match = False
+                
+                if 'chain' in self.projects_df.columns:
+                    if isinstance(row['chain'], str) and (
+                        chain.lower() in row['chain'].lower() or 
+                        row['chain'].lower() in chain.lower()
+                    ):
+                        chain_match = True
+                
+                # Apply category filter if provided
+                category_match = True  # Default to True if no category filter
+                if category:
+                    category_match = False
+                    
+                    # Check different category fields
+                    if 'categories_list' in self.projects_df.columns:
+                        cats = row['categories_list']
+                        
+                        # Handle different category formats
+                        categories_list = []
+                        if isinstance(cats, list):
+                            categories_list = cats
+                        elif isinstance(cats, str) and cats.startswith('[') and cats.endswith(']'):
+                            try:
+                                categories_list = eval(cats)
+                            except:
+                                categories_list = [cats]
+                        else:
+                            categories_list = [cats]
+                        
+                        # Check for category match
+                        for cat in categories_list:
+                            if isinstance(cat, str) and (category.lower() in cat.lower() or cat.lower() in category.lower()):
+                                category_match = True
+                                break
+                    
+                    if not category_match and 'primary_category' in self.projects_df.columns:
+                        if isinstance(row['primary_category'], str) and (
+                            category.lower() in row['primary_category'].lower() or 
+                            row['primary_category'].lower() in category.lower()
+                        ):
+                            category_match = True
+                    
+                    if not category_match and 'category' in self.projects_df.columns:
+                        if isinstance(row['category'], str) and (
+                            category.lower() in row['category'].lower() or 
+                            row['category'].lower() in category.lower()
+                        ):
+                            category_match = True
+                
+                # Add to matching projects if both chain and category match
+                if chain_match and category_match:
+                    matching_projects.append(row)
+            
+            # If strict mode and no matches, return empty list
+            if strict and len(matching_projects) == 0:
+                return []
+            
+            # Sort by popularity score if available
+            result = []
+            
+            if 'trend_score' in self.projects_df.columns and 'popularity_score' in self.projects_df.columns:
+                # Sort by combined trend and popularity
+                sorted_projects = sorted(
+                    matching_projects,
+                    key=lambda x: (
+                        x.get('trend_score', 0) * 0.7 + 
+                        x.get('popularity_score', 0) * 0.3
+                    ),
+                    reverse=True
+                )
+                
+                for row in sorted_projects[:n]:
+                    project_dict = row.to_dict()
+                    score = (row.get('trend_score', 0) * 0.7 + row.get('popularity_score', 0) * 0.3) / 100
+                    project_dict['recommendation_score'] = float(min(0.95, score))
+                    result.append(project_dict)
+            elif 'trend_score' in self.projects_df.columns:
+                # Sort by trend score
+                sorted_projects = sorted(matching_projects, key=lambda x: x.get('trend_score', 0), reverse=True)
+                
+                for row in sorted_projects[:n]:
+                    project_dict = row.to_dict()
+                    project_dict['recommendation_score'] = float(min(0.9, row.get('trend_score', 0) / 100))
+                    result.append(project_dict)
+            elif 'popularity_score' in self.projects_df.columns:
+                # Sort by popularity score
+                sorted_projects = sorted(matching_projects, key=lambda x: x.get('popularity_score', 0), reverse=True)
+                
+                for row in sorted_projects[:n]:
+                    project_dict = row.to_dict()
+                    project_dict['recommendation_score'] = float(min(0.85, row.get('popularity_score', 0) / 100))
+                    result.append(project_dict)
+            elif 'market_cap' in self.projects_df.columns:
+                # Sort by market cap
+                sorted_projects = sorted(matching_projects, key=lambda x: x.get('market_cap', 0), reverse=True)
+                
+                # Calculate max market cap for normalization
+                max_market_cap = max([row.get('market_cap', 0) for row in sorted_projects]) if sorted_projects else 1
+                
+                for row in sorted_projects[:n]:
+                    project_dict = row.to_dict()
+                    score = 0.8 * row.get('market_cap', 0) / max_market_cap if max_market_cap > 0 else 0.5
+                    project_dict['recommendation_score'] = float(score)
+                    result.append(project_dict)
+            else:
+                # Just return the matching projects with a default score
+                for row in matching_projects[:n]:
+                    project_dict = row.to_dict()
+                    project_dict['recommendation_score'] = 0.7  # Default score
+                    result.append(project_dict)
+                    
+            # If strict mode, return only matched results
+            if strict:
+                return result
+            
+            # If we don't have enough results and not in strict mode, add more with looser chain matching
+            if len(result) < n // 2 and not strict:
+                # Try to find projects with similar chain
+                similar_matches = []
+                existing_ids = {rec['id'] for rec in result}
+                
+                # Chain word fragments that might match
+                chain_fragments = [fragment for fragment in chain.lower().split('-') if len(fragment) > 2]
+                chain_fragments.extend([fragment for fragment in chain.lower().split('_') if len(fragment) > 2])
+                
+                for _, row in self.projects_df.iterrows():
+                    if row['id'] in existing_ids:
+                        continue
+                    
+                    partial_chain_match = False
+                    
+                    # Check for partial chain match
+                    if 'chain' in self.projects_df.columns and isinstance(row['chain'], str):
+                        row_chain = row['chain'].lower()
+                        for fragment in chain_fragments:
+                            if fragment in row_chain:
+                                partial_chain_match = True
+                                break
+                    
+                    # Check category if provided
+                    category_match = True
+                    if category:
+                        category_match = False
+                        if 'primary_category' in self.projects_df.columns:
+                            if isinstance(row['primary_category'], str) and (
+                                category.lower() in row['primary_category'].lower() or 
+                                row['primary_category'].lower() in category.lower()
+                            ):
+                                category_match = True
+                    
+                    if partial_chain_match and category_match:
+                        project_dict = row.to_dict()
+                        # Lower score for partial matches
+                        if 'trend_score' in row:
+                            score = min(0.75, row['trend_score'] / 150)
+                        else:
+                            score = 0.6
+                        project_dict['recommendation_score'] = float(score)
+                        similar_matches.append(project_dict)
+                
+                # Sort similar matches by score
+                similar_matches.sort(key=lambda x: x['recommendation_score'], reverse=True)
+                
+                # Add similar matches up to the desired count
+                for match in similar_matches:
+                    if len(result) >= n:
+                        break
+                    result.append(match)
+            
+            return result
+        
+        # Fallback to empty list if no projects data
+        return []
+    
+    def get_recommendations_by_category_and_chain(self, user_id: str, category: str, chain: str, n: int = 10, strict: bool = False) -> List[Dict[str, Any]]:
+        """
+        Mendapatkan rekomendasi berdasarkan kategori dan chain secara bersamaan
+        """
+        logger.info(f"Getting recommendations filtered by both category '{category}' and chain '{chain}' for user {user_id}")
+        
+        # Using category filter with chain parameter is more efficient
+        return self.get_recommendations_by_category(user_id, category, n=n, chain=chain, strict=strict)
+    
     def get_cold_start_recommendations(self, 
                                      user_interests: Optional[List[str]] = None,
                                      n: int = 10) -> List[Dict[str, Any]]:

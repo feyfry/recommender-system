@@ -7,6 +7,7 @@ import numpy as np
 import json
 from fastapi import APIRouter, HTTPException, Query, Depends, Body, Path
 from pydantic import BaseModel, Field
+import inspect
 
 # Path handling
 import sys
@@ -64,6 +65,7 @@ class RecommendationRequest(BaseModel):
     chain: Optional[str] = None
     user_interests: Optional[List[str]] = None
     risk_tolerance: Optional[str] = "medium"
+    strict_filter: bool = False
 
 class ProjectResponse(BaseModel):
     id: str
@@ -80,6 +82,7 @@ class ProjectResponse(BaseModel):
     category: Optional[str] = None
     chain: Optional[str] = None  # Must be optional to handle NaN
     recommendation_score: float
+    filter_match: Optional[str] = None 
 
 class RecommendationResponse(BaseModel):
     user_id: str
@@ -90,6 +93,7 @@ class RecommendationResponse(BaseModel):
     category_filter: Optional[str] = None
     chain_filter: Optional[str] = None
     execution_time: float
+    exact_match_count: int = 0
 
 def load_models_on_startup():
     """
@@ -457,8 +461,64 @@ async def recommend_projects(request: RecommendationRequest):
                 logger.warning(f"Model {request.model_type} tidak memiliki method get_cold_start_recommendations, fallback ke popular_projects")
                 recommendations = model.get_popular_projects(n=request.num_recommendations)
         else:
-            # Regular recommendations
-            if request.category:
+            # Regular recommendations - IMPROVED LOGIC FOR FILTERS
+            if request.category and request.chain:
+                # Both category and chain filters
+                logger.info(f"Filtering by both category '{request.category}' and chain '{request.chain}'")
+                
+                if hasattr(model, 'get_recommendations_by_category_and_chain'):
+                    # Direct combined filter method if available
+                    recommendations = model.get_recommendations_by_category_and_chain(
+                        request.user_id, 
+                        request.category,
+                        request.chain,
+                        n=request.num_recommendations,
+                        strict=request.strict_filter
+                    )
+                elif hasattr(model, 'get_recommendations_by_category'):
+                    # Try to use category filter with chain parameter if supported
+                    if 'chain' in inspect.signature(model.get_recommendations_by_category).parameters:
+                        recommendations = model.get_recommendations_by_category(
+                            request.user_id, 
+                            request.category,
+                            n=request.num_recommendations,
+                            chain=request.chain,
+                            strict=request.strict_filter
+                        )
+                    elif 'chain' in inspect.signature(model.get_recommendations_by_category).parameters:
+                        recommendations = model.get_recommendations_by_category(
+                            request.user_id, 
+                            request.category,
+                            n=request.num_recommendations,
+                            chain=request.chain
+                        )
+                    else:
+                        # Manual post-filtering by chain
+                        category_recs = model.get_recommendations_by_category(
+                            request.user_id, 
+                            request.category,
+                            n=request.num_recommendations * 3  # Get more to filter
+                        )
+                        
+                        # Filter by chain manually
+                        chain_filtered = []
+                        for rec in category_recs:
+                            if 'chain' in rec and rec['chain'] and request.chain.lower() in str(rec['chain']).lower():
+                                chain_filtered.append(rec)
+                        
+                        recommendations = chain_filtered[:request.num_recommendations]
+                        
+                        if len(recommendations) < request.num_recommendations // 2:
+                            logger.warning(f"Too few results after chain filtering ({len(recommendations)}). Adding some category-only results.")
+                            remaining = request.num_recommendations - len(recommendations)
+                            existing_ids = [rec['id'] for rec in recommendations]
+                            additional = [rec for rec in category_recs if rec['id'] not in existing_ids][:remaining]
+                            recommendations.extend(additional)
+                else:
+                    # Fallback to standard recommendations with warning
+                    logger.warning(f"Model {request.model_type} doesn't support category and chain filtering. Using standard recommendations.")
+                    recommendations = model.recommend_projects(request.user_id, n=request.num_recommendations)
+            elif request.category:
                 # Category-filtered recommendations
                 if hasattr(model, 'get_recommendations_by_category'):
                     recommendations = model.get_recommendations_by_category(
@@ -468,6 +528,7 @@ async def recommend_projects(request: RecommendationRequest):
                     )
                 else:
                     # Fallback
+                    logger.warning(f"Model {request.model_type} doesn't support category filtering. Using standard recommendations.")
                     recommendations = model.recommend_projects(request.user_id, n=request.num_recommendations)
             elif request.chain:
                 # Chain-filtered recommendations
@@ -479,6 +540,7 @@ async def recommend_projects(request: RecommendationRequest):
                     )
                 else:
                     # Fallback
+                    logger.warning(f"Model {request.model_type} doesn't support chain filtering. Using standard recommendations.")
                     recommendations = model.recommend_projects(request.user_id, n=request.num_recommendations)
             else:
                 # Standard recommendations

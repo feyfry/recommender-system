@@ -950,6 +950,350 @@ class FeatureEnhancedCF:
                 
         return detailed_recommendations
     
+    def get_recommendations_by_category(self, user_id: str, category: str, n: int = 10, 
+                                  chain: Optional[str] = None, strict: bool = False) -> List[Dict[str, Any]]:
+        """
+        Mendapatkan rekomendasi yang difilter berdasarkan kategori dengan opsional filter chain
+        """
+        logger.info(f"Getting category-filtered recommendations for user {user_id}, category={category}, chain={chain}, strict={strict}")
+        
+        # Get initial recommendations with increased count for filtering
+        multiplier = 3  # Get 3x more recommendations to allow for filtering
+        recommendations = self.recommend_for_user(user_id, n=n*multiplier)
+        
+        # Filter projects by category (and chain if provided)
+        filtered_recommendations = []
+        
+        for project_id, score in recommendations:
+            # Find project data
+            project_df_row = self.projects_df[self.projects_df['id'] == project_id]
+            
+            if not project_df_row.empty:
+                # Check category match
+                category_match = False
+                
+                # Check different category fields for match
+                if 'categories_list' in project_df_row.columns:
+                    for _, row in project_df_row.iterrows():
+                        cats = row['categories_list']
+                        
+                        # Handle different category formats
+                        categories_list = []
+                        if isinstance(cats, list):
+                            categories_list = cats
+                        elif isinstance(cats, str) and cats.startswith('[') and cats.endswith(']'):
+                            try:
+                                categories_list = eval(cats)
+                            except:
+                                categories_list = [cats]
+                        else:
+                            categories_list = [cats]
+                        
+                        # Check for category match
+                        for cat in categories_list:
+                            if isinstance(cat, str) and (category.lower() in cat.lower() or cat.lower() in category.lower()):
+                                category_match = True
+                                break
+                
+                if not category_match and 'primary_category' in project_df_row.columns:
+                    for _, row in project_df_row.iterrows():
+                        if isinstance(row['primary_category'], str) and (
+                            category.lower() in row['primary_category'].lower() or 
+                            row['primary_category'].lower() in category.lower()
+                        ):
+                            category_match = True
+                            break
+                
+                if not category_match and 'category' in project_df_row.columns:
+                    for _, row in project_df_row.iterrows():
+                        if isinstance(row['category'], str) and (
+                            category.lower() in row['category'].lower() or 
+                            row['category'].lower() in category.lower()
+                        ):
+                            category_match = True
+                            break
+                
+                # Apply chain filter if provided
+                chain_match = True  # Default to True if no chain filter
+                if chain and 'chain' in project_df_row.columns:
+                    chain_match = False
+                    for _, row in project_df_row.iterrows():
+                        if isinstance(row['chain'], str) and (
+                            chain.lower() in row['chain'].lower() or 
+                            row['chain'].lower() in chain.lower()
+                        ):
+                            chain_match = True
+                            break
+                
+                # Add to filtered recommendations if both category and chain match
+                if category_match and chain_match:
+                    filtered_recommendations.append((project_id, score))
+        
+        # Apply diversity with metadata if we have more than needed
+        if len(filtered_recommendations) > n:
+            filtered_recommendations = self._apply_diversity_with_metadata(filtered_recommendations, n=n)
+        
+        filtered_count = len(filtered_recommendations)
+        logger.info(f"Found {filtered_count} recommendations matching category '{category}'{' and chain ' + chain if chain else ''}")
+        
+        # If strict mode is enabled, only return exact matches
+        if strict:
+            # Convert to detailed recommendations
+            detailed_recommendations = []
+            
+            for project_id, score in filtered_recommendations[:n]:
+                # Find project data
+                project_data = self.projects_df[self.projects_df['id'] == project_id]
+                
+                if not project_data.empty:
+                    # Convert to dictionary
+                    project_dict = project_data.iloc[0].to_dict()
+                    
+                    # Add recommendation score
+                    project_dict['recommendation_score'] = float(score)
+                    
+                    # Add to results
+                    detailed_recommendations.append(project_dict)
+            
+            return detailed_recommendations
+        
+        # If we have too few recommendations, add some category-based recommendations
+        if len(filtered_recommendations) < n // 2:
+            logger.warning(f"Too few category-filtered recommendations, adding category-based recommendations")
+            
+            # Get IDs of already added recommendations
+            existing_ids = {rec[0] for rec in filtered_recommendations}
+            
+            # Find projects with matching category without personalization
+            category_projects = []
+            
+            for _, row in self.projects_df.iterrows():
+                category_match = False
+                if 'categories_list' in self.projects_df.columns and row['id'] not in existing_ids:
+                    cats = row['categories_list']
+                    categories_list = self.process_categories(cats)
+                    
+                    for cat in categories_list:
+                        if isinstance(cat, str) and (category.lower() in cat.lower() or cat.lower() in category.lower()):
+                            category_match = True
+                            break
+                
+                if not category_match and 'primary_category' in self.projects_df.columns and row['id'] not in existing_ids:
+                    if isinstance(row['primary_category'], str) and (
+                        category.lower() in row['primary_category'].lower() or 
+                        row['primary_category'].lower() in category.lower()
+                    ):
+                        category_match = True
+                
+                # Apply chain filter if provided
+                chain_match = True  # Default to True if no chain filter
+                if chain and 'chain' in self.projects_df.columns:
+                    chain_match = row['chain'] and chain.lower() in str(row['chain']).lower()
+                
+                if category_match and chain_match:
+                    # Add some trending bias
+                    score = 0.7  # Base score for category match
+                    if 'trend_score' in row:
+                        score = min(0.9, 0.7 + row['trend_score'] / 200)  # Boost trending items
+                    
+                    category_projects.append((row['id'], score))
+            
+            # Sort by score
+            category_projects.sort(key=lambda x: x[1], reverse=True)
+            
+            # Add to recommendations
+            for project_id, score in category_projects:
+                if len(filtered_recommendations) >= n:
+                    break
+                    
+                if project_id not in existing_ids:
+                    filtered_recommendations.append((project_id, score))
+                    existing_ids.add(project_id)
+        
+        # Convert to detailed recommendations
+        detailed_recommendations = []
+        
+        for project_id, score in filtered_recommendations[:n]:
+            # Find project data
+            project_data = self.projects_df[self.projects_df['id'] == project_id]
+            
+            if not project_data.empty:
+                # Convert to dictionary
+                project_dict = project_data.iloc[0].to_dict()
+                
+                # Add recommendation score
+                project_dict['recommendation_score'] = float(score)
+                
+                # Add to results
+                detailed_recommendations.append(project_dict)
+        
+        return detailed_recommendations
+    
+    def get_recommendations_by_chain(self, user_id: str, chain: str, n: int = 10, category: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Mendapatkan rekomendasi yang difilter berdasarkan blockchain dengan opsional filter kategori
+        """
+        logger.info(f"Getting chain-filtered recommendations for user {user_id}, chain={chain}, category={category}")
+        
+        # Get initial recommendations with increased count for filtering
+        multiplier = 3  # Get 3x more recommendations to allow for filtering
+        recommendations = self.recommend_for_user(user_id, n=n*multiplier)
+        
+        # Filter projects by chain (and category if provided)
+        filtered_recommendations = []
+        
+        for project_id, score in recommendations:
+            # Find project data
+            project_df_row = self.projects_df[self.projects_df['id'] == project_id]
+            
+            if not project_df_row.empty:
+                # Check chain match
+                chain_match = False
+                
+                if 'chain' in project_df_row.columns:
+                    for _, row in project_df_row.iterrows():
+                        if isinstance(row['chain'], str) and (
+                            chain.lower() in row['chain'].lower() or 
+                            row['chain'].lower() in chain.lower()
+                        ):
+                            chain_match = True
+                            break
+                
+                # Apply category filter if provided
+                category_match = True  # Default to True if no category filter
+                if category:
+                    category_match = False
+                    
+                    # Check different category fields
+                    if 'categories_list' in project_df_row.columns:
+                        for _, row in project_df_row.iterrows():
+                            cats = row['categories_list']
+                            categories_list = self.process_categories(cats)
+                            
+                            # Check for category match
+                            for cat in categories_list:
+                                if isinstance(cat, str) and (category.lower() in cat.lower() or cat.lower() in category.lower()):
+                                    category_match = True
+                                    break
+                    
+                    if not category_match and 'primary_category' in project_df_row.columns:
+                        for _, row in project_df_row.iterrows():
+                            if isinstance(row['primary_category'], str) and (
+                                category.lower() in row['primary_category'].lower() or 
+                                row['primary_category'].lower() in category.lower()
+                            ):
+                                category_match = True
+                                break
+                
+                # Add to filtered recommendations if both chain and category match
+                if chain_match and category_match:
+                    filtered_recommendations.append((project_id, score))
+        
+        # Apply diversity with metadata if we have more than needed
+        if len(filtered_recommendations) > n:
+            filtered_recommendations = self._apply_diversity_with_metadata(filtered_recommendations, n=n)
+        
+        # Convert to detailed recommendations
+        detailed_recommendations = []
+        
+        for project_id, score in filtered_recommendations[:n]:
+            # Find project data
+            project_data = self.projects_df[self.projects_df['id'] == project_id]
+            
+            if not project_data.empty:
+                # Convert to dictionary
+                project_dict = project_data.iloc[0].to_dict()
+                
+                # Add recommendation score
+                project_dict['recommendation_score'] = float(score)
+                
+                # Add to results
+                detailed_recommendations.append(project_dict)
+        
+        logger.info(f"Found {len(detailed_recommendations)} recommendations matching chain '{chain}'{' and category ' + category if category else ''}")
+        
+        # If we have too few recommendations, add some chain-based recommendations
+        if len(detailed_recommendations) < n // 2:
+            logger.warning("Too few chain-filtered recommendations, adding chain-based recommendations")
+            
+            # Get IDs of already added recommendations
+            existing_ids = {rec['id'] for rec in detailed_recommendations}
+            
+            # Find projects with matching chain without personalization
+            chain_projects = []
+            
+            for _, row in self.projects_df.iterrows():
+                if row['id'] not in existing_ids and 'chain' in self.projects_df.columns:
+                    # Check chain match
+                    chain_match = row['chain'] and chain.lower() in str(row['chain']).lower()
+                    
+                    # Apply category filter if provided
+                    category_match = True  # Default to True if no category filter
+                    if category:
+                        category_match = False
+                        
+                        if 'categories_list' in self.projects_df.columns:
+                            cats = row['categories_list']
+                            categories_list = self.process_categories(cats)
+                            
+                            for cat in categories_list:
+                                if isinstance(cat, str) and (category.lower() in cat.lower() or cat.lower() in category.lower()):
+                                    category_match = True
+                                    break
+                        
+                        if not category_match and 'primary_category' in self.projects_df.columns:
+                            if isinstance(row['primary_category'], str) and (
+                                category.lower() in row['primary_category'].lower() or 
+                                row['primary_category'].lower() in category.lower()
+                            ):
+                                category_match = True
+                    
+                    if chain_match and category_match:
+                        # Add some popularity/trending bias
+                        score = 0.7  # Base score for chain match
+                        
+                        if 'trend_score' in row:
+                            score = min(0.9, 0.7 + row['trend_score'] / 200)  # Boost trending items
+                        elif 'popularity_score' in row:
+                            score = min(0.85, 0.7 + row['popularity_score'] / 300)  # Lesser boost for popular items
+                        
+                        chain_projects.append((row['id'], score))
+            
+            # Sort by score
+            chain_projects.sort(key=lambda x: x[1], reverse=True)
+            
+            # Add to recommendations
+            for project_id, score in chain_projects:
+                if len(detailed_recommendations) >= n:
+                    break
+                    
+                # Find project data
+                project_data = self.projects_df[self.projects_df['id'] == project_id]
+                
+                if not project_data.empty:
+                    # Convert to dictionary
+                    project_dict = project_data.iloc[0].to_dict()
+                    
+                    # Add recommendation score
+                    project_dict['recommendation_score'] = float(score)
+                    
+                    # Mark as chain-based recommendation
+                    project_dict['recommendation_source'] = 'chain-based'
+                    
+                    # Add to results
+                    detailed_recommendations.append(project_dict)
+        
+        return detailed_recommendations
+    
+    def get_recommendations_by_category_and_chain(self, user_id: str, category: str, chain: str, n: int = 10, strict: bool = False) -> List[Dict[str, Any]]:
+        """
+        Mendapatkan rekomendasi berdasarkan kategori dan chain secara bersamaan
+        """
+        logger.info(f"Getting recommendations filtered by both category '{category}' and chain '{chain}' for user {user_id}")
+        
+        # Using category filter with chain parameter is more efficient
+        return self.get_recommendations_by_category(user_id, category, n=n, chain=chain, strict=strict)
+    
     def get_similar_projects(self, project_id: str, n: int = 10) -> List[Dict[str, Any]]:
         if self.model is None or self.item_similarity_matrix is None:
             logger.error("Model not trained or loaded")
