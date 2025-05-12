@@ -38,25 +38,54 @@ Sistem ini mengimplementasikan beberapa pendekatan rekomendasi:
    - Penanganan multi-kategori yang lebih baik
    - Normalisasi skor untuk cold-start pengguna
 
-4. **API Service dengan Konfigurasi Fleksibel:**
+4. **Filtering Rekomendasi yang Disempurnakan:**
+   - Filter berdasarkan kategori, chain, atau kombinasi keduanya
+   - Mode strict untuk hasil yang sangat spesifik dan presisi tinggi
+   - Fallback rekomendasi cerdas ketika filter terlalu ketat
+   - Diversifikasi hasil otomatis saat melakukan filtering
+
+5. **API Service dengan Konfigurasi Fleksibel:**
    - Endpoint REST API untuk integrasi dengan aplikasi backend Laravel
    - Dukungan parameter periode indikator kustom melalui API
    - Caching untuk performa yang lebih baik
    - Dokumentasi komprehensif
 
-5. **Pipeline Data Otomatis:**
+6. **Pipeline Data Otomatis:**
    - Pengumpulan data reguler dari CoinGecko
    - Pipeline pemrosesan untuk ekstraksi fitur
    - Pelatihan dan evaluasi model otomatis
 
 ## 🔄 Pembaruan Terbaru
 
+### Peningkatan Filtering Rekomendasi (Mei 2025)
+
+Sistem rekomendasi telah ditingkatkan dengan kemampuan filtering yang lebih canggih:
+
+1. **Filter Multi-Dimensi:**
+   - Kombinasi filter kategori dan chain secara bersamaan
+   - Mode strict untuk filtering tanpa fallback, menjamin hanya hasil yang sangat relevan
+   - Dukungan filter untuk semua model (FECF, NCF, dan Hybrid)
+
+2. **Algoritma Matching yang Disempurnakan:**
+   - Matching berbasis kesamaan untuk kategori dan chain
+   - Penanganan kategori majemuk yang lebih baik
+   - Peningkatan identifikasi konten relevan dengan fuzzy matching
+
+3. **Fallback Cerdas:**
+   - Respons yang lebih baik ketika hasil filter terlalu sedikit
+   - Penambahan hasil relevan secara bertahap ketika strict mode tidak aktif
+   - Label filter_match pada hasil untuk menunjukkan tingkat kecocokan
+
+4. **Parameter Filter pada API:**
+   - Parameter strict pada semua endpoint filter
+   - Indikator match quality pada respons
+   - Optimasi performa untuk query dengan filter
+
 ### Peningkatan Performa Model & Optimasi Arsitektur (Mei 2025)
 
 Sistem rekomendasi telah mengalami peningkatan signifikan pada performa model dan optimasi arsitektur:
 
 1. **Perbaikan Hybrid Model:**
-   - Model Hybrid sekarang mengungguli FECF dalam metrik utama (Precision, F1, Hit Ratio)
    - Implementasi adaptive ensemble method yang lebih cerdas
    - Pembobotan dinamis berdasarkan interaksi pengguna dan kualitas data
    - Algoritma normalisasi skor yang ditingkatkan menggunakan transformasi sigmoid
@@ -401,11 +430,11 @@ Project ini menyediakan CLI komprehensif untuk semua fungsi utama:
 
 ```bash
 # Mengumpulkan data dari CoinGecko
-python main.py collect --limit 500 --detail-limit 500
+python main.py collect --limit 1000 --detail-limit 1000
 # tambahkan param --rate-limit 3 jika ingin menghindari rate limit lebih panjang
 
 # Memproses data yang dikumpulkan
-python main.py process --users 500
+python main.py process --users 1000
 
 # Melatih model rekomendasi
 python main.py train --fecf --ncf --hybrid
@@ -415,6 +444,12 @@ python main.py evaluate --cold-start --regular-runs 5
 
 # Menghasilkan rekomendasi untuk pengguna
 python main.py recommend --user-id user_1 --model hybrid --num 10
+
+# Menghasilkan rekomendasi dengan filter
+python main.py recommend --user-id user_1 --model hybrid --num 10 --category defi --chain ethereum
+
+# Menghasilkan rekomendasi dengan strict filtering
+python main.py recommend --user-id user_1 --model hybrid --num 10 --category defi --chain ethereum --strict
 
 # Menghasilkan sinyal trading untuk proyek dengan berbagai opsi periode indikator
 # Menggunakan preset gaya trading
@@ -528,9 +563,13 @@ Secara default, API akan berjalan di `http://0.0.0.0:8001`.
   "category": "defi",
   "chain": "ethereum",
   "user_interests": ["defi", "nft", "gaming"],
-  "risk_tolerance": "medium"
+  "risk_tolerance": "medium",
+  "strict_filter": false
 }
 ```
+
+**Parameter Baru:**
+- `strict_filter`: Boolean yang menentukan apakah filter harus diterapkan secara ketat (default: false). Jika true, hanya mengembalikan hasil yang benar-benar cocok dengan filter tanpa fallback.
 
 **Response:**
 ```json
@@ -552,16 +591,22 @@ Secara default, API akan berjalan di `http://0.0.0.0:8001`.
       "trend_score": 85.2,
       "category": "layer-1",
       "chain": "bitcoin",
-      "recommendation_score": 0.95
+      "recommendation_score": 0.95,
+      "filter_match": "exact"
     }
   ],
   "timestamp": "2025-04-19T10:30:00Z",
   "is_cold_start": false,
   "category_filter": "defi",
   "chain_filter": "ethereum",
-  "execution_time": 0.125
+  "execution_time": 0.125,
+  "exact_match_count": 10
 }
 ```
+
+**Field Respons Baru:**
+- `filter_match`: Indikator tingkat kecocokan dengan filter ("exact", "category_only", "chain_only", atau "fallback")
+- `exact_match_count`: Jumlah hasil yang cocok secara tepat dengan kriteria filter
 
 #### 2. Dapatkan Proyek Trending
 
@@ -570,6 +615,9 @@ Secara default, API akan berjalan di `http://0.0.0.0:8001`.
 **Parameters:**
 - `limit` (int, optional): Jumlah proyek (default: 10)
 - `model_type` (string, optional): Model yang digunakan (default: "fecf")
+- `category` (string, optional): Filter berdasarkan kategori
+- `chain` (string, optional): Filter berdasarkan chain
+- `strict` (boolean, optional): Mode filter ketat (default: false)
 
 **Response:** Array dari objek `ProjectResponse`
 
@@ -580,6 +628,9 @@ Secara default, API akan berjalan di `http://0.0.0.0:8001`.
 **Parameters:**
 - `limit` (int, optional): Jumlah proyek (default: 10)
 - `model_type` (string, optional): Model yang digunakan (default: "fecf")
+- `category` (string, optional): Filter berdasarkan kategori
+- `chain` (string, optional): Filter berdasarkan chain
+- `strict` (boolean, optional): Mode filter ketat (default: false)
 
 **Response:** Array dari objek `ProjectResponse`
 
@@ -591,6 +642,9 @@ Secara default, API akan berjalan di `http://0.0.0.0:8001`.
 - `project_id` (string): ID proyek
 - `limit` (int, optional): Jumlah proyek serupa (default: 10)
 - `model_type` (string, optional): Model yang digunakan (default: "fecf")
+- `category` (string, optional): Filter berdasarkan kategori
+- `chain` (string, optional): Filter berdasarkan chain
+- `strict` (boolean, optional): Mode filter ketat (default: false)
 
 **Response:** Array dari objek `ProjectResponse`
 
@@ -1162,6 +1216,25 @@ web3-recommender-system/
    - Gunakan model prediksi yang lebih sederhana untuk performa lebih baik:
    ```bash
    GET /analysis/price-prediction/bitcoin?model=simple
+   ```
+
+6. **Masalah Filter yang Mengembalikan Hasil Kosong**
+   - Jika menggunakan strict mode dan tidak mendapatkan hasil:
+     - Coba tanpa mode strict untuk mendapatkan hasil yang lebih luas
+     - Gunakan filter kategori atau chain saja, bukan keduanya sekaligus
+     - Verifikasi kategori atau chain yang digunakan ada dalam dataset
+   ```bash
+   # Tanpa strict mode
+   python main.py recommend --user-id user_1 --category defi --chain ethereum
+   ```
+   - Atau gunakan API untuk memeriksa hasil filter secara bertahap:
+   ```bash
+   # Cek kategori saja dulu
+   GET /recommend/projects?user_id=user_1&category=defi
+   # Lalu coba dengan chain
+   GET /recommend/projects?user_id=user_1&chain=ethereum
+   # Terakhir coba gabungkan
+   GET /recommend/projects?user_id=user_1&category=defi&chain=ethereum
    ```
 
 ## 📬 Kontak
