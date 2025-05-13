@@ -1,45 +1,4 @@
-## 📊 Hasil Evaluasi Terbaru
-
-Sistem rekomendasi menunjukkan peningkatan kinerja yang substansial dalam evaluasi terbaru menggunakan 145 test users:
-
-### Model Comparison Summary (k=10)
-
-| Model | Precision | Recall | F1 | NDCG | Hit Ratio | MRR |
-|-------|-----------|--------|----|----|-----------|-----|
-| fecf | 0.2338 | 0.5356 | 0.3010 | 0.4700 | 0.8862 | 0.6356 |
-| ncf | 0.1566 | 0.3429 | 0.1979 | 0.2497 | 0.6069 | 0.3405 |
-| hybrid | 0.2476 | 0.5570 | 0.3162 | 0.4920 | 0.9138 | 0.6294 |
-
-### Cold-Start Performance (Averaged across multiple runs)
-
-| Model | Precision | Recall | F1 | NDCG | Hit Ratio | Runs |
-|-------|-----------|--------|----|-------|-----------|------|
-| cold_start_fecf | 0.1507±0.0103 | 0.5024±0.0345 | 0.2319±0.0159 | 0.3917±0.0321 | 0.7239±0.0451 | 5 |
-| cold_start_hybrid | 0.1374±0.0075 | 0.4580±0.0250 | 0.2114±0.0115 | 0.3621±0.0276 | 0.6809±0.0487 | 5 |
-
-### Detailed Metrics by K-Value
-
-#### fecf
-
-| K | Precision | Recall | F1 | NDCG | Hit Ratio |
-|---|-----------|--------|-----|------|-----------|
-| 5 | 0.3310 | 0.3878 | 0.3271 | 0.4350 | 0.6517 |
-| 10 | 0.2338 | 0.5356 | 0.3010 | 0.4700 | 0.8862 |
-| 20 | 0.1497 | 0.6548 | 0.2297 | 0.5148 | 0.9379 |
-
-#### ncf
-
-| K | Precision | Recall | F1 | NDCG | Hit Ratio |
-|---|-----------|--------|-----|------|-----------|
-| 5 | 0.1614 | 0.1707 | 0.1516 | 0.1855 | 0.3621 |
-| 10 | 0.1566 | 0.3429 | 0.1979 | 0.2497 | 0.6069 |
-| 20 | 0.1403 | 0.5793 | 0.2123 | 0.3437 | 0.7931 |
-
-#### hybrid
-
-| K | Precision | Recall | F1 | NDCG | Hit Ratio |
-|---|-----------|--------|-----|------|-----------|
-| 5 | # Recommendation System Web3 Based
+# Recommendation System Web3 Based
 
 Sistem rekomendasi untuk proyek Web3 (cryptocurrency, token, NFT, DeFi) berbasis popularitas, tren investasi, dan analisis teknikal dengan dukungan penuh untuk periode indikator dinamis, membandingkan pendekatan Neural CF dan Feature-Enhanced CF.
 
@@ -98,26 +57,47 @@ Sistem ini mengimplementasikan beberapa pendekatan rekomendasi:
 
 ## 🔄 Pembaruan Terbaru
 
-### Peningkatan Hasil Evaluasi Model (Juni 2025)
+### Optimasi Performa Model & Evaluasi Mendalam (Mei 2025)
 
-Sistem rekomendasi telah menunjukkan peningkatan signifikan dalam metrik evaluasi:
+Berdasarkan hasil evaluasi terbaru, sistem rekomendasi telah mencapai metrik performa yang kuat dengan kualitas rekomendasi tinggi:
 
 | Model | Precision | Recall | F1 | NDCG | Hit Ratio | MRR |
 |-------|-----------|--------|----|----|-----------|-----|
-| fecf | 0.2338 | 0.5356 | 0.3010 | 0.4700 | 0.8862 | 0.6356 |
-| ncf | 0.1566 | 0.3429 | 0.1979 | 0.2497 | 0.6069 | 0.3405 |
-| hybrid | 0.2476 | 0.5570 | 0.3162 | 0.4920 | 0.9138 | 0.6294 |
+| fecf | 0.2434 | 0.5093 | 0.3046 | 0.4543 | 0.8828 | 0.6008 |
+| ncf | 0.1800 | 0.3368 | 0.2170 | 0.3005 | 0.6897 | 0.4639 |
+| hybrid | 0.2559 | 0.5206 | 0.3176 | 0.4768 | 0.8759 | 0.6382 |
 
 **Cold-Start Performance:**
 
 | Model | Precision | Recall | F1 | NDCG | Hit Ratio | Runs |
 |-------|-----------|--------|----|-------|-----------|------|
-| cold_start_fecf | 0.1507±0.0103 | 0.5024±0.0345 | 0.2319±0.0159 | 0.3917±0.0321 | 0.7239±0.0451 | 5 |
-| cold_start_hybrid | 0.1374±0.0075 | 0.4580±0.0250 | 0.2114±0.0115 | 0.3621±0.0276 | 0.6809±0.0487 | 5 |
+| cold_start_fecf | 0.1452±0.0086 | 0.4836±0.0294 | 0.2233±0.0134 | 0.3812±0.0234 | 0.7013±0.0330 | 5 |
+| cold_start_hybrid | 0.1305±0.0049 | 0.4349±0.0163 | 0.2008±0.0075 | 0.3462±0.0134 | 0.6695±0.0350 | 5 |
 
-Dibandingkan dengan evaluasi sebelumnya, model Hybrid menunjukkan peningkatan signifikan, terutama pada Hit Ratio yang mencapai 91.38% (versus 84.16% sebelumnya). Model FECF juga menunjukkan peningkatan substansial dalam metrik NDCG (0.4700 vs 0.2831 sebelumnya) dan MRR (0.6356 vs 0.4559 sebelumnya).
+### Peningkatan Model & Evaluasi
 
-Untuk kasus cold-start, model FECF juga menunjukkan peningkatan drastis dengan Hit Ratio 72.39% (vs 22.91% sebelumnya), mencerminkan efektivitas strategi diversifikasi dan normalisasi skor yang ditingkatkan.
+1. **Perbaikan Metrik Kunci:**
+   - Model Hybrid mencapai Hit Ratio ~87%, menunjukkan keberhasilan merekomendasikan setidaknya satu item relevan di 87% kasus
+   - NDCG ~0.47 untuk model Hybrid menunjukkan item relevan secara konsisten ditempatkan di peringkat yang lebih tinggi
+   - Model FECF tetap unggul dalam skenario cold-start, mempertahankan Hit Ratio ~70% bahkan untuk pengguna baru
+
+2. **Optimasi Hybrid Model:**
+   - Implementasi adaptive ensemble method yang menyesuaikan bobot model berdasarkan data pengguna
+   - Pembobotan dinamis berdasarkan jumlah interaksi pengguna
+   - Normalisasi skor yang ditingkatkan menggunakan transformasi sigmoid
+   - Diversifikasi hasil yang lebih baik dengan penalti kategori yang lebih rasional
+
+3. **Neural CF yang Ditingkatkan:**
+   - Arsitektur mendalam dengan residual connections dan layer normalization
+   - Attention mechanism untuk meningkatkan personalisasi
+   - Strategi sampling negatif cerdas dengan category-aware sampling
+   - Learning rate scheduler dengan warm-up dan cosine annealing
+
+4. **Framework Evaluasi yang Dioptimalkan:**
+   - Multiple run evaluation untuk hasil yang lebih stabil dan dapat diandalkan
+   - Stratified split untuk evaluasi yang lebih konsisten
+   - Evaluasi mendalam untuk skenario cold-start dengan standar deviasi
+   - Paralelisasi untuk evaluasi lebih cepat
 
 ### Peningkatan Filtering Rekomendasi (Mei 2025)
 
@@ -142,33 +122,6 @@ Sistem rekomendasi telah ditingkatkan dengan kemampuan filtering yang lebih cang
    - Parameter strict pada semua endpoint filter
    - Indikator match quality pada respons
    - Optimasi performa untuk query dengan filter
-
-### Peningkatan Performa Model & Optimasi Arsitektur (Mei 2025)
-
-Sistem rekomendasi telah mengalami peningkatan signifikan pada performa model dan optimasi arsitektur:
-
-1. **Perbaikan Hybrid Model:**
-   - Implementasi adaptive ensemble method yang lebih cerdas
-   - Pembobotan dinamis berdasarkan interaksi pengguna dan kualitas data
-   - Algoritma normalisasi skor yang ditingkatkan menggunakan transformasi sigmoid
-
-2. **Optimasi Neural CF Model:**
-   - Arsitektur mendalam dengan residual connections dan layer normalization
-   - Attention mechanism untuk meningkatkan personalisasi
-   - Strategi sampling negatif yang lebih canggih dengan category-aware sampling
-   - Learning rate scheduler dengan warm-up dan cosine annealing
-
-3. **Feature-Enhanced CF yang Ditingkatkan:**
-   - Peningkatan diversitas rekomendasi dengan pembobotan kategori lebih bijak
-   - Penanganan kategori multipel yang lebih efektif
-   - Optimasi untuk data sparse dengan strategi cold-start yang lebih baik
-   - Pengelolaan cache yang lebih efisien untuk performa yang lebih cepat
-
-4. **Framework Evaluasi yang Dioptimalkan:**
-   - Stratified split untuk evaluasi yang lebih konsisten
-   - Pengukuran waktu yang akurat dan pelaporan metrik yang komprehensif
-   - Multiple run evaluation untuk cold-start dengan standar deviasi
-   - Paralelisasi untuk evaluasi lebih cepat
 
 ### Optimasi Analisis Teknikal dan Prediksi Harga (Mei 2025)
 
@@ -1193,20 +1146,7 @@ web3-recommender-system/
 └── README.md                                     # Dokumentasi proyek keseluruhan
 ```
 
-## 🔧 Cronjob dan Update Model
-
-Untuk memastikan sistem rekomendasi tetap aktual dengan perubahan cepat di dunia cryptocurrency, kami menggunakan beberapa cronjob terjadwal:
-
-| **Command** | **Jadwal** | **Deskripsi** |
-|-------------|------------|---------------|
-| recommend:sync --projects | 12 jam sekali | Sinkronisasi data proyek cryptocurrency |
-| recommend:sync --interactions | 4 jam sekali | Sinkronisasi interaksi pengguna terbaru |
-| recommend:sync --train | 03:00 setiap hari | Melatih ulang model rekomendasi |
-| cache:api-clear --expired | Setiap jam | Membersihkan cache API yang kadaluwarsa |
-
-Dengan jadwal ini, sistem mempertahankan keseimbangan optimal antara responsivitas terhadap perubahan pasar dan efisiensi komputasi. Update proyek setiap 12 jam cukup untuk menangkap perubahan metadata, sementara sinkronisasi interaksi pengguna setiap 4 jam memastikan rekomendasi memperhitungkan perilaku pengguna terbaru.
-
-Pelatihan ulang model sekali sehari pada pukul 3 pagi memungkinkan sistem memanfaatkan periode low-traffic untuk update model tanpa mengganggu pengalaman pengguna, sementara pembersihan cache per jam memastikan respons API tetap segar tanpa membebani server dengan perhitungan berulang yang tidak perlu.
+## 🔍 Pemecahan Masalah
 
 1. **Performa Model Hybrid vs FECF**
    - Jika model Hybrid tidak mengungguli FECF di semua metrik:

@@ -150,7 +150,7 @@ API_CACHE_TTL = 300  # 5 menit dalam detik
 COLD_START_EVAL_CONFIG = {
     "cold_start_users": 100,         # Jumlah test users tetap
     "max_popular_items_exclude": 0.1, # Hanya exclude 10% item populer - dinaikkan dari 0.05
-    "test_ratio": 0.25,               # Test set yang lebih reasonable - diturunkan dari 0.3
+    "test_ratio": 0.3,               # Test set yang lebih reasonable
     "min_interactions_required": 3,   # Sesuaikan dengan minimal interaksi
     "category_diversity_enabled": True,
 }
