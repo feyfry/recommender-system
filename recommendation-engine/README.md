@@ -1,4 +1,45 @@
-# Recommendation System Web3 Based
+## 📊 Hasil Evaluasi Terbaru
+
+Sistem rekomendasi menunjukkan peningkatan kinerja yang substansial dalam evaluasi terbaru menggunakan 145 test users:
+
+### Model Comparison Summary (k=10)
+
+| Model | Precision | Recall | F1 | NDCG | Hit Ratio | MRR |
+|-------|-----------|--------|----|----|-----------|-----|
+| fecf | 0.2338 | 0.5356 | 0.3010 | 0.4700 | 0.8862 | 0.6356 |
+| ncf | 0.1566 | 0.3429 | 0.1979 | 0.2497 | 0.6069 | 0.3405 |
+| hybrid | 0.2476 | 0.5570 | 0.3162 | 0.4920 | 0.9138 | 0.6294 |
+
+### Cold-Start Performance (Averaged across multiple runs)
+
+| Model | Precision | Recall | F1 | NDCG | Hit Ratio | Runs |
+|-------|-----------|--------|----|-------|-----------|------|
+| cold_start_fecf | 0.1507±0.0103 | 0.5024±0.0345 | 0.2319±0.0159 | 0.3917±0.0321 | 0.7239±0.0451 | 5 |
+| cold_start_hybrid | 0.1374±0.0075 | 0.4580±0.0250 | 0.2114±0.0115 | 0.3621±0.0276 | 0.6809±0.0487 | 5 |
+
+### Detailed Metrics by K-Value
+
+#### fecf
+
+| K | Precision | Recall | F1 | NDCG | Hit Ratio |
+|---|-----------|--------|-----|------|-----------|
+| 5 | 0.3310 | 0.3878 | 0.3271 | 0.4350 | 0.6517 |
+| 10 | 0.2338 | 0.5356 | 0.3010 | 0.4700 | 0.8862 |
+| 20 | 0.1497 | 0.6548 | 0.2297 | 0.5148 | 0.9379 |
+
+#### ncf
+
+| K | Precision | Recall | F1 | NDCG | Hit Ratio |
+|---|-----------|--------|-----|------|-----------|
+| 5 | 0.1614 | 0.1707 | 0.1516 | 0.1855 | 0.3621 |
+| 10 | 0.1566 | 0.3429 | 0.1979 | 0.2497 | 0.6069 |
+| 20 | 0.1403 | 0.5793 | 0.2123 | 0.3437 | 0.7931 |
+
+#### hybrid
+
+| K | Precision | Recall | F1 | NDCG | Hit Ratio |
+|---|-----------|--------|-----|------|-----------|
+| 5 | # Recommendation System Web3 Based
 
 Sistem rekomendasi untuk proyek Web3 (cryptocurrency, token, NFT, DeFi) berbasis popularitas, tren investasi, dan analisis teknikal dengan dukungan penuh untuk periode indikator dinamis, membandingkan pendekatan Neural CF dan Feature-Enhanced CF.
 
@@ -57,6 +98,27 @@ Sistem ini mengimplementasikan beberapa pendekatan rekomendasi:
 
 ## 🔄 Pembaruan Terbaru
 
+### Peningkatan Hasil Evaluasi Model (Juni 2025)
+
+Sistem rekomendasi telah menunjukkan peningkatan signifikan dalam metrik evaluasi:
+
+| Model | Precision | Recall | F1 | NDCG | Hit Ratio | MRR |
+|-------|-----------|--------|----|----|-----------|-----|
+| fecf | 0.2338 | 0.5356 | 0.3010 | 0.4700 | 0.8862 | 0.6356 |
+| ncf | 0.1566 | 0.3429 | 0.1979 | 0.2497 | 0.6069 | 0.3405 |
+| hybrid | 0.2476 | 0.5570 | 0.3162 | 0.4920 | 0.9138 | 0.6294 |
+
+**Cold-Start Performance:**
+
+| Model | Precision | Recall | F1 | NDCG | Hit Ratio | Runs |
+|-------|-----------|--------|----|-------|-----------|------|
+| cold_start_fecf | 0.1507±0.0103 | 0.5024±0.0345 | 0.2319±0.0159 | 0.3917±0.0321 | 0.7239±0.0451 | 5 |
+| cold_start_hybrid | 0.1374±0.0075 | 0.4580±0.0250 | 0.2114±0.0115 | 0.3621±0.0276 | 0.6809±0.0487 | 5 |
+
+Dibandingkan dengan evaluasi sebelumnya, model Hybrid menunjukkan peningkatan signifikan, terutama pada Hit Ratio yang mencapai 91.38% (versus 84.16% sebelumnya). Model FECF juga menunjukkan peningkatan substansial dalam metrik NDCG (0.4700 vs 0.2831 sebelumnya) dan MRR (0.6356 vs 0.4559 sebelumnya).
+
+Untuk kasus cold-start, model FECF juga menunjukkan peningkatan drastis dengan Hit Ratio 72.39% (vs 22.91% sebelumnya), mencerminkan efektivitas strategi diversifikasi dan normalisasi skor yang ditingkatkan.
+
 ### Peningkatan Filtering Rekomendasi (Mei 2025)
 
 Sistem rekomendasi telah ditingkatkan dengan kemampuan filtering yang lebih canggih:
@@ -107,23 +169,6 @@ Sistem rekomendasi telah mengalami peningkatan signifikan pada performa model da
    - Pengukuran waktu yang akurat dan pelaporan metrik yang komprehensif
    - Multiple run evaluation untuk cold-start dengan standar deviasi
    - Paralelisasi untuk evaluasi lebih cepat
-
-### Performa Model Terbaru (Mei 2025)
-
-| Model | Precision | Recall | F1 | NDCG | Hit Ratio | MRR |
-|-------|-----------|--------|----|----|-----------|-----|
-| fecf | 0.1485 | 0.3301 | 0.1891 | 0.2831 | 0.8020 | 0.4559 |
-| ncf | 0.0950 | 0.1860 | 0.1140 | 0.1534 | 0.6238 | 0.2723 |
-| hybrid | 0.1515 | 0.3282 | 0.1911 | 0.2733 | 0.8416 | 0.4347 |
-
-**Cold-Start Performance:**
-
-| Model | Precision | Recall | F1 | NDCG | Hit Ratio |
-|-------|-----------|--------|----|-------|-----------|
-| cold_start_fecf | 0.0366±0.0028 | 0.1071±0.0145 | 0.0522±0.0059 | 0.0813±0.0138 | 0.2291±0.0120 |
-| cold_start_hybrid | 0.0311±0.0031 | 0.0978±0.0113 | 0.0462±0.0051 | 0.0722±0.0107 | 0.1998±0.0248 |
-
-Model hybrid sekarang mengungguli model FECF dalam metrik Precision, F1, dan Hit Ratio. Khususnya, peningkatan signifikan terjadi pada Hit Ratio hybrid (0.8416 vs 0.8020 FECF). Untuk kasus cold-start, FECF masih sedikit mengungguli hybrid.
 
 ### Optimasi Analisis Teknikal dan Prediksi Harga (Mei 2025)
 
@@ -1148,7 +1193,20 @@ web3-recommender-system/
 └── README.md                                     # Dokumentasi proyek keseluruhan
 ```
 
-## 🔍 Pemecahan Masalah
+## 🔧 Cronjob dan Update Model
+
+Untuk memastikan sistem rekomendasi tetap aktual dengan perubahan cepat di dunia cryptocurrency, kami menggunakan beberapa cronjob terjadwal:
+
+| **Command** | **Jadwal** | **Deskripsi** |
+|-------------|------------|---------------|
+| recommend:sync --projects | 12 jam sekali | Sinkronisasi data proyek cryptocurrency |
+| recommend:sync --interactions | 4 jam sekali | Sinkronisasi interaksi pengguna terbaru |
+| recommend:sync --train | 03:00 setiap hari | Melatih ulang model rekomendasi |
+| cache:api-clear --expired | Setiap jam | Membersihkan cache API yang kadaluwarsa |
+
+Dengan jadwal ini, sistem mempertahankan keseimbangan optimal antara responsivitas terhadap perubahan pasar dan efisiensi komputasi. Update proyek setiap 12 jam cukup untuk menangkap perubahan metadata, sementara sinkronisasi interaksi pengguna setiap 4 jam memastikan rekomendasi memperhitungkan perilaku pengguna terbaru.
+
+Pelatihan ulang model sekali sehari pada pukul 3 pagi memungkinkan sistem memanfaatkan periode low-traffic untuk update model tanpa mengganggu pengalaman pengguna, sementara pembersihan cache per jam memastikan respons API tetap segar tanpa membebani server dengan perhitungan berulang yang tidak perlu.
 
 1. **Performa Model Hybrid vs FECF**
    - Jika model Hybrid tidak mengungguli FECF di semua metrik:
