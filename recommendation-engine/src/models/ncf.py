@@ -1089,7 +1089,7 @@ class NCFRecommender:
         }
     
     def _calculate_validation_metrics(self, val_dataset):
-        """Calculate validation metrics for model comparison"""
+        """Calculate validation metrics for model comparison with improved methodology"""
         self.model.eval()
         
         # Extract positive examples from validation set
@@ -1116,19 +1116,20 @@ class NCFRecommender:
                 # Get user's interacted items to exclude
                 user_interacted_items = val_dataset.user_item_map.get(user_idx, [])
                 
-                # Generate candidate items (1 positive + 99 negative)
-                candidate_items = [pos_item_idx]
+                # IMPROVEMENT: Use all available items instead of just 99 random negatives
+                # This makes evaluation much more realistic and challenging
                 
-                # Add 99 random negative items
-                neg_items = []
-                for _ in range(99):
-                    while True:
-                        neg_item = np.random.choice(val_dataset.all_items)
-                        if neg_item not in user_interacted_items and neg_item not in candidate_items:
-                            neg_items.append(neg_item)
-                            break
+                # Get all items excluding user's already interacted items
+                all_candidate_items = np.setdiff1d(val_dataset.all_items, user_interacted_items)
                 
-                candidate_items.extend(neg_items)
+                # If all candidate items is too large (>10,000), sample a large subset
+                # This balances computational feasibility with realistic evaluation
+                if len(all_candidate_items) > 10000:
+                    negative_items = np.random.choice(all_candidate_items, size=9999, replace=False)
+                    candidate_items = np.append([pos_item_idx], negative_items)
+                else:
+                    # Use positive item plus all available negative items
+                    candidate_items = np.append([pos_item_idx], all_candidate_items)
                 
                 # Move to device
                 user_tensor = torch.LongTensor([user_idx] * len(candidate_items)).to(self.device)

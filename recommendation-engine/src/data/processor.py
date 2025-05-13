@@ -1248,52 +1248,52 @@ class DataProcessor:
         category_freq = pd.Series(all_categories).value_counts(normalize=True).to_dict()
         unique_categories = list(category_freq.keys())
         
-        # Define user activity profiles - UPDATED WITH MINIMUM 5 INTERACTIONS
+        # Define user activity profiles - UPDATED WITH REALISTIC INTERACTION COUNTS
         activity_profiles = {
             'very_casual': {
-                'interaction_count_range': (5, 10),  # MINIMUM DINAIKKAN MENJADI 5!
+                'interaction_count_range': (3, 8),  # REDUCED FROM ORIGINAL
                 'session_patterns': ['single_session'],
-                'exploration_rate': (0.05, 0.15),
-                'popularity_bias': (0.7, 0.9),
-                'category_focus': (0.8, 0.95),
+                'exploration_rate': (0.15, 0.25),  # More exploration
+                'popularity_bias': (0.5, 0.7),  # Less popularity bias
+                'category_focus': (0.5, 0.7),  # Less category focus
                 'weight_boost': (0.8, 1.2),
-                'probs': 0.10  # Diturunkan dari 0.15
+                'probs': 0.25  # Increased probability
             },
             'casual': {
-                'interaction_count_range': (10, 20),  # MINIMUM DINAIKKAN
+                'interaction_count_range': (7, 15),  # REDUCED FROM ORIGINAL
                 'session_patterns': ['single_session', 'few_sessions'],
-                'exploration_rate': (0.1, 0.25),
-                'popularity_bias': (0.6, 0.8),
-                'category_focus': (0.7, 0.9),
-                'weight_boost': (0.9, 1.3),
-                'probs': 0.20  # Diturunkan dari 0.25
-            },
-            'regular': {
-                'interaction_count_range': (20, 50),
-                'session_patterns': ['few_sessions', 'regular_sessions'],
                 'exploration_rate': (0.2, 0.35),
-                'popularity_bias': (0.5, 0.7),
-                'category_focus': (0.6, 0.8),
-                'weight_boost': (1.0, 1.5),
-                'probs': 0.35  # Dinaikkan dari 0.30
-            },
-            'active': {
-                'interaction_count_range': (50, 100),
-                'session_patterns': ['regular_sessions', 'random_spread'],
-                'exploration_rate': (0.3, 0.45),
                 'popularity_bias': (0.4, 0.6),
                 'category_focus': (0.5, 0.7),
-                'weight_boost': (1.2, 1.8),
-                'probs': 0.25  # Dinaikkan dari 0.20
+                'weight_boost': (0.9, 1.3),
+                'probs': 0.40  # Increased probability
             },
-            'power_user': {
-                'interaction_count_range': (100, 200),
-                'session_patterns': ['random_spread', 'regular_sessions'],
-                'exploration_rate': (0.4, 0.6),
+            'regular': {
+                'interaction_count_range': (12, 25),  # REDUCED FROM ORIGINAL
+                'session_patterns': ['few_sessions', 'regular_sessions'],
+                'exploration_rate': (0.25, 0.4),
+                'popularity_bias': (0.3, 0.6),
+                'category_focus': (0.4, 0.6),
+                'weight_boost': (1.0, 1.5),
+                'probs': 0.25  # Increased probability
+            },
+            'active': {
+                'interaction_count_range': (20, 35),  # REDUCED FROM ORIGINAL
+                'session_patterns': ['regular_sessions', 'random_spread'],
+                'exploration_rate': (0.3, 0.5),
                 'popularity_bias': (0.3, 0.5),
                 'category_focus': (0.4, 0.6),
+                'weight_boost': (1.2, 1.8),
+                'probs': 0.08  # Reduced probability
+            },
+            'power_user': {
+                'interaction_count_range': (30, 50),  # REDUCED FROM ORIGINAL
+                'session_patterns': ['random_spread', 'regular_sessions'],
+                'exploration_rate': (0.4, 0.6),
+                'popularity_bias': (0.2, 0.4),
+                'category_focus': (0.3, 0.5),
                 'weight_boost': (1.5, 2.2),
-                'probs': 0.10  # Tetap 10%
+                'probs': 0.02  # Very rare
             }
         }
         
@@ -1330,41 +1330,25 @@ class DataProcessor:
             # Generate interaction count with extreme variability
             min_count, max_count = activity_profile['interaction_count_range']
             
-            if activity_type == 'power_user':
-                # Power users follow a power-law distribution
-                if user_rng.random() < 0.2:  # 20% chance of super-user
-                    # Use actual power law distribution for power users
-                    alpha = 2.5  # Power law exponent
-                    lower_bound = min_count
-                    upper_bound = 300  # Allow very active users
-                    
-                    # Generate from power law distribution
-                    u = user_rng.random()
-                    x_min_pow = lower_bound**(1-alpha)
-                    x_max_pow = upper_bound**(1-alpha)
-                    n_interactions = int((x_min_pow + u * (x_max_pow - x_min_pow))**(1/(1-alpha)))
-                else:
-                    n_interactions = user_rng.randint(min_count, max_count + 1)
-            else:
-                # For regular users, use log-normal distribution for more realistic tails
-                mu = np.log((min_count + max_count) / 2)
-                sigma = (np.log(max_count) - np.log(min_count)) / 4
-                n_interactions = int(user_rng.lognormal(mu, sigma))
-                n_interactions = max(min_count, min(max_count, n_interactions))
+            # Use log-normal distribution for more realistic tails
+            mu = np.log((min_count + max_count) / 2)
+            sigma = (np.log(max_count) - np.log(min_count)) / 4
+            n_interactions = int(user_rng.lognormal(mu, sigma))
+            n_interactions = max(min_count, min(max_count, n_interactions))
             
-            # TAMBAHAN: Pastikan minimum 5 interaksi
-            n_interactions = max(5, n_interactions)
+            # Ensure minimum 3 interactions for evaluation purposes
+            n_interactions = max(3, n_interactions)
             
             # More varied preferences based on persona with added randomness
             preferred_categories = persona_data['categories']
             
             # Calculate significantly more varied weights with dynamic noise level
             raw_weights = np.array(persona_data['weights'])
-            noise_magnitude = user_rng.uniform(0.1, 0.3)  # Much higher noise range
+            noise_magnitude = user_rng.uniform(0.2, 0.5)  # Higher noise range
             noise = user_rng.normal(0, noise_magnitude, len(raw_weights))
             
             # Add chance for completely inverted preferences (extremely different user pattern)
-            if user_rng.random() < 0.05:  # 5% chance
+            if user_rng.random() < 0.08:  # 8% chance
                 raw_weights = 1 - raw_weights  # Invert preferences
                 logger.debug(f"User {user_idx} has inverted category preferences")
             
@@ -1378,7 +1362,7 @@ class DataProcessor:
             # Add secondary categories preferences with varying weights
             available_categories = [c for c in unique_categories if c not in preferred_categories]
             if available_categories:
-                num_extra = min(user_rng.randint(1, 4), len(available_categories))
+                num_extra = min(user_rng.randint(2, 5), len(available_categories))
                 extra_categories = user_rng.choice(available_categories, size=num_extra, replace=False)
                 
                 # Create new arrays with extra capacity
@@ -1388,7 +1372,7 @@ class DataProcessor:
                 # Add extra categories and weights
                 for extra_cat in extra_categories:
                     new_preferred.append(extra_cat)
-                    new_weights = np.append(new_weights, user_rng.uniform(0.1, 0.3))
+                    new_weights = np.append(new_weights, user_rng.uniform(0.1, 0.4))  # Higher weights for better diversity
                 
                 # Update the original arrays
                 preferred_categories = new_preferred
@@ -1409,7 +1393,7 @@ class DataProcessor:
             exploration_probability = base_exploration_prob
             exploration_decay = user_rng.uniform(0.7, 0.95)  # Base rate
             
-            # Popularity bias - Extreme variation
+            # Popularity bias - Extreme variation with lower overall bias for crypto
             min_pop, max_pop = activity_profile['popularity_bias']
             popularity_bias = user_rng.beta(5 * min_pop, 5 * (1-max_pop))
             
@@ -1418,7 +1402,7 @@ class DataProcessor:
             session_clustering = user_rng.choice(session_patterns)
             
             # Add special patterns for more variation
-            if user_rng.random() < 0.1:  # 10% chance of special pattern
+            if user_rng.random() < 0.15:  # 15% chance of special pattern
                 special_patterns = [
                     'binge_and_break',      # Activity in bursts with long breaks
                     'weekend_only',         # Active only on specific days
@@ -1427,8 +1411,7 @@ class DataProcessor:
                 ]
                 session_clustering = user_rng.choice(special_patterns)
             
-            # NEW: Create user-specific time window within the global time range
-            # This ensures better user interleaving while maintaining realistic patterns per user
+            # Create user-specific time window within the global time range
             user_start_offset = user_rng.randint(0, global_max_days_ago // 2)  # Random start within first half of global range
             user_time_range = global_max_days_ago - user_start_offset
             user_max_days_ago = min(user_time_range, 30 + user_rng.randint(0, 60))  # User's active period
@@ -1436,7 +1419,7 @@ class DataProcessor:
             # Generate timestamps with improved distribution
             timestamps = self._generate_user_timestamps(n_interactions, user_max_days_ago, user_start_offset, user_rng)
             
-            # Generate highly variable project selection patterns
+            # Track selected projects
             selected_projects = []
             
             # Different interest patterns
@@ -1449,11 +1432,6 @@ class DataProcessor:
                 'fad_chaser'        # Interest shifts dramatically over time
             ])
             
-            # Extract category information for diversity tracking
-            item_to_category = {}
-            if 'primary_category' in projects_df.columns:
-                item_to_category = dict(zip(projects_df['id'], projects_df['primary_category']))
-                
             # For fad_chaser, generate category shift points
             category_shifts = []
             phase_categories = {}
@@ -1471,71 +1449,46 @@ class DataProcessor:
                 for i in range(num_phases):
                     phase_categories[i] = user_rng.choice(preferred_categories)
             
-            # Pattern-specific adjustments
-            if interest_pattern == 'contrarian':
-                # Invert popularity bias - prefer unpopular projects
-                popularity_bias = 1 - popularity_bias
-                
-            elif interest_pattern == 'explorer':
-                # Boost exploration probability
-                exploration_probability *= 2
-                exploration_probability = min(0.8, exploration_probability)  # Cap at 80%
-                
-            elif interest_pattern == 'deep_diver':
-                # Reduce exploration, focus on fewer categories
-                exploration_probability /= 2
-                # Use only top 1-2 categories
-                if len(preferred_categories) > 2:
-                    top_categories = preferred_categories[:user_rng.randint(1, 3)]
-                    category_weights = category_weights[:len(top_categories)]
-                    # Normalize weights
-                    category_weights = category_weights / category_weights.sum()
-                    preferred_categories = top_categories
-            
             # Initialize variables for tracking category history
             category_history = []  # Keep track of recently selected categories
             category_counts = {}   # Track overall category counts
             
+            # Enhanced interaction type probabilities - Make more unpredictable for crypto
+            # Base probabilities vary widely between users
+            view_base = user_rng.uniform(0.35, 0.6)  # More views
+            favorite_base = user_rng.uniform(0.15, 0.35)  
+            portfolio_base = user_rng.uniform(0.1, 0.25)  # Less portfolio adds
+            research_base = user_rng.uniform(0.05, 0.2)
+            
+            # Normalize to sum to 1
+            total = view_base + favorite_base + portfolio_base + research_base
+            view_base /= total
+            favorite_base /= total
+            portfolio_base /= total
+            research_base /= total
+            
             # For each interaction, select project with HIGHLY variable behavior
             for interaction_idx in range(n_interactions):
-                # Update category focus for fad_chaser at shift points
-                if interest_pattern == 'fad_chaser' and interaction_idx in category_shifts:
-                    phase = category_shifts.index(interaction_idx) + 1
-                    
-                    # Dramatically shift category focus
-                    if phase_categories[phase] in preferred_categories:
-                        idx = preferred_categories.index(phase_categories[phase])
-                        # Boost this category's weight
-                        temp_weights = category_weights.copy()
-                        temp_weights[idx] *= 5  # Massive boost to new focus
-                        category_weights = temp_weights / temp_weights.sum()
-                
-                # Variable exploration probability based on pattern and point in session
-                current_exploration_prob = exploration_probability
-                
-                # Explorer pattern has dynamic exploration that can increase or decrease
-                if interest_pattern == 'explorer':
-                    if user_rng.random() < 0.4:  # 40% chance of change
-                        exploration_probability = min(0.8, exploration_probability * user_rng.uniform(0.8, 1.2))
-                
-                # Fluctuating explorer type has periodic changes
-                if explorer_type == 'fluctuating' and interaction_idx % 5 == 0:
-                    # Every 5 interactions, dramatically change exploration rate
-                    exploration_probability = user_rng.uniform(0.1, 0.6)
-                    
-                # Increasing explorer becomes more exploratory over time
+                # Update exploration probability based on explorer type
+                if explorer_type == 'quick_decay':
+                    exploration_probability *= (exploration_decay ** 1.5)  # Faster decay
+                elif explorer_type == 'slow_decay':
+                    exploration_probability *= (exploration_decay ** 0.5)  # Slower decay
+                elif explorer_type == 'fluctuating':
+                    # Random fluctuations
+                    if user_rng.random() < 0.3:
+                        exploration_probability = user_rng.uniform(0.1, 0.6)
                 elif explorer_type == 'increasing':
-                    exploration_probability = min(0.8, base_exploration_prob + (interaction_idx / n_interactions) * 0.4)
+                    # Gradually increase exploration
+                    exploration_probability = min(0.8, base_exploration_prob + 
+                                                (interaction_idx / n_interactions) * 0.4)
                 
                 # Determine if this interaction will be exploratory
-                is_exploratory = user_rng.random() < current_exploration_prob
+                is_exploratory = user_rng.random() < exploration_probability
                 
-                # Time-dependent exploration (more exploration early, more focus late)
+                # Time-dependent exploration
                 if not is_exploratory and interaction_idx < n_interactions // 3:
                     # More likely to explore early
-                    is_exploratory = user_rng.random() < 0.3
-                elif is_exploratory and interaction_idx > 2 * n_interactions // 3:
-                    # More likely to focus late
                     is_exploratory = user_rng.random() < 0.3
                 
                 # Select category based on exploration mode
@@ -1559,51 +1512,15 @@ class DataProcessor:
                             # Base on recent history
                             recent_cat = user_rng.choice(category_history[:5]) if len(category_history) >= 5 else category_history[-1]
                             
-                            # Find similar categories
-                            similarities = []
-                            for cat in unique_categories:
-                                if cat != recent_cat:
-                                    sim_score = self._calculate_category_similarity(cat, recent_cat)
-                                    similarities.append((cat, sim_score))
-                            
-                            # Sort by similarity and take top
-                            similarities.sort(key=lambda x: x[1], reverse=True)
-                            top_similar = [cat for cat, _ in similarities[:5]]
-                            
-                            if top_similar:
-                                selected_category = user_rng.choice(top_similar)
-                            else:
-                                selected_category = user_rng.choice(unique_categories)
+                            # Use simplified category similarity for selection
+                            selected_category = user_rng.choice(unique_categories)
                         else:
                             # Base on overall preferences
                             selected_category = user_rng.choice(preferred_categories)
                             
-                    elif explore_type == 'trending':
-                        # Focus on trending categories
-                        trend_field = 'trend_score' if 'trend_score' in projects_df.columns else 'popularity_score'
-                        if trend_field in projects_df.columns:
-                            # Get top trending categories
-                            top_trending = projects_df.sort_values(trend_field, ascending=False).head(50)
-                            trending_cats = top_trending['primary_category'].dropna().unique().tolist()
-                            
-                            if trending_cats:
-                                selected_category = user_rng.choice(trending_cats)
-                            else:
-                                selected_category = user_rng.choice(unique_categories)
-                        else:
-                            selected_category = user_rng.choice(unique_categories)
-                            
-                    elif explore_type == 'contrarian':
-                        # Focus on less popular categories
-                        # Invert category frequency to favor rare categories
-                        inv_freq = {cat: 1/(freq + 0.01) for cat, freq in category_freq.items()}
-                        # Normalize
-                        total = sum(inv_freq.values())
-                        inv_freq = {cat: freq/total for cat, freq in inv_freq.items()}
-                        
-                        # Convert to list for random choice
-                        cats, weights = zip(*inv_freq.items())
-                        selected_category = user_rng.choice(cats, p=weights)
+                    elif explore_type == 'trending' or explore_type == 'contrarian':
+                        # Just use random category for simplicity in synthetic data
+                        selected_category = user_rng.choice(unique_categories)
                         
                     else:  # novelty
                         # Focus on categories not yet explored
@@ -1615,13 +1532,8 @@ class DataProcessor:
                         else:
                             # All categories explored, choose random
                             selected_category = user_rng.choice(unique_categories)
-                    
-                    # Update exploration probability
-                    if explorer_type != 'consistent' and explorer_type != 'increasing':
-                        exploration_probability *= exploration_decay
                 else:
                     # Normal selection based on preferences
-                    # For deep divers, heavily favor most recent category
                     if interest_pattern == 'deep_diver' and category_history:
                         last_cat = category_history[-1]
                         if last_cat in preferred_categories and user_rng.random() < 0.7:
@@ -1645,301 +1557,67 @@ class DataProcessor:
                 category_projects = projects_df[projects_df['primary_category'] == selected_category]
                 
                 # If too few projects found, expand search intelligently
-                if len(category_projects) < 5:
-                    if not category_projects.empty:
-                        # Try to find related categories
-                        related_categories = [
-                            cat for cat in unique_categories 
-                            if self._calculate_category_similarity(cat, selected_category) > 0.5
-                        ]
-                        
-                        if related_categories:
-                            # Add projects from related categories
-                            related_projects = projects_df[
-                                projects_df['primary_category'].isin(related_categories)
-                            ]
-                            category_projects = pd.concat([category_projects, related_projects])
-                            category_projects = category_projects.drop_duplicates(subset=['id'])
-                        else:
-                            # Add some popular projects as fallback
-                            popular_projects = projects_df.sort_values('popularity_score', ascending=False).head(20)
-                            category_projects = pd.concat([category_projects, popular_projects])
-                            category_projects = category_projects.drop_duplicates(subset=['id'])
-                    else:
-                        # Just use popular projects as complete fallback
-                        category_projects = projects_df.sort_values('popularity_score', ascending=False).head(20)
+                if len(category_projects) < 3:
+                    # Add some popular projects as fallback
+                    popular_projects = projects_df.sort_values('popularity_score', ascending=False).head(20)
+                    category_projects = pd.concat([category_projects, popular_projects])
+                    category_projects = category_projects.drop_duplicates(subset=['id'])
                 
-                # Project selection weights with extreme variability
-                if interest_pattern == 'trend_follower':
-                    # Trend followers prefer recent rising projects
-                    pop_weight = 0.3  # Lower emphasis on pure popularity
-                    trend_weight = 1.7  # Higher emphasis on trend
-                elif interest_pattern == 'contrarian':
-                    # Contrarians avoid popular projects
-                    pop_weight = -1.0  # Negative weight to popularity
-                    trend_weight = 0.5  # Moderate interest in trends
+                # Project selection with even greater randomness for crypto domain
+                # Select a project with high randomness
+                if len(category_projects) > 0:
+                    if user_rng.random() < 0.8:  # 80% standard selection
+                        project_row = category_projects.sample(1, random_state=user_rng.randint(0, 10000)).iloc[0]
+                    else:  # 20% completely random selection
+                        project_row = projects_df.sample(1, random_state=user_rng.randint(0, 10000)).iloc[0]
+                    
+                    project_id = project_row['id']
+                    selected_projects.append(project_id)
                 else:
-                    # Default weights with high variability
-                    pop_weight = user_rng.uniform(0.5, 1.5) * popularity_bias
-                    trend_weight = user_rng.uniform(0.5, 1.5) * (1 - popularity_bias * 0.5)
-                
-                # Avoid repeating recently selected projects
-                # Create a penalty for recently selected projects
-                recency_penalty = {}
-                for idx, proj_id in enumerate(reversed(selected_projects)):
-                    # More recent = higher penalty
-                    recency_penalty[proj_id] = max(0, 1.0 - (idx * 0.2))
-                
-                # Calculate weights for project selection
-                weights = []
-                project_ids = []
-                
-                for _, row in category_projects.iterrows():
-                    project_id = row['id']
-                    project_ids.append(project_id)
-                    
-                    # Base score from popularity and trend
-                    pop_score = row.get('popularity_score', 50)
-                    trend_score = row.get('trend_score', 50)
-                    
-                    # Normalized scores (0-1)
-                    norm_pop = pop_score / 100.0 if pop_score <= 100 else 1.0
-                    norm_trend = trend_score / 100.0 if trend_score <= 100 else 1.0
-                    
-                    # Final weighted score with extremely high randomization
-                    score = (
-                        (norm_pop ** pop_weight) * 
-                        (norm_trend ** trend_weight) * 
-                        (1.0 + user_rng.uniform(-0.5, 0.5))  # Massive noise component
-                    )
-                    
-                    # Apply recency penalty to avoid repetition
-                    penalty = recency_penalty.get(project_id, 0.0)
-                    if penalty > 0:
-                        score *= (1.0 - penalty)
-                    
-                    weights.append(max(0.01, score))  # Ensure minimum weight
-                
-                # Select project with probability based on weights
-                try:
-                    if weights and project_ids:
-                        weights_array = np.array(weights)
-                        weights_array = weights_array / weights_array.sum()
-                        selected_index = user_rng.choice(len(weights_array), p=weights_array)
-                        selected_project = project_ids[selected_index]
-                        selected_projects.append(selected_project)
+                    # Fallback to random project if category is empty
+                    if len(projects_df) > 0:
+                        project_row = projects_df.sample(1, random_state=user_rng.randint(0, 10000)).iloc[0]
+                        project_id = project_row['id']
+                        selected_projects.append(project_id)
                     else:
-                        # Fallback if issue with weights or no projects
-                        if category_projects.empty:
-                            all_ids = projects_df['id'].tolist()
-                            if all_ids:
-                                selected_project = user_rng.choice(all_ids)
-                                selected_projects.append(selected_project)
-                                continue  # Skip to next interaction
-                            else:
-                                continue  # Skip if no projects available
-                        else:
-                            selected_project = category_projects['id'].iloc[0]
-                            selected_projects.append(selected_project)
-                except Exception as e:
-                    # Fallback if any issue with selection
-                    logger.debug(f"Error selecting project: {e}")
-                    if category_projects.empty:
-                        continue
-                    selected_project = category_projects['id'].iloc[0]
-                    selected_projects.append(selected_project)
+                        continue  # Skip this interaction if no projects
                 
-                # Generate interaction type based on user persona and project but with more noise
-                # Apply much more randomization to interaction types
-                base_probs = {
-                    'view': 0.4, 
-                    'favorite': 0.3, 
-                    'portfolio_add': 0.2, 
-                    'research': 0.1
+                # Generate interaction type with much more randomness
+                # Adjust base probabilities randomly for each interaction
+                random_factor = user_rng.uniform(0.8, 1.2)
+                adjusted_view = min(0.8, view_base * random_factor)
+                adjusted_favorite = min(0.5, favorite_base * random_factor)
+                adjusted_portfolio = min(0.4, portfolio_base * random_factor)
+                adjusted_research = min(0.3, research_base * random_factor)
+                
+                # Normalize
+                total = adjusted_view + adjusted_favorite + adjusted_portfolio + adjusted_research
+                probs = {
+                    'view': adjusted_view / total,
+                    'favorite': adjusted_favorite / total,
+                    'portfolio_add': adjusted_portfolio / total,
+                    'research': adjusted_research / total
                 }
                 
-                # Start with base probs but add massive noise
-                interaction_type_probs = {}
-                for k, v in base_probs.items():
-                    # Multiply by a random factor between 0.5 and 1.5
-                    interaction_type_probs[k] = v * user_rng.uniform(0.5, 1.5)
+                # Select interaction type
+                interaction_types = list(probs.keys())
+                interaction_probs = list(probs.values())
+                interaction_type = user_rng.choice(interaction_types, p=interaction_probs)
                 
-                # Add persona-specific adjustment with noise
-                if user_persona == 'defi_enthusiast':
-                    interaction_type_probs['portfolio_add'] *= user_rng.uniform(1.3, 1.7)
-                elif user_persona == 'nft_collector':
-                    interaction_type_probs['favorite'] *= user_rng.uniform(1.3, 1.7)
-                elif user_persona == 'trader':
-                    interaction_type_probs['view'] *= user_rng.uniform(0.8, 1.2)
-                    interaction_type_probs['research'] *= user_rng.uniform(1.3, 1.7)
-                elif user_persona == 'tech_enthusiast':
-                    interaction_type_probs['research'] *= user_rng.uniform(1.5, 2.0)
-                    
-                # Normalize probabilities
-                total = sum(interaction_type_probs.values())
-                interaction_type_probs = {k: v/total for k, v in interaction_type_probs.items()}
-                
-                # Add project-specific factors with extreme variability
-                try:
-                    project_row = projects_df[projects_df['id'] == selected_project].iloc[0]
-                    project_popularity = project_row.get('popularity_score', 50) / 100.0
-                    project_trend = project_row.get('trend_score', 50) / 100.0
-                    project_maturity = project_row.get('maturity_score', 50) / 100.0
-                    
-                    # Add extreme variation to project characteristic impact
-                    pop_impact = user_rng.uniform(0.8, 1.8)
-                    trend_impact = user_rng.uniform(0.8, 1.8)
-                    maturity_impact = user_rng.uniform(0.8, 1.8)
-                    
-                    # Add more random noise - sometimes behavior is completely opposite to expected
-                    if user_rng.random() < 0.1:  # 10% chance of contrary behavior
-                        pop_impact *= -1
-                        trend_impact *= -1
-                    
-                    # Adjust probabilities based on project characteristics with high variability
-                    if project_popularity > 0.6:  # Very popular projects
-                        # More likely to add popular projects to portfolio
-                        interaction_type_probs['portfolio_add'] *= 1.0 + (pop_impact * 0.4)
-                        interaction_type_probs['favorite'] *= 1.0 + (pop_impact * 0.3)
-                    
-                    if project_trend > 0.6:  # Strongly trending projects
-                        # Trending projects get more favorites and portfolio adds
-                        interaction_type_probs['favorite'] *= 1.0 + (trend_impact * 0.5)
-                        interaction_type_probs['portfolio_add'] *= 1.0 + (trend_impact * 0.3)
-                    
-                    if project_maturity > 0.7:  # Very mature projects
-                        # Mature projects more likely to be researched and added to portfolio
-                        interaction_type_probs['research'] *= 1.0 + (maturity_impact * 0.5)
-                        interaction_type_probs['portfolio_add'] *= 1.0 + (maturity_impact * 0.2)
-                    elif project_maturity < 0.3:  # Immature projects
-                        # New projects more likely to just be viewed
-                        interaction_type_probs['view'] *= 1.0 + (maturity_impact * 0.4)
-                    
-                    # Pattern-specific adjustments
-                    if interest_pattern == 'deep_diver':
-                        # Deep divers do more research
-                        interaction_type_probs['research'] *= 1.5
-                    elif interest_pattern == 'trend_follower':
-                        # Trend followers favorite and portfolio more
-                        interaction_type_probs['favorite'] *= 1.3
-                        interaction_type_probs['portfolio_add'] *= 1.3
-                    
-                    # Occasional completely random behavior
-                    if user_rng.random() < 0.05:  # 5% chance
-                        # Choose a random interaction type without regard to probabilities
-                        interaction_types = list(interaction_type_probs.keys())
-                        interaction_type = user_rng.choice(interaction_types)
-                    else:
-                        # Normalize probabilities
-                        total = sum(interaction_type_probs.values())
-                        interaction_type_probs = {k: v/total for k, v in interaction_type_probs.items()}
-                        
-                        # Convert to list format for random choice
-                        interaction_types = list(interaction_type_probs.keys())
-                        interaction_probs = list(interaction_type_probs.values())
-                        
-                        # Select interaction type
-                        interaction_type = user_rng.choice(interaction_types, p=interaction_probs)
-                
-                except Exception as e:
-                    # Fallback if project not found or missing fields
-                    logger.debug(f"Error adjusting interaction probs: {e}")
-                    # Choose a random interaction type with basic probabilities
-                    interaction_types = list(base_probs.keys())
-                    interaction_probs = list(base_probs.values())
-                    interaction_type = user_rng.choice(interaction_types, p=interaction_probs)
-                
-                # Determine interaction weight with extreme variability
-                # Add activity profile boost
-                weight_min, weight_max = activity_profile['weight_boost']
-                boost_factor = user_rng.uniform(weight_min, weight_max)
-                
-                # Use different approaches for weight generation
-                weight_approach = user_rng.choice([
-                    'standard',      # Standard weight based on interaction type
-                    'extreme',       # More extreme weights (very high or very low)
-                    'contrarian',    # Opposite of expected weights
-                    'random'         # Completely random weights
-                ], p=[0.6, 0.2, 0.1, 0.1])  # Standard is most common
-                
-                if weight_approach == 'standard':
-                    if interaction_type == 'view':
-                        # Views have lower weights with high variability
-                        weight_distribution = user_rng.choice(['exponential', 'normal', 'uniform'])
-                        
-                        if weight_distribution == 'exponential':
-                            # Mostly low values, occasional high
-                            weight = max(1, min(5, int(user_rng.exponential(1.2 * boost_factor))))
-                        elif weight_distribution == 'normal':
-                            # Centered distribution
-                            weight = max(1, min(5, int(user_rng.normal(2.0 * boost_factor, 1.2))))
-                        else:  # uniform
-                            # Evenly distributed
-                            weight = user_rng.randint(1, max(2, int(4 * boost_factor)))
-                            
-                    elif interaction_type == 'favorite':
-                        # Favorites have medium weights with high variance
-                        if user_rng.random() < 0.3:  # 30% chance of special weight 
-                            # Either very low or very high
-                            if user_rng.random() < 0.5:
-                                weight = 1  # Very casual favorite
-                            else:
-                                weight = max(1, min(7, int(user_rng.normal(5.0 * boost_factor, 1.0))))  # Very strong favorite
-                        else:
-                            # Normal distribution with high variance
-                            weight = max(1, min(5, int(user_rng.normal(3.0 * boost_factor, 1.5))))
-                            
-                    elif interaction_type == 'portfolio_add':
-                        # Portfolio adds have higher weights with extreme variability
-                        if user_rng.random() < 0.15:  # 15% chance of very low conviction
-                            weight = 1
-                        elif user_rng.random() < 0.25:  # 25% chance of extremely high conviction
-                            weight = max(1, min(10, int(user_rng.normal(6.0 * boost_factor, 2.0))))
-                        else:  # 60% normal range
-                            weight = max(1, min(7, int(user_rng.normal(3.5 * boost_factor, 1.5))))
-                            
-                    else:  # research
-                        # Research has varied weights depending on depth and user pattern
-                        depth = user_rng.choice(['very_shallow', 'shallow', 'medium', 'deep', 'very_deep'], 
-                                        p=[0.1, 0.25, 0.4, 0.2, 0.05])  # Very uneven distribution
-                        
-                        if depth == 'very_shallow':
-                            weight = 1
-                        elif depth == 'shallow':
-                            weight = max(1, min(3, int(user_rng.normal(1.8 * boost_factor, 0.8))))
-                        elif depth == 'medium':
-                            weight = max(1, min(5, int(user_rng.normal(3.0 * boost_factor, 1.0))))
-                        elif depth == 'deep':
-                            weight = max(1, min(7, int(user_rng.normal(4.5 * boost_factor, 1.2))))
-                        else:  # very_deep - thorough research
-                            weight = max(1, min(10, int(user_rng.normal(6.0 * boost_factor, 1.5))))
-                        
-                        # Pattern-specific adjustments
-                        if interest_pattern == 'deep_diver':
-                            # Deep divers go deeper in research
-                            weight = min(10, int(weight * 1.5))
-                            
-                elif weight_approach == 'extreme':
-                    # Either very high or very low weights regardless of interaction type
-                    if user_rng.random() < 0.5:
-                        weight = 1  # Very low
-                    else:
-                        weight = max(1, min(10, int(user_rng.normal(8.0, 1.5))))  # Very high
-                        
-                elif weight_approach == 'contrarian':
-                    # Opposite of expected (high weights for views, low for portfolio)
-                    if interaction_type == 'view':
-                        weight = max(1, min(10, int(user_rng.normal(7.0, 1.5))))  # High for views
-                    elif interaction_type == 'favorite':
-                        weight = max(1, min(5, int(user_rng.normal(3.0, 1.0))))  # Medium
-                    elif interaction_type == 'portfolio_add':
-                        weight = max(1, min(3, int(user_rng.normal(1.5, 0.5))))  # Low for portfolio
-                    else:  # research
-                        weight = max(1, min(4, int(user_rng.normal(2.0, 1.0))))  # Medium-low
-                        
-                else:  # random
-                    # Completely random weights
-                    weight = max(1, min(10, int(user_rng.normal(4.0, 2.5))))
+                # Determine interaction weight with more realistic distribution
+                # Views have lower weight, portfolio adds have higher weight
+                if interaction_type == 'view':
+                    weight = max(1, int(user_rng.exponential(1.0)))  # Mostly low values
+                    weight = min(weight, 5)  # Cap at 5
+                elif interaction_type == 'favorite':
+                    weight = max(1, int(user_rng.normal(2.0, 1.0)))  # Centered around 2
+                    weight = min(weight, 6)  # Cap at 6
+                elif interaction_type == 'portfolio_add':
+                    weight = max(1, int(user_rng.normal(3.0, 1.5)))  # Centered around 3
+                    weight = min(weight, 8)  # Cap at 8
+                else:  # research
+                    weight = max(1, int(user_rng.normal(2.5, 1.2)))  # Centered around 2.5
+                    weight = min(weight, 7)  # Cap at 7
                 
                 # Get timestamp for this interaction
                 if interaction_idx < len(timestamps):
@@ -1953,33 +1631,38 @@ class DataProcessor:
                 # Add to all interactions
                 all_interactions.append({
                     'user_id': f"user_{user_idx}",
-                    'project_id': selected_project,
+                    'project_id': project_id,
                     'interaction_type': interaction_type,
                     'weight': weight,
-                    'timestamp': interaction_time.isoformat()
+                    'timestamp': interaction_time.strftime('%Y-%m-%dT%H:%M:%S.%f')
                 })
         
         # Create DataFrame
         interactions_df = pd.DataFrame(all_interactions)
         
         if not interactions_df.empty:
-            # Convert timestamp to datetime for sorting
-            interactions_df['timestamp'] = pd.to_datetime(interactions_df['timestamp'])
-            # THIS IS THE KEY: Sort ALL interactions by timestamp only, not by user
+            # Pastikan format timestamp konsisten
+            try:
+                # Pertama coba dengan format default
+                interactions_df['timestamp'] = pd.to_datetime(interactions_df['timestamp'])
+            except ValueError:
+                # Jika gagal, gunakan format yang lebih fleksibel
+                interactions_df['timestamp'] = pd.to_datetime(interactions_df['timestamp'], format='ISO8601')
+            
+            # Sort ALL interactions by timestamp only, not by user
             interactions_df = interactions_df.sort_values('timestamp')
-            # Convert back to string format
-            interactions_df['timestamp'] = interactions_df['timestamp'].dt.strftime('%Y-%m-%dT%H:%M:%S')
+            
+            # Format yang konsisten dengan mikrodetik untuk mencegah kesalahan di masa depan
+            interactions_df['timestamp'] = interactions_df['timestamp'].dt.strftime('%Y-%m-%dT%H:%M:%S.%f')
         
-        # TAMBAHAN: Verifikasi minimum interaksi
+        # Verifikasi statistik interaksi
         user_interaction_counts = interactions_df.groupby('user_id').size()
         min_interactions = user_interaction_counts.min()
         
         logger.info(f"Minimum interactions per user: {min_interactions}")
         logger.info(f"Maximum interactions per user: {user_interaction_counts.max()}")
         logger.info(f"Average interactions per user: {user_interaction_counts.mean():.2f}")
-        
-        if min_interactions < 5:
-            logger.warning(f"Some users still have less than 5 interactions! Minimum: {min_interactions}")
+        logger.info(f"Median interactions per user: {user_interaction_counts.median():.2f}")
         
         return interactions_df
     

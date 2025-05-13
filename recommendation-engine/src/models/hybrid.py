@@ -473,7 +473,7 @@ class HybridRecommender:
         Mendapatkan bobot model yang benar-benar adaptif berdasarkan berbagai faktor kontekstual
         """
         # Base weights - mulai dengan bobot yang lebih seimbang
-        base_fecf_weight = self.params.get('fecf_weight', 0.65)  # Default sedang, tidak terlalu tinggi
+        base_fecf_weight = self.params.get('fecf_weight', 0.65)  # Default lebih seimbang
         base_ncf_weight = self.params.get('ncf_weight', 0.35)  # NCF mendapat peran yang lebih signifikan
         diversity_factor = self.params.get('diversity_factor', 0.25)
         
@@ -512,8 +512,8 @@ class HybridRecommender:
         )
         
         # Pastikan bobot dalam range valid dan ternormalisasi
-        fecf_weight = max(0.3, min(0.9, fecf_weight))  # Min 0.3, max 0.9
-        ncf_weight = max(0.1, min(0.7, ncf_weight))    # Min 0.1, max 0.7
+        fecf_weight = max(0.4, min(0.8, fecf_weight))  # Min 0.4, max 0.8 - lebih seimbang
+        ncf_weight = max(0.2, min(0.6, ncf_weight))    # Min 0.2, max 0.6 - lebih seimbang
         
         # Normalisasi bobot
         total = fecf_weight + ncf_weight
@@ -853,15 +853,15 @@ class HybridRecommender:
         return diversity
     
     def get_ensemble_recommendations(self, 
-                               fecf_recs: List[Tuple[str, float]], 
-                               ncf_recs: List[Tuple[str, float]],
-                               fecf_weight: float = 0.65, 
-                               ncf_weight: float = 0.35,
-                               user_id: Optional[str] = None,
-                               context: Optional[Dict] = None,
-                               ensemble_method: Optional[str] = None) -> List[Tuple[str, float]]:
+                           fecf_recs: List[Tuple[str, float]], 
+                           ncf_recs: List[Tuple[str, float]],
+                           fecf_weight: float = 0.55, 
+                           ncf_weight: float = 0.45,
+                           user_id: Optional[str] = None,
+                           context: Optional[Dict] = None,
+                           ensemble_method: Optional[str] = None) -> List[Tuple[str, float]]:
         """
-        Menggabungkan rekomendasi dengan strategi fusion yang sadar konteks
+        Menggabungkan rekomendasi dengan strategi fusion yang adaptif dan lebih seimbang
         """
         if not fecf_recs and not ncf_recs:
             return []
@@ -872,7 +872,7 @@ class HybridRecommender:
         if not ncf_recs:
             return fecf_recs
             
-        # Use specified method or default from params
+        # Use specified method or default from params - default to adaptive
         ensemble_method = ensemble_method or self.params.get('ensemble_method', 'adaptive')
         
         # Normalize scores first
@@ -900,128 +900,72 @@ class HybridRecommender:
         # Prepare results dictionary
         results = {}
         
-        # Multi-strategy fusion based on method
-        if ensemble_method == 'contextual':
-            # Context-aware fusion - decide strategy per item!
+        # IMPROVED: Stacking ensemble method - more sophisticated than weighted average
+        # Use a different strategy based on confidence levels and agreement between models
+        if ensemble_method == 'stacking' or ensemble_method == 'adaptive':
             for item in all_items:
                 fecf_score = fecf_dict.get(item, 0)
                 ncf_score = ncf_dict.get(item, 0)
                 
-                # Get item metadata for context-aware weighting
+                # IMPROVEMENT: Look at agreement level between models
+                agreement_level = 1.0 - abs(fecf_score - ncf_score)
+                
+                # Get item context for adaptive weighting
                 item_context = self._get_item_context(item)
                 
-                # Compute item-specific weights
+                # Compute item-specific weights based on confidence and context
                 item_fecf_weight, item_ncf_weight = self._compute_item_weights(
-                    item_context, user_context, temporal_context, domain_context, 
+                    item_context, user_context, temporal_context, domain_context,
                     base_fecf=fecf_weight, base_ncf=ncf_weight
                 )
                 
-                # Special case handling
-                if item in fecf_dict and item in ncf_dict:
-                    # Both models recommend this item
-                    
-                    # Check for high confidence case
-                    if fecf_score > 0.8 and ncf_score > 0.8:
-                        # High agreement - boost score
-                        confidence_boost = 0.1 * min(fecf_score, ncf_score)
+                # Apply stacking strategy based on confidence and agreement
+                if fecf_score > 0.8 and ncf_score > 0.8:
+                    # Both models highly confident - boost more
+                    confidence_boost = 0.15 * min(fecf_score, ncf_score)
+                    results[item] = (fecf_score * item_fecf_weight + 
+                                ncf_score * item_ncf_weight + 
+                                confidence_boost)
+                elif fecf_score > 0.75 or ncf_score > 0.75:
+                    # At least one model very confident
+                    if fecf_score > ncf_score + 0.3:
+                        # FECF much more confident - trust FECF more
+                        adj_fecf_weight = min(0.8, item_fecf_weight * 1.2)
+                        adj_ncf_weight = 1.0 - adj_fecf_weight
+                        results[item] = fecf_score * adj_fecf_weight + ncf_score * adj_ncf_weight
+                    elif ncf_score > fecf_score + 0.3:
+                        # NCF much more confident - trust NCF more
+                        adj_ncf_weight = min(0.8, item_ncf_weight * 1.2)
+                        adj_fecf_weight = 1.0 - adj_ncf_weight
+                        results[item] = fecf_score * adj_fecf_weight + ncf_score * adj_ncf_weight
+                    else:
+                        # Similar confidence - use standard weights with agreement bonus
+                        agreement_bonus = agreement_level * 0.05
                         results[item] = (fecf_score * item_fecf_weight + 
                                     ncf_score * item_ncf_weight + 
-                                    confidence_boost)
-                    elif abs(fecf_score - ncf_score) > 0.5:
-                        # High disagreement - trust more confident model more
-                        if fecf_score > ncf_score:
-                            confidence_ratio = min(0.9, fecf_score / (ncf_score + 0.1))
-                            # Adjust weights based on confidence
-                            adj_fecf_weight = min(0.9, item_fecf_weight * confidence_ratio)
-                            adj_ncf_weight = 1.0 - adj_fecf_weight
-                            results[item] = fecf_score * adj_fecf_weight + ncf_score * adj_ncf_weight
-                        else:
-                            confidence_ratio = min(0.9, ncf_score / (fecf_score + 0.1))
-                            # Adjust weights based on confidence
-                            adj_ncf_weight = min(0.9, item_ncf_weight * confidence_ratio)
-                            adj_fecf_weight = 1.0 - adj_ncf_weight
-                            results[item] = fecf_score * adj_fecf_weight + ncf_score * adj_ncf_weight
-                    else:
-                        # Normal case - weighted average
-                        results[item] = fecf_score * item_fecf_weight + ncf_score * item_ncf_weight
-                
-                elif item in fecf_dict:
-                    # Only FECF recommends it
-                    # Apply penalty only if score is not very high
-                    if fecf_score > 0.85:
-                        results[item] = fecf_score * 0.95  # Minor penalty for very confident
-                    else:
-                        results[item] = fecf_score * 0.9  # Moderate penalty
-                
+                                    agreement_bonus)
                 else:
-                    # Only NCF recommends it
-                    # More significant penalty since NCF tends to be less robust
-                    if ncf_score > 0.9:
-                        results[item] = ncf_score * 0.9  # Minor penalty for very confident
+                    # Neither model very confident - use standard weights
+                    results[item] = fecf_score * item_fecf_weight + ncf_score * item_ncf_weight
+                
+                # Apply small trend boost for only one model recommending
+                if item in fecf_dict and item not in ncf_dict:
+                    # Only FECF recommends - apply small penalty unless trend is high
+                    trend_score = item_context.get('trend_score', 50) / 100
+                    if trend_score > 0.7:  # High trending
+                        results[item] = fecf_score * 0.95  # Smaller penalty for trending items
                     else:
-                        results[item] = ncf_score * 0.8  # Higher penalty
-        
-        elif ensemble_method == 'adaptive':
-            # Enhanced adaptive method
-            for item in all_items:
-                fecf_score = fecf_dict.get(item, 0)
-                ncf_score = ncf_dict.get(item, 0)
+                        results[item] = fecf_score * 0.9  # Standard penalty
                 
-                # Dynamic confidence-based weighting
-                if item in fecf_dict and item in ncf_dict:
-                    # Calculate confidence values
-                    fecf_conf = (fecf_score - 0.5) * 2  # Scale to [-1, 1]
-                    ncf_conf = (ncf_score - 0.5) * 2    # Scale to [-1, 1]
-                    
-                    # Use sigmoid to get dynamic weights
-                    import scipy.special
-                    fecf_weight_adj = scipy.special.expit(fecf_conf * 3) - 0.5
-                    ncf_weight_adj = scipy.special.expit(ncf_conf * 3) - 0.5
-                    
-                    # Calculate dynamic weights with bounds
-                    dynamic_fecf_weight = max(0.4, min(0.8, fecf_weight + fecf_weight_adj * 0.2 - ncf_weight_adj * 0.1))
-                    dynamic_ncf_weight = 1.0 - dynamic_fecf_weight
-                    
-                    # Enhanced weighted average
-                    results[item] = fecf_score * dynamic_fecf_weight + ncf_score * dynamic_ncf_weight
-                
-                elif item in fecf_dict:
-                    # Only FECF recommends - slight penalty
-                    results[item] = fecf_score * 0.9
-                
-                else:
-                    # Only NCF recommends - more penalty
-                    results[item] = ncf_score * 0.8
-                    
-        elif ensemble_method == 'selective':
-            # Selective fusion - choose best model per item
-            confidence_threshold = self.params.get('confidence_threshold', 0.7)
-            
-            for item in all_items:
-                fecf_score = fecf_dict.get(item, 0)
-                ncf_score = ncf_dict.get(item, 0)
-                
-                if item in fecf_dict and item in ncf_dict:
-                    # Both models recommend - choose based on confidence
-                    if fecf_score > confidence_threshold and ncf_score > confidence_threshold:
-                        # Both models confident - average
-                        results[item] = (fecf_score + ncf_score) / 2
-                    elif fecf_score > confidence_threshold:
-                        # FECF confident - use it
-                        results[item] = fecf_score
-                    elif ncf_score > confidence_threshold:
-                        # NCF confident - use it
-                        results[item] = ncf_score
+                elif item in ncf_dict and item not in fecf_dict:
+                    # Only NCF recommends - apply penalty but check popularity
+                    popularity = item_context.get('popularity', 0.5)
+                    if popularity > 0.7:  # Very popular
+                        results[item] = ncf_score * 0.9  # Smaller penalty for popular items
                     else:
-                        # Neither confident - weighted average
-                        results[item] = fecf_score * fecf_weight + ncf_score * ncf_weight
-                elif item in fecf_dict:
-                    results[item] = fecf_score
-                else:
-                    results[item] = ncf_score
-        
-        else:  # default to weighted_avg
-            # Enhanced weighted average
+                        results[item] = ncf_score * 0.85  # Larger penalty by default
+        else:
+            # Use weighted average as default fallback
             for item in all_items:
                 fecf_score = fecf_dict.get(item, 0)
                 ncf_score = ncf_dict.get(item, 0)
@@ -1036,8 +980,8 @@ class HybridRecommender:
                     # Only NCF recommends - apply confidence adjustment
                     results[item] = ncf_score * ncf_weight * 0.9  # More penalty
         
-        # Apply trending boost if available
-        self._apply_trending_boost(results)
+        # Apply trending boost if available with more modest boost
+        self._apply_trending_boost(results, boost_factor=0.2)  # Reduced boost factor
         
         # Convert to list of tuples and sort
         combined_recs = [(item, score) for item, score in results.items()]
@@ -1157,10 +1101,11 @@ class HybridRecommender:
         
         return fecf_weight, ncf_weight
 
-    def _apply_trending_boost(self, results: Dict[str, float]) -> None:
-        """Apply trending boost to results"""
+    def _apply_trending_boost(self, results: Dict[str, float], boost_factor: Optional[float] = None) -> None:
+        """Apply trending boost to results with configurable boost factor"""
         if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
-            trend_boost_factor = self.params.get('trending_boost_factor', 0.35)
+            # Use provided boost_factor or get from params
+            trend_boost_factor = boost_factor if boost_factor is not None else self.params.get('trending_boost_factor', 0.35)
             
             if trend_boost_factor > 0:
                 # Create item to trend lookup

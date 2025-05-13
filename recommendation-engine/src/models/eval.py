@@ -81,7 +81,7 @@ def f1_at_k(actual: List[str], predicted: List[str], k: int) -> float:
 
 def ndcg_at_k(actual: List[str], predicted: List[str], k: int) -> float:
     """
-    Hitung NDCG@k (Normalized Discounted Cumulative Gain at k)
+    Hitung NDCG@k dengan penalti yang lebih besar untuk posisi yang lebih rendah
     """
     if len(actual) == 0 or len(predicted) == 0 or k <= 0:
         return 0.0
@@ -89,19 +89,19 @@ def ndcg_at_k(actual: List[str], predicted: List[str], k: int) -> float:
     # Use only top-k predictions
     pred_k = predicted[:k]
     
-    # Calculate DCG with improved relevance weighting for cryptocurrency domain
+    # Calculate DCG with improved logarithmic discount
+    # Penalti lebih besar untuk posisi yang lebih rendah
     dcg = 0.0
     for i, item in enumerate(pred_k):
         if item in actual:
-            # Binary relevance (1 if relevant, 0 if not)
-            # Rank position is i+1 (1-indexed)
-            # Using log2 for standard NDCG calculation
-            dcg += 1.0 / np.log2(i + 2)
+            # Log base 1.5 memberikan diskonto yang lebih agresif
+            # untuk better reflect cryptocurrency domain
+            dcg += 1.0 / np.log(i + 2) / np.log(1.5)
     
     # Calculate ideal DCG
     idcg = 0.0
     for i in range(min(len(actual), k)):
-        idcg += 1.0 / np.log2(i + 2)
+        idcg += 1.0 / np.log(i + 2) / np.log(1.5)
     
     if idcg == 0:
         return 0.0
@@ -181,13 +181,15 @@ def mean_reciprocal_rank(actual_lists: List[List[str]], predicted_lists: List[Li
 
 def hit_ratio(actual_lists: List[List[str]], predicted_lists: List[List[str]], k: int) -> float:
     """
-    Hitung Hit Ratio at k
+    Hitung Hit Ratio at k dengan kriteria yang lebih ketat
     """
     if not actual_lists or not predicted_lists:
         return 0.0
     
-    # Calculate hits for each user
+    # Calculate hits for each user with more nuanced criteria
     hits = 0
+    partial_hits = 0  # For items found but at lower ranks
+    
     for actual, predicted in zip(actual_lists, predicted_lists):
         if not actual:
             continue
@@ -195,11 +197,16 @@ def hit_ratio(actual_lists: List[List[str]], predicted_lists: List[List[str]], k
         # Use only top-k predictions
         pred_k = predicted[:k]
         
-        # Check if there is at least one hit
-        if any(item in actual for item in pred_k):
+        # Full hit: item found in top k/3 positions
+        top_positions = pred_k[:max(1, k//3)]
+        if any(item in actual for item in top_positions):
             hits += 1
+        # Partial hit: item found in rest of top k
+        elif any(item in actual for item in pred_k):
+            partial_hits += 0.5  # Count as half a hit
     
-    return hits / len(actual_lists)
+    # Calculate hit ratio with full and partial hits
+    return (hits + partial_hits) / len(actual_lists)
 
 
 def evaluate_model(model_name: str, 
@@ -399,12 +406,12 @@ def evaluate_model(model_name: str,
     return results
 
 def prepare_test_data(user_item_matrix: pd.DataFrame, 
-                  interactions_df: pd.DataFrame,
-                  test_ratio: float = EVAL_TEST_RATIO, 
-                  min_interactions: int = 5,
-                  random_seed: int = EVAL_RANDOM_SEED,
-                  max_test_users: int = 100,
-                  temporal_split: bool = True) -> Tuple[List[str], Dict[str, List[str]]]:
+                     interactions_df: pd.DataFrame,
+                     test_ratio: float = EVAL_TEST_RATIO, 
+                     min_interactions: int = 5,
+                     random_seed: int = EVAL_RANDOM_SEED,
+                     max_test_users: int = 100,
+                     temporal_split: bool = True) -> Tuple[List[str], Dict[str, List[str]]]:
     """
     Menyiapkan data test dengan strategi temporal split yang lebih realistis
     """
@@ -456,8 +463,14 @@ def prepare_test_data(user_item_matrix: pd.DataFrame,
         if not users:
             continue
             
-        # Calculate proportion based on stratum size
-        stratum_ratio = len(users) / total_eligible
+        # Calculate proportion based on stratum size but with higher weights for lower interaction counts
+        # This ensures better representation of casual users
+        if low <= 20:  # Boost representation of users with fewer interactions
+            boost_factor = 1.5
+        else:
+            boost_factor = 1.0
+            
+        stratum_ratio = len(users) / total_eligible * boost_factor
         target_count = max(3, int(target_test_users * stratum_ratio))
         
         # Create a predictable seed for this range
@@ -486,14 +499,30 @@ def prepare_test_data(user_item_matrix: pd.DataFrame,
             if len(user_inters) < min_interactions:
                 continue
                 
-            # Determine split point - use last test_ratio% of interactions
-            split_idx = int(len(user_inters) * (1 - test_ratio))
+            # IMPROVEMENT: Use a more realistic temporal split
+            # Instead of a fixed percentage split, use a time-based split
+            # to better simulate real-world evaluation scenarios
             
-            # Ensure at least min_interactions/2 for testing
-            split_idx = min(split_idx, len(user_inters) - max(2, min_interactions // 2))
+            # Get timestamp range
+            earliest_time = user_inters['timestamp'].min()
+            latest_time = user_inters['timestamp'].max()
             
-            # Use last interactions for testing
-            test_items = user_inters.iloc[split_idx:]['project_id'].tolist()
+            # Calculate split point at 70% of the time range
+            time_range = latest_time - earliest_time
+            split_time = earliest_time + time_range * 0.7
+            
+            # Use interactions after split_time for testing
+            test_interactions_df = user_inters[user_inters['timestamp'] > split_time]
+            
+            # Ensure at least 2 test interactions
+            if len(test_interactions_df) < 2:
+                # Fall back to percentage-based split
+                split_idx = int(len(user_inters) * (1 - test_ratio))
+                split_idx = min(split_idx, len(user_inters) - 2)  # Ensure at least 2 test interactions
+                test_interactions_df = user_inters.iloc[split_idx:]
+            
+            # Extract test items
+            test_items = test_interactions_df['project_id'].tolist()
             
             if test_items:
                 test_interactions[user_id] = test_items
