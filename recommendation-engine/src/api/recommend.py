@@ -47,12 +47,12 @@ _user_recommendations_cache = {
     "hybrid": {}
 }
 
-# Ditambahkan: cache waktu kedaluwarsa yang lebih lama untuk pengguna yang jarang berubah
+# Ditambahkan: cache waktu kedaluwarsa yang sedikit lebih lama untuk pengguna yang jarang berubah
 _cache_ttl = {
-    "cold_start": 86400,  # 24 jam untuk cold-start user
-    "low_activity": 43200,  # 12 jam untuk pengguna dengan aktivitas rendah (<10 interaksi)
-    "normal": 7200,     # 2 jam untuk pengguna normal (10-50 interaksi)
-    "active": 3600      # 1 jam untuk pengguna sangat aktif (>50 interaksi)
+    "cold_start": 1800,  # 30 menit untuk cold-start user
+    "low_activity": 1500,  # 25 menit untuk pengguna dengan aktivitas rendah (<10 interaksi)
+    "normal": 1200,     # 20 menit untuk pengguna normal (10-50 interaksi)
+    "active": 900      # 15 menit untuk pengguna sangat aktif (>50 interaksi)
 }
 
 # Pydantic models
@@ -524,7 +524,8 @@ async def recommend_projects(request: RecommendationRequest):
                     recommendations = model.get_recommendations_by_category(
                         request.user_id, 
                         request.category, 
-                        n=request.num_recommendations
+                        n=request.num_recommendations,
+                        strict=request.strict_filter
                     )
                 else:
                     # Fallback

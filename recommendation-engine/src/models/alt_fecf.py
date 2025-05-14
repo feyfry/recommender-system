@@ -7,6 +7,7 @@ import time
 import pickle
 from datetime import datetime
 from pathlib import Path
+import json
 
 from sklearn.decomposition import TruncatedSVD
 from sklearn.metrics.pairwise import cosine_similarity
@@ -1128,6 +1129,29 @@ class FeatureEnhancedCF:
                 detailed_recommendations.append(project_dict)
         
         return detailed_recommendations
+    
+    def process_categories(self, category_value):
+        """Proses kategori baik itu string tunggal maupun list"""
+        if isinstance(category_value, list):
+            return category_value  # Kembalikan list kategori
+        elif isinstance(category_value, str):
+            # Periksa apakah string dalam format list
+            if category_value.startswith('[') and category_value.endswith(']'):
+                try:
+                    # Coba parse JSON jika format valid
+                    parsed = json.loads(category_value)
+                    if isinstance(parsed, list):
+                        return parsed
+                    return [category_value]
+                except:
+                    # Fallback ke parsing manual jika JSON parse gagal
+                    if ',' in category_value:
+                        # Strip kurung dan whitespace, split by comma
+                        cleaned = category_value.strip('[]" ')
+                        return [cat.strip(' "\'') for cat in cleaned.split(',')]
+                    return [category_value]
+            return [category_value]  # Wrap string tunggal dalam list
+        return ['unknown']  # Default fallback
     
     def get_recommendations_by_chain(self, user_id: str, chain: str, n: int = 10, category: Optional[str] = None) -> List[Dict[str, Any]]:
         """
