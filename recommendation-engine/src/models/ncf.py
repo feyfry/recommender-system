@@ -759,13 +759,13 @@ class NCFRecommender:
         """
         # Use config params if not specified
         val_ratio = val_ratio if val_ratio is not None else self.params.get('val_ratio', 0.15)
-        batch_size = batch_size if batch_size is not None else self.params.get('batch_size', 256)
+        batch_size = batch_size if batch_size is not None else self.params.get('batch_size', 128)
         num_epochs = num_epochs if num_epochs is not None else self.params.get('epochs', 30)
-        learning_rate = learning_rate if learning_rate is not None else self.params.get('learning_rate', 0.0003)
+        learning_rate = learning_rate if learning_rate is not None else self.params.get('learning_rate', 0.0001)
         
         # Get additional parameters for training
         weight_decay = kwargs.get('weight_decay', self.params.get('weight_decay', 5e-4))
-        num_negative = kwargs.get('negative_ratio', self.params.get('negative_ratio', 5))
+        num_negative = kwargs.get('negative_ratio', self.params.get('negative_ratio', 3))
         patience = kwargs.get('patience', self.params.get('patience', 7))
         
         logger.info("Starting NCF training with enhanced architecture")

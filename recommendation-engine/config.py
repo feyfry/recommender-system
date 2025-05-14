@@ -21,8 +21,8 @@ COINGECKO_API_URL = "https://api.coingecko.com/api/v3"
 COINGECKO_API_KEY = os.environ.get("COINGECKO_API_KEY", "")  # Demo API key - Ambil dari .env
 
 # Pengumpulan data
-TOP_COINS_LIMIT = 1000
-TOP_COINS_DETAIL = 1000
+TOP_COINS_LIMIT = 500
+TOP_COINS_DETAIL = 500
 CATEGORIES = [
     "layer-1",
     "smart-contract-platform", 

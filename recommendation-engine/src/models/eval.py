@@ -795,7 +795,7 @@ def evaluate_cold_start(model: Any,
     # Set parameters from config or use provided values
     cold_start_users = min(100, cold_start_users or config.get('cold_start_users', 100))
     test_ratio = config.get('test_ratio', 0.3)
-    popular_exclude_ratio = config.get('max_popular_items_exclude', 0.2)
+    popular_exclude_ratio = config.get('max_popular_items_exclude', 0.1)
     min_interactions = config.get('min_interactions_required', 3)
     category_diversity_enabled = config.get('category_diversity_enabled', True)
     

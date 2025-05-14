@@ -36,19 +36,19 @@ class HybridRecommender:
     def __init__(self, params: Optional[Dict[str, Any]] = None):
         # Model parameters dengan default yang lebih baik
         default_params = {
-            "ncf_weight": 0.2,              # Kurangi bobot NCF
-            "fecf_weight": 0.8,             # Tingkatkan bobot FECF
-            "interaction_threshold_low": 5,  # Sesuaikan dengan minimal interaksi
-            "interaction_threshold_high": 15, # Tingkatkan threshold high
-            "diversity_factor": 0.25,        # Tingkatkan sedikit faktor diversitas
-            "cold_start_fecf_weight": 0.95,  # Hampir sepenuhnya FECF untuk cold start
-            "explore_ratio": 0.2,            # Tingkatkan eksplorasi
-            "normalization": "sigmoid",      # Normalisasi metode
-            "ensemble_method": "adaptive",   # Metode ensemble adaptif
-            "n_candidates_factor": 4,        # Lebih banyak kandidat
-            "category_diversity_weight": 0.2, # Tingkatkan bobot diversitas kategori
-            "trending_boost_factor": 0.3,    # Faktor boost untuk trending items
-            "confidence_threshold": 0.65,    # Threshold confidence untuk NCF
+            "ncf_weight": 0.35,             # Bobot NCF yang lebih signifikan
+            "fecf_weight": 0.65,            # FECF tetap dominan tapi tidak terlalu tinggi
+            "interaction_threshold_low": 5,  # Threshold low sesuai interaksi realistis
+            "interaction_threshold_high": 15, # Threshold high yang lebih realistis - diturunkan dari 20
+            "diversity_factor": 0.3,        # Tingkatkan faktor diversitas
+            "cold_start_fecf_weight": 0.75,  # FECF lebih dominan untuk cold start tapi tidak ekstrem
+            "explore_ratio": 0.30,          # Tingkatkan eksplorasi
+            "normalization": "sigmoid",     # Tetap gunakan sigmoid normalization
+            "ensemble_method": "stacking",  # Metode ensemble baru yang lebih adaptif - stacking
+            "n_candidates_factor": 3,        # Lebih banyak kandidat vs. hasil akhir - diturunkan dari 4
+            "category_diversity_weight": 0.25, # Tingkatkan bobot diversitas kategori
+            "trending_boost_factor": 0.2,    # Faktor boost untuk trending items - diturunkan dari 0.35
+            "confidence_threshold": 0.7,     # Threshold kepercayaan untuk metode selective
         }
         
         # Update dengan parameter yang disediakan atau dari config
@@ -62,6 +62,9 @@ class HybridRecommender:
         self.fecf_model = None
         self.ncf_model = None
         
+        # Logged ensemble method flag
+        self._logged_ensemble_method = False
+
         # Data
         self.projects_df = None
         self.interactions_df = None
@@ -258,8 +261,8 @@ class HybridRecommender:
             self.save_model()
         
         # Create ensemble performance estimate
-        base_fecf_weight = self.params.get('fecf_weight', 0.8)
-        base_ncf_weight = self.params.get('ncf_weight', 0.2)
+        base_fecf_weight = self.params.get('fecf_weight', 0.65)
+        base_ncf_weight = self.params.get('ncf_weight', 0.35)
         
         # Estimate combined performance
         ensemble_metrics = {}
@@ -475,7 +478,7 @@ class HybridRecommender:
         # Base weights - mulai dengan bobot yang lebih seimbang
         base_fecf_weight = self.params.get('fecf_weight', 0.65)  # Default lebih seimbang
         base_ncf_weight = self.params.get('ncf_weight', 0.35)  # NCF mendapat peran yang lebih signifikan
-        diversity_factor = self.params.get('diversity_factor', 0.25)
+        diversity_factor = self.params.get('diversity_factor', 0.3)
         
         # Mengekstrak informasi kontekstual
         user_context = self._extract_user_context(user_id)
@@ -855,8 +858,8 @@ class HybridRecommender:
     def get_ensemble_recommendations(self, 
                            fecf_recs: List[Tuple[str, float]], 
                            ncf_recs: List[Tuple[str, float]],
-                           fecf_weight: float = 0.55, 
-                           ncf_weight: float = 0.45,
+                           fecf_weight: float = 0.65, 
+                           ncf_weight: float = 0.35,
                            user_id: Optional[str] = None,
                            context: Optional[Dict] = None,
                            ensemble_method: Optional[str] = None) -> List[Tuple[str, float]]:
@@ -872,8 +875,12 @@ class HybridRecommender:
         if not ncf_recs:
             return fecf_recs
             
-        # Use specified method or default from params - default to adaptive
-        ensemble_method = ensemble_method or self.params.get('ensemble_method', 'adaptive')
+        # Use specified method or default from params - default to stacking
+        ensemble_method = ensemble_method or self.params.get('ensemble_method', 'stacking')
+
+        if not self._logged_ensemble_method:
+            logger.info(f"Using ensemble method: {ensemble_method}")
+            self._logged_ensemble_method = True
         
         # Normalize scores first
         fecf_normalized = self.normalize_scores(fecf_recs, method=self.params.get('normalization', 'sigmoid'))
@@ -1105,7 +1112,7 @@ class HybridRecommender:
         """Apply trending boost to results with configurable boost factor"""
         if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
             # Use provided boost_factor or get from params
-            trend_boost_factor = boost_factor if boost_factor is not None else self.params.get('trending_boost_factor', 0.35)
+            trend_boost_factor = boost_factor if boost_factor is not None else self.params.get('trending_boost_factor', 0.2)
             
             if trend_boost_factor > 0:
                 # Create item to trend lookup
@@ -1372,7 +1379,7 @@ class HybridRecommender:
             return []
             
         # Determine number of candidates to get from each model
-        n_candidates = min(n * self.params.get('n_candidates_factor', 4), 150)
+        n_candidates = min(n * self.params.get('n_candidates_factor', 3), 150)
         
         # Get FECF recommendations if available
         fecf_recs = []
@@ -1423,7 +1430,7 @@ class HybridRecommender:
             ncf_recs=ncf_recs,
             fecf_weight=fecf_weight,
             ncf_weight=ncf_weight,
-            ensemble_method=self.params.get('ensemble_method', 'adaptive')
+            ensemble_method=self.params.get('ensemble_method', 'stacking')
         )
         logger.debug(f"Ensemble recommendations for {user_id} took {time.time() - start_time:.3f}s")
         
@@ -1467,7 +1474,7 @@ class HybridRecommender:
         logger.info(f"Generating cold-start recommendations for user {user_id}")
         
         # Use optimized weights for cold-start with FECF heavily favored
-        fecf_weight = self.params.get('cold_start_fecf_weight', 0.95)
+        fecf_weight = self.params.get('cold_start_fecf_weight', 0.75)
         ncf_weight = 1.0 - fecf_weight
         
         # Get FECF cold-start recommendations
@@ -1549,7 +1556,7 @@ class HybridRecommender:
             ncf_recs=ncf_recs,
             fecf_weight=fecf_weight,
             ncf_weight=ncf_weight,
-            ensemble_method='weighted_avg'  # Simpler method for cold-start
+            ensemble_method='stacking'  # Simpler method for cold-start
         )
         
         # Also get purely trending projects as a source of diversity
@@ -1585,7 +1592,7 @@ class HybridRecommender:
         # Filter trending to avoid duplicates with model recs
         model_items = {item_id for item_id, _ in selected_model_recs}
         filtered_trending = [(item_id, score) for item_id, score in trending_recs 
-                          if item_id not in model_items]
+                            if item_id not in model_items]
         selected_trending_recs = filtered_trending[:trend_count]
         
         # Combine recommendations with guaranteed diversity
@@ -1595,7 +1602,7 @@ class HybridRecommender:
         diversified = self.apply_diversity(
             diversity_seeds, 
             n=n, 
-            diversity_weight=self.params.get('category_diversity_weight', 0.2) * 1.5  # Stronger diversity for cold-start
+            diversity_weight=self.params.get('category_diversity_weight', 0.25) * 1.5  # Stronger diversity for cold-start
         )
         
         return diversified[:n]
@@ -2023,7 +2030,7 @@ class HybridRecommender:
         
         # Apply additional diversity if we have more than needed
         if len(filtered_recommendations) > n:
-            filtered_recommendations = self.apply_diversity(filtered_recommendations, n=n, diversity_weight=self.params.get('diversity_factor', 0.25))
+            filtered_recommendations = self.apply_diversity(filtered_recommendations, n=n, diversity_weight=self.params.get('diversity_factor', 0.3))
         
         # Convert to detailed recommendations
         detailed_recommendations = []
@@ -2186,7 +2193,7 @@ class HybridRecommender:
             enhanced_recommendations = self.apply_diversity(
                 enhanced_recommendations, 
                 n=n, 
-                diversity_weight=self.params.get('category_diversity_weight', 0.2) * 1.5  # Stronger diversity
+                diversity_weight=self.params.get('category_diversity_weight', 0.25) * 1.5  # Stronger diversity
             )
         else:
             # Fallback to regular cold-start when no interests specified

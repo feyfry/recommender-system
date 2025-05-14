@@ -372,7 +372,7 @@ class FeatureEnhancedCF:
                 content_similarity = cosine_similarity(self._item_features)
                 
                 # Get content alpha from params
-                alpha = max(0.3, min(0.7, self.params.get('content_alpha', 0.65)))
+                alpha = max(0.3, min(0.7, self.params.get('content_alpha', 0.55)))
                 
                 # Apply domain-specific adjustments
                 category_importance = self.crypto_weights.get("category_correlation", 0.6)
