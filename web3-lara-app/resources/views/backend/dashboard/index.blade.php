@@ -317,9 +317,9 @@
                             @if(isset($recommendation['current_price']))
                                 <div class="flex justify-between text-sm">
                                     <span>${{ number_format($recommendation['current_price'], 8) }}</span>
-                                    <span class="{{ ($recommendation['price_change_percentage_24h'] ?? 0) >= 0 ? 'text-success' : 'text-danger' }}">
-                                        @if(isset($recommendation['price_change_percentage_24h']))
-                                            {{ ($recommendation['price_change_percentage_24h'] >= 0 ? '+' : '') . number_format($recommendation['price_change_percentage_24h'], 2) . '%' }}
+                                    <span class="{{ ($recommendation['price_change_24h'] ?? 0) >= 0 ? 'text-success' : 'text-danger' }}">
+                                        @if(isset($recommendation['price_change_24h']))
+                                            {{ ($recommendation['price_change_24h'] >= 0 ? '+' : '') . number_format($recommendation['price_change_24h'], 8) . '$' }}
                                         @else
                                             -
                                         @endif
