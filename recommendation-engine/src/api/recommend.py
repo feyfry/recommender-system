@@ -537,7 +537,8 @@ async def recommend_projects(request: RecommendationRequest):
                     recommendations = model.get_recommendations_by_chain(
                         request.user_id, 
                         request.chain, 
-                        n=request.num_recommendations
+                        n=request.num_recommendations,
+                        strict=request.strict_filter
                     )
                 else:
                     # Fallback

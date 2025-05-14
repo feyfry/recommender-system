@@ -1668,15 +1668,17 @@ class HybridRecommender:
         
         return detailed_recommendations
     
-    def get_recommendations_by_category(self, user_id: str, category: str, n: int = 10, 
-                                  chain: Optional[str] = None, strict: bool = False) -> List[Dict[str, Any]]:
+    def get_recommendations_by_category(self, user_id: str, category: str, n: int = 10, chain: Optional[str] = None, strict: bool = False) -> List[Dict[str, Any]]:
         """
-        Mendapatkan rekomendasi berdasarkan kategori dengan opsional filter chain
+        Mendapatkan rekomendasi yang difilter berdasarkan kategori dengan opsional filter chain
         """
         logger.info(f"Getting category-filtered recommendations for user {user_id}, category={category}, chain={chain}, strict={strict}")
         
+        # Perbaikan baru: Verifikasi kategori lowercase untuk pencocokan yang lebih baik
+        category_lower = category.lower()
+        
         # Get initial recommendations with increased count for filtering
-        multiplier = 5  # Get 5x more recommendations to allow for more filtering
+        multiplier = 5  # Meningkatkan multiplier untuk mendapatkan lebih banyak kandidat potensial
         recommendations = self.recommend_for_user(user_id, n=n*multiplier)
         
         # Filter projects by category (and chain if provided)
@@ -1691,7 +1693,7 @@ class HybridRecommender:
                 category_match = False
                 project_category = None
                 
-                # Check different category fields for match
+                # Check different category fields for match dengan pencocokan yang ditingkatkan
                 if 'categories_list' in project_df_row.columns:
                     for _, row in project_df_row.iterrows():
                         cats = row['categories_list']
@@ -1708,26 +1710,28 @@ class HybridRecommender:
                         else:
                             categories_list = [cats]
                         
-                        # Check for category match
+                        # Perbaikan: Iterasi kategori dengan pencocokan yang ditingkatkan
                         for cat in categories_list:
-                            if cat and isinstance(cat, str) and (
-                                category.lower() in cat.lower() or 
-                                cat.lower() in category.lower()
-                            ):
-                                category_match = True
-                                project_category = cat
-                                break
+                            if cat and isinstance(cat, str):
+                                cat_lower = cat.lower()
+                                if (category_lower in cat_lower or cat_lower in category_lower or 
+                                    category_lower == cat_lower):
+                                    category_match = True
+                                    project_category = cat
+                                    break
                 
+                # Coba cari di kolom primary_category dengan pencocokan yang lebih teliti
                 if not category_match and 'primary_category' in project_df_row.columns:
                     for _, row in project_df_row.iterrows():
                         primary_cat = row['primary_category']
-                        if primary_cat and isinstance(primary_cat, str) and (
-                            category.lower() in primary_cat.lower() or 
-                            primary_cat.lower() in category.lower()
-                        ):
-                            category_match = True
-                            project_category = primary_cat
-                            break
+                        if primary_cat and isinstance(primary_cat, str):
+                            primary_cat_lower = primary_cat.lower()
+                            if (category_lower in primary_cat_lower or 
+                                primary_cat_lower in category_lower or
+                                category_lower == primary_cat_lower):
+                                category_match = True
+                                project_category = primary_cat
+                                break
                 
                 # Apply chain filter if provided
                 chain_match = True  # Default to True if no chain filter
@@ -1754,7 +1758,7 @@ class HybridRecommender:
         filtered_count = len(filtered_recommendations)
         logger.info(f"Found {filtered_count} recommendations matching filters exactly")
         
-        # PERBAIKAN: In strict mode, only return exact matches
+        # Perbaikan: In strict mode, only return exact matches
         if strict:
             if filtered_count == 0:
                 logger.warning(f"No recommendations match the filters in strict mode")
@@ -1783,7 +1787,7 @@ class HybridRecommender:
             return detailed_recommendations[:n]
         
         # Non-strict mode: Add fallback recommendations if needed
-        if filtered_count < n:
+        if filtered_count < n and not strict:
             logger.warning(f"Only {filtered_count}/{n} recommendations match filters exactly. Adding fallbacks.")
             
             # Try chain-only matches first if both filters used
@@ -1840,17 +1844,17 @@ class HybridRecommender:
                     project_df_row = self.projects_df[self.projects_df['id'] == project_id]
                     
                     if not project_df_row.empty:
-                        # Check category match
+                        # Check category match - pencocokan yang ditingkatkan
                         category_match = False
                         project_category = None
                         
-                        # Check for category match
+                        # Check for category match with improved matching
                         if 'primary_category' in project_df_row.columns:
                             for _, row in project_df_row.iterrows():
                                 primary_cat = row['primary_category']
                                 if primary_cat and isinstance(primary_cat, str) and (
-                                    category.lower() in primary_cat.lower() or 
-                                    primary_cat.lower() in category.lower()
+                                    category_lower in primary_cat.lower() or 
+                                    primary_cat.lower() in category_lower
                                 ):
                                     category_match = True
                                     project_category = primary_cat
@@ -1868,56 +1872,6 @@ class HybridRecommender:
                                 break
                 
                 filtered_recommendations.extend(category_only_matches)
-                
-            # Finally, add generic recommendations if still needed
-            if len(filtered_recommendations) < n:
-                # Get existing IDs
-                existing_ids = {item[0] for item in filtered_recommendations}
-                
-                # Add non-duplicate generic recommendations
-                generic_recs = []
-                for project_id, score in recommendations:
-                    if project_id not in existing_ids:
-                        generic_recs.append((project_id, score * 0.85, {
-                            'category_match': False,
-                            'chain_match': False,
-                            'match_type': 'generic'
-                        }))
-                        
-                        if len(generic_recs) + len(filtered_recommendations) >= n:
-                            break
-                            
-                filtered_recommendations.extend(generic_recs)
-        
-        # Apply diversity
-        if len(filtered_recommendations) > n:
-            # Sort by score and match quality first
-            filtered_recommendations.sort(key=lambda x: (
-                # First, sort by exact matches
-                1 if x[2]['category_match'] and (not chain or x[2]['chain_match']) else 0,
-                # Then by score
-                x[1]
-            ), reverse=True)
-            
-            # Take more than we need for diversity
-            top_candidates = filtered_recommendations[:min(n*2, len(filtered_recommendations))]
-            
-            # Extract just the IDs and scores for diversity function
-            diversity_candidates = [(item[0], item[1]) for item in top_candidates]
-            diversified = self.apply_diversity(diversity_candidates, n=n)
-            
-            # Map back to full tuples with match info
-            match_info_map = {item[0]: item[2] for item in top_candidates}
-            diversified_with_info = [(item_id, score, match_info_map[item_id]) for item_id, score in diversified]
-            filtered_recommendations = diversified_with_info
-        
-        # Sort final results by match quality and score
-        filtered_recommendations.sort(key=lambda x: (
-            # First, sort by exact matches
-            1 if x[2]['category_match'] and (not chain or x[2]['chain_match']) else 0,
-            # Then by score
-            x[1]
-        ), reverse=True)
         
         # Convert to detailed recommendations
         detailed_recommendations = []
@@ -2223,7 +2177,7 @@ class HybridRecommender:
         
         logger.info(f"Found {len(detailed_recommendations)} filtered recommendations")
         
-        # PERBAIKAN: Jika strict mode, hanya kembalikan exact matches
+        # Perbaikan: If strict mode, only return exact matches
         if strict:
             return detailed_recommendations[:n]
         
@@ -2308,7 +2262,7 @@ class HybridRecommender:
                 if chain_match and category_match:
                     matching_projects.append(row)
             
-            # If strict mode and no matches, return empty list
+            # Perbaikan: If strict mode and no matches, return empty list
             if strict and len(matching_projects) == 0:
                 return []
             

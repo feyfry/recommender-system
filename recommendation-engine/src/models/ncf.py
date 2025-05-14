@@ -2063,7 +2063,7 @@ class NCFRecommender:
         
         logger.info(f"Found {len(detailed_recommendations)} filtered recommendations")
         
-        # If strict mode, only return exact matches
+        # Perbaikan: If strict mode, only return exact matches
         if strict:
             return detailed_recommendations[:n]
         
