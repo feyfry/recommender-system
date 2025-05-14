@@ -656,13 +656,30 @@ class DataProcessor:
         # 1. Bersihkan dan lengkapi data proyek
         projects_df = self._clean_project_data(projects_df, trending_df)
         
-        # 2. Buat fitur untuk rekomendasi
+        # 2. TAMBAHAN: Simpan categories_list sebelum membuat primary_category
+        # Ini memastikan kita memiliki akses ke kategori asli dalam format terstruktur
+        if 'categories' in projects_df.columns:
+            def process_categories(cats):
+                if isinstance(cats, list):
+                    return cats
+                elif isinstance(cats, str) and cats.startswith('[') and cats.endswith(']'):
+                    try:
+                        return json.loads(cats)
+                    except:
+                        return [cats]
+                elif isinstance(cats, str):
+                    return [cats]
+                return []
+            
+            projects_df['categories_list'] = projects_df['categories'].apply(process_categories)
+        
+        # 3. Buat fitur untuk rekomendasi
         features_df = self._create_features(projects_df)
         
-        # 3. Buat data interaksi sintetis
+        # 4. Buat data interaksi sintetis
         interactions_df = self._create_synthetic_interactions(projects_df, n_users)
         
-        # 4. Validasi hasil pemrosesan
+        # 5. Validasi hasil pemrosesan
         validation_results = self.validate_processed_data(projects_df)
         
         # Log hasil validasi 
@@ -673,7 +690,7 @@ class DataProcessor:
             logger.warning(f"High number of data issues detected: {validation_results['issues_found']}")
             logger.warning("Please check data integrity before proceeding")
         
-        # 5. Simpan data yang sudah diproses
+        # 6. Simpan data yang sudah diproses
         self._save_processed_data(projects_df, interactions_df, features_df)
         
         return projects_df, interactions_df, features_df
@@ -734,10 +751,14 @@ class DataProcessor:
                 return []
                     
             df['categories'] = df['categories'].apply(clean_categories)
+            
+            # TAMBAHAN: Buat categories_list yang tersusun rapi
+            df['categories_list'] = df['categories'].apply(lambda x: x if isinstance(x, list) else [])
         else:
             df['categories'] = [[] for _ in range(len(df))]
+            df['categories_list'] = [[] for _ in range(len(df))]
         
-        # Ekstrak primary_category
+        # Ekstrak primary_category dengan metode yang disederhanakan
         df['primary_category'] = df.apply(self._extract_primary_category_improved, axis=1)
         
         # Ekstrak chain
@@ -786,113 +807,63 @@ class DataProcessor:
         return df
         
     def _extract_primary_category_improved(self, row) -> str:
+        """
+        Ekstrak kategori utama dari daftar kategori dengan pendekatan yang lebih sederhana dan cerdas.
+        Mengembalikan string kategori tunggal, bukan array.
+        """
         categories = row.get('categories', [])
         query_category = row.get('query_category')
         
         # Handle empty categories
         if not categories or not any(isinstance(cat, str) and cat.strip() for cat in categories):
-            # Fallback to query_category if available and not generic
+            # Fallback to query_category jika tersedia dan bukan kategori generik
             if query_category and query_category.lower() not in ['unknown', 'top']:
-                # Check if the query_category matches any of our category mappings
-                for category, aliases in self.category_mappings.items():
-                    if query_category.lower() in [alias.lower() for alias in aliases]:
-                        return category
                 return query_category.lower()
             return 'unknown'
         
-        # Convert all categories to lowercase for better matching
+        # Normalisasi kategori (filter hanya string dan lowercase)
         normalized_categories = [cat.lower() for cat in categories if isinstance(cat, str) and cat]
         
         if not normalized_categories:
             return 'unknown'
         
-        # Matched categories with priority ranking
-        matched_categories = []
+        # SMART DETECTION: Gunakan beberapa faktor untuk menentukan kategori utama
         
-        # APPROACH 1: Use first three categories (most important) if available
-        for first_category in normalized_categories[:3]:
-            category_matched = False
-            
-            # Check if category is in our mappings (case-insensitive)
-            for category_key, aliases in self.category_mappings.items():
-                lower_aliases = [alias.lower() for alias in aliases]
-                if first_category in lower_aliases:
-                    matched_categories.append(category_key)
-                    category_matched = True
-                    break
-                    
-            # Check for partial matches if no exact match
-            if not category_matched:
-                for category_key, aliases in self.category_mappings.items():
-                    lower_aliases = [alias.lower() for alias in aliases]
-                    # Check if the category is contained within any alias or vice versa
-                    if any(first_category in alias or alias in first_category for alias in lower_aliases):
-                        matched_categories.append(category_key)
-                        category_matched = True
-                        break
-                
-            # Special handling for ecosystem categories if still no match
-            if not category_matched:
-                for ecosystem in self.ecosystem_categories:
-                    ecosystem_lower = ecosystem.lower()
-                    if ecosystem_lower in first_category or first_category in ecosystem_lower:
-                        base_ecosystem = ecosystem.split('-')[0] if '-ecosystem' in ecosystem else ecosystem
-                        matched_categories.append(base_ecosystem.lower())
-                        category_matched = True
-                        break
-                        
-            # If still no mapping found, use raw category
-            if not category_matched:
-                matched_categories.append(first_category)
-
-        # APPROACH 2: Find additional categories with priority ordering
-        all_matched_categories = set(matched_categories)  # Track all categories already matched
-        remaining_slots = max(0, 3 - len(matched_categories))
+        # 1. Kategori paling spesifik biasanya lebih penting
+        # Kategori dengan nama lebih panjang dan lebih spesifik cenderung lebih informatif
+        specific_score = [(cat, len(cat.split('-')) + len(cat.split(' '))) for cat in normalized_categories]
+        specific_score.sort(key=lambda x: x[1], reverse=True)
         
-        if remaining_slots > 0:
-            for category_key, aliases in self.category_mappings.items():
-                if len(matched_categories) >= 3:
-                    break
-                    
-                if category_key in all_matched_categories:
-                    continue
-                    
-                lower_aliases = [alias.lower() for alias in aliases]
-                for normalized_cat in normalized_categories:
-                    # Skip if already matched
-                    if normalized_cat in all_matched_categories:
-                        continue
-                        
-                    # Direct or partial match
-                    if normalized_cat in lower_aliases or any(normalized_cat in alias or alias in normalized_cat for alias in lower_aliases):
-                        matched_categories.append(category_key)
-                        all_matched_categories.add(category_key)
-                        break
-            
-        # APPROACH 3: Fallback to query_category if still need more categories
-        if len(matched_categories) == 0 and query_category and query_category.lower() not in ['unknown', 'top']:
-            matched_categories.append(query_category.lower())
-                    
-        # APPROACH 4: Last resort - use first raw categories 
-        if len(matched_categories) == 0 and normalized_categories:
-            matched_categories = normalized_categories[:min(3, len(normalized_categories))]
+        # 2. Kategori yang lebih relevan diberi prioritas
+        # Beberapa kategori lebih relevan untuk rekomendasi cryptocurrency
+        high_relevance_prefixes = ['defi', 'layer', 'nft', 'dex', 'stablecoin', 'lending', 'yield', 'dao']
         
-        # If still empty, use unknown
-        if len(matched_categories) == 0:
-            matched_categories = ['unknown']
-            
-        # Prioritize categories based on priority list
-        priority_dict = {cat: idx for idx, cat in enumerate(self.category_priority)}
-        matched_categories.sort(key=lambda x: priority_dict.get(x, 999))
+        for cat in normalized_categories:
+            for prefix in high_relevance_prefixes:
+                if cat.startswith(prefix) or f"-{prefix}" in cat:
+                    return cat  # Langsung kembalikan kategori yang sangat relevan
         
-        # Limit to max 3 categories
-        top_categories = matched_categories[:3]
+        # 3. Hindari kategori ekosistem blockchain kecuali hanya itu yang tersedia
+        ecosystem_categories = [cat for cat in normalized_categories 
+                            if 'ecosystem' in cat or cat in self.ecosystem_categories]
+        non_ecosystem_categories = [cat for cat in normalized_categories 
+                                if cat not in ecosystem_categories]
         
-        # Return sebagai string JSON untuk multiple kategori atau string biasa untuk kategori tunggal
-        if len(top_categories) == 1:
-            return top_categories[0]
-        else:
-            return json.dumps(top_categories)
+        # 4. Pilih kategori prioritas tertinggi
+        # Jika ada kategori non-ekosistem, pilih yang paling spesifik
+        if non_ecosystem_categories:
+            # Urutkan berdasarkan spesifisitas
+            specific_non_eco = [(cat, len(cat.split('-')) + len(cat.split(' '))) 
+                            for cat in non_ecosystem_categories]
+            specific_non_eco.sort(key=lambda x: x[1], reverse=True)
+            return specific_non_eco[0][0]
+        
+        # 5. Jika hanya ada kategori ekosistem, gunakan itu
+        if ecosystem_categories:
+            return ecosystem_categories[0]
+        
+        # 6. Jika semua gagal, gunakan kategori pertama
+        return normalized_categories[0]
     
     def _extract_primary_chain(self, platforms: Dict[str, str]) -> str:
         # Handle NaN or non-dict values
