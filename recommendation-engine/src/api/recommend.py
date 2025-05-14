@@ -553,17 +553,12 @@ async def recommend_projects(request: RecommendationRequest):
         
         # Create response with sanitized data
         project_responses = []
-        exact_match_count = 0  # Inisialisasi penghitung exact matches
         
         # PERBAIKAN: Tambahkan penanganan error pada loop
         for rec in recommendations:
             try:
                 # Sanitize data (handle NaN values)
                 clean_rec = sanitize_project_data(rec)
-
-                # PERBAIKAN: Hitung exact_match_count
-                if 'filter_match' in clean_rec and clean_rec['filter_match'] == 'exact':
-                    exact_match_count += 1
                 
                 # PERBAIKAN: Pastikan recommendation_score adalah float Python
                 if 'recommendation_score' in clean_rec:
@@ -584,8 +579,7 @@ async def recommend_projects(request: RecommendationRequest):
                         trend_score=clean_rec.get('trend_score'),
                         category=clean_rec.get('primary_category', clean_rec.get('category')),
                         chain=clean_rec.get('chain'),
-                        recommendation_score=clean_rec.get('recommendation_score', 0.5),
-                        filter_match=clean_rec.get('filter_match')
+                        recommendation_score=clean_rec.get('recommendation_score', 0.5)
                     )
                 )
             except Exception as e:
@@ -600,8 +594,7 @@ async def recommend_projects(request: RecommendationRequest):
             is_cold_start=is_cold_start,
             category_filter=request.category,
             chain_filter=request.chain,
-            execution_time=(datetime.now() - start_time).total_seconds(),
-            exact_match_count=exact_match_count
+            execution_time=(datetime.now() - start_time).total_seconds()
         )
         
         # OPTIMIZATION: Store in user-specific cache with appropriate TTL
