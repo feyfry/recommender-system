@@ -43,6 +43,13 @@ Sistem ini mengimplementasikan beberapa pendekatan rekomendasi:
    - Mode strict untuk hasil yang sangat spesifik dan presisi tinggi
    - Fallback rekomendasi cerdas ketika filter terlalu ketat
    - Diversifikasi hasil otomatis saat melakukan filtering
+   - **Klasifikasi Filter Match** dengan beberapa tingkatan:
+     - `exact` - Item yang cocok persis dengan filter yang diterapkan
+     - `category_only` - Item yang hanya cocok dengan filter kategori
+     - `chain_only` - Item yang hanya cocok dengan filter chain
+     - `chain_popular` - Item populer dalam chain yang difilter
+     - `fallback` - Item yang ditambahkan sebagai cadangan karena kurangnya hasil
+   - **Penghitungan Exact Match** untuk mengukur ketepatan filter
 
 5. **API Service dengan Konfigurasi Fleksibel:**
    - Endpoint REST API untuk integrasi dengan aplikasi backend Laravel
@@ -113,14 +120,21 @@ Sistem rekomendasi telah ditingkatkan dengan kemampuan filtering yang lebih cang
    - Penanganan kategori majemuk yang lebih baik
    - Peningkatan identifikasi konten relevan dengan fuzzy matching
 
-3. **Fallback Cerdas:**
+3. **Fallback Cerdas dengan Filter Match Tracking:**
    - Respons yang lebih baik ketika hasil filter terlalu sedikit
    - Penambahan hasil relevan secara bertahap ketika strict mode tidak aktif
-   - Label filter_match pada hasil untuk menunjukkan tingkat kecocokan
+   - Label `filter_match` pada hasil untuk menunjukkan tingkat kecocokan:
+     - `exact`: Item yang cocok persis dengan seluruh kriteria filter
+     - `category_only`: Item yang hanya cocok dengan filter kategori, tidak dengan chain
+     - `chain_only`: Item yang hanya cocok dengan filter chain, tidak dengan kategori
+     - `chain_popular`: Item populer dalam chain yang sama (untuk FECF)
+     - `fallback`: Item yang ditambahkan karena kurangnya hasil yang cocok persis
+   - Penghitungan `exact_match_count` untuk memantau kualitas hasil filter
 
 4. **Parameter Filter pada API:**
-   - Parameter strict pada semua endpoint filter
-   - Indikator match quality pada respons
+   - Parameter `strict` pada semua endpoint filter untuk hasil yang tepat
+   - Indikator `filter_match` pada setiap item dalam respons
+   - Field `exact_match_count` pada respons untuk menunjukkan jumlah hasil yang persis sesuai filter
    - Optimasi performa untuk query dengan filter
 
 ### Optimasi Analisis Teknikal dan Prediksi Harga (Mei 2025)
@@ -603,8 +617,14 @@ Secara default, API akan berjalan di `http://0.0.0.0:8001`.
 ```
 
 **Field Respons Baru:**
-- `filter_match`: Indikator tingkat kecocokan dengan filter ("exact", "category_only", "chain_only", atau "fallback")
-- `exact_match_count`: Jumlah hasil yang cocok secara tepat dengan kriteria filter
+- `filter_match`: Indikator tingkat kecocokan dengan filter yang memiliki nilai berikut:
+  - `exact` - Item yang cocok persis dengan semua filter (kategori dan chain)
+  - `category_only` - Item yang hanya cocok dengan filter kategori tapi tidak dengan chain
+  - `chain_only` - Item yang hanya cocok dengan filter chain tapi tidak dengan kategori
+  - `chain_popular` - Item populer dalam chain yang sama (khusus untuk model FECF)
+  - `fallback` - Item tambahan ketika tidak cukup hasil yang cocok persis
+  - `null` - Tidak ada filter yang diterapkan atau item tidak melalui filtering
+- `exact_match_count`: Jumlah total hasil yang memiliki `filter_match` bernilai "exact"
 
 #### 2. Dapatkan Proyek Trending
 
@@ -617,7 +637,7 @@ Secara default, API akan berjalan di `http://0.0.0.0:8001`.
 - `chain` (string, optional): Filter berdasarkan chain
 - `strict` (boolean, optional): Mode filter ketat (default: false)
 
-**Response:** Array dari objek `ProjectResponse`
+**Response:** Array dari objek `ProjectResponse` dengan bidang `filter_match` untuk menunjukkan tingkat kecocokan
 
 #### 3. Dapatkan Proyek Populer
 
@@ -630,7 +650,7 @@ Secara default, API akan berjalan di `http://0.0.0.0:8001`.
 - `chain` (string, optional): Filter berdasarkan chain
 - `strict` (boolean, optional): Mode filter ketat (default: false)
 
-**Response:** Array dari objek `ProjectResponse`
+**Response:** Array dari objek `ProjectResponse` dengan bidang `filter_match` untuk menunjukkan tingkat kecocokan
 
 #### 4. Dapatkan Proyek Serupa
 
@@ -644,7 +664,7 @@ Secara default, API akan berjalan di `http://0.0.0.0:8001`.
 - `chain` (string, optional): Filter berdasarkan chain
 - `strict` (boolean, optional): Mode filter ketat (default: false)
 
-**Response:** Array dari objek `ProjectResponse`
+**Response:** Array dari objek `ProjectResponse` dengan bidang `filter_match` untuk menunjukkan tingkat kecocokan
 
 ### Endpoint Analisis Teknikal dengan Periode Dinamis
 
@@ -1043,105 +1063,7 @@ web3-recommender-system/
 │	├── requirements.txt      # Dependensi
 │	└── README.md             # Dokumentasi
 ├── web3-lara-app/                 # Aplikasi Laravel untuk frontend/backend
-│   ├── app/                       # Kode PHP aplikasi
-│   │   ├── Console/
-│   │   │   └── Commands/          # Command CLI custom
-│   │   │       └── ClearApiCache.php
-│   │   │
-│   │   ├── Http/
-│   │   │   ├── Controllers/       # Controller untuk menangani request
-│   │   │   │   ├── Admin/         # Controller untuk panel admin
-│   │   │   │   │   └── AdminController.php
-│   │   │   │   │
-│   │   │   │   ├── Auth/          # Controller untuk autentikasi
-│   │   │   │   │   └── Web3AuthController.php
-│   │   │   │   │
-│   │   │   │   ├── Backend/       # Controller untuk panel pengguna
-│   │   │   │   │   ├── DashboardController.php
-│   │   │   │   │   ├── PortfolioController.php
-│   │   │   │   │   ├── ProfileController.php
-│   │   │   │   │   └── RecommendationController.php
-│   │   │   │   │
-│   │   │   │   └── Controller.php  # Controller abstrak dasar
-│   │   │   │
-│   │   │   └── Middleware/        # Middleware aplikasi
-│   │   │       ├── CacheHeadersMiddleware.php
-│   │   │       └── CheckRoleMiddleware.php
-│   │   │
-│   │   └── Models/                # Model database
-│   │       ├── ActivityLog.php
-│   │       ├── ApiCache.php
-│   │       ├── HistoricalPrice.php
-│   │       ├── Interaction.php
-│   │       ├── Notification.php
-│   │       ├── Portfolio.php
-│   │       ├── PriceAlert.php
-│   │       ├── Profile.php
-│   │       ├── Project.php
-│   │       ├── Recommendation.php
-│   │       ├── Transaction.php
-│   │       └── User.php
-│   │
-│   ├── bootstrap/
-│   │   └── app.php               # Bootstrap aplikasi Laravel
-│   │
-│   ├── database/
-│   │   └── migrations/           # Migrasi database
-│   │       ├── 0001_01_01_000000_create_users_table.php
-│   │       ├── 0001_01_01_000001_create_cache_table.php
-│   │       ├── 0001_01_01_000002_create_jobs_table.php
-│   │       ├── 2025_04_28_193939_create_profiles_table.php
-│   │       ├── 2025_04_29_071448_create_projects_table.php
-│   │       ├── 2025_04_29_071635_create_interactions_table.php
-│   │       ├── 2025_04_29_071753_create_recommendations_table.php
-│   │       ├── 2025_04_29_071858_create_portfolios_table.php
-│   │       ├── 2025_04_29_071950_create_transactions_table.php
-│   │       ├── 2025_04_29_072507_create_api_cache_table.php
-│   │       ├── 2025_04_29_072547_create_price_alerts_table.php
-│   │       ├── 2025_04_29_072627_create_notifications_table.php
-│   │       ├── 2025_04_29_072725_create_activity_logs_table.php
-│   │       └── 2025_04_29_072824_create_historical_prices_table.php
-│   │
-│   ├── public/
-│   │   └── backend/
-│   │       └── assets/
-│   │           └── css/
-│   │               └── claymorphism.css  # CSS untuk tema claymorphism
-│   │
-│   ├── resources/
-│   │   └── views/
-│   │       ├── auth/
-│   │       │   └── web3login.blade.php  # Halaman login Web3 wallet
-│   │       │
-│   │       ├── backend/
-│   │       │   ├── dashboard/
-│   │       │   │   └── index.blade.php  # Dashboard utama pengguna
-│   │       │   │
-│   │       │   ├── portfolio/
-│   │       │   │   ├── index.blade.php            # Halaman overview portfolio
-│   │       │   │   ├── transactions.blade.php     # Halaman riwayat transaksi
-│   │       │   │   └── price_alerts.blade.php     # Halaman price alerts
-│   │       │   │
-│   │       │   ├── profile/
-│   │       │   │   ├── edit.blade.php                 # Halaman edit profil
-│   │       │   │   └── notification_settings.blade.php # Pengaturan notifikasi
-│   │       │   │
-│   │       │   └── recommendation/
-│   │       │       ├── index.blade.php            # Overview rekomendasi
-│   │       │       ├── personal.blade.php         # Rekomendasi personal
-│   │       │       ├── trending.blade.php         # Proyek trending
-│   │       │       ├── popular.blade.php          # Proyek populer
-│   │       │       ├── categories.blade.php       # Filter berdasarkan kategori
-│   │       │       ├── chains.blade.php           # Filter berdasarkan blockchain
-│   │       │       └── project_detail.blade.php   # Detail proyek
-│   │       │
-│   │       ├── layouts/
-│   │       │   └── app.blade.php                  # Layout utama aplikasi
-│   │       │
-│   │       └── welcome.blade.php                  # Halaman landing page
-│   │
-│   └── routes/
-│       └── web.php                               # Definisi route web
+│   └── ... (direktori aplikasi Laravel)
 │
 └── README.md                                     # Dokumentasi proyek keseluruhan
 ```
@@ -1183,7 +1105,27 @@ web3-recommender-system/
    python main.py recommend --user-id cold_start_user --interests "defi,gaming,nft"
    ```
 
-4. **Error pada Analisis Teknikal dengan Data Terbatas**
+4. **Masalah dengan Nilai Filter Match**
+   - Jika `filter_match` selalu `null` atau `exact_match_count` selalu 0:
+     - Verifikasi respons API untuk memastikan field tersebut ada dalam response
+     - Coba gunakan parameter `strict=false` karena dengan `strict=true` mungkin tidak ada hasil
+     - Verifikasi bahwa kategori dan chain yang digunakan ada dalam dataset
+     - Bersihkan cache API dan coba lagi
+   ```bash
+   # Pertama, bersihkan cache rekomendasi
+   POST /recommend/cache/clear
+   
+   # Kemudian coba request dengan filter yang lebih umum
+   POST /recommend/projects
+   {
+     "user_id": "user_123",
+     "model_type": "hybrid",
+     "category": "defi",
+     "strict_filter": false
+   }
+   ```
+
+5. **Error pada Analisis Teknikal dengan Data Terbatas**
    - Sistem secara otomatis menyesuaikan parameter untuk data terbatas
    - Kurangi periode MA jangka panjang:
    ```json
@@ -1200,7 +1142,7 @@ web3-recommender-system/
    GET /analysis/trading-signals?project_id=bitcoin&trading_style=short_term
    ```
 
-5. **Performa API Lambat**
+6. **Performa API Lambat**
    - Hapus cache jika implementasi model berubah:
    ```bash
    # Clear analysis cache
@@ -1216,7 +1158,7 @@ web3-recommender-system/
    GET /analysis/price-prediction/bitcoin?model=simple
    ```
 
-6. **Masalah Filter yang Mengembalikan Hasil Kosong**
+7. **Masalah Filter yang Mengembalikan Hasil Kosong**
    - Jika menggunakan strict mode dan tidak mendapatkan hasil:
      - Coba tanpa mode strict untuk mendapatkan hasil yang lebih luas
      - Gunakan filter kategori atau chain saja, bukan keduanya sekaligus
