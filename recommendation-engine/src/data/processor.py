@@ -551,37 +551,14 @@ class DataProcessor:
                 categories = row['categories'] if isinstance(row['categories'], list) else []
                 
                 if categories and primary_cat not in ['unknown', 'other-ecosystem']:
-                    # Cek apakah primary_category match dengan salah satu kategori asli
-                    # atau setidaknya sebagian dari kategori asli
-                    normalized_categories = [cat.lower() for cat in categories if cat]
-                    found_match = False
-                    
-                    # Cek match eksak
-                    if primary_cat in normalized_categories:
-                        found_match = True
-                    else:
-                        # Cek partial match
-                        for cat in normalized_categories:
-                            if primary_cat in cat or cat in primary_cat:
-                                found_match = True
-                                break
-                            
-                            # Cek jika primary_cat adalah ecosystem tapi disingkat
-                            if primary_cat in ['ethereum', 'binance', 'solana', 'polygon', 'avalanche', 
-                                            'arbitrum', 'optimism', 'base', 'fantom', 'cosmos']:
-                                ecosystem_cat = f"{primary_cat}-ecosystem"
-                                if ecosystem_cat in cat or cat in ecosystem_cat:
-                                    found_match = True
-                                    break
-                    
-                    # Jika tidak ada match, catat masalah
-                    if not found_match:
+                    # Cek apakah primary_category adalah kategori pertama atau normalisasinya
+                    if categories and primary_cat != categories[0].lower():
                         category_mismatch += 1
                         validation_results["issues_details"].append({
                             "id": row.get('id', f"Row {idx}"),
-                            "issue": "primary_category doesn't match any category in categories",
+                            "issue": "primary_category doesn't match first category",
                             "primary_category": primary_cat,
-                            "categories": str(categories)
+                            "first_category": categories[0] if categories else "None"
                         })
         
         validation_results["category_mismatch_issues"] = category_mismatch
@@ -617,6 +594,8 @@ class DataProcessor:
                     "symbol": row.get('symbol', 'N/A'),
                     "primary_category": row.get('primary_category', 'N/A'),
                     "categories": str(row.get('categories', [])),
+                    "chain": row.get('chain', 'N/A'),
+                    "platforms": str(row.get('platforms', {}))
                 }
                 validation_results["sample_rows"].append(sample)
         
@@ -638,7 +617,7 @@ class DataProcessor:
                     # Log detail tambahan berdasarkan jenis masalah
                     if "primary_category doesn't match" in issue_type:
                         logger.warning(f"    Primary: {issue.get('primary_category', 'N/A')}")
-                        logger.warning(f"    Categories: {issue.get('categories', 'N/A')}")
+                        logger.warning(f"    First Category: {issue.get('first_category', 'N/A')}")
                     elif "not a valid" in issue_type:
                         logger.warning(f"    Value: {issue.get('value', 'N/A')}")
         
@@ -656,41 +635,13 @@ class DataProcessor:
         # 1. Bersihkan dan lengkapi data proyek
         projects_df = self._clean_project_data(projects_df, trending_df)
         
-        # 2. TAMBAHAN: Simpan categories_list sebelum membuat primary_category
-        # Ini memastikan kita memiliki akses ke kategori asli dalam format terstruktur
-        if 'categories' in projects_df.columns:
-            def process_categories(cats):
-                if isinstance(cats, list):
-                    return cats
-                elif isinstance(cats, str) and cats.startswith('[') and cats.endswith(']'):
-                    try:
-                        return json.loads(cats)
-                    except:
-                        return [cats]
-                elif isinstance(cats, str):
-                    return [cats]
-                return []
-            
-            projects_df['categories_list'] = projects_df['categories'].apply(process_categories)
-        
-        # 3. Buat fitur untuk rekomendasi
+        # 2. Buat fitur untuk rekomendasi - langsung gunakan categories yang ada
         features_df = self._create_features(projects_df)
         
-        # 4. Buat data interaksi sintetis
+        # 3. Buat data interaksi sintetis
         interactions_df = self._create_synthetic_interactions(projects_df, n_users)
         
-        # 5. Validasi hasil pemrosesan
-        validation_results = self.validate_processed_data(projects_df)
-        
-        # Log hasil validasi 
-        logger.info(f"Data validation results: {validation_results['issues_found']} issues found.")
-        
-        # Jika ada masalah serius, tampilkan log peringatan
-        if validation_results['issues_found'] > 100:
-            logger.warning(f"High number of data issues detected: {validation_results['issues_found']}")
-            logger.warning("Please check data integrity before proceeding")
-        
-        # 6. Simpan data yang sudah diproses
+        # 4. Simpan data yang sudah diproses
         self._save_processed_data(projects_df, interactions_df, features_df)
         
         return projects_df, interactions_df, features_df
@@ -751,17 +702,13 @@ class DataProcessor:
                 return []
                     
             df['categories'] = df['categories'].apply(clean_categories)
-            
-            # TAMBAHAN: Buat categories_list yang tersusun rapi
-            df['categories_list'] = df['categories'].apply(lambda x: x if isinstance(x, list) else [])
         else:
             df['categories'] = [[] for _ in range(len(df))]
-            df['categories_list'] = [[] for _ in range(len(df))]
         
-        # Ekstrak primary_category dengan metode yang disederhanakan
+        # Ekstrak primary_category langsung dari categories
         df['primary_category'] = df.apply(self._extract_primary_category_improved, axis=1)
         
-        # Ekstrak chain
+        # Ekstrak chain langsung dari platforms
         df['chain'] = df.apply(lambda row: self._extract_primary_chain(row['platforms']), axis=1)
         
         # Hitung skor popularitas dan tren
@@ -808,8 +755,7 @@ class DataProcessor:
         
     def _extract_primary_category_improved(self, row) -> str:
         """
-        Ekstrak kategori utama dari daftar kategori dengan pendekatan yang lebih sederhana dan cerdas.
-        Mengembalikan string kategori tunggal, bukan array.
+        Ekstrak kategori utama dari daftar kategori dengan langsung mengambil kategori pertama (indeks 0).
         """
         categories = row.get('categories', [])
         query_category = row.get('query_category')
@@ -821,75 +767,46 @@ class DataProcessor:
                 return query_category.lower()
             return 'unknown'
         
-        # Normalisasi kategori (filter hanya string dan lowercase)
-        normalized_categories = [cat.lower() for cat in categories if isinstance(cat, str) and cat]
+        # Jika categories sudah berupa list, ambil elemen pertama
+        if isinstance(categories, list) and categories:
+            return categories[0].lower()
         
-        if not normalized_categories:
-            return 'unknown'
+        # Jika categories string dalam format list, parse dan ambil elemen pertama
+        if isinstance(categories, str) and categories.startswith('[') and categories.endswith(']'):
+            try:
+                parsed_categories = json.loads(categories)
+                if isinstance(parsed_categories, list) and parsed_categories:
+                    return parsed_categories[0].lower()
+            except:
+                pass
         
-        # SMART DETECTION: Gunakan beberapa faktor untuk menentukan kategori utama
-        
-        # 1. Kategori paling spesifik biasanya lebih penting
-        # Kategori dengan nama lebih panjang dan lebih spesifik cenderung lebih informatif
-        specific_score = [(cat, len(cat.split('-')) + len(cat.split(' '))) for cat in normalized_categories]
-        specific_score.sort(key=lambda x: x[1], reverse=True)
-        
-        # 2. Kategori yang lebih relevan diberi prioritas
-        # Beberapa kategori lebih relevan untuk rekomendasi cryptocurrency
-        high_relevance_prefixes = ['defi', 'layer', 'nft', 'dex', 'stablecoin', 'lending', 'yield', 'dao']
-        
-        for cat in normalized_categories:
-            for prefix in high_relevance_prefixes:
-                if cat.startswith(prefix) or f"-{prefix}" in cat:
-                    return cat  # Langsung kembalikan kategori yang sangat relevan
-        
-        # 3. Hindari kategori ekosistem blockchain kecuali hanya itu yang tersedia
-        ecosystem_categories = [cat for cat in normalized_categories 
-                            if 'ecosystem' in cat or cat in self.ecosystem_categories]
-        non_ecosystem_categories = [cat for cat in normalized_categories 
-                                if cat not in ecosystem_categories]
-        
-        # 4. Pilih kategori prioritas tertinggi
-        # Jika ada kategori non-ekosistem, pilih yang paling spesifik
-        if non_ecosystem_categories:
-            # Urutkan berdasarkan spesifisitas
-            specific_non_eco = [(cat, len(cat.split('-')) + len(cat.split(' '))) 
-                            for cat in non_ecosystem_categories]
-            specific_non_eco.sort(key=lambda x: x[1], reverse=True)
-            return specific_non_eco[0][0]
-        
-        # 5. Jika hanya ada kategori ekosistem, gunakan itu
-        if ecosystem_categories:
-            return ecosystem_categories[0]
-        
-        # 6. Jika semua gagal, gunakan kategori pertama
-        return normalized_categories[0]
+        # Fallback jika format tidak sesuai ekspektasi
+        return 'unknown'
     
     def _extract_primary_chain(self, platforms: Dict[str, str]) -> str:
-        # Handle NaN or non-dict values
+        """
+        Ekstrak chain utama dari platforms dengan mengecek indeks secara berurutan.
+        Jika indeks pertama kosong, cek indeks kedua, dan seterusnya.
+        """
+        # Handle NaN atau non-dict values
         if pd.isna(platforms) or not isinstance(platforms, dict):
             return 'unknown'
                 
         if not platforms:
             return 'unknown'
-                
-        # Prioritas chain
-        priority_chains = ['ethereum', 'binance-smart-chain', 'solana', 'polygon-pos', 'avalanche']
         
-        # Cek apakah ada priority chain yang match
-        for chain in priority_chains:
-            if chain in platforms:
-                return chain
+        # Ambil semua platform keys
+        platform_keys = list(platforms.keys())
         
-        # Cek menggunakan normalisasi dengan aliases
-        platform_keys = [p.lower() for p in platforms.keys()]
-        for chain_name, aliases in self.blockchain_platforms.items():
-            for alias in aliases:
-                if any(alias in p for p in platform_keys):
-                    return chain_name
+        # Cek setiap key secara berurutan
+        for idx, platform in enumerate(platform_keys):
+            # Cek apakah platform key-nya tidak kosong
+            if platform and platform.strip():
+                logger.debug(f"Menggunakan platform pada indeks {idx}: {platform}")
+                return platform
         
-        # Jika tidak ada match, ambil platform pertama
-        return list(platforms.keys())[0] if platforms else 'unknown'
+        # Jika semua kosong, kembalikan unknown
+        return 'unknown'
     
     def _calculate_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
         logger.info("Calculating additional metrics")
