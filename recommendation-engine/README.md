@@ -70,23 +70,23 @@ Berdasarkan hasil evaluasi terbaru, sistem rekomendasi telah mencapai metrik per
 
 | Model | Precision | Recall | F1 | NDCG | Hit Ratio | MRR |
 |-------|-----------|--------|----|----|-----------|-----|
-| fecf | 0.1678 | 0.3369 | 0.2066 | 0.3455 | 0.7483 | 0.5836 |
-| ncf | 0.1329 | 0.2475 | 0.1578 | 0.1925 | 0.5175 | 0.2766 |
-| hybrid | 0.1930 | 0.3842 | 0.2354 | 0.3806 | 0.8042 | 0.6003 |
+| fecf | 0.1392 | 0.3204 | 0.1776 | 0.2899 | 0.6853 | 0.4821 |
+| ncf | 0.1161 | 0.2284 | 0.1426 | 0.1903 | 0.4930 | 0.2984 |
+| hybrid | 0.1510 | 0.3231 | 0.1898 | 0.3087 | 0.7063 | 0.5051 |
 
 **Cold-Start Performance:**
 
 | Model | Precision | Recall | F1 | NDCG | Hit Ratio | Runs |
 |-------|-----------|--------|----|-------|-----------|------|
-| cold_start_fecf | 0.0987±0.0072 | 0.3267±0.0232 | 0.1515±0.0110 | 0.2639±0.0229 | 0.5978±0.0235 | 5 |
-| cold_start_hybrid | 0.0780±0.0109 | 0.2583±0.0354 | 0.1197±0.0166 | 0.2150±0.0289 | 0.4959±0.0440 | 5 |
+| cold_start_fecf | 0.0910±0.0056 | 0.3018±0.0189 | 0.1398±0.0086 | 0.2487±0.0199 | 0.5667±0.0349 | 5 |
+| cold_start_hybrid | 0.0818±0.0043 | 0.2719±0.0154 | 0.1257±0.0068 | 0.2321±0.0105 | 0.5227±0.0161 | 5 |
 
 ### Peningkatan Model & Evaluasi
 
 1. **Perbaikan Metrik Kunci:**
-   - Model Hybrid mencapai Hit Ratio ~80%, menunjukkan keberhasilan merekomendasikan setidaknya satu item relevan di 80% kasus
-   - NDCG ~0.38 untuk model Hybrid menunjukkan item relevan secara konsisten ditempatkan di peringkat yang lebih tinggi
-   - Model FECF tetap unggul dalam skenario cold-start, mempertahankan Hit Ratio ~59% bahkan untuk pengguna baru
+   - Model Hybrid mencapai Hit Ratio ~70%, menunjukkan keberhasilan merekomendasikan setidaknya satu item relevan di 70% kasus
+   - NDCG ~0.30 untuk model Hybrid menunjukkan item relevan secara konsisten ditempatkan di peringkat yang lebih tinggi
+   - Model FECF tetap unggul dalam skenario cold-start, mempertahankan Hit Ratio ~56% bahkan untuk pengguna baru
 
 2. **Optimasi Hybrid Model:**
    - Implementasi adaptive ensemble method yang menyesuaikan bobot model berdasarkan data pengguna
