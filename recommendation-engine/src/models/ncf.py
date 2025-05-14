@@ -1760,6 +1760,9 @@ class NCFRecommender:
                 # Add recommendation score
                 project_dict['recommendation_score'] = float(score)
                 
+                # PERBAIKAN: Tambahkan filter_match untuk exact match
+                project_dict['filter_match'] = 'exact'
+                
                 # Add to results
                 detailed_recommendations.append(project_dict)
         
@@ -1784,6 +1787,8 @@ class NCFRecommender:
                 if rec['id'] not in existing_ids and len(detailed_recommendations) < n:
                     # Mark as popular supplementary item
                     rec['recommendation_source'] = 'category-popular'
+                    # PERBAIKAN: Set filter_match untuk item tambahan
+                    rec['filter_match'] = 'fallback'
                     detailed_recommendations.append(rec)
         
         return detailed_recommendations[:n]
@@ -2058,6 +2063,9 @@ class NCFRecommender:
                 # Add recommendation score
                 project_dict['recommendation_score'] = float(score)
                 
+                # PERBAIKAN: Tambahkan filter_match untuk exact match
+                project_dict['filter_match'] = 'exact'
+                
                 # Add to results
                 detailed_recommendations.append(project_dict)
         
@@ -2082,6 +2090,8 @@ class NCFRecommender:
                 if rec['id'] not in existing_ids and len(detailed_recommendations) < n:
                     # Mark as popular supplementary item
                     rec['recommendation_source'] = 'chain-popular'
+                    # PERBAIKAN: Set filter_match untuk item fallback
+                    rec['filter_match'] = 'fallback'
                     detailed_recommendations.append(rec)
         
         return detailed_recommendations[:n]
@@ -2170,6 +2180,8 @@ class NCFRecommender:
                     project_dict = row.to_dict()
                     score = (row.get('trend_score', 0) * 0.7 + row.get('popularity_score', 0) * 0.3) / 100
                     project_dict['recommendation_score'] = float(min(0.95, score))
+                    # PERBAIKAN: Tambahkan filter_match untuk exact match
+                    project_dict['filter_match'] = 'exact'
                     result.append(project_dict)
             elif 'trend_score' in self.projects_df.columns:
                 # Sort by trend score
@@ -2178,6 +2190,8 @@ class NCFRecommender:
                 for row in sorted_projects[:n]:
                     project_dict = row.to_dict()
                     project_dict['recommendation_score'] = float(min(0.9, row.get('trend_score', 0) / 100))
+                    # PERBAIKAN: Tambahkan filter_match untuk exact match
+                    project_dict['filter_match'] = 'exact'
                     result.append(project_dict)
             elif 'popularity_score' in self.projects_df.columns:
                 # Sort by popularity score
@@ -2186,6 +2200,8 @@ class NCFRecommender:
                 for row in sorted_projects[:n]:
                     project_dict = row.to_dict()
                     project_dict['recommendation_score'] = float(min(0.85, row.get('popularity_score', 0) / 100))
+                    # PERBAIKAN: Tambahkan filter_match untuk exact match
+                    project_dict['filter_match'] = 'exact'
                     result.append(project_dict)
             elif 'market_cap' in self.projects_df.columns:
                 # Sort by market cap
@@ -2198,15 +2214,19 @@ class NCFRecommender:
                     project_dict = row.to_dict()
                     score = 0.8 * row.get('market_cap', 0) / max_market_cap if max_market_cap > 0 else 0.5
                     project_dict['recommendation_score'] = float(score)
+                    # PERBAIKAN: Tambahkan filter_match untuk exact match
+                    project_dict['filter_match'] = 'exact'
                     result.append(project_dict)
             else:
                 # Just return the matching projects with a default score
                 for row in matching_projects[:n]:
                     project_dict = row.to_dict()
                     project_dict['recommendation_score'] = 0.7  # Default score
+                    # PERBAIKAN: Tambahkan filter_match untuk exact match
+                    project_dict['filter_match'] = 'exact'
                     result.append(project_dict)
                     
-            # If strict mode, return only matched results
+            # Jika strict mode, kembalikan hanya hasil yang cocok
             if strict:
                 return result
             
@@ -2253,6 +2273,8 @@ class NCFRecommender:
                         else:
                             score = 0.6
                         project_dict['recommendation_score'] = float(score)
+                        # PERBAIKAN: Tambahkan filter_match untuk partial match
+                        project_dict['filter_match'] = 'fallback'
                         similar_matches.append(project_dict)
                 
                 # Sort similar matches by score

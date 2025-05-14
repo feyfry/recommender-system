@@ -2156,12 +2156,23 @@ class HybridRecommender:
                 
                 # Add to filtered recommendations if both chain and category match
                 if chain_match and category_match:
-                    filtered_recommendations.append((project_id, score))
+                    # PERBAIKAN: Tambahkan info filter match
+                    filtered_recommendations.append((project_id, score, {
+                        'chain_match': True,
+                        'category_match': category_match
+                    }))
         
         # Convert to detailed recommendations
         detailed_recommendations = []
         
-        for project_id, score in filtered_recommendations[:n]:
+        for item in filtered_recommendations[:n]:
+            # PERBAIKAN: Menyesuaikan unpacking sesuai dengan format yang dikirim
+            if len(item) == 3:
+                project_id, score, match_info = item
+            else:
+                project_id, score = item
+                match_info = {'chain_match': True, 'category_match': True}
+            
             # Find project data
             project_data = self.projects_df[self.projects_df['id'] == project_id]
             
@@ -2171,6 +2182,9 @@ class HybridRecommender:
                 
                 # Add recommendation score
                 project_dict['recommendation_score'] = float(score)
+                
+                # PERBAIKAN: Tambahkan filter_match untuk exact match
+                project_dict['filter_match'] = 'exact'
                 
                 # Add to results
                 detailed_recommendations.append(project_dict)
@@ -2196,6 +2210,9 @@ class HybridRecommender:
                 if rec['id'] not in existing_ids and len(detailed_recommendations) < n:
                     # Mark as popular supplementary item
                     rec['recommendation_source'] = 'chain-popular'
+                    # PERBAIKAN: Jika rec sudah memiliki filter_match, pastikan itu konsisten
+                    if 'filter_match' not in rec:
+                        rec['filter_match'] = 'fallback'
                     detailed_recommendations.append(rec)
         
         return detailed_recommendations[:n]
@@ -2262,7 +2279,7 @@ class HybridRecommender:
                 if chain_match and category_match:
                     matching_projects.append(row)
             
-            # Perbaikan: If strict mode and no matches, return empty list
+            # If strict mode and no matches, return empty list
             if strict and len(matching_projects) == 0:
                 return []
             
@@ -2284,6 +2301,8 @@ class HybridRecommender:
                     project_dict = row.to_dict()
                     score = (row.get('trend_score', 0) * 0.7 + row.get('popularity_score', 0) * 0.3) / 100
                     project_dict['recommendation_score'] = float(min(0.95, score))
+                    # PERBAIKAN: Tambahkan filter_match untuk exact match
+                    project_dict['filter_match'] = 'exact'
                     result.append(project_dict)
             elif 'trend_score' in self.projects_df.columns:
                 # Sort by trend score
@@ -2292,6 +2311,8 @@ class HybridRecommender:
                 for row in sorted_projects[:n]:
                     project_dict = row.to_dict()
                     project_dict['recommendation_score'] = float(min(0.9, row.get('trend_score', 0) / 100))
+                    # PERBAIKAN: Tambahkan filter_match untuk exact match
+                    project_dict['filter_match'] = 'exact'
                     result.append(project_dict)
             elif 'popularity_score' in self.projects_df.columns:
                 # Sort by popularity score
@@ -2300,6 +2321,8 @@ class HybridRecommender:
                 for row in sorted_projects[:n]:
                     project_dict = row.to_dict()
                     project_dict['recommendation_score'] = float(min(0.85, row.get('popularity_score', 0) / 100))
+                    # PERBAIKAN: Tambahkan filter_match untuk exact match
+                    project_dict['filter_match'] = 'exact'
                     result.append(project_dict)
             elif 'market_cap' in self.projects_df.columns:
                 # Sort by market cap
@@ -2312,12 +2335,16 @@ class HybridRecommender:
                     project_dict = row.to_dict()
                     score = 0.8 * row.get('market_cap', 0) / max_market_cap if max_market_cap > 0 else 0.5
                     project_dict['recommendation_score'] = float(score)
+                    # PERBAIKAN: Tambahkan filter_match untuk exact match
+                    project_dict['filter_match'] = 'exact'
                     result.append(project_dict)
             else:
                 # Just return the matching projects with a default score
                 for row in matching_projects[:n]:
                     project_dict = row.to_dict()
                     project_dict['recommendation_score'] = 0.7  # Default score
+                    # PERBAIKAN: Tambahkan filter_match untuk exact match
+                    project_dict['filter_match'] = 'exact'
                     result.append(project_dict)
                     
             # Jika strict mode, kembalikan hanya hasil yang cocok
@@ -2367,6 +2394,8 @@ class HybridRecommender:
                         else:
                             score = 0.6
                         project_dict['recommendation_score'] = float(score)
+                        # PERBAIKAN: Tambahkan filter_match untuk partial match
+                        project_dict['filter_match'] = 'fallback'
                         similar_matches.append(project_dict)
                 
                 # Sort similar matches by score

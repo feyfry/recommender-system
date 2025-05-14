@@ -952,7 +952,7 @@ class FeatureEnhancedCF:
         return detailed_recommendations
     
     def get_recommendations_by_category(self, user_id: str, category: str, n: int = 10, 
-                                  chain: Optional[str] = None, strict: bool = False) -> List[Dict[str, Any]]:
+                              chain: Optional[str] = None, strict: bool = False) -> List[Dict[str, Any]]:
         """
         Mendapatkan rekomendasi yang difilter berdasarkan kategori dengan opsional filter chain
         """
@@ -1053,6 +1053,9 @@ class FeatureEnhancedCF:
                     # Add recommendation score
                     project_dict['recommendation_score'] = float(score)
                     
+                    # PERBAIKAN: Tambahkan filter_match untuk exact match
+                    project_dict['filter_match'] = 'exact'
+                    
                     # Add to results
                     detailed_recommendations.append(project_dict)
             
@@ -1075,7 +1078,7 @@ class FeatureEnhancedCF:
                     categories_list = self.process_categories(cats)
                     
                     for cat in categories_list:
-                        if isinstance(cat, str) and (category.lower() in cat.lower() or cat.lower() in category.lower()):
+                        if (isinstance(cat, str) and (category.lower() in cat.lower() or cat.lower() in category.lower())):
                             category_match = True
                             break
                 
@@ -1125,6 +1128,12 @@ class FeatureEnhancedCF:
                 # Add recommendation score
                 project_dict['recommendation_score'] = float(score)
                 
+                # PERBAIKAN: Tambahkan filter_match berdasarkan apakah item berasal dari rekomendasi asli atau tambahan
+                if project_id in [rec[0] for rec in recommendations[:len(recommendations)//3]]:
+                    project_dict['filter_match'] = 'exact'
+                else:
+                    project_dict['filter_match'] = 'fallback'
+                
                 # Add to results
                 detailed_recommendations.append(project_dict)
         
@@ -1173,7 +1182,8 @@ class FeatureEnhancedCF:
                 for _, row in chain_projects.head(n).iterrows():
                     chain_popular.append({
                         **row.to_dict(),
-                        'recommendation_score': 0.7
+                        'recommendation_score': 0.7,
+                        'filter_match': 'exact'  # PERBAIKAN: Tambahkan filter_match
                     })
             
             if not chain_popular and not strict:
@@ -1185,7 +1195,8 @@ class FeatureEnhancedCF:
                 for _, row in chain_projects.head(n).iterrows():
                     chain_popular.append({
                         **row.to_dict(),
-                        'recommendation_score': 0.6  # Lower score for partial match
+                        'recommendation_score': 0.6,  # Lower score for partial match
+                        'filter_match': 'fallback'  # PERBAIKAN: Tambahkan filter_match
                     })
             
             return chain_popular[:n]
@@ -1261,6 +1272,9 @@ class FeatureEnhancedCF:
                 # Add recommendation score
                 project_dict['recommendation_score'] = float(score)
                 
+                # PERBAIKAN: Tambahkan filter_match untuk exact match
+                project_dict['filter_match'] = 'exact'
+                
                 # Add to results
                 detailed_recommendations.append(project_dict)
         
@@ -1290,7 +1304,7 @@ class FeatureEnhancedCF:
                     project_dict = row.to_dict()
                     # Use slightly lower score for fallback recommendations
                     project_dict['recommendation_score'] = 0.65
-                    project_dict['filter_match'] = 'chain_popular'
+                    project_dict['filter_match'] = 'chain_popular'  # PERBAIKAN: Tambahkan filter_match
                     detailed_recommendations.append(project_dict)
         
         return detailed_recommendations[:n]

@@ -485,13 +485,6 @@ async def recommend_projects(request: RecommendationRequest):
                             chain=request.chain,
                             strict=request.strict_filter
                         )
-                    elif 'chain' in inspect.signature(model.get_recommendations_by_category).parameters:
-                        recommendations = model.get_recommendations_by_category(
-                            request.user_id, 
-                            request.category,
-                            n=request.num_recommendations,
-                            chain=request.chain
-                        )
                     else:
                         # Manual post-filtering by chain
                         category_recs = model.get_recommendations_by_category(
@@ -504,6 +497,8 @@ async def recommend_projects(request: RecommendationRequest):
                         chain_filtered = []
                         for rec in category_recs:
                             if 'chain' in rec and rec['chain'] and request.chain.lower() in str(rec['chain']).lower():
+                                # PERBAIKAN: Tambahkan filter_match jika difilter manual
+                                rec['filter_match'] = 'exact'
                                 chain_filtered.append(rec)
                         
                         recommendations = chain_filtered[:request.num_recommendations]
@@ -512,7 +507,14 @@ async def recommend_projects(request: RecommendationRequest):
                             logger.warning(f"Too few results after chain filtering ({len(recommendations)}). Adding some category-only results.")
                             remaining = request.num_recommendations - len(recommendations)
                             existing_ids = [rec['id'] for rec in recommendations]
-                            additional = [rec for rec in category_recs if rec['id'] not in existing_ids][:remaining]
+                            additional = []
+                            for rec in category_recs:
+                                if rec['id'] not in existing_ids:
+                                    # PERBAIKAN: Tambahkan filter_match untuk hasil tambahan
+                                    rec['filter_match'] = 'category_only'
+                                    additional.append(rec)
+                                    if len(additional) >= remaining:
+                                        break
                             recommendations.extend(additional)
                 else:
                     # Fallback to standard recommendations with warning
@@ -553,12 +555,17 @@ async def recommend_projects(request: RecommendationRequest):
         
         # Create response with sanitized data
         project_responses = []
+        exact_match_count = 0  # Inisialisasi penghitung exact matches
         
         # PERBAIKAN: Tambahkan penanganan error pada loop
         for rec in recommendations:
             try:
                 # Sanitize data (handle NaN values)
                 clean_rec = sanitize_project_data(rec)
+
+                # PERBAIKAN: Hitung exact_match_count - fix kondisi pengecekan
+                if 'filter_match' in clean_rec and clean_rec['filter_match'] == 'exact':
+                    exact_match_count += 1
                 
                 # PERBAIKAN: Pastikan recommendation_score adalah float Python
                 if 'recommendation_score' in clean_rec:
@@ -579,12 +586,16 @@ async def recommend_projects(request: RecommendationRequest):
                         trend_score=clean_rec.get('trend_score'),
                         category=clean_rec.get('primary_category', clean_rec.get('category')),
                         chain=clean_rec.get('chain'),
-                        recommendation_score=clean_rec.get('recommendation_score', 0.5)
+                        recommendation_score=clean_rec.get('recommendation_score', 0.5),
+                        filter_match=clean_rec.get('filter_match')
                     )
                 )
             except Exception as e:
                 logger.warning(f"Error processing recommendation item: {e}. Skipping item.")
                 continue
+        
+        # PERBAIKAN: Log jumlah exact matches
+        logger.info(f"Found {exact_match_count} exact matches out of {len(project_responses)} recommendations")
         
         response = RecommendationResponse(
             user_id=request.user_id,
@@ -594,7 +605,8 @@ async def recommend_projects(request: RecommendationRequest):
             is_cold_start=is_cold_start,
             category_filter=request.category,
             chain_filter=request.chain,
-            execution_time=(datetime.now() - start_time).total_seconds()
+            execution_time=(datetime.now() - start_time).total_seconds(),
+            exact_match_count=exact_match_count
         )
         
         # OPTIMIZATION: Store in user-specific cache with appropriate TTL
