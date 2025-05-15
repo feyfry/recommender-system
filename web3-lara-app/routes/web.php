@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Admin\AdminController;
 use App\Http\Controllers\Auth\Web3AuthController;
 use App\Http\Controllers\Backend\ProfileController;
+use App\Http\Controllers\Backend\ProjectController;
 use App\Http\Controllers\Backend\DashboardController;
 use App\Http\Controllers\Backend\PortfolioController;
 use App\Http\Controllers\Backend\RecommendationController;
@@ -28,6 +29,12 @@ Route::prefix('panel')->middleware('auth')->group(function () {
     // Dashboard AJAX endpoints untuk lazy loading
     Route::get('/dashboard/load-portfolio', [DashboardController::class, 'loadPortfolio'])->name('panel.dashboard.load-portfolio');
     Route::get('/dashboard/load-interactions', [DashboardController::class, 'loadInteractions'])->name('panel.dashboard.load-interactions');
+
+    // Projects
+    Route::get('/projects', [ProjectController::class, 'index'])->name('panel.projects');
+    Route::get('/projects/{id}', [ProjectController::class, 'show'])->name('panel.projects.show');
+    Route::post('/projects/favorite', [ProjectController::class, 'favorite'])->name('panel.projects.favorite');
+    Route::post('/projects/add-portfolio', [ProjectController::class, 'addToPortfolio'])->name('panel.projects.add-portfolio');
 
     // Profil Pengguna
     Route::get('/profile', [ProfileController::class, 'edit'])->name('panel.profile.edit');

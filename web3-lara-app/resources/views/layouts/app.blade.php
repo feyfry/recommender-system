@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>{{ config('app.name', 'Web3 Recommender System') }}</title>
+    <title>{{ config('app.name', 'Crypto Recommender System') }}</title>
 
-    <!-- Fonts -->
+    {{-- Fonts --}}
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -16,7 +16,7 @@
     @stack('styles')
 </head>
 <body class="min-h-screen">
-    <!-- Clay Gradient Background -->
+    {{-- Clay Gradient Background --}}
     <div class="clay-gradient-bg">
         <div class="clay-blob clay-blob-1"></div>
         <div class="clay-blob clay-blob-2"></div>
@@ -24,7 +24,7 @@
     </div>
 
     <div x-data="{ sidebarOpen: false, mobileMenuOpen: false }">
-        <!-- Top Navbar -->
+        {{-- Top Navbar --}}
         <nav class="sticky top-0 z-50 w-full p-4" aria-label="Global">
             <div class="clay-card container mx-auto py-2 px-4">
                 <div class="flex justify-between items-center">
@@ -38,7 +38,7 @@
                             <div class="bg-primary p-2 rounded-lg shadow-lg mr-3">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-hop"><path d="M10.82 16.12c1.69.6 3.91.79 5.18.85.55.03 1-.42.97-.97-.06-1.27-.26-3.5-.85-5.18"/><path d="M11.5 6.5c1.64 0 5-.38 6.71-1.07.52-.2.55-.82.12-1.17A10 10 0 0 0 4.26 18.33c.35.43.96.4 1.17-.12.69-1.71 1.07-5.07 1.07-6.71 1.34.45 3.1.9 4.88.62a.88.88 0 0 0 .73-.74c.3-2.14-.15-3.5-.61-4.88"/><path d="M15.62 16.95c.2.85.62 2.76.5 4.28a.77.77 0 0 1-.9.7 16.64 16.64 0 0 1-4.08-1.36"/><path d="M16.13 21.05c1.65.63 3.68.84 4.87.91a.9.9 0 0 0 .96-.96 17.68 17.68 0 0 0-.9-4.87"/><path d="M16.94 15.62c.86.2 2.77.62 4.29.5a.77.77 0 0 0 .7-.9 16.64 16.64 0 0 0-1.36-4.08"/><path d="M17.99 5.52a20.82 20.82 0 0 1 3.15 4.5.8.8 0 0 1-.68 1.13c-2.33.2-5.3-.32-8.27-1.57"/><path d="M4.93 4.93 3 3a.7.7 0 0 1 0-1"/><path d="M9.58 12.18c1.24 2.98 1.77 5.95 1.57 8.28a.8.8 0 0 1-1.13.68 20.82 20.82 0 0 1-4.5-3.15"/></svg>
                             </div>
-                            <span class="text-xl font-bold hidden md:block lg:inline">Web3 Recommender</span>
+                            <span class="text-xl font-bold hidden md:block lg:inline">Crypto Recommender</span>
                         </a>
                     </div>
 
@@ -95,14 +95,14 @@
         </nav>
 
         <div class="flex-1 relative flex">
-            <!-- Sidebar for Desktop -->
+            {{-- Sidebar for Desktop --}}
             @auth
-                <!-- Sidebar for Larger Screens -->
+                {{-- Sidebar for Larger Screens --}}
                 <aside class="fixed lg:sticky top-[88px] z-30 w-64 transform transition-transform duration-300 lg:translate-x-0 self-start"
                     :class="{'translate-x-0': sidebarOpen, '-translate-x-full': !sidebarOpen}"
                     style="height: calc(100vh - 88px);">
                     <div class="h-full clay-card mx-4 mr-1 overflow-y-auto">
-                        <!-- User Profile Summary -->
+                        {{-- User Profile Summary --}}
                         <div class="mt-4 mb-6 px-2">
                             <div class="flex items-center mb-3">
                                 <div class="clay-avatar clay-avatar-md mr-3">
@@ -130,15 +130,21 @@
                             </div>
                         </div>
 
-                        <!-- Sidebar Menu -->
+                        {{-- Sidebar Menu --}}
                         <nav class="space-y-1 px-2" aria-label="Sidebar">
-                            <!-- Dashboard -->
+                            {{-- Dashboard --}}
                             <a href="{{ route('panel.dashboard') }}" class="clay-nav-button {{ request()->routeIs('panel.dashboard') ? 'active' : '' }}">
                                 <i class="fas fa-home w-5 mr-3"></i>
                                 <span>Dashboard</span>
                             </a>
 
-                            <!-- Recommendations Menu -->
+                            <!-- Projects -->
+                            <a href="{{ route('panel.projects') }}" class="clay-nav-button {{ request()->routeIs('panel.projects*') ? 'active' : '' }}">
+                                <i class="fas fa-project-diagram w-5 mr-3"></i>
+                                <span>Proyek</span>
+                            </a>
+
+                            {{-- Recommendations Menu --}}
                             <div x-data="{ open: {{ request()->routeIs('panel.recommendations*') ? 'true' : 'false' }} }">
                                 <button @click="open = !open" class="clay-nav-button w-full flex justify-between">
                                     <div class="flex items-center">
@@ -163,23 +169,7 @@
                                 </div>
                             </div>
 
-                            <!-- Technical Analysis Menu -->
-                            <div x-data="{ open: {{ request()->routeIs('panel.technical-analysis*') ? 'true' : 'false' }} }">
-                                <button @click="open = !open" class="clay-nav-button w-full flex justify-between">
-                                    <div class="flex items-center">
-                                        <i class="fas fa-chart-line w-5 mr-3"></i>
-                                        <span class="truncate max-w-[120px] sm:max-w-none">Analisis Teknikal</span>
-                                    </div>
-                                    <i class="fas fa-chevron-right transition-transform" :class="{'rotate-90': open}"></i>
-                                </button>
-                                <div x-show="open" class="pl-9 space-y-1 mt-1">
-                                    <a href="{{ route('panel.technical-analysis') }}" class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('panel.technical-analysis') && !request()->routeIs('panel.technical-analysis.*') ? 'font-bold text-primary' : '' }}">
-                                        Overview
-                                    </a>
-                                </div>
-                            </div>
-
-                            <!-- Portfolio Menu -->
+                            {{-- Portfolio Menu --}}
                             <div x-data="{ open: {{ request()->routeIs('panel.portfolio*') ? 'true' : 'false' }} }">
                                 <button @click="open = !open" class="clay-nav-button w-full flex justify-between">
                                     <div class="flex items-center">
@@ -201,13 +191,19 @@
                                 </div>
                             </div>
 
-                            <!-- Profile -->
+                            {{-- Technical Analysis Menu --}}
+                            <a href="{{ route('panel.technical-analysis') }}" class="clay-nav-button {{ request()->routeIs('panel.technical-analysis*') ? 'active' : '' }}">
+                                <i class="fas fa-chart-line w-5 mr-3"></i>
+                                <span>Analisis Teknikal</span>
+                            </a>
+
+                            {{-- Profile --}}
                             <a href="{{ route('panel.profile.edit') }}" class="clay-nav-button {{ request()->routeIs('panel.profile*') ? 'active' : '' }}">
                                 <i class="fas fa-user w-5 mr-3"></i>
                                 <span>Profil</span>
                             </a>
 
-                            <!-- Admin Section (Only for admins) -->
+                            {{-- Admin Section (Only for admins) --}}
                             @if(Auth::check() && Auth::user()->isAdmin())
                             <div class="pt-4 mt-4 border-t border-gray-200">
                                 <div class="px-2 mb-2 text-xs font-semibold text-gray-500">ADMIN PANEL</div>
@@ -242,23 +238,23 @@
             @endauth
 
             <div class="flex-1 flex flex-col w-full">
-                <!-- Main Content -->
+                {{-- Main Content --}}
                 <main class="flex-1 px-4 pb-8 lg:pl-4">
                     <div class="container mx-auto">
                         @yield('content')
                     </div>
                 </main>
 
-                <!-- Footer -->
+                {{-- Footer --}}
                 <footer class="p-4 text-center">
                     <div class="inline-block clay-card py-2 px-4 text-sm">
-                        <span>Web3 Recommender System &copy; {{ date('Y') }}</span>
+                        <span>Crypto Recommender System &copy; {{ date('Y') }}</span>
                     </div>
                 </footer>
             </div>
         </div>
 
-        <!-- Overlay for sidebar on mobile -->
+        {{-- Overlay for sidebar on mobile --}}
         <div
             x-show="sidebarOpen"
             @click="sidebarOpen = false"

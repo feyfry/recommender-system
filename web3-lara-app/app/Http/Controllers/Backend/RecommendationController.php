@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Controllers\Backend;
 
 use App\Http\Controllers\Controller;
@@ -195,24 +196,21 @@ class RecommendationController extends Controller
 
     /**
      * Endpoint kategori untuk mendapatkan daftar kategori atau redirect ke halaman rekomendasi personal dengan filter kategori
+     * PERBAIKAN: Perbaiki implementasi categories untuk mengembalikan data yang benar
      */
     public function categories(Request $request)
     {
-        // Ambil parameter kategori
-        $category = $request->input('category', 'defi');
-
-        // Untuk request AJAX atau jika hanya meminta daftar kategori
+        // PERBAIKAN: Untuk request AJAX atau jika hanya meminta daftar kategori
         if ($request->input('format') === 'json' || $request->input('loadCategories') === 'true') {
-            $categories = Cache::remember('categories_list', 60, function () { // 1 jam
-                return $this->getCategories();
-            });
+            $categories = $this->getCategories();
 
             return response()->json([
                 'categories' => $categories
             ]);
         }
 
-        // Redirect ke personal dengan filter kategori
+        // PERBAIKAN: Untuk request normal, redirect ke personal dengan filter kategori
+        $category = $request->input('category', 'defi');
         return redirect()->route('panel.recommendations.personal', [
             'category' => $category
         ]);
@@ -220,24 +218,21 @@ class RecommendationController extends Controller
 
     /**
      * Endpoint chain untuk mendapatkan daftar chain atau redirect ke halaman rekomendasi personal dengan filter chain
+     * PERBAIKAN: Perbaiki implementasi chains untuk mengembalikan data yang benar
      */
     public function chains(Request $request)
     {
-        // Ambil parameter chain
-        $chain = $request->input('chain', 'ethereum');
-
-        // Untuk request AJAX atau jika hanya meminta daftar chain
+        // PERBAIKAN: Untuk request AJAX atau jika hanya meminta daftar chain
         if ($request->input('format') === 'json' || $request->input('part') === 'chains_list') {
-            $chains = Cache::remember('chains_list', 60, function () { // 1 jam
-                return $this->getChains();
-            });
+            $chains = $this->getChains();
 
             return response()->json([
                 'chains' => $chains
             ]);
         }
 
-        // Redirect ke personal dengan filter chain
+        // PERBAIKAN: Untuk request normal, redirect ke personal dengan filter chain
+        $chain = $request->input('chain', 'ethereum');
         return redirect()->route('panel.recommendations.personal', [
             'chain' => $chain
         ]);
@@ -640,7 +635,6 @@ class RecommendationController extends Controller
                 'name'                                   => $data['name'] ?? ($data->name ?? 'Unknown'),
                 'symbol'                                 => $data['symbol'] ?? ($data->symbol ?? 'N/A'),
                 'image'                                  => $data['image'] ?? ($data->image ?? null),
-                'current_price'                          => floatval($data['current_price'] ?? ($data->current_price ?? 0)),
                 // Simpan kedua nilai perubahan (absolut dan persentase) jika tersedia
                 'price_change_24h'                       => $priceChange24h !== null ? floatval($priceChange24h) : null,
                 'price_change_percentage_24h'            => $priceChangePercentage24h !== null ? floatval($priceChangePercentage24h) : 0,
@@ -661,6 +655,7 @@ class RecommendationController extends Controller
                             ($data->score ?? 0.5)))),
                 // PERBAIKAN: Tambahkan field filter_match
                 'filter_match'                          => $filterMatch,
+                'current_price'                          => floatval($data['current_price'] ?? ($data->current_price ?? 0)),
             ];
         }
 
@@ -1008,15 +1003,7 @@ class RecommendationController extends Controller
     private function getCategories()
     {
         try {
-            // Coba dapatkan kategori dari API terlebih dahulu
-            $response = Http::timeout(2)->get("{$this->apiUrl}/categories")->json();
-
-            if (!empty($response) && is_array($response)) {
-                // Jika API mengembalikan categories, gunakan data tersebut
-                return $response;
-            }
-
-            // Jika API tidak mengembalikan data yang valid, ambil dari database lokal
+            // PERBAIKAN: Ambil kategori langsung dari database Laravel tanpa request API
             $categories = Project::select('primary_category')
                 ->distinct()
                 ->whereNotNull('primary_category')
@@ -1081,15 +1068,7 @@ class RecommendationController extends Controller
     private function getChains()
     {
         try {
-            // Coba dapatkan chains dari API terlebih dahulu
-            $response = Http::timeout(2)->get("{$this->apiUrl}/chains")->json();
-
-            if (!empty($response) && is_array($response)) {
-                // Jika API mengembalikan chains, gunakan data tersebut
-                return $response;
-            }
-
-            // Jika API tidak mengembalikan data yang valid, ambil dari database lokal
+            // PERBAIKAN: Ambil chain langsung dari database Laravel tanpa request API
             $chains = Project::select('chain')
                 ->distinct()
                 ->whereNotNull('chain')

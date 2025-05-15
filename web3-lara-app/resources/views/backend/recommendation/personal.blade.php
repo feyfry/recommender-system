@@ -26,7 +26,7 @@
     @endif
 
     <!-- Filter Cards -->
-    <div class="clay-card p-6 mb-8" x-data="{
+    <div class="clay-card p-4 sm:p-6 mb-8" x-data="{
         showFilters: false,
         category: '{{ $selectedCategory ?? '' }}',
         chain: '{{ $selectedChain ?? '' }}',
@@ -35,31 +35,31 @@
         chains: [],
         loadingFilters: true
     }">
-        <div class="flex justify-between items-center mb-4">
-            <button @click="showFilters = !showFilters" class="clay-button clay-button-secondary">
+        <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-4 gap-3">
+            <button @click="showFilters = !showFilters" class="clay-button clay-button-secondary w-full sm:w-auto">
                 <i class="fas fa-filter mr-2"></i>
                 <span x-text="showFilters ? 'Sembunyikan Filter' : 'Tampilkan Filter'"></span>
             </button>
 
-            <div class="flex items-center" x-show="category || chain">
-                <div class="mr-4">
-                    <span class="font-medium">Filter aktif:</span>
+            <div class="flex flex-wrap items-center gap-2" x-show="category || chain">
+                <div class="flex flex-wrap items-center gap-1">
+                    <span class="font-medium text-sm">Filter aktif:</span>
                     <template x-if="category">
-                        <span class="clay-badge clay-badge-primary ml-2" x-text="category"></span>
+                        <span class="clay-badge clay-badge-primary" x-text="category"></span>
                     </template>
                     <template x-if="chain">
-                        <span class="clay-badge clay-badge-secondary ml-2" x-text="chain"></span>
+                        <span class="clay-badge clay-badge-secondary" x-text="chain"></span>
                     </template>
                 </div>
-                <button @click="window.location.href='{{ route('panel.recommendations.personal') }}'" class="clay-button clay-button-danger py-1 px-3 text-sm">
-                    <i class="fas fa-times mr-1"></i> Reset Filter
+                <button @click="window.location.href='{{ route('panel.recommendations.personal') }}'" class="clay-button clay-button-danger py-1 px-2 text-sm">
+                    <i class="fas fa-times mr-1"></i> Reset
                 </button>
             </div>
         </div>
 
         <div x-show="showFilters" x-transition class="mt-4">
             <div x-init="
-                // PERBAIKAN: Load kategori dan chain dengan fetch API dan tampilkan log
+                // PERBAIKAN: Load kategori dengan fetch API langsung ke Laravel route
                 fetch('{{ route('panel.recommendations.categories') }}?format=json&loadCategories=true')
                     .then(response => response.json())
                     .then(data => {
@@ -73,6 +73,7 @@
                         loadingFilters = false;
                     });
 
+                // PERBAIKAN: Load chain dengan fetch API langsung ke Laravel route
                 fetch('{{ route('panel.recommendations.chains') }}?format=json&part=chains_list')
                     .then(response => response.json())
                     .then(data => {
@@ -86,10 +87,10 @@
                         loadingFilters = false;
                     });
             ">
-                <form action="{{ route('panel.recommendations.personal') }}" method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <form action="{{ route('panel.recommendations.personal') }}" method="GET" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <!-- Category Filter -->
-                    <div class="clay-card bg-primary/5 p-4">
-                        <label for="category" class="block font-medium text-gray-700 mb-2">Kategori</label>
+                    <div class="clay-card bg-primary/5 p-3">
+                        <label for="category" class="block font-medium text-gray-700 mb-2 text-sm">Kategori</label>
                         <div x-show="loadingFilters" class="py-2">
                             <div class="inline-block animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-primary"></div>
                             <span class="ml-2 text-sm text-gray-500">Memuat...</span>
@@ -108,8 +109,8 @@
                     </div>
 
                     <!-- Chain Filter -->
-                    <div class="clay-card bg-secondary/5 p-4">
-                        <label for="chain" class="block font-medium text-gray-700 mb-2">Blockchain</label>
+                    <div class="clay-card bg-secondary/5 p-3">
+                        <label for="chain" class="block font-medium text-gray-700 mb-2 text-sm">Blockchain</label>
                         <div x-show="loadingFilters" class="py-2">
                             <div class="inline-block animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-secondary"></div>
                             <span class="ml-2 text-sm text-gray-500">Memuat...</span>
@@ -128,8 +129,8 @@
                     </div>
 
                     <!-- Limit Filter -->
-                    <div class="clay-card bg-info/5 p-4">
-                        <label for="limit" class="block font-medium text-gray-700 mb-2">Jumlah Rekomendasi</label>
+                    <div class="clay-card bg-info/5 p-3">
+                        <label for="limit" class="block font-medium text-gray-700 mb-2 text-sm">Jumlah Rekomendasi</label>
                         <select name="limit" id="limit" class="clay-select w-full">
                             <option value="10" {{ request()->input('limit') == 10 ? 'selected' : '' }}>10 Rekomendasi</option>
                             <option value="20" {{ request()->input('limit') == 20 ? 'selected' : '' }}>20 Rekomendasi</option>
@@ -138,8 +139,8 @@
                     </div>
 
                     <!-- Advanced Options -->
-                    <div class="clay-card bg-warning/5 p-4">
-                        <div class="flex items-center mb-4">
+                    <div class="clay-card bg-warning/5 p-3">
+                        <div class="flex items-center mb-3">
                             <input
                                 type="checkbox"
                                 name="strict_filter"
@@ -147,13 +148,13 @@
                                 value="1"
                                 x-model="strictFilter"
                                 class="mr-2">
-                            <label for="strict_filter" class="font-medium">Filter Ketat</label>
+                            <label for="strict_filter" class="font-medium text-sm">Filter Ketat</label>
                         </div>
-                        <p class="text-xs text-gray-600">
+                        <p class="text-xs text-gray-600 mb-3">
                             Opsi ini hanya menampilkan proyek yang benar-benar cocok dengan filter yang dipilih (tanpa fallback).
                         </p>
 
-                        <button type="submit" class="clay-button clay-button-primary w-full mt-4">
+                        <button type="submit" class="clay-button clay-button-primary w-full">
                             <i class="fas fa-search mr-2"></i> Terapkan Filter
                         </button>
                     </div>
@@ -303,7 +304,7 @@
                                 'clay-badge-info': recommendation.filter_match === 'chain_popular',
                                 'clay-badge-secondary': recommendation.filter_match === 'fallback'
                             }">
-                                <span x-text="recommendation.filter_match === 'exact' ? 'Match Sempurna' :
+                                <span x-text="recommendation.filter_match === 'exact' ? 'Akurat' :
                                     (recommendation.filter_match === 'category_only' ? 'Kategori' :
                                     (recommendation.filter_match === 'chain_only' ? 'Chain' :
                                     (recommendation.filter_match === 'chain_popular' ? 'Chain Populer' : 'Tambahan')))">
@@ -370,7 +371,7 @@
                                 'clay-badge-info': recommendation.filter_match === 'chain_popular',
                                 'clay-badge-secondary': recommendation.filter_match === 'fallback'
                             }">
-                                <span x-text="recommendation.filter_match === 'exact' ? 'Match Sempurna' :
+                                <span x-text="recommendation.filter_match === 'exact' ? 'Akurat' :
                                     (recommendation.filter_match === 'category_only' ? 'Kategori' :
                                     (recommendation.filter_match === 'chain_only' ? 'Chain' :
                                     (recommendation.filter_match === 'chain_popular' ? 'Chain Populer' : 'Tambahan')))">
@@ -430,7 +431,7 @@
                                 'clay-badge-info': recommendation.filter_match === 'chain_popular',
                                 'clay-badge-secondary': recommendation.filter_match === 'fallback'
                             }">
-                                <span x-text="recommendation.filter_match === 'exact' ? 'Match Sempurna' :
+                                <span x-text="recommendation.filter_match === 'exact' ? 'Akurat' :
                                     (recommendation.filter_match === 'category_only' ? 'Kategori' :
                                     (recommendation.filter_match === 'chain_only' ? 'Chain' :
                                     (recommendation.filter_match === 'chain_popular' ? 'Chain Populer' : 'Tambahan')))">

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <!-- Same head section as 404 page -->
-    <title>500 - Server Error | Web3 Recommender</title>
+    <title>500 - Server Error | Crypto Recommender</title>
 </head>
 <body class="min-h-screen flex flex-col">
     <div class="fixed top-0 left-0 w-full h-full overflow-hidden -z-10">
@@ -40,7 +40,7 @@
 
             <div class="mt-8 text-center">
                 <p class="text-gray-600">
-                    &copy; {{ date('Y') }} Web3 Recommender System
+                    &copy; {{ date('Y') }} Crypto Recommender System
                 </p>
             </div>
         </div>

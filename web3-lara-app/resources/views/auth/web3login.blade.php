@@ -5,7 +5,7 @@
     <div class="w-full max-w-md z-10" x-data="web3Login()" x-cloak>
         <!-- Header -->
         <div class="text-center mb-8">
-            <h1 class="text-4xl font-bold text-primary mb-2">Web3 Auth</h1>
+            <h1 class="text-4xl font-bold text-primary mb-2">Wallet Auth</h1>
             <div class="clay-badge clay-badge-success py-1 px-3 inline-block text-sm font-bold">
                 HUBUNGKAN WALLET ANDA
             </div>
@@ -19,7 +19,7 @@
                 </div>
             </div>
 
-            <h2 class="text-2xl font-bold text-center mb-6">Login dengan Web3 Wallet</h2>
+            <h2 class="text-2xl font-bold text-center mb-6">Login dengan Crypto Wallet</h2>
 
             <!-- Not Connected State -->
             <div x-show="!connected" class="space-y-6">

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>401 - Tidak Terotorisasi | Web3 Recommender</title>
+    <title>401 - Tidak Terotorisasi | Crypto Recommender</title>
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -89,7 +89,7 @@
 
             <div class="mt-8 text-center">
                 <p class="text-gray-600">
-                    &copy; {{ date('Y') }} Web3 Recommender System
+                    &copy; {{ date('Y') }} Crypto Recommender System
                 </p>
             </div>
         </div>

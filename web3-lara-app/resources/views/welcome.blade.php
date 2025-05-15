@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>{{ config('app.name', 'Web3 Recommender System') }}</title>
+    <title>{{ config('app.name', 'Crypto Recommender System') }}</title>
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -29,7 +29,7 @@
                     <div class="bg-primary p-2 rounded-lg shadow-lg mr-3">
                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-hop"><path d="M10.82 16.12c1.69.6 3.91.79 5.18.85.55.03 1-.42.97-.97-.06-1.27-.26-3.5-.85-5.18"/><path d="M11.5 6.5c1.64 0 5-.38 6.71-1.07.52-.2.55-.82.12-1.17A10 10 0 0 0 4.26 18.33c.35.43.96.4 1.17-.12.69-1.71 1.07-5.07 1.07-6.71 1.34.45 3.1.9 4.88.62a.88.88 0 0 0 .73-.74c.3-2.14-.15-3.5-.61-4.88"/><path d="M15.62 16.95c.2.85.62 2.76.5 4.28a.77.77 0 0 1-.9.7 16.64 16.64 0 0 1-4.08-1.36"/><path d="M16.13 21.05c1.65.63 3.68.84 4.87.91a.9.9 0 0 0 .96-.96 17.68 17.68 0 0 0-.9-4.87"/><path d="M16.94 15.62c.86.2 2.77.62 4.29.5a.77.77 0 0 0 .7-.9 16.64 16.64 0 0 0-1.36-4.08"/><path d="M17.99 5.52a20.82 20.82 0 0 1 3.15 4.5.8.8 0 0 1-.68 1.13c-2.33.2-5.3-.32-8.27-1.57"/><path d="M4.93 4.93 3 3a.7.7 0 0 1 0-1"/><path d="M9.58 12.18c1.24 2.98 1.77 5.95 1.57 8.28a.8.8 0 0 1-1.13.68 20.82 20.82 0 0 1-4.5-3.15"/></svg>
                     </div>
-                    <span class="text-xl font-bold">Web3 Recommender</span>
+                    <span class="text-xl font-bold">Crypto Recommender</span>
                 </div>
                 <div>
                     @auth
@@ -51,7 +51,7 @@
             <div class="clay-card clay-card-lg p-8 sm:p-12 transform transition hover:translate-y-[-5px] mb-12">
                 <h1 class="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight mb-4 text-primary relative">
                     <span class="relative inline-block">
-                        Web3
+                        Crypto
                         <span class="absolute -top-1 right-0 transform translate-x-1/2 -translate-y-1/2 rotate-12 clay-badge clay-badge-warning font-bold">
                             BARU
                         </span>
@@ -67,7 +67,7 @@
 
                 <div class="mt-10">
                     <a href="{{ route('login') }}" class="clay-button clay-button-success px-8 py-4 text-lg font-bold transform transition hover:translate-y-[-5px]">
-                        <i class="fas fa-wallet mr-2"></i> Login dengan Web3 Wallet
+                        <i class="fas fa-wallet mr-2"></i> Login dengan Crypto Wallet
                     </a>
                 </div>
             </div>
@@ -76,7 +76,7 @@
             <div class="clay-card p-8 mb-12">
                 <h2 class="text-3xl font-bold mb-6 inline-block clay-badge clay-badge-primary p-2 text-lg">📋 Deskripsi</h2>
                 <p class="text-lg mb-6">
-                    Sistem ini menggunakan data dari CoinGecko API untuk menyediakan rekomendasi proyek Web3 berdasarkan:
+                    Sistem ini menggunakan data dari CoinGecko API untuk menyediakan rekomendasi proyek Crypto berdasarkan:
                 </p>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
@@ -409,7 +409,7 @@
             <!-- CTA Section -->
             <div class="clay-card clay-card-lg p-8 sm:p-10 text-center mb-12">
                 <h2 class="text-3xl font-bold mb-6">Mulai Sekarang!</h2>
-                <p class="text-xl mb-8">Login dengan Web3 wallet dan dapatkan rekomendasi personal untuk investasi cryptocurrency Anda.</p>
+                <p class="text-xl mb-8">Login dengan Crypto wallet dan dapatkan rekomendasi personal untuk investasi cryptocurrency Anda.</p>
                 <a href="{{ route('login') }}" class="clay-button clay-button-secondary px-8 py-4 text-xl font-bold transform transition hover:translate-y-[-5px]">
                     <i class="fas fa-wallet mr-2"></i> Hubungkan Wallet
                 </a>
@@ -423,7 +423,7 @@
                 <p class="mt-4 font-medium">
                     Pengembangan Sistem Rekomendasi Berbasis Popularitas dan Tren Investasi<br>Cryptocurrency dengan Metode: Feature-Enhanced CF dan Neural CF
                 </p>
-                <p class="mt-3 text-sm">&copy; 2025 Web3 Recommender System</p>
+                <p class="mt-3 text-sm">&copy; 2025 Crypto Recommender System</p>
             </div>
         </div>
     </div>
