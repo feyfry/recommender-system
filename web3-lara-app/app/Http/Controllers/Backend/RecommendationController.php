@@ -74,34 +74,93 @@ class RecommendationController extends Controller
 
     /**
      * Mendapatkan rekomendasi personal untuk pengguna
+     * DIOPTIMALKAN: Menambahkan parameter filtering (kategori, chain, strict_filter, dll)
      */
-    public function personal()
+    public function personal(Request $request)
     {
         $user   = Auth::user();
         $userId = $user->user_id;
 
-        // PERBAIKAN: Menggunakan cache key yang konsisten
-        $hybridRecommendations = Cache::remember("rec_personal_hybrid_{$userId}_10", 15, function () use ($userId) {
-            $recommendations = $this->getPersonalRecommendations($userId, 'hybrid', 10);
-            return $this->normalizeRecommendationData($recommendations);
-        });
+        // Ambil parameter filter
+        $modelType = $request->input('model_type', 'hybrid');
+        $category = $request->input('category');
+        $chain = $request->input('chain');
+        $limit = $request->input('limit', 10);
+        $strictFilter = $request->boolean('strict_filter', false);
 
-        $fecfRecommendations = Cache::remember("rec_personal_fecf_{$userId}_10", 15, function () use ($userId) {
-            $recommendations = $this->getPersonalRecommendations($userId, 'fecf', 10);
-            return $this->normalizeRecommendationData($recommendations);
-        });
+        // Ambil format jika ada (untuk AJAX requests)
+        $format = $request->input('format');
 
-        $ncfRecommendations = Cache::remember("rec_personal_ncf_{$userId}_10", 15, function () use ($userId) {
-            $recommendations = $this->getPersonalRecommendations($userId, 'ncf', 10);
-            return $this->normalizeRecommendationData($recommendations);
-        });
-
+        // DIOPTIMALKAN: Deteksi cold-start
         $interactionCount = Cache::remember("user_interactions_count_{$userId}", 30, function () use ($userId) {
             return Interaction::where('user_id', $userId)->count();
         });
 
         $isColdStart = $interactionCount < 5;
 
+        // Dapatkan daftar kategori dan chain untuk dropdown
+        $categories = Cache::remember('all_categories', 60, function () { // 1 jam
+            return $this->getCategories();
+        });
+
+        $chains = Cache::remember('all_chains', 60, function () { // 1 jam
+            return $this->getChains();
+        });
+
+        // PERBAIKAN: Buat cache key yang menyertakan semua parameter filter
+        $hybridCacheKey = "rec_personal_hybrid_{$userId}_" . md5(json_encode([
+            'limit' => $limit,
+            'category' => $category,
+            'chain' => $chain,
+            'strict' => $strictFilter
+        ]));
+
+        $fecfCacheKey = "rec_personal_fecf_{$userId}_" . md5(json_encode([
+            'limit' => $limit,
+            'category' => $category,
+            'chain' => $chain,
+            'strict' => $strictFilter
+        ]));
+
+        $ncfCacheKey = "rec_personal_ncf_{$userId}_" . md5(json_encode([
+            'limit' => $limit,
+            'category' => $category,
+            'chain' => $chain,
+            'strict' => $strictFilter
+        ]));
+
+        // Ambil rekomendasi untuk semua model dengan parameter filter yang sama
+        $hybridRecommendations = Cache::remember($hybridCacheKey, 15, function () use ($userId, $limit, $category, $chain, $strictFilter) {
+            $recommendations = $this->getPersonalRecommendations($userId, 'hybrid', $limit, $category, $chain, $strictFilter);
+            return $this->normalizeRecommendationData($recommendations);
+        });
+
+        $fecfRecommendations = Cache::remember($fecfCacheKey, 15, function () use ($userId, $limit, $category, $chain, $strictFilter) {
+            $recommendations = $this->getPersonalRecommendations($userId, 'fecf', $limit, $category, $chain, $strictFilter);
+            return $this->normalizeRecommendationData($recommendations);
+        });
+
+        $ncfRecommendations = Cache::remember($ncfCacheKey, 15, function () use ($userId, $limit, $category, $chain, $strictFilter) {
+            $recommendations = $this->getPersonalRecommendations($userId, 'ncf', $limit, $category, $chain, $strictFilter);
+            return $this->normalizeRecommendationData($recommendations);
+        });
+
+        // Jika format JSON diminta (untuk AJAX requests), kembalikan data sebagai JSON
+        if ($format === 'json') {
+            $modelRequested = $request->input('model', 'hybrid');
+
+            switch ($modelRequested) {
+                case 'fecf':
+                    return response()->json($fecfRecommendations);
+                case 'ncf':
+                    return response()->json($ncfRecommendations);
+                case 'hybrid':
+                default:
+                    return response()->json($hybridRecommendations);
+            }
+        }
+
+        // Untuk request normal (HTML), tampilkan view
         return view('backend.recommendation.personal', [
             'hybridRecommendations' => $hybridRecommendations,
             'fecfRecommendations'   => $fecfRecommendations,
@@ -109,6 +168,11 @@ class RecommendationController extends Controller
             'interactions'          => $this->getUserInteractions($userId, 10),
             'user'                  => $user,
             'isColdStart'           => $isColdStart,
+            'categories'            => $categories,
+            'chains'                => $chains,
+            'selectedCategory'      => $category,
+            'selectedChain'         => $chain,
+            'strictFilter'          => $strictFilter,
         ]);
     }
 
@@ -127,6 +191,56 @@ class RecommendationController extends Controller
                 ->limit($limit)
                 ->get();
         });
+    }
+
+    /**
+     * Redirect kategori ke halaman rekomendasi personal dengan filter kategori
+     */
+    public function categories(Request $request)
+    {
+        // Ambil parameter kategori
+        $category = $request->input('category', 'defi');
+
+        // Untuk request AJAX atau jika hanya meminta daftar kategori
+        if ($request->input('format') === 'json' || $request->input('loadCategories') === 'true') {
+            $categories = Cache::remember('all_categories', 60, function () { // 1 jam
+                return $this->getCategories();
+            });
+
+            return response()->json([
+                'categories' => $categories
+            ]);
+        }
+
+        // Redirect ke personal dengan filter kategori
+        return redirect()->route('panel.recommendations.personal', [
+            'category' => $category
+        ]);
+    }
+
+    /**
+     * Redirect chain ke halaman rekomendasi personal dengan filter chain
+     */
+    public function chains(Request $request)
+    {
+        // Ambil parameter chain
+        $chain = $request->input('chain', 'ethereum');
+
+        // Untuk request AJAX atau jika hanya meminta daftar chain
+        if ($request->input('format') === 'json' || $request->input('part') === 'chains_list') {
+            $chains = Cache::remember('all_chains', 60, function () { // 1 jam
+                return $this->getChains();
+            });
+
+            return response()->json([
+                'chains' => $chains
+            ]);
+        }
+
+        // Redirect ke personal dengan filter chain
+        return redirect()->route('panel.recommendations.personal', [
+            'chain' => $chain
+        ]);
     }
 
     /**
@@ -178,62 +292,6 @@ class RecommendationController extends Controller
 
         return view('backend.recommendation.popular', [
             'popularProjects' => $popularProjects,
-        ]);
-    }
-
-    /**
-     * Menampilkan halaman kategori
-     */
-    public function categories(Request $request)
-    {
-        $user     = Auth::user();
-        $userId   = $user->user_id;
-        $category = $request->input('category', 'defi');
-
-        // DIOPTIMALKAN: Cache rekomendasi kategori
-        $cacheKey                = "rec_category_{$userId}_{$category}_16";
-        $categoryRecommendations = Cache::remember($cacheKey, 15, function () use ($userId, $category) {
-            $recommendations = $this->getCategoryRecommendations($userId, $category, 16);
-            return $this->normalizeRecommendationData($recommendations);
-        });
-
-                                                                          // DIOPTIMALKAN: Cache untuk daftar kategori
-        $categories = Cache::remember('all_categories', 60, function () { // 1 jam
-            return $this->getCategories();
-        });
-
-        return view('backend.recommendation.categories', [
-            'categoryRecommendations' => $categoryRecommendations,
-            'selectedCategory'        => $category,
-            'categories'              => $categories,
-        ]);
-    }
-
-    /**
-     * Menampilkan halaman blockchain
-     */
-    public function chains(Request $request)
-    {
-        $user   = Auth::user();
-        $userId = $user->user_id;
-        $chain  = $request->input('chain', 'ethereum');
-
-        // DIOPTIMALKAN: Cache rekomendasi blockchain
-        $cacheKey             = "rec_chain_{$userId}_{$chain}_16";
-        $chainRecommendations = Cache::remember($cacheKey, 15, function () use ($userId, $chain) {
-            $recommendations = $this->getChainRecommendations($userId, $chain, 16);
-            return $this->normalizeRecommendationData($recommendations);
-        });
-
-                                                                  // DIOPTIMALKAN: Cache untuk daftar blockchain
-        $chains = Cache::remember('all_chains', 60, function () { // 1 jam
-            return $this->getChains();
-        });
-
-        return view('backend.recommendation.chains', [
-            'chainRecommendations' => $chainRecommendations,
-            'selectedChain'        => $chain,
-            'chains'               => $chains,
         ]);
     }
 
@@ -568,6 +626,14 @@ class RecommendationController extends Controller
                 $priceChangePercentage7d = $data->price_change_7d;
             }
 
+            // Extract filter_match if available (new field)
+            $filterMatch = null;
+            if (isset($data['filter_match'])) {
+                $filterMatch = $data['filter_match'];
+            } elseif (isset($data->filter_match)) {
+                $filterMatch = $data->filter_match;
+            }
+
             // Pastikan semua property yang diperlukan ada
             $normalized[] = [
                 'id'                                     => $id,
@@ -593,6 +659,8 @@ class RecommendationController extends Controller
                         ($data->similarity_score ??
                             $data['score'] ??
                             ($data->score ?? 0.5)))),
+                // PERBAIKAN: Tambahkan field filter_match
+                'filter_match'                          => $filterMatch,
             ];
         }
 
@@ -600,12 +668,39 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Mendapatkan rekomendasi personal - DIOPTIMALKAN
+     * Mendapatkan rekomendasi personal - DIOPTIMALKAN untuk mendukung parameter filter
      */
-    private function getPersonalRecommendations($userId, $modelType = 'hybrid', $limit = 10)
+    private function getPersonalRecommendations($userId, $modelType = 'hybrid', $limit = 10, $category = null, $chain = null, $strictFilter = false)
     {
-        // STANDARDIZED: Pendekatan cache yang konsisten
-        $cacheKey   = "personal_recommendations_{$userId}_{$modelType}_{$limit}";
+        // TAMBAHAN: Parameter filter yang ada di API endpoint "/recommend/projects"
+        $requestParams = [
+            'user_id'             => $userId,
+            'model_type'          => $modelType,
+            'num_recommendations' => $limit,
+            'exclude_known'       => true,
+            'risk_tolerance'      => Auth::user()->risk_tolerance ?? 'medium',
+            'investment_style'    => Auth::user()->investment_style ?? 'balanced',
+        ];
+
+        // Tambahkan parameter filter jika ada
+        if (!empty($category)) {
+            $requestParams['category'] = $category;
+        }
+
+        if (!empty($chain)) {
+            $requestParams['chain'] = $chain;
+        }
+
+        // Tambahkan parameter strict_filter
+        if ($strictFilter) {
+            $requestParams['strict_filter'] = true;
+        }
+
+        // STANDARDIZED: Buat cache key berdasarkan semua parameter
+        $cacheParams = $requestParams;
+        unset($cacheParams['user_id']); // Tidak perlu dalam cache key karena sudah digunakan dalam prefiks
+        $cacheKey = "personal_recommendations_{$userId}_{$modelType}_" . md5(json_encode($cacheParams));
+
         $cachedData = Cache::get($cacheKey);
 
         if ($cachedData) {
@@ -619,16 +714,9 @@ class RecommendationController extends Controller
             });
 
             $isColdStart = $interactionCount < 5;
-            $timeout     = $isColdStart ? 5 : 2; // 5 detik untuk cold-start, 2 detik untuk regular
+            $timeout     = $isColdStart ? 5 : 3; // 5 detik untuk cold-start, 3 detik untuk regular
 
-            $response = Http::timeout($timeout)->post("{$this->apiUrl}/recommend/projects", [
-                'user_id'             => $userId,
-                'model_type'          => $modelType,
-                'num_recommendations' => $limit,
-                'exclude_known'       => true,
-                'risk_tolerance'      => Auth::user()->risk_tolerance ?? 'medium',
-                'investment_style'    => Auth::user()->investment_style ?? 'balanced',
-            ]);
+            $response = Http::timeout($timeout)->post("{$this->apiUrl}/recommend/projects", $requestParams);
 
             // Validasi respons
             if ($response->successful() && isset($response['recommendations']) && ! empty($response['recommendations'])) {
@@ -897,140 +985,100 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Mendapatkan rekomendasi berdasarkan kategori - DIOPTIMALKAN
-     */
-    private function getCategoryRecommendations($userId, $category, $limit = 16)
-    {
-        $cacheKey   = "category_recommendations_{$userId}_{$category}_{$limit}";
-        $cachedData = Cache::get($cacheKey);
-
-        if ($cachedData) {
-            return $cachedData;
-        }
-
-        try {
-            $response = Http::timeout(2)->post("{$this->apiUrl}/recommend/projects", [
-                'user_id'             => $userId,
-                'model_type'          => 'hybrid',
-                'num_recommendations' => $limit,
-                'exclude_known'       => true,
-                'category'            => $category,
-                'risk_tolerance'      => Auth::user()->risk_tolerance ?? 'medium',
-                'investment_style'    => Auth::user()->investment_style ?? 'balanced',
-            ])->json();
-
-            if (isset($response['recommendations']) && ! empty($response['recommendations'])) {
-                Cache::put($cacheKey, $response['recommendations'], 30);
-                return $response['recommendations'];
-            }
-
-            // Fallback ke database local
-            $categoryProjects = Project::where('primary_category', $category)
-                ->orderBy('popularity_score', 'desc')
-                ->limit($limit)
-                ->get();
-
-            Cache::put($cacheKey, $categoryProjects, 30);
-            return $categoryProjects;
-        } catch (\Exception $e) {
-            Log::error("Gagal mendapatkan rekomendasi kategori: " . $e->getMessage());
-
-            return Project::where('primary_category', $category)
-                ->orderBy('popularity_score', 'desc')
-                ->limit($limit)
-                ->get();
-        }
-    }
-
-    /**
-     * Mendapatkan rekomendasi berdasarkan blockchain - DIOPTIMALKAN
-     */
-    private function getChainRecommendations($userId, $chain, $limit = 16)
-    {
-        $cacheKey   = "chain_recommendations_{$userId}_{$chain}_{$limit}";
-        $cachedData = Cache::get($cacheKey);
-
-        if ($cachedData) {
-            return $cachedData;
-        }
-
-        try {
-            $response = Http::timeout(2)->post("{$this->apiUrl}/recommend/projects", [
-                'user_id'             => $userId,
-                'model_type'          => 'hybrid',
-                'num_recommendations' => $limit,
-                'exclude_known'       => true,
-                'chain'               => $chain,
-                'risk_tolerance'      => Auth::user()->risk_tolerance ?? 'medium',
-                'investment_style'    => Auth::user()->investment_style ?? 'balanced',
-            ])->json();
-
-            if (isset($response['recommendations']) && ! empty($response['recommendations'])) {
-                Cache::put($cacheKey, $response['recommendations'], 30);
-                return $response['recommendations'];
-            }
-
-            // Fallback ke database local
-            $chainProjects = Project::where('chain', $chain)
-                ->orderBy('popularity_score', 'desc')
-                ->limit($limit)
-                ->get();
-
-            Cache::put($cacheKey, $chainProjects, 30);
-            return $chainProjects;
-        } catch (\Exception $e) {
-            Log::error("Gagal mendapatkan rekomendasi blockchain: " . $e->getMessage());
-
-            return Project::where('chain', $chain)
-                ->orderBy('popularity_score', 'desc')
-                ->limit($limit)
-                ->get();
-        }
-    }
-
-    /**
-     * Mendapatkan daftar kategori - DIOPTIMALKAN
+     * PERBAIKAN: Mendapatkan daftar kategori yang lebih lengkap dan dibersihkan
      */
     private function getCategories()
     {
-        $cacheKey   = "categories_list";
-        $cachedData = Cache::get($cacheKey);
+        try {
+            // Coba dapatkan kategori dari API terlebih dahulu
+            $response = Http::timeout(2)->get("{$this->apiUrl}/categories")->json();
 
-        if ($cachedData) {
-            return $cachedData;
+            if (!empty($response) && is_array($response)) {
+                // Jika API mengembalikan categories, gunakan data tersebut
+                return $response;
+            }
+
+            // Jika API tidak mengembalikan data yang valid, ambil dari database lokal
+            $categories = Project::select('primary_category')
+                ->distinct()
+                ->whereNotNull('primary_category')
+                ->where('primary_category', '!=', '')
+                ->get()
+                ->pluck('primary_category')
+                ->toArray();
+
+            $cleanCategories = [];
+
+            foreach ($categories as $category) {
+                // Coba parse jika category dalam format JSON array
+                if (str_starts_with($category, '[') && str_ends_with($category, ']')) {
+                    try {
+                        $parsed = json_decode($category, true);
+                        if (is_array($parsed) && !empty($parsed)) {
+                            foreach ($parsed as $cat) {
+                                if (!empty($cat) && strtolower($cat) !== 'unknown') {
+                                    $cleanCategories[] = $cat;
+                                }
+                            }
+                        }
+                    } catch (\Exception $e) {
+                        // Jika parsing gagal, gunakan nilai asli
+                        if (!empty($category) && strtolower($category) !== 'unknown') {
+                            $cleanCategories[] = $category;
+                        }
+                    }
+                } else {
+                    // Jika bukan format JSON, gunakan nilai asli jika valid
+                    if (!empty($category) && strtolower($category) !== 'unknown') {
+                        $cleanCategories[] = $category;
+                    }
+                }
+            }
+
+            // Kembalikan kategori unik dan urut abjad
+            return collect($cleanCategories)
+                ->unique()
+                ->sort()
+                ->values()
+                ->toArray();
+
+        } catch (\Exception $e) {
+            Log::error("Gagal mendapatkan daftar kategori: " . $e->getMessage());
+
+            // Fallback ke kategori default jika terjadi error
+            return ['defi', 'nft', 'gaming', 'layer1', 'layer2', 'stablecoin', 'exchange'];
         }
-
-        $categories = Project::select('primary_category')
-            ->distinct()
-            ->whereNotNull('primary_category')
-            ->orderBy('primary_category')
-            ->pluck('primary_category')
-            ->toArray();
-
-        Cache::put($cacheKey, $categories, 60 * 1); // 1 jam
-        return $categories;
     }
 
     /**
-     * Mendapatkan daftar blockchain - DIOPTIMALKAN
+     * PERBAIKAN: Mendapatkan daftar chains yang lebih lengkap
      */
     private function getChains()
     {
-        $cacheKey   = "chains_list";
-        $cachedData = Cache::get($cacheKey);
+        try {
+            // Coba dapatkan chains dari API terlebih dahulu
+            $response = Http::timeout(2)->get("{$this->apiUrl}/chains")->json();
 
-        if ($cachedData) {
-            return $cachedData;
+            if (!empty($response) && is_array($response)) {
+                // Jika API mengembalikan chains, gunakan data tersebut
+                return $response;
+            }
+
+            // Jika API tidak mengembalikan data yang valid, ambil dari database lokal
+            return Project::select('chain')
+                ->distinct()
+                ->whereNotNull('chain')
+                ->where('chain', '!=', '')
+                ->orderBy('chain')
+                ->pluck('chain')
+                ->filter()
+                ->values()
+                ->toArray();
+        } catch (\Exception $e) {
+            Log::error("Gagal mendapatkan daftar chains: " . $e->getMessage());
+
+            // Fallback ke chains default jika terjadi error
+            return ['ethereum', 'binance-smart-chain', 'polygon', 'solana', 'avalanche'];
         }
-
-        $chains = Project::select('chain')
-            ->distinct()
-            ->whereNotNull('chain')
-            ->orderBy('chain')
-            ->pluck('chain')
-            ->toArray();
-
-        Cache::put($cacheKey, $chains, 60 * 1); // 1 jam
-        return $chains;
     }
 }

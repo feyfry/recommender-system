@@ -1,14 +1,14 @@
 <?php
 
-use Psr\SimpleCache\CacheException;
-use Illuminate\Foundation\Application;
-use Illuminate\Console\Scheduling\Schedule;
+use App\Http\Middleware\CacheHeadersMiddleware;
 use App\Http\Middleware\CheckRoleMiddleware;
 use App\Http\Middleware\HandleCorsMiddleware;
-use App\Http\Middleware\CacheHeadersMiddleware;
-use Illuminate\Http\Middleware\SetCacheHeaders;
+use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Middleware\SetCacheHeaders;
+use Psr\SimpleCache\CacheException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -37,7 +37,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withCommands([
         App\Console\Commands\ImportRecommendationData::class,
         App\Console\Commands\SyncRecommendationData::class,
-        App\Console\Commands\ClearApiCache::class
+        App\Console\Commands\ClearApiCache::class,
     ])
     ->withSchedule(function (Schedule $schedule) {
         $schedule->command('recommend:sync --projects')

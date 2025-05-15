@@ -160,12 +160,6 @@
                                     <a href="{{ route('panel.recommendations.popular') }}" class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('panel.recommendations.popular') ? 'font-bold text-primary' : '' }}">
                                         Popular
                                     </a>
-                                    <a href="{{ route('panel.recommendations.categories') }}" class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('panel.recommendations.categories') ? 'font-bold text-primary' : '' }}">
-                                        Kategori
-                                    </a>
-                                    <a href="{{ route('panel.recommendations.chains') }}" class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('panel.recommendations.chains') ? 'font-bold text-primary' : '' }}">
-                                        Blockchain
-                                    </a>
                                 </div>
                             </div>
 

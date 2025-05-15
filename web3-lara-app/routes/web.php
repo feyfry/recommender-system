@@ -6,7 +6,6 @@ use App\Http\Controllers\Auth\Web3AuthController;
 use App\Http\Controllers\Backend\ProfileController;
 use App\Http\Controllers\Backend\DashboardController;
 use App\Http\Controllers\Backend\PortfolioController;
-use SebastianBergmann\CodeCoverage\Report\Html\Dashboard;
 use App\Http\Controllers\Backend\RecommendationController;
 use App\Http\Controllers\Backend\TechnicalAnalysisController;
 
@@ -42,8 +41,6 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         Route::get('/personal', [RecommendationController::class, 'personal'])->name('panel.recommendations.personal');
         Route::get('/trending', [RecommendationController::class, 'trending'])->name('panel.recommendations.trending');
         Route::get('/popular', [RecommendationController::class, 'popular'])->name('panel.recommendations.popular');
-        Route::get('/categories', [RecommendationController::class, 'categories'])->name('panel.recommendations.categories');
-        Route::get('/chains', [RecommendationController::class, 'chains'])->name('panel.recommendations.chains');
         Route::get('/project/{id}', [RecommendationController::class, 'projectDetail'])->name('panel.recommendations.project');
         Route::post('/favorites/add', [RecommendationController::class, 'addToFavorites'])->name('panel.recommendations.add-favorite');
     });

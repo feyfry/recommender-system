@@ -448,7 +448,7 @@
 
                     @if(!empty($project->platforms))
                     <div class="mt-6">
-                        <h4 class="font-bold mb-2">Platform:</h4>
+                        <h4 class="font-bold mb-2">Chain:</h4>
                         <div class="flex flex-wrap gap-2">
                             @foreach($project->platforms as $platform => $address)
                                 <span class="clay-badge clay-badge-secondary">{{ $platform }}</span>

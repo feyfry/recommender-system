@@ -25,6 +25,151 @@
     </div>
     @endif
 
+    <!-- Filter Cards -->
+    <div class="clay-card p-6 mb-8" x-data="{
+        showFilters: false,
+        category: '{{ $selectedCategory ?? '' }}',
+        chain: '{{ $selectedChain ?? '' }}',
+        strictFilter: {{ $strictFilter ? 'true' : 'false' }},
+        categories: [],
+        chains: [],
+        loadingFilters: true
+    }">
+        <div class="flex justify-between items-center mb-4">
+            <button @click="showFilters = !showFilters" class="clay-button clay-button-secondary">
+                <i class="fas fa-filter mr-2"></i>
+                <span x-text="showFilters ? 'Sembunyikan Filter' : 'Tampilkan Filter'"></span>
+            </button>
+
+            <div class="flex items-center" x-show="category || chain">
+                <div class="mr-4">
+                    <span class="font-medium">Filter aktif:</span>
+                    <template x-if="category">
+                        <span class="clay-badge clay-badge-primary ml-2" x-text="category"></span>
+                    </template>
+                    <template x-if="chain">
+                        <span class="clay-badge clay-badge-secondary ml-2" x-text="chain"></span>
+                    </template>
+                </div>
+                <button @click="window.location.href='{{ route('panel.recommendations.personal') }}'" class="clay-button clay-button-danger py-1 px-3 text-sm">
+                    <i class="fas fa-times mr-1"></i> Reset Filter
+                </button>
+            </div>
+        </div>
+
+        <div x-show="showFilters" x-transition class="mt-4">
+            <div x-init="
+                // Inisialisasi dengan data yang sudah diload
+                @if(!empty($categories))
+                    categories = {{ json_encode($categories) }};
+                    loadingFilters = false;
+                @else
+                    fetch('{{ route('panel.recommendations.categories') }}?format=json&loadCategories=true')
+                        .then(response => response.json())
+                        .then(data => {
+                            categories = data.categories || [];
+                            loadingFilters = false;
+                        })
+                        .catch(error => {
+                            console.error('Error loading categories:', error);
+                            categories = ['defi', 'nft', 'gaming', 'layer1', 'layer2'];
+                            loadingFilters = false;
+                        });
+                @endif
+
+                @if(!empty($chains))
+                    chains = {{ json_encode($chains) }};
+                    loadingFilters = false;
+                @else
+                    fetch('{{ route('panel.recommendations.chains') }}?format=json&part=chains_list')
+                        .then(response => response.json())
+                        .then(data => {
+                            chains = data.chains || [];
+                            loadingFilters = false;
+                        })
+                        .catch(error => {
+                            console.error('Error loading chains:', error);
+                            chains = ['ethereum', 'binance-smart-chain', 'polygon', 'solana', 'avalanche'];
+                            loadingFilters = false;
+                        });
+                @endif
+            ">
+                <form action="{{ route('panel.recommendations.personal') }}" method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <!-- Category Filter -->
+                    <div class="clay-card bg-primary/5 p-4">
+                        <label for="category" class="block font-medium text-gray-700 mb-2">Kategori</label>
+                        <div x-show="loadingFilters" class="py-2">
+                            <div class="inline-block animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-primary"></div>
+                            <span class="ml-2 text-sm text-gray-500">Memuat...</span>
+                        </div>
+                        <select
+                            x-show="!loadingFilters"
+                            name="category"
+                            id="category"
+                            x-model="category"
+                            class="clay-select w-full">
+                            <option value="">Semua Kategori</option>
+                            <template x-for="cat in categories" :key="cat">
+                                <option :value="cat" :selected="cat === category" x-text="cat"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <!-- Chain Filter -->
+                    <div class="clay-card bg-secondary/5 p-4">
+                        <label for="chain" class="block font-medium text-gray-700 mb-2">Blockchain</label>
+                        <div x-show="loadingFilters" class="py-2">
+                            <div class="inline-block animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-secondary"></div>
+                            <span class="ml-2 text-sm text-gray-500">Memuat...</span>
+                        </div>
+                        <select
+                            x-show="!loadingFilters"
+                            name="chain"
+                            id="chain"
+                            x-model="chain"
+                            class="clay-select w-full">
+                            <option value="">Semua Blockchain</option>
+                            <template x-for="ch in chains" :key="ch">
+                                <option :value="ch" :selected="ch === chain" x-text="ch"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <!-- Limit Filter -->
+                    <div class="clay-card bg-info/5 p-4">
+                        <label for="limit" class="block font-medium text-gray-700 mb-2">Jumlah Rekomendasi</label>
+                        <select name="limit" id="limit" class="clay-select w-full">
+                            <option value="10" {{ request()->input('limit') == 10 ? 'selected' : '' }}>10 Rekomendasi</option>
+                            <option value="20" {{ request()->input('limit') == 20 ? 'selected' : '' }}>20 Rekomendasi</option>
+                            <option value="30" {{ request()->input('limit') == 30 ? 'selected' : '' }}>30 Rekomendasi</option>
+                        </select>
+                    </div>
+
+                    <!-- Advanced Options -->
+                    <div class="clay-card bg-warning/5 p-4">
+                        <div class="flex items-center mb-4">
+                            <input
+                                type="checkbox"
+                                name="strict_filter"
+                                id="strict_filter"
+                                value="1"
+                                x-model="strictFilter"
+                                class="mr-2">
+                            <label for="strict_filter" class="font-medium">Filter Ketat</label>
+                        </div>
+                        <p class="text-xs text-gray-600">
+                            Opsi ini hanya menampilkan proyek yang benar-benar cocok dengan filter yang dipilih (tanpa fallback).
+                        </p>
+
+                        <button type="submit" class="clay-button clay-button-primary w-full mt-4">
+                            <i class="fas fa-search mr-2"></i> Terapkan Filter
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- Model Tabs dengan Lazy Loading -->
     <div class="clay-card p-6 mb-8" x-data="{
         activeTab: 'hybrid',
@@ -71,7 +216,7 @@
                 hybridRecommendations = {{ json_encode($hybridRecommendations) }};
                 loading.hybrid = false;
             @else
-                fetch('{{ route('panel.recommendations.personal') }}?model=hybrid&format=json')
+                fetch('{{ route('panel.recommendations.personal') }}?model=hybrid&format=json&category={{ $selectedCategory ?? '' }}&chain={{ $selectedChain ?? '' }}&strict_filter={{ $strictFilter ? '1' : '0' }}')
                     .then(response => response.json())
                     .then(data => {
                         hybridRecommendations = data;
@@ -89,7 +234,7 @@
             @else
                 document.querySelector('[x-data] button:nth-child(2)').addEventListener('click', function() {
                     if (fecfRecommendations.length === 0 && loading.fecf) {
-                        fetch('{{ route('panel.recommendations.personal') }}?model=fecf&format=json')
+                        fetch('{{ route('panel.recommendations.personal') }}?model=fecf&format=json&category={{ $selectedCategory ?? '' }}&chain={{ $selectedChain ?? '' }}&strict_filter={{ $strictFilter ? '1' : '0' }}')
                             .then(response => response.json())
                             .then(data => {
                                 fecfRecommendations = data;
@@ -109,7 +254,7 @@
             @else
                 document.querySelector('[x-data] button:nth-child(3)').addEventListener('click', function() {
                     if (ncfRecommendations.length === 0 && loading.ncf) {
-                        fetch('{{ route('panel.recommendations.personal') }}?model=ncf&format=json')
+                        fetch('{{ route('panel.recommendations.personal') }}?model=ncf&format=json&category={{ $selectedCategory ?? '' }}&chain={{ $selectedChain ?? '' }}&strict_filter={{ $strictFilter ? '1' : '0' }}')
                             .then(response => response.json())
                             .then(data => {
                                 ncfRecommendations = data;
@@ -155,13 +300,40 @@
                                     ((recommendation.price_change_24h || 0).toFixed(8)) + '$'">
                         </span>
                     </div>
-                    <div class="clay-badge clay-badge-info mb-3" x-text="recommendation.primary_category || recommendation.category || 'Umum'"></div>
+                    <div class="flex flex-wrap gap-2 mb-3">
+                        <div class="clay-badge clay-badge-info" x-text="recommendation.primary_category || recommendation.category || 'Umum'"></div>
+                        <div class="clay-badge clay-badge-secondary" x-text="recommendation.chain || 'Multiple'"></div>
+                        <!-- Filter match badge -->
+                        <template x-if="recommendation.filter_match">
+                            <div class="clay-badge" :class="{
+                                'clay-badge-success': recommendation.filter_match === 'exact',
+                                'clay-badge-warning': recommendation.filter_match === 'category_only' || recommendation.filter_match === 'chain_only',
+                                'clay-badge-info': recommendation.filter_match === 'chain_popular',
+                                'clay-badge-secondary': recommendation.filter_match === 'fallback'
+                            }">
+                                <span x-text="recommendation.filter_match === 'exact' ? 'Match Sempurna' :
+                                    (recommendation.filter_match === 'category_only' ? 'Kategori' :
+                                    (recommendation.filter_match === 'chain_only' ? 'Chain' :
+                                    (recommendation.filter_match === 'chain_popular' ? 'Chain Populer' : 'Tambahan')))">
+                                </span>
+                            </div>
+                        </template>
+                    </div>
                     <div class="flex justify-between items-center">
                         <div class="text-xs font-medium">Score: <span class="text-primary"
                                 x-text="(recommendation.recommendation_score || 0).toFixed(2)"></span></div>
-                        <a :href="'/panel/recommendations/project/' + recommendation.id" class="clay-badge clay-badge-secondary px-2 py-1 text-xs">
-                            <i class="fas fa-info-circle mr-1"></i> Detail
-                        </a>
+                        <div class="flex space-x-2">
+                            <a :href="'/panel/recommendations/project/' + recommendation.id" class="clay-badge clay-badge-secondary px-2 py-1 text-xs">
+                                <i class="fas fa-info-circle mr-1"></i> Detail
+                            </a>
+                            <form method="POST" action="{{ route('panel.recommendations.add-favorite') }}" class="inline">
+                                @csrf
+                                <input type="hidden" name="project_id" :value="recommendation.id">
+                                <button type="submit" class="clay-badge clay-badge-primary px-2 py-1 text-xs">
+                                    <i class="fas fa-heart mr-1"></i> Favorit
+                                </button>
+                            </form>
+                        </div>
                     </div>
                 </div>
             </template>
@@ -195,13 +367,40 @@
                                     ((recommendation.price_change_24h || 0).toFixed(8)) + '$'">
                         </span>
                     </div>
-                    <div class="clay-badge clay-badge-info mb-3" x-text="recommendation.primary_category || recommendation.category || 'Umum'"></div>
+                    <div class="flex flex-wrap gap-2 mb-3">
+                        <div class="clay-badge clay-badge-info" x-text="recommendation.primary_category || recommendation.category || 'Umum'"></div>
+                        <div class="clay-badge clay-badge-secondary" x-text="recommendation.chain || 'Multiple'"></div>
+                        <!-- Filter match badge -->
+                        <template x-if="recommendation.filter_match">
+                            <div class="clay-badge" :class="{
+                                'clay-badge-success': recommendation.filter_match === 'exact',
+                                'clay-badge-warning': recommendation.filter_match === 'category_only' || recommendation.filter_match === 'chain_only',
+                                'clay-badge-info': recommendation.filter_match === 'chain_popular',
+                                'clay-badge-secondary': recommendation.filter_match === 'fallback'
+                            }">
+                                <span x-text="recommendation.filter_match === 'exact' ? 'Match Sempurna' :
+                                    (recommendation.filter_match === 'category_only' ? 'Kategori' :
+                                    (recommendation.filter_match === 'chain_only' ? 'Chain' :
+                                    (recommendation.filter_match === 'chain_popular' ? 'Chain Populer' : 'Tambahan')))">
+                                </span>
+                            </div>
+                        </template>
+                    </div>
                     <div class="flex justify-between items-center">
                         <div class="text-xs font-medium">Score: <span class="text-primary"
                                 x-text="(recommendation.recommendation_score || 0).toFixed(2)"></span></div>
-                        <a :href="'/panel/recommendations/project/' + recommendation.id" class="clay-badge clay-badge-secondary px-2 py-1 text-xs">
-                            <i class="fas fa-info-circle mr-1"></i> Detail
-                        </a>
+                        <div class="flex space-x-2">
+                            <a :href="'/panel/recommendations/project/' + recommendation.id" class="clay-badge clay-badge-secondary px-2 py-1 text-xs">
+                                <i class="fas fa-info-circle mr-1"></i> Detail
+                            </a>
+                            <form method="POST" action="{{ route('panel.recommendations.add-favorite') }}" class="inline">
+                                @csrf
+                                <input type="hidden" name="project_id" :value="recommendation.id">
+                                <button type="submit" class="clay-badge clay-badge-primary px-2 py-1 text-xs">
+                                    <i class="fas fa-heart mr-1"></i> Favorit
+                                </button>
+                            </form>
+                        </div>
                     </div>
                 </div>
             </template>
@@ -228,13 +427,40 @@
                                     ((recommendation.price_change_24h || 0).toFixed(8)) + '$'">
                         </span>
                     </div>
-                    <div class="clay-badge clay-badge-info mb-3" x-text="recommendation.primary_category || recommendation.category || 'Umum'"></div>
+                    <div class="flex flex-wrap gap-2 mb-3">
+                        <div class="clay-badge clay-badge-info" x-text="recommendation.primary_category || recommendation.category || 'Umum'"></div>
+                        <div class="clay-badge clay-badge-secondary" x-text="recommendation.chain || 'Multiple'"></div>
+                        <!-- Filter match badge -->
+                        <template x-if="recommendation.filter_match">
+                            <div class="clay-badge" :class="{
+                                'clay-badge-success': recommendation.filter_match === 'exact',
+                                'clay-badge-warning': recommendation.filter_match === 'category_only' || recommendation.filter_match === 'chain_only',
+                                'clay-badge-info': recommendation.filter_match === 'chain_popular',
+                                'clay-badge-secondary': recommendation.filter_match === 'fallback'
+                            }">
+                                <span x-text="recommendation.filter_match === 'exact' ? 'Match Sempurna' :
+                                    (recommendation.filter_match === 'category_only' ? 'Kategori' :
+                                    (recommendation.filter_match === 'chain_only' ? 'Chain' :
+                                    (recommendation.filter_match === 'chain_popular' ? 'Chain Populer' : 'Tambahan')))">
+                                </span>
+                            </div>
+                        </template>
+                    </div>
                     <div class="flex justify-between items-center">
                         <div class="text-xs font-medium">Score: <span class="text-primary"
                                 x-text="(recommendation.recommendation_score || 0).toFixed(2)"></span></div>
-                        <a :href="'/panel/recommendations/project/' + recommendation.id" class="clay-badge clay-badge-secondary px-2 py-1 text-xs">
-                            <i class="fas fa-info-circle mr-1"></i> Detail
-                        </a>
+                        <div class="flex space-x-2">
+                            <a :href="'/panel/recommendations/project/' + recommendation.id" class="clay-badge clay-badge-secondary px-2 py-1 text-xs">
+                                <i class="fas fa-info-circle mr-1"></i> Detail
+                            </a>
+                            <form method="POST" action="{{ route('panel.recommendations.add-favorite') }}" class="inline">
+                                @csrf
+                                <input type="hidden" name="project_id" :value="recommendation.id">
+                                <button type="submit" class="clay-badge clay-badge-primary px-2 py-1 text-xs">
+                                    <i class="fas fa-heart mr-1"></i> Favorit
+                                </button>
+                            </form>
+                        </div>
                     </div>
                 </div>
             </template>
@@ -247,6 +473,72 @@
                     </div>
                 </div>
             </template>
+        </div>
+    </div>
+
+    <!-- Kategori & Chain Info -->
+    <div class="clay-card p-6 mb-8">
+        <h2 class="text-xl font-bold mb-4 flex items-center">
+            <i class="fas fa-info-circle mr-2 text-info"></i>
+            Kategori & Blockchain
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Kategori -->
+            <div class="clay-card bg-primary/10 p-4" x-data="{ showAllCategories: false }">
+                <h3 class="font-bold mb-3 flex justify-between items-center">
+                    <span>Kategori Proyek</span>
+                    <button @click="showAllCategories = !showAllCategories" class="text-xs clay-button py-1 px-2"
+                        :class="showAllCategories ? 'clay-button-secondary' : 'clay-button-primary'">
+                        <span x-text="showAllCategories ? 'Sembunyikan' : 'Lihat Semua'"></span>
+                    </button>
+                </h3>
+
+                <div class="flex flex-wrap gap-2">
+                    <template x-for="(category, index) in {{ json_encode($categories ?? []) }}" :key="index">
+                        <template x-if="index < 10 || showAllCategories">
+                            <a :href="'{{ route('panel.recommendations.personal') }}?category=' + category"
+                                class="clay-badge clay-badge-primary py-1 px-2 hover:translate-y-[-2px] transition-transform"
+                                x-text="category">
+                            </a>
+                        </template>
+                    </template>
+
+                    <template x-if="!showAllCategories && {{ json_encode(count($categories ?? [])) }} > 10">
+                        <span class="text-xs text-gray-500 mt-1">
+                            ...dan {{ count($categories ?? []) - 10 }} kategori lainnya
+                        </span>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Blockchain -->
+            <div class="clay-card bg-secondary/10 p-4" x-data="{ showAllChains: false }">
+                <h3 class="font-bold mb-3 flex justify-between items-center">
+                    <span>Blockchain</span>
+                    <button @click="showAllChains = !showAllChains" class="text-xs clay-button py-1 px-2"
+                        :class="showAllChains ? 'clay-button-secondary' : 'clay-button-secondary'">
+                        <span x-text="showAllChains ? 'Sembunyikan' : 'Lihat Semua'"></span>
+                    </button>
+                </h3>
+
+                <div class="flex flex-wrap gap-2">
+                    <template x-for="(chain, index) in {{ json_encode($chains ?? []) }}" :key="index">
+                        <template x-if="index < 10 || showAllChains">
+                            <a :href="'{{ route('panel.recommendations.personal') }}?chain=' + chain"
+                                class="clay-badge clay-badge-secondary py-1 px-2 hover:translate-y-[-2px] transition-transform"
+                                x-text="chain">
+                            </a>
+                        </template>
+                    </template>
+
+                    <template x-if="!showAllChains && {{ json_encode(count($chains ?? [])) }} > 10">
+                        <span class="text-xs text-gray-500 mt-1">
+                            ...dan {{ count($chains ?? []) - 10 }} blockchain lainnya
+                        </span>
+                    </template>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -357,7 +649,7 @@
     </div>
 
     <!-- How Recommendations Work -->
-    <div class="clay-card p-6 mb-8">
+    <div class="clay-card p-6">
         <h2 class="text-xl font-bold mb-4 flex items-center">
             <i class="fas fa-question-circle mr-2 text-info"></i>
             Bagaimana Rekomendasi Bekerja
