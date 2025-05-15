@@ -59,40 +59,32 @@
 
         <div x-show="showFilters" x-transition class="mt-4">
             <div x-init="
-                // Inisialisasi dengan data yang sudah diload
-                @if(!empty($categories))
-                    categories = {{ json_encode($categories) }};
-                    loadingFilters = false;
-                @else
-                    fetch('{{ route('panel.recommendations.categories') }}?format=json&loadCategories=true')
-                        .then(response => response.json())
-                        .then(data => {
-                            categories = data.categories || [];
-                            loadingFilters = false;
-                        })
-                        .catch(error => {
-                            console.error('Error loading categories:', error);
-                            categories = ['defi', 'nft', 'gaming', 'layer1', 'layer2'];
-                            loadingFilters = false;
-                        });
-                @endif
+                // PERBAIKAN: Load kategori dan chain dengan fetch API dan tampilkan log
+                fetch('{{ route('panel.recommendations.categories') }}?format=json&loadCategories=true')
+                    .then(response => response.json())
+                    .then(data => {
+                        console.log('Kategori yang dimuat:', data);
+                        categories = data.categories || [];
+                        loadingFilters = false;
+                    })
+                    .catch(error => {
+                        console.error('Error loading categories:', error);
+                        categories = ['defi', 'nft', 'gaming', 'layer1', 'layer2'];
+                        loadingFilters = false;
+                    });
 
-                @if(!empty($chains))
-                    chains = {{ json_encode($chains) }};
-                    loadingFilters = false;
-                @else
-                    fetch('{{ route('panel.recommendations.chains') }}?format=json&part=chains_list')
-                        .then(response => response.json())
-                        .then(data => {
-                            chains = data.chains || [];
-                            loadingFilters = false;
-                        })
-                        .catch(error => {
-                            console.error('Error loading chains:', error);
-                            chains = ['ethereum', 'binance-smart-chain', 'polygon', 'solana', 'avalanche'];
-                            loadingFilters = false;
-                        });
-                @endif
+                fetch('{{ route('panel.recommendations.chains') }}?format=json&part=chains_list')
+                    .then(response => response.json())
+                    .then(data => {
+                        console.log('Chain yang dimuat:', data);
+                        chains = data.chains || [];
+                        loadingFilters = false;
+                    })
+                    .catch(error => {
+                        console.error('Error loading chains:', error);
+                        chains = ['ethereum', 'binance-smart-chain', 'polygon', 'solana', 'avalanche'];
+                        loadingFilters = false;
+                    });
             ">
                 <form action="{{ route('panel.recommendations.personal') }}" method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <!-- Category Filter -->

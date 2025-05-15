@@ -194,7 +194,7 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Redirect kategori ke halaman rekomendasi personal dengan filter kategori
+     * Endpoint kategori untuk mendapatkan daftar kategori atau redirect ke halaman rekomendasi personal dengan filter kategori
      */
     public function categories(Request $request)
     {
@@ -203,7 +203,7 @@ class RecommendationController extends Controller
 
         // Untuk request AJAX atau jika hanya meminta daftar kategori
         if ($request->input('format') === 'json' || $request->input('loadCategories') === 'true') {
-            $categories = Cache::remember('all_categories', 60, function () { // 1 jam
+            $categories = Cache::remember('categories_list', 60, function () { // 1 jam
                 return $this->getCategories();
             });
 
@@ -219,7 +219,7 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Redirect chain ke halaman rekomendasi personal dengan filter chain
+     * Endpoint chain untuk mendapatkan daftar chain atau redirect ke halaman rekomendasi personal dengan filter chain
      */
     public function chains(Request $request)
     {
@@ -228,7 +228,7 @@ class RecommendationController extends Controller
 
         // Untuk request AJAX atau jika hanya meminta daftar chain
         if ($request->input('format') === 'json' || $request->input('part') === 'chains_list') {
-            $chains = Cache::remember('all_chains', 60, function () { // 1 jam
+            $chains = Cache::remember('chains_list', 60, function () { // 1 jam
                 return $this->getChains();
             });
 
@@ -716,14 +716,32 @@ class RecommendationController extends Controller
             $isColdStart = $interactionCount < 5;
             $timeout     = $isColdStart ? 5 : 3; // 5 detik untuk cold-start, 3 detik untuk regular
 
+            // PERBAIKAN: Log request params untuk debugging
+            Log::info("Mengirim permintaan rekomendasi ke API", [
+                'user_id' => $userId,
+                'model' => $modelType,
+                'params' => $requestParams
+            ]);
+
             $response = Http::timeout($timeout)->post("{$this->apiUrl}/recommend/projects", $requestParams);
 
             // Validasi respons
-            if ($response->successful() && isset($response['recommendations']) && ! empty($response['recommendations'])) {
+            if ($response->successful() && isset($response['recommendations']) && !empty($response['recommendations'])) {
+                // PERBAIKAN: Log exact_match_count untuk debugging filter
+                if (isset($response['exact_match_count'])) {
+                    Log::info("Jumlah exact match: " . $response['exact_match_count']);
+                }
+
                 // PERBAIKAN: Simpan ke cache untuk 15 menit - konsisten dengan waktu cache lainnya
                 Cache::put($cacheKey, $response['recommendations'], 15);
                 return $response['recommendations'];
             } else {
+                // Log error respons
+                Log::warning("Respons API rekomendasi tidak valid", [
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                ]);
+
                 // Fallback untuk cold-start users
                 if ($isColdStart) {
                     return $this->getTrendingProjects($limit);
@@ -1013,7 +1031,14 @@ class RecommendationController extends Controller
                 // Coba parse jika category dalam format JSON array
                 if (str_starts_with($category, '[') && str_ends_with($category, ']')) {
                     try {
-                        $parsed = json_decode($category, true);
+                        // Clean up potential nested quotes
+                        $cleaned_value = $category;
+                        // Replace double quotes if needed
+                        if (str_starts_with($cleaned_value, '"[') && str_ends_with($cleaned_value, ']"')) {
+                            $cleaned_value = substr($cleaned_value, 1, -1);
+                        }
+
+                        $parsed = json_decode($cleaned_value, true);
                         if (is_array($parsed) && !empty($parsed)) {
                             foreach ($parsed as $cat) {
                                 if (!empty($cat) && strtolower($cat) !== 'unknown') {
@@ -1065,15 +1090,51 @@ class RecommendationController extends Controller
             }
 
             // Jika API tidak mengembalikan data yang valid, ambil dari database lokal
-            return Project::select('chain')
+            $chains = Project::select('chain')
                 ->distinct()
                 ->whereNotNull('chain')
                 ->where('chain', '!=', '')
+                ->where('chain', '!=', 'unknown')
                 ->orderBy('chain')
+                ->get()
                 ->pluck('chain')
-                ->filter()
+                ->toArray();
+
+            $cleanChains = [];
+
+            foreach ($chains as $chain) {
+                // Bersihkan format array jika ada
+                if (str_starts_with($chain, '[') && str_ends_with($chain, ']')) {
+                    try {
+                        $parsed = json_decode($chain, true);
+                        if (is_array($parsed) && !empty($parsed)) {
+                            foreach ($parsed as $ch) {
+                                if (!empty($ch) && strtolower($ch) !== 'unknown') {
+                                    $cleanChains[] = $ch;
+                                }
+                            }
+                        }
+                    } catch (\Exception $e) {
+                        // Jika parsing gagal, gunakan nilai asli
+                        if (!empty($chain) && strtolower($chain) !== 'unknown') {
+                            $cleanChains[] = $chain;
+                        }
+                    }
+                } else {
+                    // Jika bukan format array, gunakan nilai asli
+                    if (!empty($chain) && strtolower($chain) !== 'unknown') {
+                        $cleanChains[] = $chain;
+                    }
+                }
+            }
+
+            // Kembalikan chains unik dan urut abjad
+            return collect($cleanChains)
+                ->unique()
+                ->sort()
                 ->values()
                 ->toArray();
+
         } catch (\Exception $e) {
             Log::error("Gagal mendapatkan daftar chains: " . $e->getMessage());
 
