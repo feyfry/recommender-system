@@ -63,8 +63,8 @@ FECF_PARAMS = {
 
 # Hybrid Model - BALANCED ADAPTIVE SETTINGS
 HYBRID_PARAMS = {
-    "ncf_weight": 0.35,             # Bobot NCF yang lebih signifikan
-    "fecf_weight": 0.65,            # FECF tetap dominan tapi tidak terlalu tinggi
+    "ncf_weight": 0.5,             # Bobot NCF seimbang - sebelumnya 0.35
+    "fecf_weight": 0.5,            # FECF seimbang -  sebelumnya 0.65
     "interaction_threshold_low": 5,  # Threshold low sesuai interaksi realistis
     "interaction_threshold_high": 15, # Threshold high yang lebih realistis - diturunkan dari 20
     "diversity_factor": 0.3,        # Tingkatkan faktor diversitas
