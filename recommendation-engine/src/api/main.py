@@ -77,7 +77,7 @@ app.include_router(analysis_router)
 class InteractionRecord(BaseModel):
     user_id: str
     project_id: str
-    interaction_type: str = Field(..., description="Type of interaction: view, favorite, portfolio_add, research")
+    interaction_type: str = Field(..., description="Type of interaction: view, favorite, portfolio_add")
     weight: int = Field(1, ge=1, le=10, description="Weight/strength of the interaction")
     context: Optional[Dict[str, Any]] = None
     timestamp: Optional[str] = None
