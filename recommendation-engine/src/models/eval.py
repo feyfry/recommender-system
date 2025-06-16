@@ -575,7 +575,7 @@ def evaluate_all_models(models: Dict[str, Any],
                        num_workers: int = 4,
                        eval_cold_start: bool = True,
                        cold_start_runs: int = 5,
-                       regular_runs: int = 1) -> Dict[str, Dict[str, Any]]:
+                       regular_runs: int = 5) -> Dict[str, Dict[str, Any]]:
     """
     Perbaikan untuk mengevaluasi semua model dengan multiple runs untuk hasil yang lebih robust
     """
@@ -635,7 +635,7 @@ def evaluate_all_models(models: Dict[str, Any],
     
     # Regular evaluation with multiple runs for more robust results
     # IMPROVED: Use multiple runs like cold-start for regular models too
-    num_runs = max(1, regular_runs)  # Default to at least 1 run
+    num_runs = max(5, regular_runs)  # Default to at least 5 run
     logger.info(f"Performing {num_runs} evaluation runs for regular models")
     
     all_results = {model_name: [] for model_name in models.keys()}

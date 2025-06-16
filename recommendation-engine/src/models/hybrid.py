@@ -517,6 +517,20 @@ class HybridRecommender:
     def get_effective_weights(self, user_id: str, context: Optional[Dict] = None) -> Tuple[float, float, float]:
         """
         Mendapatkan bobot model yang adaptif berdasarkan confidence dan user characteristics
+
+        Logika Adaptive Weighting:
+        Interactions < 10:          FECF 95%, NCF 5%   (cold start)
+        Interactions 10-20:         FECF 80%, NCF 20%  (low interactions)
+        Interactions 20-30:         FECF 80%→50%, NCF 20%→50% (gradual transition)
+        Interactions 30-50:         FECF 50%, NCF 50%  (base weights)
+        Interactions 50-100:        FECF 45%, NCF 55%  (NCF mulai unggul)
+        Interactions > 100:         FECF 40%, NCF 60%  (NCF dominan)
+
+        Penjelasan Penggunaan Thresholds:
+        threshold_low (10): Di bawah ini, user dianggap cold-start, gunakan cold_start_fecf_weight
+        min_ncf_interactions (20): Minimal interaksi untuk NCF mulai berkontribusi
+        threshold_high (30): Di atas ini, NCF mulai lebih dipercaya
+        confidence_threshold (0.4): Minimal performance score untuk NCF dianggap reliable
         """
         # Base weights dari config
         base_fecf_weight = self.params.get('fecf_weight', 0.5)

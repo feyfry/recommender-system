@@ -532,14 +532,14 @@ def evaluate_models(args):
             return False
         
         # Get parameters
-        test_ratio = getattr(args, 'test_ratio', 0.2)
-        min_interactions = getattr(args, 'min_interactions', 5)
+        test_ratio = getattr(args, 'test_ratio', 0.3)
+        min_interactions = getattr(args, 'min_interactions', 20)
         k_values = getattr(args, 'k_values', [5, 10, 20])
         eval_cold_start = getattr(args, 'cold_start', True)
         output_format = getattr(args, 'format', 'markdown')
         cold_start_runs = getattr(args, 'cold_start_runs', 5)
         max_test_users = getattr(args, 'max_test_users', 100)
-        regular_runs = getattr(args, 'regular_runs', 1)
+        regular_runs = getattr(args, 'regular_runs', 5)
         
         # Get main user-item matrix
         user_item_matrix = fecf.user_item_matrix if 'fecf' in models else ncf.user_item_matrix
@@ -1544,14 +1544,14 @@ Examples:
     
     # collect command
     collect_parser = subparsers.add_parser("collect", help="Collect data from CoinGecko")
-    collect_parser.add_argument("--limit", type=int, default=500, help="Number of coins to collect")
-    collect_parser.add_argument("--detail-limit", type=int, default=100, help="Number of coins to get detailed data for")
+    collect_parser.add_argument("--limit", type=int, default=1000, help="Number of coins to collect")
+    collect_parser.add_argument("--detail-limit", type=int, default=1000, help="Number of coins to get detailed data for")
     collect_parser.add_argument("--rate-limit", type=float, default=2.0, help="Delay between API requests in seconds")
     collect_parser.add_argument("--include-categories", action="store_true", help="Also collect coins by categories defined in config.py")
     
     # process command
     process_parser = subparsers.add_parser("process", help="Process collected data")
-    process_parser.add_argument("--users", type=int, default=500, help="Number of synthetic users to generate")
+    process_parser.add_argument("--users", type=int, default=1000, help="Number of synthetic users to generate")
     
     # train command
     train_parser = subparsers.add_parser("train", help="Train recommendation models")
@@ -1563,12 +1563,12 @@ Examples:
     
     # evaluate command
     evaluate_parser = subparsers.add_parser("evaluate", help="Evaluate recommendation models")
-    evaluate_parser.add_argument("--test-ratio", type=float, default=0.2, help="Test data ratio")
-    evaluate_parser.add_argument("--min-interactions", type=int, default=5, help="Minimum interactions for test users")
+    evaluate_parser.add_argument("--test-ratio", type=float, default=0.3, help="Test data ratio")
+    evaluate_parser.add_argument("--min-interactions", type=int, default=20, help="Minimum interactions for test users")
     evaluate_parser.add_argument("--cold-start", action="store_true", help="Evaluate cold-start scenarios")
     evaluate_parser.add_argument("--cold-start-runs", type=int, default=5, help="Number of runs for cold-start evaluation (default: 5)")
-    evaluate_parser.add_argument("--regular-runs", type=int, default=1, help="Number of runs for regular model evaluation (default: 1)")
-    evaluate_parser.add_argument("--format", choices=["text", "markdown", "html", "json"], default="markdown", help="Output format")  
+    evaluate_parser.add_argument("--regular-runs", type=int, default=5, help="Number of runs for regular model evaluation (default: 1)")
+    evaluate_parser.add_argument("--format", choices=["text", "markdown", "json"], default="markdown", help="Output format")  
     evaluate_parser.add_argument("--debug", action="store_true", help="Enable detailed debug logging")
     evaluate_parser.add_argument("--max-test-users", type=int, default=100, help="Maximum number of test users to evaluate")
     
