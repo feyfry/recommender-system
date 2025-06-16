@@ -1562,9 +1562,15 @@ Examples:
     train_parser.add_argument("--force", action="store_true", help="Force training even if data quality validation fails")
     
     # evaluate command
+    """
+    Min interaksi untuk pengguna:
+    # Users dengan <20 interaksi: FECF dominan
+    # Users dengan ≥20 interaksi: NCF mulai efektif
+    # Users dengan ≥50 interaksi: NCF bisa dominan
+    """
     evaluate_parser = subparsers.add_parser("evaluate", help="Evaluate recommendation models")
     evaluate_parser.add_argument("--test-ratio", type=float, default=0.3, help="Test data ratio")
-    evaluate_parser.add_argument("--min-interactions", type=int, default=20, help="Minimum interactions for test users")
+    evaluate_parser.add_argument("--min-interactions", type=int, default=10, help="Minimum interactions for test users")
     evaluate_parser.add_argument("--cold-start", action="store_true", help="Evaluate cold-start scenarios")
     evaluate_parser.add_argument("--cold-start-runs", type=int, default=5, help="Number of runs for cold-start evaluation (default: 5)")
     evaluate_parser.add_argument("--regular-runs", type=int, default=5, help="Number of runs for regular model evaluation (default: 1)")

@@ -97,7 +97,7 @@ class RecommendationController extends Controller
             return Interaction::where('user_id', $userId)->count();
         });
 
-        $isColdStart = $interactionCount < 5;
+        $isColdStart = $interactionCount < 10; // Jika interaksi kurang dari 10, anggap cold-start
 
         // Dapatkan daftar kategori dan chain untuk dropdown
         $categories = Cache::remember('all_categories', 60, function () { // 1 jam
@@ -320,7 +320,7 @@ class RecommendationController extends Controller
         // DIOPTIMALKAN: Cache cold-start status
         $isColdStart = Cache::remember("user_cold_start_{$userId}", 30, function () use ($userId) {
             $interactionCount = Interaction::where('user_id', $userId)->count();
-            return $interactionCount < 5;
+            return $interactionCount < 10;
         });
 
         // Coba cari proyek di database lokal terlebih dahulu
@@ -708,7 +708,7 @@ class RecommendationController extends Controller
                 return Interaction::where('user_id', $userId)->count();
             });
 
-            $isColdStart = $interactionCount < 5;
+            $isColdStart = $interactionCount < 10;
             $timeout     = $isColdStart ? 5 : 3; // 5 detik untuk cold-start, 3 detik untuk regular
 
             // PERBAIKAN: Log request params untuk debugging
@@ -747,7 +747,7 @@ class RecommendationController extends Controller
             Log::error("Gagal mendapatkan rekomendasi personal: " . $e->getMessage());
 
             // Fallback untuk cold-start atau error
-            if ($interactionCount < 5) {
+            if ($interactionCount < 10) {
                 return $this->getTrendingProjects($limit);
             }
 
