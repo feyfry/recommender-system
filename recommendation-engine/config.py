@@ -63,19 +63,20 @@ FECF_PARAMS = {
 
 # Hybrid Model - BALANCED ADAPTIVE SETTINGS
 HYBRID_PARAMS = {
-    "ncf_weight": 0.5,             # Bobot NCF seimbang - sebelumnya 0.35
-    "fecf_weight": 0.5,            # FECF seimbang -  sebelumnya 0.65
-    "interaction_threshold_low": 5,  # Threshold low sesuai interaksi realistis
-    "interaction_threshold_high": 15, # Threshold high yang lebih realistis - diturunkan dari 20
-    "diversity_factor": 0.3,        # Tingkatkan faktor diversitas
-    "cold_start_fecf_weight": 0.75,  # FECF lebih dominan untuk cold start tapi tidak ekstrem
-    "explore_ratio": 0.30,          # Tingkatkan eksplorasi
-    "normalization": "sigmoid",     # Tetap gunakan sigmoid normalization
-    "ensemble_method": "stacking",  # Metode ensemble baru yang lebih adaptif - stacking
-    "n_candidates_factor": 3,        # Lebih banyak kandidat vs. hasil akhir - diturunkan dari 4
-    "category_diversity_weight": 0.25, # Tingkatkan bobot diversitas kategori
-    "trending_boost_factor": 0.2,    # Faktor boost untuk trending items - diturunkan dari 0.35
-    "confidence_threshold": 0.7,     # Threshold kepercayaan untuk metode selective
+    "ncf_weight": 0.5,             # Base weight - akan di-adjust secara adaptive
+    "fecf_weight": 0.5,            # Base weight - akan di-adjust secara adaptive
+    "interaction_threshold_low": 10,  # Dinaikkan dari 5
+    "interaction_threshold_high": 30, # Dinaikkan dari 15
+    "diversity_factor": 0.3,        
+    "cold_start_fecf_weight": 0.95,  # FECF sangat dominan untuk cold start
+    "explore_ratio": 0.30,          
+    "normalization": "percentile",   # Ganti ke percentile-based
+    "ensemble_method": "selective",  # Ganti dari stacking ke selective
+    "n_candidates_factor": 3,        
+    "category_diversity_weight": 0.25,
+    "trending_boost_factor": 0.2,    
+    "confidence_threshold": 0.4,     # Threshold untuk NCF confidence
+    "min_ncf_interactions": 20,     # Minimal interactions untuk NCF
 }
 
 # Category Configuration - ENHANCED SETTINGS
