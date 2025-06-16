@@ -985,14 +985,7 @@ class HybridRecommender:
         
         return weight_stats
     
-    def get_ensemble_recommendations(self, 
-                               fecf_recs: List[Tuple[str, float]], 
-                               ncf_recs: List[Tuple[str, float]],
-                               fecf_weight: float = 0.5,
-                               ncf_weight: float = 0.5,
-                               user_id: Optional[str] = None,
-                               context: Optional[Dict] = None,
-                               ensemble_method: Optional[str] = None) -> List[Tuple[str, float]]:
+    def get_ensemble_recommendations(self, fecf_recs: List[Tuple[str, float]], ncf_recs: List[Tuple[str, float]], fecf_weight: float = 0.5, ncf_weight: float = 0.5, user_id: Optional[str] = None, context: Optional[Dict] = None, ensemble_method: Optional[str] = None) -> List[Tuple[str, float]]:
         """
         Menggabungkan rekomendasi dengan selective ensemble strategy
         """
@@ -1103,7 +1096,80 @@ class HybridRecommender:
             return combined_recs
         
         else:
-            # Fallback to weighted average
+            # Fallback ke strategi ensemble yang lebih adaptif
+            try:
+                return self._apply_ensemble_fallback_strategies(fecf_recs, ncf_recs, fecf_weight, ncf_weight)
+            except Exception as e:
+                logger.warning(f"Fallback ensemble strategy failed: {str(e)}, using simple weighted average")
+                return self._weighted_average_ensemble(fecf_recs, ncf_recs, fecf_weight, ncf_weight)
+        
+    def _weighted_average_ensemble(self, fecf_recs: List[Tuple[str, float]], ncf_recs: List[Tuple[str, float]], fecf_weight: float = 0.5, ncf_weight: float = 0.5) -> List[Tuple[str, float]]:
+        """
+        Menggabungkan rekomendasi dengan weighted average sederhana
+        Method ini dipanggil sebagai fallback ketika selective ensemble tidak digunakan
+        """
+        if not fecf_recs and not ncf_recs:
+            return []
+            
+        # Quick return if only one model's recommendations are available
+        if not fecf_recs:
+            return ncf_recs
+        if not ncf_recs:
+            return fecf_recs
+            
+        # Normalisasi skor untuk memastikan rentang yang konsisten
+        fecf_normalized = self.normalize_scores(fecf_recs, method='linear')
+        ncf_normalized = self.normalize_scores(ncf_recs, method='linear')
+        
+        # Buat dictionary untuk mempermudah penggabungan
+        fecf_dict = dict(fecf_normalized)
+        ncf_dict = dict(ncf_normalized)
+        
+        # Gabungkan semua item unik
+        all_items = set(fecf_dict.keys()) | set(ncf_dict.keys())
+        
+        # Hitung weighted average untuk setiap item
+        combined_results = []
+        
+        for item in all_items:
+            fecf_score = fecf_dict.get(item, 0)
+            ncf_score = ncf_dict.get(item, 0)
+            
+            # Weighted average dengan penalty untuk item yang hanya ada di satu model
+            if item in fecf_dict and item in ncf_dict:
+                # Kedua model merekomendasikan - gunakan weighted average penuh
+                combined_score = (fecf_score * fecf_weight + ncf_score * ncf_weight)
+            elif item in fecf_dict:
+                # Hanya FECF - gunakan skor FECF dengan slight penalty
+                combined_score = fecf_score * fecf_weight * 0.95
+            else:
+                # Hanya NCF - gunakan skor NCF dengan slight penalty
+                combined_score = ncf_score * ncf_weight * 0.95
+            
+            combined_results.append((item, combined_score))
+        
+        # Urutkan berdasarkan skor gabungan (tertinggi ke terendah)
+        combined_results.sort(key=lambda x: x[1], reverse=True)
+        
+        return combined_results
+
+    def _apply_ensemble_fallback_strategies(self, fecf_recs: List[Tuple[str, float]], ncf_recs: List[Tuple[str, float]], fecf_weight: float, ncf_weight: float) -> List[Tuple[str, float]]:
+        """
+        Strategi fallback tambahan untuk ensemble ketika selective method tidak optimal
+        """
+        # Jika salah satu model tidak memberikan hasil yang memadai
+        if len(fecf_recs) < 3 and len(ncf_recs) >= 5:
+            # NCF memberikan hasil lebih baik, tingkatkan bobotnya
+            adjusted_ncf_weight = min(0.8, ncf_weight * 1.3)
+            adjusted_fecf_weight = 1.0 - adjusted_ncf_weight
+            return self._weighted_average_ensemble(fecf_recs, ncf_recs, adjusted_fecf_weight, adjusted_ncf_weight)
+        elif len(ncf_recs) < 3 and len(fecf_recs) >= 5:
+            # FECF memberikan hasil lebih baik, tingkatkan bobotnya
+            adjusted_fecf_weight = min(0.8, fecf_weight * 1.3)
+            adjusted_ncf_weight = 1.0 - adjusted_fecf_weight
+            return self._weighted_average_ensemble(fecf_recs, ncf_recs, adjusted_fecf_weight, adjusted_ncf_weight)
+        else:
+            # Gunakan weighted average biasa
             return self._weighted_average_ensemble(fecf_recs, ncf_recs, fecf_weight, ncf_weight)
     
     def _get_item_context(self, item_id: str) -> Dict:
