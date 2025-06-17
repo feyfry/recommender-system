@@ -1309,50 +1309,54 @@ class NCFRecommender:
     def recommend_for_user(self, user_id: str, n: int = 10, 
                    exclude_known: bool = True) -> List[Tuple[str, float]]:
         """
-        Generate recommendations for a user with enhanced diversity
+        PERBAIKAN: Generate recommendations dengan score validation yang ketat
         """
         # Check cache for performance
         cache_key = f"{user_id}_{n}_{exclude_known}"
         if cache_key in self._recommendation_cache:
-            # Check if cache is still valid (< 1 hour old)
             cache_time, cache_results = self._recommendation_cache[cache_key]
-            if time.time() - cache_time < 3600:  # 1 hour in seconds
-                return cache_results
-        
+            if time.time() - cache_time < 3600:
+                # PERBAIKAN: Validasi score dari cache
+                validated_cache = []
+                for item_id, score in cache_results:
+                    clean_score = float(np.clip(score, 0.0, 1.0))
+                    if not np.isnan(clean_score) and not np.isinf(clean_score):
+                        validated_cache.append((item_id, clean_score))
+                
+                validated_cache.sort(key=lambda x: x[1], reverse=True)
+                return validated_cache
+
         if self.model is None:
             logger.error("Model not trained or loaded")
             return []
-        
+
         # Check if user exists
         if user_id not in self.users:
             logger.warning(f"User {user_id} not in training data")
             return self._get_cold_start_recommendations(n)
-        
+
         # Get known items to exclude
         known_items = set()
         if exclude_known and self.user_item_matrix is not None:
             if user_id in self.user_item_matrix.index:
                 user_interactions = self.user_item_matrix.loc[user_id]
                 known_items = set(user_interactions[user_interactions > 0].index)
-        
-        # Get category information for diversity tracking
+
+        # Get metadata untuk diversity tracking
         category_counts = {}
         item_to_category = {}
         item_to_chain = {}
         item_to_trend = {}
-        
+
         try:
             if self.projects_df is not None:
-                # Map item_id to metadata for easier lookup
                 if 'primary_category' in self.projects_df.columns:
                     for _, row in self.projects_df.iterrows():
                         if 'id' in row:
                             item_id = row['id']
                             
-                            # Try to get multiple categories if available
                             categories = []
                             if 'categories_list' in row:
-                                # Process categories list
                                 cats = row['categories_list']
                                 if isinstance(cats, list):
                                     categories = cats
@@ -1367,29 +1371,28 @@ class NCFRecommender:
                                 categories = [row['primary_category']]
                             
                             item_to_category[item_id] = categories
-                    
+                
                 if 'chain' in self.projects_df.columns:
                     item_to_chain = dict(zip(self.projects_df['id'], self.projects_df['chain']))
                 if 'trend_score' in self.projects_df.columns:
                     item_to_trend = dict(zip(self.projects_df['id'], self.projects_df['trend_score']))
         except Exception as e:
             logger.warning(f"Error getting item metadata: {str(e)}")
-        
+
         # Get potential items to recommend
         candidate_items = [item for item in self.items if item not in known_items]
-        
-        # If no candidates, return empty list
+
         if not candidate_items:
             return []
-        
+
         # Encode user
         user_idx = self.user_encoder.transform([user_id])[0]
         user_tensor = torch.LongTensor([user_idx]).to(self.device)
-        
-        # Generate predictions for all candidate items in batches
+
+        # PERBAIKAN: Generate predictions dengan validation ketat
         predictions = []
-        batch_size = 512  # Increased batch size for efficiency
-        
+        batch_size = 512
+
         for i in range(0, len(candidate_items), batch_size):
             batch_items = candidate_items[i:i+batch_size]
             
@@ -1397,50 +1400,62 @@ class NCFRecommender:
                 item_indices = self.item_encoder.transform(batch_items)
                 item_tensor = torch.LongTensor(item_indices).to(self.device)
                 
-                # Replicate user tensor for each item
                 batch_user_tensor = user_tensor.repeat(len(batch_items))
                 
-                # Make predictions
                 self.model.eval()
                 with torch.no_grad():
                     batch_predictions = self.model(batch_user_tensor, item_tensor).cpu().numpy()
+                    
+                    # PERBAIKAN: Clip dan validate predictions
+                    batch_predictions = np.clip(batch_predictions, 0.0, 1.0)
+                    batch_predictions = np.nan_to_num(batch_predictions, nan=0.0, posinf=1.0, neginf=0.0)
                 
-                # Store predictions with items
-                predictions.extend(list(zip(batch_items, batch_predictions)))
+                # Store predictions with validation
+                for item_id, pred in zip(batch_items, batch_predictions):
+                    clean_pred = float(np.clip(pred, 0.0, 1.0))
+                    if not np.isnan(clean_pred) and not np.isinf(clean_pred):
+                        predictions.append((item_id, clean_pred))
+                        
             except Exception as e:
                 logger.warning(f"Error in batch prediction: {e}")
-                # Skip this batch on error
                 continue
-        
-        # If we have too few predictions, add some trending/popular ones
+
+        # PERBAIKAN: Fallback jika predictions terlalu sedikit
         if len(predictions) < n and self.projects_df is not None:
-            # Get fallback recommendations
             fallback_recs = self._get_fallback_recommendations(n, exclude_ids=known_items)
             
-            # Filter out any that are already in predictions
             predicted_ids = {item_id for item_id, _ in predictions}
-            filtered_fallbacks = [(item_id, score) for item_id, score in fallback_recs 
-                               if item_id not in predicted_ids]
+            filtered_fallbacks = []
             
-            # Add to predictions
+            for item_id, score in fallback_recs:
+                if item_id not in predicted_ids:
+                    clean_score = float(np.clip(score, 0.0, 1.0))
+                    if not np.isnan(clean_score) and not np.isinf(clean_score):
+                        filtered_fallbacks.append((item_id, clean_score))
+            
             predictions.extend(filtered_fallbacks)
+
+        # PERBAIKAN: Sort dengan validation
+        valid_predictions = []
+        for item_id, score in predictions:
+            clean_score = float(np.clip(score, 0.0, 1.0))
+            if not np.isnan(clean_score) and not np.isinf(clean_score):
+                valid_predictions.append((item_id, clean_score))
         
-        # Sort by prediction score
-        predictions.sort(key=lambda x: x[1], reverse=True)
-        
-        # If we have fewer recommendations than requested, return what we have
-        if len(predictions) <= n:
+        valid_predictions.sort(key=lambda x: x[1], reverse=True)
+
+        if len(valid_predictions) <= n:
             # Store in cache
-            self._recommendation_cache[cache_key] = (time.time(), predictions)
-            return predictions
-        
+            self._recommendation_cache[cache_key] = (time.time(), valid_predictions)
+            return valid_predictions
+
         # Take more candidates for better diversity
-        top_candidates = predictions[:min(len(predictions), n*3)]
-        
-        # Enhance predictions with diversity
+        top_candidates = valid_predictions[:min(len(valid_predictions), n*3)]
+
+        # PERBAIKAN: Enhanced diversity dengan score validation
         if item_to_category:
-            # First, select some top items unconditionally
-            top_count = max(n // 4, 1)  # 25% by pure score
+            # Select top items unconditionally (25% by pure score)
+            top_count = max(n // 4, 1)
             result = top_candidates[:top_count]
             
             # Track selected categories and chains
@@ -1456,44 +1471,39 @@ class NCFRecommender:
                 if item_id in item_to_chain:
                     chain = item_to_chain[item_id]
                     selected_chains[chain] = selected_chains.get(chain, 0) + 1
-            
-            # Max per category (25% of total)
+
+            # Diversity limits
             max_per_category = max(1, int(n * 0.25))
-            # Max per chain (40% of total) - chains are less diverse in crypto
             max_per_chain = max(2, int(n * 0.4))
             
             # Remaining candidates
             remaining = top_candidates[top_count:]
             
-            # Apply diversity balancing for remaining slots
+            # Apply diversity balancing
             while len(result) < n and remaining:
                 best_score = -float('inf')
                 best_idx = -1
                 
                 for idx, (item_id, score) in enumerate(remaining):
-                    # Start with original score
                     adjusted_score = score
                     
-                    # Apply diversity adjustments
+                    # Category diversity adjustments
                     if item_id in item_to_category:
                         categories = item_to_category[item_id]
                         
-                        # Check if categories are overrepresented
                         category_penalty = 0
                         for category in categories:
                             cat_count = selected_categories.get(category, 0)
                             if cat_count >= max_per_category:
-                                category_penalty -= 0.2  # Penalty for overrepresented category
+                                category_penalty -= 0.2
                                 break
                         
-                        # Check if categories are new
                         category_bonus = 0
                         for category in categories:
                             if category not in selected_categories:
-                                category_bonus += 0.1  # Bonus for new category
+                                category_bonus += 0.1
                                 break
                         
-                        # Apply category adjustments
                         adjusted_score += category_penalty + category_bonus
                     
                     # Chain diversity
@@ -1502,29 +1512,31 @@ class NCFRecommender:
                         chain_count = selected_chains.get(chain, 0)
                         
                         if chain_count >= max_per_chain:
-                            # Penalty for overrepresented chain
                             adjusted_score -= 0.15
                         elif chain_count == 0:
-                            # Bonus for new chain
                             adjusted_score += 0.05
                     
                     # Trend boost
                     if item_id in item_to_trend:
                         trend_score = item_to_trend[item_id]
-                        if trend_score > 80:  # Very trending
+                        if trend_score > 80:
                             adjusted_score += 0.15
-                        elif trend_score > 65:  # Moderately trending
+                        elif trend_score > 65:
                             adjusted_score += 0.05
                     
-                    # Track best adjusted score
+                    # PERBAIKAN: Clip adjusted score
+                    adjusted_score = np.clip(adjusted_score, 0.0, 1.0)
+                    
                     if adjusted_score > best_score:
                         best_score = adjusted_score
                         best_idx = idx
                 
                 if best_idx >= 0:
-                    # Add best item to result
-                    item_id, score = remaining.pop(best_idx)
-                    result.append((item_id, score))
+                    item_id, original_score = remaining.pop(best_idx)
+                    
+                    # PERBAIKAN: Use original score, not adjusted
+                    clean_score = float(np.clip(original_score, 0.0, 1.0))
+                    result.append((item_id, clean_score))
                     
                     # Update tracking
                     if item_id in item_to_category:
@@ -1536,88 +1548,136 @@ class NCFRecommender:
                         chain = item_to_chain[item_id]
                         selected_chains[chain] = selected_chains.get(chain, 0) + 1
                 else:
-                    # No more items
                     break
             
-            # Store in cache
-            self._recommendation_cache[cache_key] = (time.time(), result)
+            # PERBAIKAN: Final validation dan sort
+            final_result = []
+            for item_id, score in result:
+                clean_score = float(np.clip(score, 0.0, 1.0))
+                if not np.isnan(clean_score) and not np.isinf(clean_score):
+                    final_result.append((item_id, clean_score))
             
-            return result[:n]
+            final_result.sort(key=lambda x: x[1], reverse=True)
+            
+            # Store in cache
+            self._recommendation_cache[cache_key] = (time.time(), final_result)
+            
+            return final_result[:n]
+
+        # PERBAIKAN: Jika tidak ada category data, return validated top candidates
+        validated_top = []
+        for item_id, score in top_candidates[:n]:
+            clean_score = float(np.clip(score, 0.0, 1.0))
+            if not np.isnan(clean_score) and not np.isinf(clean_score):
+                validated_top.append((item_id, clean_score))
         
-        # If no category data, just return top candidates
-        top_candidates = top_candidates[:n]
+        validated_top.sort(key=lambda x: x[1], reverse=True)
         
         # Store in cache
-        self._recommendation_cache[cache_key] = (time.time(), top_candidates)
+        self._recommendation_cache[cache_key] = (time.time(), validated_top)
         
-        return top_candidates
+        return validated_top
     
     def _get_fallback_recommendations(self, n: int, exclude_ids: set = None) -> List[Tuple[str, float]]:
-        """Get fallback recommendations when prediction fails"""
+        """
+        PERBAIKAN: Get fallback recommendations dengan score validation
+        """
         if exclude_ids is None:
             exclude_ids = set()
             
         fallback_recs = []
         
-        # First try trending items
+        # Try trending items first
         if 'trend_score' in self.projects_df.columns:
             trending_items = self.projects_df.sort_values('trend_score', ascending=False)
             
             for _, row in trending_items.iterrows():
                 if row['id'] not in exclude_ids and len(fallback_recs) < n:
-                    score = row['trend_score'] / 100 * 0.8  # Scale to 0-0.8
-                    fallback_recs.append((row['id'], score))
+                    # PERBAIKAN: Clip dan validate score
+                    raw_score = row['trend_score'] / 100 * 0.8
+                    clean_score = float(np.clip(raw_score, 0.0, 1.0))
+                    if not np.isnan(clean_score) and not np.isinf(clean_score):
+                        fallback_recs.append((row['id'], clean_score))
         
-        # If still not enough, add popular items
+        # Add popular items if needed
         if len(fallback_recs) < n and 'popularity_score' in self.projects_df.columns:
             popular_items = self.projects_df.sort_values('popularity_score', ascending=False)
             
             for _, row in popular_items.iterrows():
-                if row['id'] not in exclude_ids and row['id'] not in [rec[0] for rec in fallback_recs] and len(fallback_recs) < n:
-                    score = row['popularity_score'] / 100 * 0.7  # Scale to 0-0.7
-                    fallback_recs.append((row['id'], score))
+                if (row['id'] not in exclude_ids and 
+                    row['id'] not in [rec[0] for rec in fallback_recs] and 
+                    len(fallback_recs) < n):
+                    
+                    # PERBAIKAN: Clip dan validate score
+                    raw_score = row['popularity_score'] / 100 * 0.7
+                    clean_score = float(np.clip(raw_score, 0.0, 1.0))
+                    if not np.isnan(clean_score) and not np.isinf(clean_score):
+                        fallback_recs.append((row['id'], clean_score))
         
-        # If still not enough, add by market cap
+        # Add market cap items if still needed
         if len(fallback_recs) < n and 'market_cap' in self.projects_df.columns:
             market_cap_items = self.projects_df.sort_values('market_cap', ascending=False)
             max_cap = market_cap_items['market_cap'].max()
             
             for _, row in market_cap_items.iterrows():
-                if row['id'] not in exclude_ids and row['id'] not in [rec[0] for rec in fallback_recs] and len(fallback_recs) < n:
-                    # Normalize market cap to 0-0.6
+                if (row['id'] not in exclude_ids and 
+                    row['id'] not in [rec[0] for rec in fallback_recs] and 
+                    len(fallback_recs) < n):
+                    
+                    # PERBAIKAN: Normalize dan clip market cap score
                     if max_cap > 0:
-                        score = row['market_cap'] / max_cap * 0.6
+                        raw_score = row['market_cap'] / max_cap * 0.6
                     else:
-                        score = 0.5
-                    fallback_recs.append((row['id'], score))
+                        raw_score = 0.5
+                    
+                    clean_score = float(np.clip(raw_score, 0.0, 1.0))
+                    if not np.isnan(clean_score) and not np.isinf(clean_score):
+                        fallback_recs.append((row['id'], clean_score))
         
-        # If still not enough, add random items
+        # Add random items if still needed
         remaining = n - len(fallback_recs)
         if remaining > 0:
-            # Get random items not already included
             available_items = [item for item in self.items 
-                          if item not in exclude_ids 
-                          and item not in [rec[0] for rec in fallback_recs]]
+                            if item not in exclude_ids 
+                            and item not in [rec[0] for rec in fallback_recs]]
             
             if available_items:
-                # Sample random items
                 random_items = random.sample(available_items, min(remaining, len(available_items)))
                 
-                # Add with low score
                 for item in random_items:
-                    fallback_recs.append((item, 0.4))  # Low default score
+                    # PERBAIKAN: Default score yang sudah divalidasi
+                    clean_score = 0.4  # Low default score dalam range valid
+                    fallback_recs.append((item, clean_score))
         
         return fallback_recs
     
     def _get_cold_start_recommendations(self, n: int = 10) -> List[Tuple[str, float]]:
-        """Get recommendations for cold-start users"""
+        """
+        PERBAIKAN: Cold-start recommendations dengan score validation
+        """
         # Use precomputed popular items if available
         if self._popular_items:
-            return self._popular_items[:n]
+            validated_popular = []
+            for item_id, score in self._popular_items[:n]:
+                clean_score = float(np.clip(score, 0.0, 1.0))
+                if not np.isnan(clean_score) and not np.isinf(clean_score):
+                    validated_popular.append((item_id, clean_score))
             
-        # Fallback to trending + popular items
+            if validated_popular:
+                return validated_popular
+        
+        # Fallback to trending + popular items dengan validation
         fallback_recs = self._get_fallback_recommendations(n)
-        return fallback_recs
+        
+        # PERBAIKAN: Double validation untuk cold-start
+        validated_fallback = []
+        for item_id, score in fallback_recs:
+            clean_score = float(np.clip(score, 0.0, 1.0))
+            if not np.isnan(clean_score) and not np.isinf(clean_score):
+                validated_fallback.append((item_id, clean_score))
+        
+        validated_fallback.sort(key=lambda x: x[1], reverse=True)
+        return validated_fallback
     
     def recommend_projects(self, user_id: str, n: int = 10) -> List[Dict[str, Any]]:
         """

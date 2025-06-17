@@ -492,15 +492,17 @@ class FeatureEnhancedCF:
     
     def recommend_for_user(self, user_id: str, n: int = 10, exclude_known: bool = True) -> List[Tuple[str, float]]:
         """
-        Generate recommendations for a user with enhanced diversity and performance 
+        PERBAIKAN: Generate recommendations dengan score normalization yang ketat
         """
         # Check cache for performance
         cache_key = f"{user_id}_{n}_{exclude_known}"
         if cache_key in self._recommendation_cache:
-            # Check if cache is still valid (< 1 hour old)
             cache_time, cache_results = self._recommendation_cache[cache_key]
-            if time.time() - cache_time < 3600:  # 1 hour in seconds
-                return cache_results
+            if time.time() - cache_time < 3600:
+                # PERBAIKAN: Validasi dan clip score dari cache
+                validated_cache = [(item_id, min(1.0, max(0.0, score))) for item_id, score in cache_results]
+                validated_cache.sort(key=lambda x: x[1], reverse=True)
+                return validated_cache
         
         if self.model is None or self.item_similarity_matrix is None:
             logger.error("Model not trained or loaded")
@@ -518,11 +520,16 @@ class FeatureEnhancedCF:
         positive_indices = user_ratings.index[user_ratings > 0].tolist()
         positive_weights = user_ratings[positive_indices].values
         
-        # Get known items to exclude - do this once
+        # PERBAIKAN: Normalisasi weights untuk menghindari score explosion
+        if len(positive_weights) > 0:
+            max_weight = positive_weights.max()
+            if max_weight > 1.0:
+                positive_weights = positive_weights / max_weight
+        
+        # Get known items to exclude
         known_items = set(positive_indices) if exclude_known else set()
         
         # Prepare items for vectorized computation
-        # Only consider items not in known_items
         all_items = [item for item in self.user_item_matrix.columns if item not in known_items]
         if not all_items:
             logger.warning("No items available for recommendation after excluding known items")
@@ -531,47 +538,134 @@ class FeatureEnhancedCF:
         # Get similarity scores in a vectorized way
         item_scores = np.zeros(len(all_items))
         
-        # OPTIMIZATION: Pre-calculate all required indices
         try:
             rated_indices = [self._item_mapping[item] for item in positive_indices if item in self._item_mapping]
             candidate_indices = [self._item_mapping[item] for item in all_items if item in self._item_mapping]
             
-            # Use vectorized operations for similarity calculation
+            # PERBAIKAN: Clip similarity matrix values untuk memastikan [0,1]
+            clipped_similarity_matrix = np.clip(self.item_similarity_matrix, 0.0, 1.0)
+            
             for i, item_idx in enumerate(candidate_indices):
-                # Use numpy's vectorized operations
-                similarities = np.array([self.item_similarity_matrix[item_idx, rated_idx] for rated_idx in rated_indices])
+                similarities = np.array([clipped_similarity_matrix[item_idx, rated_idx] for rated_idx in rated_indices])
                 weights = np.array(positive_weights[:len(rated_indices)])
                 
-                # Weighted sum with normalization
                 if len(similarities) > 0 and weights.sum() > 0:
-                    item_scores[i] = np.sum(similarities * weights) / weights.sum()
+                    # PERBAIKAN: Gunakan weighted average dengan normalisasi yang ketat
+                    weighted_sim = np.sum(similarities * weights) / weights.sum()
+                    # Clip hasil untuk memastikan dalam range [0,1]
+                    item_scores[i] = np.clip(weighted_sim, 0.0, 1.0)
+            
         except Exception as e:
             logger.error(f"Error in similarity calculation: {e}")
+            # Fallback ke cold-start jika ada error
+            return self._get_cold_start_recommendations(n)
+        
+        # PERBAIKAN: Final validation dan normalisasi score
+        # Pastikan tidak ada NaN atau infinity
+        item_scores = np.nan_to_num(item_scores, nan=0.0, posinf=1.0, neginf=0.0)
+        
+        # Clip semua score ke range [0,1]
+        item_scores = np.clip(item_scores, 0.0, 1.0)
+        
+        # PERBAIKAN: Normalisasi ulang jika semua score 0 (edge case)
+        if np.max(item_scores) == 0:
+            logger.warning("All similarity scores are 0, using fallback scoring")
+            # Gunakan popularity-based scoring sebagai fallback
+            fallback_scores = self._get_fallback_scores(all_items)
+            item_scores = np.array(fallback_scores)
         
         # Create list of (item_id, score) tuples
         scores = list(zip(all_items, item_scores))
         
-        # Sort by score
+        # PERBAIKAN: Sort dengan validation tambahan
         scores.sort(key=lambda x: x[1], reverse=True)
         
-        # OPTIMIZATION: Get more candidates for diversity but limit to a reasonable number
+        # OPTIMIZATION: Get more candidates for diversity but limit to reasonable number
         candidate_size = min(n * 3, 100)
         top_candidates = scores[:candidate_size]
         
-        # Ensure category diversity with item metadata
-        if hasattr(self, 'projects_df') and 'primary_category' in self.projects_df.columns:
-            diversified_results = self._apply_diversity_with_metadata(top_candidates, n)
-            
-            # Store in cache
-            self._recommendation_cache[cache_key] = (time.time(), diversified_results)
-            
-            return diversified_results
+        # PERBAIKAN: Final score validation sebelum apply diversity
+        validated_candidates = []
+        for item_id, score in top_candidates:
+            validated_score = float(np.clip(score, 0.0, 1.0))
+            validated_candidates.append((item_id, validated_score))
         
-        # If no category/chain data available, just return top-n
-        return top_candidates[:n]
+        # Apply diversity dengan score yang sudah divalidasi
+        if hasattr(self, 'projects_df') and 'primary_category' in self.projects_df.columns:
+            diversified_results = self._apply_diversity_with_metadata(validated_candidates, n)
+            
+            # PERBAIKAN: Final validation setelah diversity
+            final_results = []
+            for item_id, score in diversified_results:
+                final_score = float(np.clip(score, 0.0, 1.0))
+                final_results.append((item_id, final_score))
+            
+            # Sort final results
+            final_results.sort(key=lambda x: x[1], reverse=True)
+            
+            # Store in cache dengan score yang sudah divalidasi
+            self._recommendation_cache[cache_key] = (time.time(), final_results)
+            
+            return final_results
+        
+        # Jika tidak ada diversity, return validated candidates
+        validated_candidates.sort(key=lambda x: x[1], reverse=True)
+        result = validated_candidates[:n]
+        
+        # Store in cache
+        self._recommendation_cache[cache_key] = (time.time(), result)
+        
+        return result
+    
+    def _get_fallback_scores(self, items: List[str]) -> List[float]:
+        """
+        PERBAIKAN: Generate fallback scores untuk edge cases
+        """
+        fallback_scores = []
+        
+        for item_id in items:
+            score = 0.5  # Default score
+            
+            # Coba gunakan popularity/trend jika tersedia
+            if hasattr(self, 'projects_df'):
+                item_data = self.projects_df[self.projects_df['id'] == item_id]
+                if not item_data.empty:
+                    item_row = item_data.iloc[0]
+                    
+                    # Gunakan trend_score jika ada
+                    if 'trend_score' in item_row:
+                        trend_score = item_row['trend_score']
+                        if pd.notna(trend_score) and trend_score > 0:
+                            score = min(1.0, trend_score / 100 * 0.8)  # Max 0.8 untuk fallback
+                    
+                    # Atau gunakan popularity_score
+                    elif 'popularity_score' in item_row:
+                        pop_score = item_row['popularity_score']  
+                        if pd.notna(pop_score) and pop_score > 0:
+                            score = min(1.0, pop_score / 100 * 0.7)  # Max 0.7 untuk fallback
+            
+            fallback_scores.append(score)
+        
+        return fallback_scores
     
     def _apply_diversity_with_metadata(self, candidates: List[Tuple[str, float]], n: int) -> List[Tuple[str, float]]:
-        """Apply diversity to recommendations using project metadata"""
+        """
+        PERBAIKAN: Apply diversity dengan score validation yang ketat
+        """
+        # PERBAIKAN: Validasi input candidates
+        validated_candidates = []
+        for item_id, score in candidates:
+            # Clip dan validate score
+            clean_score = float(np.clip(score, 0.0, 1.0))
+            if not np.isnan(clean_score) and not np.isinf(clean_score):
+                validated_candidates.append((item_id, clean_score))
+        
+        if len(validated_candidates) == 0:
+            logger.warning("No valid candidates for diversity application")
+            return []
+        
+        # Sort validated candidates  
+        validated_candidates.sort(key=lambda x: x[1], reverse=True)
         
         # OPTIMIZATION: Create item metadata lookup only once
         item_metadata = {}
@@ -599,19 +693,18 @@ class FeatureEnhancedCF:
                 chain = row.get('chain', 'unknown')
                 market_cap = row.get('market_cap', 0)
                 
-                # Store metadata
                 item_metadata[item_id] = {
                     'categories': categories,
                     'chain': chain,
                     'market_cap': market_cap
                 }
         
-        # OPTIMIZATION: Select top items unconditionally first
-        top_count = max(n // 5, 1)  # ~20% by pure score
-        result_items = [item for item, _ in candidates[:top_count]]
-        result_scores = [score for _, score in candidates[:top_count]]
+        # Select top items unconditionally first (20% by pure score)
+        top_count = max(n // 5, 1)
+        result_items = [item for item, _ in validated_candidates[:top_count]]
+        result_scores = [score for _, score in validated_candidates[:top_count]]
         
-        # Track selected categories and chains for diversity
+        # Track diversity
         category_counts = {}
         chain_counts = {}
         market_cap_tiers = {'high': 0, 'medium': 0, 'low': 0}
@@ -620,22 +713,20 @@ class FeatureEnhancedCF:
         high_cap_threshold = 1e9  # $1B
         medium_cap_threshold = 1e8  # $100M
         
-        # Initialize tracking
+        # Initialize tracking for selected items
         for item in result_items:
             if item in item_metadata:
                 meta = item_metadata[item]
-                categories = meta['categories']
-                chain = meta['chain']
-                market_cap = meta['market_cap']
                 
                 # Update category counts
-                for category in categories:
+                for category in meta['categories']:
                     category_counts[category] = category_counts.get(category, 0) + 1
                 
                 # Update chain counts
-                chain_counts[chain] = chain_counts.get(chain, 0) + 1
+                chain_counts[meta['chain']] = chain_counts.get(meta['chain'], 0) + 1
                 
                 # Update market cap tier counts
+                market_cap = meta['market_cap']
                 if market_cap >= high_cap_threshold:
                     market_cap_tiers['high'] += 1
                 elif market_cap >= medium_cap_threshold:
@@ -643,61 +734,54 @@ class FeatureEnhancedCF:
                 else:
                     market_cap_tiers['low'] += 1
         
-        # Diversity limits - more balanced for crypto
-        max_per_category = max(2, int(n * 0.3))  # Max 30% from any category
-        max_per_chain = max(3, int(n * 0.4))     # Max 40% from any chain
+        # Diversity limits
+        max_per_category = max(2, int(n * 0.3))
+        max_per_chain = max(3, int(n * 0.4))
         
-        # Desired distribution for market cap tiers
+        # Target market cap distribution
         target_market_cap_distribution = {
-            'high': int(n * 0.4),    # 40% high cap for stability
-            'medium': int(n * 0.4),  # 40% medium cap for growth
-            'low': int(n * 0.2)      # 20% low cap for speculation
+            'high': int(n * 0.4),
+            'medium': int(n * 0.4), 
+            'low': int(n * 0.2)
         }
         
-        # Remaining candidates
-        remaining = candidates[top_count:]
-        
-        # Calculate diversity adjustments for remaining items
+        # Remaining candidates with diversity adjustments
+        remaining = validated_candidates[top_count:]
         diversity_adjustments = []
         
         for item_id, score in remaining:
             if item_id in item_metadata:
                 meta = item_metadata[item_id]
-                categories = meta['categories']
-                chain = meta['chain']
-                market_cap = meta['market_cap']
+                total_adjustment = 0.0
                 
-                # Calculate category adjustment
-                category_adjustment = 0
+                # Category diversity adjustment
+                category_adjustment = 0.0
                 has_overrepresented_category = False
-                has_new_category = True
+                has_new_category = False
                 
-                for category in categories:
+                for category in meta['categories']:
                     cat_count = category_counts.get(category, 0)
-                    
                     if cat_count >= max_per_category:
-                        # Category overrepresented
                         has_overrepresented_category = True
                     elif cat_count == 0:
-                        # New category bonus
                         has_new_category = True
                 
                 if has_overrepresented_category:
-                    category_adjustment -= 0.3
+                    category_adjustment = -0.2
                 elif has_new_category:
-                    category_adjustment += 0.2
+                    category_adjustment = 0.15
                 
                 # Chain adjustment
-                chain_adjustment = 0
-                chain_count = chain_counts.get(chain, 0)
-                
+                chain_adjustment = 0.0
+                chain_count = chain_counts.get(meta['chain'], 0)
                 if chain_count >= max_per_chain:
-                    chain_adjustment -= 0.2
+                    chain_adjustment = -0.15
                 elif chain_count == 0:
-                    chain_adjustment += 0.1
+                    chain_adjustment = 0.1
                 
-                # Market cap adjustment based on tier targets
-                market_cap_adjustment = 0
+                # Market cap adjustment
+                market_cap_adjustment = 0.0
+                market_cap = meta['market_cap']
                 
                 if market_cap >= high_cap_threshold:
                     tier = 'high'
@@ -710,26 +794,25 @@ class FeatureEnhancedCF:
                 target_count = target_market_cap_distribution[tier]
                 
                 if current_count >= target_count:
-                    # This tier is overrepresented
-                    market_cap_adjustment -= 0.2
+                    market_cap_adjustment = -0.1
                 else:
-                    # This tier is underrepresented
                     fill_ratio = 1.0 - (current_count / target_count if target_count > 0 else 0)
-                    market_cap_adjustment += 0.2 * fill_ratio
+                    market_cap_adjustment = 0.1 * fill_ratio
                 
-                # Combine all adjustments
+                # Combine adjustments
                 total_adjustment = (
-                    category_adjustment * 0.6 +   # Categories most important
-                    chain_adjustment * 0.25 +     # Chain secondary importance
-                    market_cap_adjustment * 0.15  # Market cap tertiary importance
+                    category_adjustment * 0.6 +
+                    chain_adjustment * 0.25 +
+                    market_cap_adjustment * 0.15
                 )
                 
-                # Add to diversity adjustments
-                diversity_adjustments.append(
-                    (item_id, score, score + total_adjustment * 0.5)  # Apply half of adjustment for balance
-                )
+                # PERBAIKAN: Limit adjustment impact dan clip final score
+                adjusted_score = score + total_adjustment * 0.3  # Reduce adjustment impact
+                adjusted_score = np.clip(adjusted_score, 0.0, 1.0)
+                
+                diversity_adjustments.append((item_id, score, adjusted_score))
             else:
-                # No metadata, just use original score
+                # No metadata, use original score
                 diversity_adjustments.append((item_id, score, score))
         
         # Sort by adjusted score
@@ -740,29 +823,24 @@ class FeatureEnhancedCF:
             if len(result_items) >= n:
                 break
                 
-            # Skip if already selected
             if item_id in result_items:
                 continue
                 
-            # Add to results
+            # PERBAIKAN: Use original score for final result (not adjusted)
+            validated_score = float(np.clip(original_score, 0.0, 1.0))
             result_items.append(item_id)
-            result_scores.append(original_score)  # Use original score for consistency
+            result_scores.append(validated_score)
             
             # Update tracking
             if item_id in item_metadata:
                 meta = item_metadata[item_id]
-                categories = meta['categories']
-                chain = meta['chain']
-                market_cap = meta['market_cap']
                 
-                # Update category counts
-                for category in categories:
+                for category in meta['categories']:
                     category_counts[category] = category_counts.get(category, 0) + 1
                 
-                # Update chain counts
-                chain_counts[chain] = chain_counts.get(chain, 0) + 1
+                chain_counts[meta['chain']] = chain_counts.get(meta['chain'], 0) + 1
                 
-                # Update market cap tier counts
+                market_cap = meta['market_cap']
                 if market_cap >= high_cap_threshold:
                     market_cap_tiers['high'] += 1
                 elif market_cap >= medium_cap_threshold:
@@ -770,8 +848,16 @@ class FeatureEnhancedCF:
                 else:
                     market_cap_tiers['low'] += 1
         
-        # Build final result
-        result = list(zip(result_items, result_scores))
+        # PERBAIKAN: Build final result dengan validation ketat
+        result = []
+        for item_id, score in zip(result_items, result_scores):
+            final_score = float(np.clip(score, 0.0, 1.0))
+            if not np.isnan(final_score) and not np.isinf(final_score):
+                result.append((item_id, final_score))
+        
+        # Final sort
+        result.sort(key=lambda x: x[1], reverse=True)
+        
         return result
     
     def _get_cold_start_recommendations(self, n: int = 10) -> List[Tuple[str, float]]:

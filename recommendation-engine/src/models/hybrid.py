@@ -1059,25 +1059,40 @@ class HybridRecommender:
         
         return weight_stats
     
-    def get_ensemble_recommendations(self, fecf_recs: List[Tuple[str, float]], ncf_recs: List[Tuple[str, float]], fecf_weight: float = 0.5, ncf_weight: float = 0.5, user_id: Optional[str] = None, context: Optional[Dict] = None, ensemble_method: Optional[str] = None) -> List[Tuple[str, float]]:
+    def get_ensemble_recommendations(self, fecf_recs: List[Tuple[str, float]], ncf_recs: List[Tuple[str, float]], 
+                               fecf_weight: float = 0.5, ncf_weight: float = 0.5, user_id: Optional[str] = None, 
+                               context: Optional[Dict] = None, ensemble_method: Optional[str] = None) -> List[Tuple[str, float]]:
         """
-        Menggabungkan rekomendasi dengan selective ensemble strategy
+        PERBAIKAN: Menggabungkan rekomendasi dengan input validation yang ketat
         """
         if not fecf_recs and not ncf_recs:
             return []
+        
+        # PERBAIKAN: Validasi input sebelum processing
+        def validate_recommendations(recs, model_name):
+            validated = []
+            for item_id, score in recs:
+                clean_score = float(np.clip(score, 0.0, 1.0))
+                if not np.isnan(clean_score) and not np.isinf(clean_score):
+                    validated.append((item_id, clean_score))
+                else:
+                    logger.warning(f"Invalid score {score} for item {item_id} from {model_name}")
+            
+            validated.sort(key=lambda x: x[1], reverse=True)
+            return validated
+        
+        # Validate inputs
+        fecf_recs = validate_recommendations(fecf_recs, "FECF")
+        ncf_recs = validate_recommendations(ncf_recs, "NCF")
             
         # Quick return if only one model's recommendations are available
         if not fecf_recs:
-            # Pastikan NCF results terurut dan score <= 1.0
-            ncf_normalized = [(item_id, min(1.0, score)) for item_id, score in ncf_recs]
-            ncf_normalized.sort(key=lambda x: x[1], reverse=True)
-            return ncf_normalized
+            logger.debug("Using NCF only - FECF recommendations empty")
+            return ncf_recs
         if not ncf_recs:
-            # Pastikan FECF results terurut dan score <= 1.0  
-            fecf_normalized = [(item_id, min(1.0, score)) for item_id, score in fecf_recs]
-            fecf_normalized.sort(key=lambda x: x[1], reverse=True)
-            return fecf_normalized
-            
+            logger.debug("Using FECF only - NCF recommendations empty")
+            return fecf_recs
+                
         ensemble_method = ensemble_method or self.params.get('ensemble_method', 'selective')
         
         # PERBAIKAN: Implementasi selective ensemble dengan normalisasi yang konsisten
@@ -1092,49 +1107,43 @@ class HybridRecommender:
             ncf_mean = np.mean(ncf_scores) if len(ncf_scores) > 0 else 0
             ncf_std = np.std(ncf_scores) if len(ncf_scores) > 1 else 0
             
-            # NCF confidence check - jika scores terlalu rendah atau terlalu uniform, ignore NCF
-            ncf_confidence_threshold = 0.3  # Turunkan threshold untuk lebih fleksibel
-            ncf_is_confident = ncf_mean > ncf_confidence_threshold and ncf_std > 0.05
+            # NCF confidence check dengan threshold yang disesuaikan
+            ncf_confidence_threshold = 0.2  # Lowered threshold untuk lebih fleksibel
+            ncf_is_confident = ncf_mean > ncf_confidence_threshold and ncf_std > 0.02
             
             if not ncf_is_confident:
                 logger.debug(f"NCF confidence low (mean={ncf_mean:.3f}, std={ncf_std:.3f}), using FECF only")
-                # Just use FECF recommendations dengan normalisasi
-                fecf_normalized = [(item_id, min(1.0, score)) for item_id, score in fecf_recs]
-                fecf_normalized.sort(key=lambda x: x[1], reverse=True)
-                return fecf_normalized
+                return fecf_recs
             
-            # PERBAIKAN: Robust score normalization 
-            # Gunakan min-max normalization dengan clipping
+            # PERBAIKAN: Robust score normalization dengan percentile-based approach
             def robust_normalize(scores):
-                """Normalisasi robust dengan clipping"""
                 if len(scores) == 0:
                     return {}
                 
                 scores_array = np.array(scores)
                 
-                # Use robust percentiles instead of min/max to handle outliers
-                p5 = np.percentile(scores_array, 5)
-                p95 = np.percentile(scores_array, 95)
+                # Use IQR untuk robust normalization
+                q25 = np.percentile(scores_array, 25)
+                q75 = np.percentile(scores_array, 75)
                 
-                # Avoid division by zero
-                if p95 - p5 < 1e-6:
-                    # All scores are very similar, use mean
-                    mean_score = np.mean(scores_array)
-                    return {i: min(0.95, max(0.05, mean_score)) for i in range(len(scores))}
+                if q75 - q25 < 1e-6:
+                    # Semua scores hampir sama, gunakan nilai tengah
+                    median_score = np.median(scores_array)
+                    return {i: np.clip(median_score, 0.05, 0.95) for i in range(len(scores))}
                 
-                # Normalize to [0.05, 0.95] range to avoid extreme values
-                normalized = 0.05 + 0.9 * (scores_array - p5) / (p95 - p5)
+                # Normalize menggunakan IQR dengan range [0.05, 0.95]
+                normalized = 0.05 + 0.9 * (scores_array - q25) / (q75 - q25)
                 
-                # Clip to ensure bounds
+                # Clip ke bounds yang aman
                 normalized = np.clip(normalized, 0.05, 0.95)
                 
-                return {i: normalized[i] for i in range(len(scores))}
+                return {i: float(normalized[i]) for i in range(len(scores))}
             
             # Normalize both score arrays
             fecf_norm_dict = robust_normalize([score for _, score in fecf_recs])
             ncf_norm_dict = robust_normalize([score for _, score in ncf_recs])
             
-            # Create score dictionaries with normalized scores
+            # Create score dictionaries dengan normalized scores
             fecf_dict = {}
             ncf_dict = {}
             
@@ -1147,61 +1156,72 @@ class HybridRecommender:
             # Get all unique items
             all_items = set(fecf_dict.keys()) | set(ncf_dict.keys())
             
-            # Combine with selective strategy
+            # Combine dengan selective strategy
             results = {}
             
             for item in all_items:
                 fecf_score = fecf_dict.get(item, 0)
                 ncf_score = ncf_dict.get(item, 0)
                 
-                # PERBAIKAN: Selective combination yang lebih hati-hati dengan bounds
                 if item in fecf_dict and item in ncf_dict:
-                    # Both models recommend
+                    # Both models recommend - weight by agreement
                     score_diff = abs(fecf_score - ncf_score)
                     
-                    if score_diff < 0.15:  # Models agree (threshold dikurangi)
-                        # Use weighted average dengan agreement bonus yang terkontrol
+                    if score_diff < 0.1:  # Models agree - reduced threshold
                         base_score = fecf_score * fecf_weight + ncf_score * ncf_weight
-                        # PERBAIKAN: Agreement bonus maksimal 5% dan ensure <= 1.0
-                        agreement_bonus = min(0.05, (0.15 - score_diff) * 0.3)
+                        agreement_bonus = min(0.03, (0.1 - score_diff) * 0.3)  # Reduced bonus
                         combined_score = min(0.95, base_score + agreement_bonus)
                     else:
-                        # Models disagree - trust FECF more due to better cold-start performance
+                        # Models disagree - favor FECF dengan weight yang disesuaikan
                         if fecf_score > ncf_score:
-                            combined_score = fecf_score * 0.85 + ncf_score * 0.15
+                            combined_score = fecf_score * 0.75 + ncf_score * 0.25
                         else:
-                            # NCF ranks higher - be cautious but fair
-                            combined_score = fecf_score * 0.65 + ncf_score * 0.35
+                            combined_score = fecf_score * 0.6 + ncf_score * 0.4
                             
-                    results[item] = min(0.95, combined_score)  # Ensure max 0.95
+                    results[item] = min(0.95, combined_score)
                     
                 elif item in fecf_dict:
                     # Only FECF recommends - slight penalty
-                    results[item] = min(0.90, fecf_score * 0.95)
+                    results[item] = min(0.90, fecf_score * 0.9)
                     
                 else:
-                    # Only NCF recommends - larger penalty due to lower confidence
-                    results[item] = min(0.85, ncf_score * 0.8)
+                    # Only NCF recommends - larger penalty
+                    results[item] = min(0.85, ncf_score * 0.75)
             
-            # PERBAIKAN: Convert to list dan pastikan sorting benar
-            combined_recs = [(item, score) for item, score in results.items()]
+            # PERBAIKAN: Convert to list dan ensure sorting
+            combined_recs = []
+            for item, score in results.items():
+                clean_score = float(np.clip(score, 0.0, 1.0))
+                if not np.isnan(clean_score) and not np.isinf(clean_score):
+                    combined_recs.append((item, clean_score))
             
-            # CRITICAL: Sort by score descending - ini yang paling penting!
+            # CRITICAL: Sort by score descending
             combined_recs.sort(key=lambda x: x[1], reverse=True)
-            
-            # DEBUGGING: Log untuk memastikan sorting benar
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"Ensemble results sorted: {[(item, f'{score:.4f}') for item, score in combined_recs[:5]]}")
             
             return combined_recs
         
         else:
-            # Fallback ke strategi ensemble yang lebih sederhana
+            # Fallback ke weighted average dengan validation
             try:
-                return self._apply_ensemble_fallback_strategies(fecf_recs, ncf_recs, fecf_weight, ncf_weight)
-            except Exception as e:
-                logger.warning(f"Fallback ensemble strategy failed: {str(e)}, using simple weighted average")
                 return self._weighted_average_ensemble(fecf_recs, ncf_recs, fecf_weight, ncf_weight)
+            except Exception as e:
+                logger.warning(f"Ensemble fallback failed: {str(e)}, using simple combination")
+                
+                # Last resort - simple combination
+                all_recs = fecf_recs + ncf_recs
+                item_scores = {}
+                
+                for item_id, score in all_recs:
+                    clean_score = float(np.clip(score, 0.0, 1.0))
+                    if item_id in item_scores:
+                        # Average multiple scores
+                        item_scores[item_id] = (item_scores[item_id] + clean_score) / 2
+                    else:
+                        item_scores[item_id] = clean_score
+                
+                result = [(item_id, score) for item_id, score in item_scores.items()]
+                result.sort(key=lambda x: x[1], reverse=True)
+                return result
         
     def _weighted_average_ensemble(self, fecf_recs: List[Tuple[str, float]], ncf_recs: List[Tuple[str, float]], fecf_weight: float = 0.5, ncf_weight: float = 0.5) -> List[Tuple[str, float]]:
         """
@@ -1658,13 +1678,18 @@ class HybridRecommender:
         if hasattr(self, '_recommendation_cache') and cache_key in self._recommendation_cache:
             cache_entry = self._recommendation_cache[cache_key]
             cache_time = cache_entry.get('time', 0)
-            # Use cache if it's less than 15 minutes old
-            if time.time() - cache_time < 900:  # 15 minutes in seconds
+            if time.time() - cache_time < 900:  # 15 minutes
                 cached_results = cache_entry['recommendations']
-                # PERBAIKAN: Pastikan cached results juga terurut
-                cached_results.sort(key=lambda x: x[1], reverse=True)
-                return cached_results
-        
+                # PERBAIKAN: Validasi cached results
+                validated_cache = []
+                for item_id, score in cached_results:
+                    clean_score = float(np.clip(score, 0.0, 1.0))
+                    if not np.isnan(clean_score) and not np.isinf(clean_score):
+                        validated_cache.append((item_id, clean_score))
+                
+                validated_cache.sort(key=lambda x: x[1], reverse=True)
+                return validated_cache
+
         # Check if this is a cold-start user
         is_cold_start = True
         if self.user_item_matrix is not None:
@@ -1673,22 +1698,27 @@ class HybridRecommender:
         # Handle cold-start case
         if is_cold_start:
             cold_start_recs = self._get_cold_start_recommendations(user_id, n)
-            # PERBAIKAN: Pastikan cold-start results terurut
-            cold_start_recs.sort(key=lambda x: x[1], reverse=True)
-            return cold_start_recs
+            # PERBAIKAN: Validasi cold-start results
+            validated_cold_start = []
+            for item_id, score in cold_start_recs:
+                clean_score = float(np.clip(score, 0.0, 1.0))
+                if not np.isnan(clean_score) and not np.isinf(clean_score):
+                    validated_cold_start.append((item_id, clean_score))
+            
+            validated_cold_start.sort(key=lambda x: x[1], reverse=True)
+            return validated_cold_start
             
         # Get effective weights
         fecf_weight, ncf_weight, diversity_weight = self.get_effective_weights(user_id)
 
-        # Log weights yang digunakan untuk debugging
+        # Log weights
         logger.debug(f"Using weights for user {user_id}: FECF={fecf_weight:.3f}, NCF={ncf_weight:.3f}")
         
-        # Can't do anything if neither model is available
         if fecf_weight == 0 and ncf_weight == 0:
             logger.error("No models available for recommendations")
             return []
             
-        # Determine number of candidates to get from each model
+        # Determine number of candidates
         n_candidates = min(n * self.params.get('n_candidates_factor', 3), 150)
         
         # Get FECF recommendations if available
@@ -1701,20 +1731,33 @@ class HybridRecommender:
                     n=n_candidates,
                     exclude_known=exclude_known
                 )
-                # PERBAIKAN: Pastikan FECF results terurut dari awal
+                
+                # PERBAIKAN: Validasi FECF results
+                validated_fecf = []
+                for item_id, score in fecf_recs:
+                    clean_score = float(np.clip(score, 0.0, 1.0))
+                    if not np.isnan(clean_score) and not np.isinf(clean_score):
+                        validated_fecf.append((item_id, clean_score))
+                
+                fecf_recs = validated_fecf
                 fecf_recs.sort(key=lambda x: x[1], reverse=True)
-                logger.debug(f"FECF recommendations for {user_id} took {time.time() - start_time:.3f}s")
+                
+                logger.debug(f"FECF recommendations took {time.time() - start_time:.3f}s")
             except Exception as e:
                 logger.warning(f"Error getting FECF recommendations: {e}")
-                # Adjust weights if FECF fails
                 if ncf_weight > 0:
                     ncf_weight = 1.0
                     fecf_weight = 0.0
                 else:
-                    # Both models failed, fallback to cold-start
                     fallback_recs = self._get_cold_start_recommendations(user_id, n)
-                    fallback_recs.sort(key=lambda x: x[1], reverse=True)
-                    return fallback_recs
+                    validated_fallback = []
+                    for item_id, score in fallback_recs:
+                        clean_score = float(np.clip(score, 0.0, 1.0))
+                        if not np.isnan(clean_score) and not np.isinf(clean_score):
+                            validated_fallback.append((item_id, clean_score))
+                    
+                    validated_fallback.sort(key=lambda x: x[1], reverse=True)
+                    return validated_fallback
         
         # Get NCF recommendations if available
         ncf_recs = []
@@ -1726,31 +1769,44 @@ class HybridRecommender:
                     n=n_candidates,
                     exclude_known=exclude_known
                 )
-                # PERBAIKAN: Pastikan NCF results terurut dari awal
+                
+                # PERBAIKAN: Validasi NCF results
+                validated_ncf = []
+                for item_id, score in ncf_recs:
+                    clean_score = float(np.clip(score, 0.0, 1.0))
+                    if not np.isnan(clean_score) and not np.isinf(clean_score):
+                        validated_ncf.append((item_id, clean_score))
+                
+                ncf_recs = validated_ncf
                 ncf_recs.sort(key=lambda x: x[1], reverse=True)
-                logger.debug(f"NCF recommendations for {user_id} took {time.time() - start_time:.3f}s")
+                
+                logger.debug(f"NCF recommendations took {time.time() - start_time:.3f}s")
             except Exception as e:
                 logger.warning(f"Error getting NCF recommendations: {e}")
-                # Adjust weights if NCF fails
                 if fecf_weight > 0:
                     fecf_weight = 1.0
                     ncf_weight = 0.0
                 else:
-                    # Both models failed, fallback to cold-start
                     fallback_recs = self._get_cold_start_recommendations(user_id, n)
-                    fallback_recs.sort(key=lambda x: x[1], reverse=True)
-                    return fallback_recs
+                    validated_fallback = []
+                    for item_id, score in fallback_recs:
+                        clean_score = float(np.clip(score, 0.0, 1.0))
+                        if not np.isnan(clean_score) and not np.isinf(clean_score):
+                            validated_fallback.append((item_id, clean_score))
+                    
+                    validated_fallback.sort(key=lambda x: x[1], reverse=True)
+                    return validated_fallback
         
-        # PERBAIKAN: Validasi input sebelum ensemble
+        # PERBAIKAN: Log input statistics untuk debugging
         if fecf_recs:
-            # Clip extreme scores
-            fecf_recs = [(item_id, min(1.0, max(0.0, score))) for item_id, score in fecf_recs]
-            logger.debug(f"FECF top 3 scores: {[(item, f'{score:.4f}') for item, score in fecf_recs[:3]]}")
+            fecf_scores = [score for _, score in fecf_recs]
+            logger.debug(f"FECF scores - min: {min(fecf_scores):.4f}, max: {max(fecf_scores):.4f}, "
+                        f"mean: {np.mean(fecf_scores):.4f}")
         
         if ncf_recs:
-            # Clip extreme scores 
-            ncf_recs = [(item_id, min(1.0, max(0.0, score))) for item_id, score in ncf_recs]
-            logger.debug(f"NCF top 3 scores: {[(item, f'{score:.4f}') for item, score in ncf_recs[:3]]}")
+            ncf_scores = [score for _, score in ncf_recs]
+            logger.debug(f"NCF scores - min: {min(ncf_scores):.4f}, max: {max(ncf_scores):.4f}, "
+                        f"mean: {np.mean(ncf_scores):.4f}")
         
         # Use enhanced ensemble to combine recommendations
         start_time = time.time()
@@ -1762,17 +1818,22 @@ class HybridRecommender:
             user_id=user_id,
             ensemble_method=self.params.get('ensemble_method', 'selective')
         )
-        logger.debug(f"Ensemble recommendations for {user_id} took {time.time() - start_time:.3f}s")
+        logger.debug(f"Ensemble took {time.time() - start_time:.3f}s")
         
         # PERBAIKAN: Validasi hasil ensemble
         if combined_recs:
-            # Pastikan tidak ada score > 1.0
-            combined_recs = [(item_id, min(0.95, score)) for item_id, score in combined_recs]
+            validated_combined = []
+            for item_id, score in combined_recs:
+                clean_score = float(np.clip(score, 0.0, 1.0))
+                if not np.isnan(clean_score) and not np.isinf(clean_score):
+                    validated_combined.append((item_id, clean_score))
             
-            # CRITICAL: Pastikan hasil terurut
+            combined_recs = validated_combined
             combined_recs.sort(key=lambda x: x[1], reverse=True)
             
-            logger.debug(f"Combined top 3 scores: {[(item, f'{score:.4f}') for item, score in combined_recs[:3]]}")
+            combined_scores = [score for _, score in combined_recs]
+            logger.debug(f"Combined scores - min: {min(combined_scores):.4f}, max: {max(combined_scores):.4f}, "
+                        f"mean: {np.mean(combined_scores):.4f}")
         
         # Apply diversity
         start_time = time.time()
@@ -1781,23 +1842,29 @@ class HybridRecommender:
             n=n, 
             diversity_weight=diversity_weight
         )
-        logger.debug(f"Diversity application for {user_id} took {time.time() - start_time:.3f}s")
+        logger.debug(f"Diversity application took {time.time() - start_time:.3f}s")
         
         # PERBAIKAN: Final validation dan sorting
         if diversified_recs:
-            # Pastikan semua score valid
-            diversified_recs = [(item_id, min(0.95, max(0.05, score))) for item_id, score in diversified_recs]
+            final_results = []
+            for item_id, score in diversified_recs:
+                clean_score = float(np.clip(score, 0.0, 1.0))
+                if not np.isnan(clean_score) and not np.isinf(clean_score):
+                    final_results.append((item_id, clean_score))
             
-            # CRITICAL: Final sorting untuk memastikan urutan benar
-            diversified_recs.sort(key=lambda x: x[1], reverse=True)
+            final_results.sort(key=lambda x: x[1], reverse=True)
             
-            logger.debug(f"Final top 3 scores: {[(item, f'{score:.4f}') for item, score in diversified_recs[:3]]}")
+            final_scores = [score for _, score in final_results]
+            logger.debug(f"Final scores - min: {min(final_scores):.4f}, max: {max(final_scores):.4f}, "
+                        f"mean: {np.mean(final_scores):.4f}")
+        else:
+            final_results = []
         
         # Store in cache
         if not hasattr(self, '_recommendation_cache'):
             self._recommendation_cache = {}
             
-        final_result = diversified_recs[:n]
+        final_result = final_results[:n]
         self._recommendation_cache[cache_key] = {
             'recommendations': final_result,
             'time': time.time()
