@@ -63,12 +63,16 @@
                         @csrf
                         <input type="hidden" name="project_id" value="{{ $project->id }}">
                         <button type="submit" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
-                            <i class="fas fa-heart mr-1"></i> Tambah ke Favorit
+                            <i class="fas fa-heart mr-1"></i> Sukai
                         </button>
                     </form>
-                    <a href="#" class="clay-button clay-button-success py-1.5 px-3 text-sm">
-                        <i class="fas fa-wallet mr-1"></i> Tambah ke Portfolio
-                    </a>
+                    <form method="POST" action="{{ route('panel.recommendations.add-portfolio') }}" class="inline">
+                        @csrf
+                        <input type="hidden" name="project_id" value="{{ $project->id }}">
+                        <button type="submit" class="clay-button clay-button-success py-1.5 px-3 text-sm">
+                            <i class="fas fa-wallet mr-1"></i> Sukai
+                        </button>
+                    </form>
                     @else
                     <a href="#" class="clay-button clay-button-secondary py-1.5 px-3 text-sm disabled" onclick="alert('Proyek harus ada di database lokal untuk ditambahkan ke favorit.'); return false;">
                         <i class="fas fa-heart mr-1"></i> Tambah ke Favorit

@@ -52,6 +52,7 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         Route::get('/chains', [RecommendationController::class, 'chains'])->name('panel.recommendations.chains');
         Route::get('/project/{id}', [RecommendationController::class, 'projectDetail'])->name('panel.recommendations.project');
         Route::post('/favorites/add', [RecommendationController::class, 'addToFavorites'])->name('panel.recommendations.add-favorite');
+        Route::post('/portfolio/add', [RecommendationController::class, 'addToPortfolio'])->name('panel.recommendations.add-portfolio');
     });
 
     // Technical Analysis dengan periode dinamis

@@ -401,7 +401,7 @@ class RecommendationController extends Controller
                 ->where('created_at', '>=', now()->subMinutes(5))
                 ->exists();
 
-            if (! $recentView) {
+            if (!$recentView) {
                 $this->recordInteraction($userId, $projectId, 'view');
             }
         }
@@ -448,13 +448,37 @@ class RecommendationController extends Controller
     }
 
     /**
+     * Tambahkan proyek ke portfolio - INTERAKSI PENTING UNTUK SISTEM REKOMENDASI
+     */
+    public function addToPortfolio(Request $request)
+    {
+        $user = Auth::user();
+        $projectId = $request->input('project_id');
+
+        if (!$projectId) {
+            return redirect()->back()->with('error', 'ID proyek diperlukan');
+        }
+
+        // PENTING: Catat interaksi portfolio_add karena ini penting untuk sistem rekomendasi
+        $interaction = $this->recordInteraction($user->user_id, $projectId, 'portfolio_add');
+
+        if ($interaction) {
+            // Redirect ke halaman portfolio untuk menambahkan detail transaksi
+            return redirect()->route('panel.portfolio.transactions', ['add_project' => $projectId])
+                ->with('success', 'Interaksi proyek berhasil direkam & ditambahkan. Silakan tambahkan detail transaksi.');
+        } else {
+            return redirect()->back()->with('error', 'Gagal menambahkan proyek.');
+        }
+    }
+
+    /**
      * Menambahkan interaksi pengguna - FUNGSI CORE UNTUK REKOMENDASI
      * DIOPTIMALKAN: Menambahkan validasi proyek dan pengelolaan foreign key error
      */
     private function recordInteraction($userId, $projectId, $interactionType, $weight = 1)
     {
         // Validasi tipe interaksi
-        if (! in_array($interactionType, Interaction::$validTypes)) {
+        if (!in_array($interactionType, Interaction::$validTypes)) {
             Log::warning("Tipe interaksi tidak valid: {$interactionType}");
             return null;
         }
@@ -464,51 +488,23 @@ class RecommendationController extends Controller
             return Project::where('id', $projectId)->exists();
         });
 
-        if (! $projectExists) {
+        if (!$projectExists) {
             Log::warning("Tidak dapat mencatat interaksi '{$interactionType}' untuk proyek '{$projectId}': Proyek tidak ditemukan di database");
             return null;
         }
 
         try {
-            // Cek duplikasi untuk mencegah double entry
-            $existingInteraction = Interaction::where('user_id', $userId)
-                ->where('project_id', $projectId)
-                ->where('interaction_type', $interactionType)
-                ->where('created_at', '>=', now()->subSeconds(5))
-                ->first();
-
-            if ($existingInteraction) {
-                Log::info("Interaction sudah ada, skip duplikasi: {$userId}:{$projectId}:{$interactionType}");
-                return $existingInteraction;
-            }
-
-            // Catat interaksi di database lokal
-            $interaction = Interaction::create([
-                'user_id'          => $userId,
-                'project_id'       => $projectId,
-                'interaction_type' => $interactionType,
-                'weight'           => $weight,
-                'context'          => [
-                    'source'    => 'web',
+            // PERBAIKAN: Gunakan method createInteraction dengan built-in duplicate prevention
+            $interaction = Interaction::createInteraction(
+                $userId,
+                $projectId,
+                $interactionType,
+                $weight,
+                [
+                    'source' => 'web',
                     'timestamp' => now()->timestamp,
-                ],
-            ]);
-
-            // DIOPTIMALKAN: Kirim interaksi ke API dengan penanganan error yang lebih baik
-            try {
-                Http::timeout(2)->post("{$this->apiUrl}/interactions/record", [
-                    'user_id'          => $userId,
-                    'project_id'       => $projectId,
-                    'interaction_type' => $interactionType,
-                    'weight'           => $weight,
-                    'context'          => [
-                        'source'    => 'web',
-                        'timestamp' => now()->timestamp,
-                    ],
-                ]);
-            } catch (\Exception $e) {
-                Log::error("Gagal mengirim interaksi ke API: " . $e->getMessage());
-            }
+                ]
+            );
 
             // DIOPTIMALKAN: Hapus caches terkait rekomendasi
             $this->clearUserRecommendationCaches($userId);
@@ -829,7 +825,7 @@ class RecommendationController extends Controller
      */
     private function getPopularProjects($perPage = 20, $page = 1)
     {
-        $cacheKey   = "popular_projects_{$perPage}_page_{$page}";
+        $cacheKey = "popular_projects_{$perPage}_page_{$page}";
         $cachedData = Cache::get($cacheKey);
 
         if ($cachedData) {
@@ -837,16 +833,25 @@ class RecommendationController extends Controller
         }
 
         try {
+            // PERBAIKAN: Pastikan API mengurutkan berdasarkan popularity_score
             $response = Http::timeout(2)->get("{$this->apiUrl}/recommend/popular", [
                 'limit' => 100, // Ambil data lebih banyak untuk pagination client-side
+                'sort' => 'popularity_score', // TAMBAHKAN: Parameter sort
+                'order' => 'desc' // TAMBAHKAN: Parameter order
             ])->json();
 
             // Jika response valid dan berbentuk array
-            if (! empty($response) && is_array($response)) {
+            if (!empty($response) && is_array($response)) {
+                // PERBAIKAN: Pastikan data diurutkan berdasarkan popularity_score
+                usort($response, function($a, $b) {
+                    $scoreA = $a['popularity_score'] ?? 0;
+                    $scoreB = $b['popularity_score'] ?? 0;
+                    return $scoreB <=> $scoreA; // Descending order
+                });
+
                 // PERBAIKAN: Implementasi pagination yang benar
-                // Jika API tidak support pagination, kita lakukan di sisi Laravel
                 $totalItems = count($response);
-                $items      = array_slice($response, ($page - 1) * $perPage, $perPage);
+                $items = array_slice($response, ($page - 1) * $perPage, $perPage);
 
                 // Normalkan data untuk memastikan konsistensi fields
                 $normalizedItems = $this->normalizeRecommendationData($items);
@@ -865,8 +870,8 @@ class RecommendationController extends Controller
                 return $paginator;
             }
 
-            // Fallback ke database
-            $projects = Project::orderBy('popularity_score', 'desc')
+            // Fallback ke database dengan pengurutan yang benar
+            $projects = Project::orderBy('popularity_score', 'desc') // PERBAIKAN: Pastikan DESC
                 ->paginate($perPage, ['*'], 'page', $page);
 
             // Cache 30 menit untuk fallback
@@ -875,7 +880,8 @@ class RecommendationController extends Controller
         } catch (\Exception $e) {
             Log::error("Gagal mendapatkan proyek populer: " . $e->getMessage());
 
-            return Project::orderBy('popularity_score', 'desc')
+            // Fallback ke database dengan pagination dan pengurutan yang benar
+            return Project::orderBy('popularity_score', 'desc') // PERBAIKAN: Pastikan DESC
                 ->paginate($perPage, ['*'], 'page', $page);
         }
     }

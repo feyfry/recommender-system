@@ -1,15 +1,20 @@
 <?php
 namespace App\Models;
 
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Http;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class Interaction extends Model
 {
     use HasFactory;
+
+    /**
+     * Flag untuk mencegah duplicate call ke API
+     */
+    private $apiCallSent = false;
 
     /**
      * Atribut yang dapat diisi secara massal.
@@ -43,9 +48,7 @@ class Interaction extends Model
     public static $validTypes = [
         'view',
         'favorite',
-        'portfolio_add',
-        'research',
-        'click',
+        'portfolio_add'
     ];
 
     /**
@@ -130,25 +133,28 @@ class Interaction extends Model
     }
 
     /**
-     * Override method save untuk mengirim interaksi ke engine rekomendasi
+     * PERBAIKAN: Override method save dengan duplicate prevention
      */
     public function save(array $options = [])
     {
         // PERBAIKAN: Cek duplikasi sebelum menyimpan
-        if (!$this->exists && $this->isDuplicate()) {
+        if (! $this->exists && $this->isDuplicate()) {
             Log::info("Interaction duplikat terdeteksi, skip: {$this->user_id}:{$this->project_id}:{$this->interaction_type}");
             return false;
         }
 
         $result = parent::save($options);
 
-        // Kirim ke engine rekomendasi setelah disimpan di database
-        if ($result && !$this->wasRecentlyCreated) {
-            // Hanya kirim ke engine untuk interaksi yang baru dibuat
+        // PERBAIKAN: Kirim ke engine rekomendasi hanya sekali dan hanya untuk record baru
+        if ($result && $this->wasRecentlyCreated && ! $this->apiCallSent) {
+            $this->apiCallSent = true; // Set flag untuk mencegah duplicate call
+
             try {
                 $this->sendToRecommendationEngine();
+                Log::info("Interaction berhasil dikirim ke engine: {$this->user_id}:{$this->project_id}:{$this->interaction_type}");
             } catch (\Exception $e) {
                 Log::error("Gagal mengirim interaksi ke engine rekomendasi: " . $e->getMessage());
+                $this->apiCallSent = false; // Reset flag jika gagal
             }
         }
 
@@ -156,15 +162,44 @@ class Interaction extends Model
     }
 
     /**
+     * PERBAIKAN: Method create static dengan duplicate check yang lebih robust
+     */
+    public static function createInteraction($userId, $projectId, $interactionType, $weight = 1, $context = null)
+    {
+        // Cek duplikasi dalam rentang waktu yang lebih ketat (30 detik)
+        $existingInteraction = static::where('user_id', $userId)
+            ->where('project_id', $projectId)
+            ->where('interaction_type', $interactionType)
+            ->where('created_at', '>=', now()->subSeconds(30))
+            ->first();
+
+        if ($existingInteraction) {
+            Log::info("Duplicate interaction prevented: {$userId}:{$projectId}:{$interactionType}");
+            return $existingInteraction;
+        }
+
+        return static::create([
+            'user_id'          => $userId,
+            'project_id'       => $projectId,
+            'interaction_type' => $interactionType,
+            'weight'           => $weight,
+            'context'          => $context ?? [
+                'source'    => 'web',
+                'timestamp' => now()->timestamp,
+            ],
+        ]);
+    }
+
+    /**
      * Cek apakah interaksi ini duplikat
      */
     protected function isDuplicate()
     {
-        // Cek interaksi serupa dalam 60 detik terakhir
+        // PERBAIKAN: Cek interaksi serupa dalam 30 detik terakhir (lebih ketat)
         return static::where('user_id', $this->user_id)
             ->where('project_id', $this->project_id)
             ->where('interaction_type', $this->interaction_type)
-            ->where('created_at', '>=', now()->subSeconds(60))
+            ->where('created_at', '>=', now()->subSeconds(30))
             ->exists();
     }
 
@@ -178,22 +213,28 @@ class Interaction extends Model
         try {
             // Siapkan data untuk dikirim
             $data = [
-                'user_id' => $this->user_id,
-                'project_id' => $this->project_id,
+                'user_id'          => $this->user_id,
+                'project_id'       => $this->project_id,
                 'interaction_type' => $this->interaction_type,
-                'weight' => $this->weight,
-                'context' => $this->context,
-                'timestamp' => $this->created_at->toIso8601String(), // Format ISO8601 dengan timezone
+                'weight'           => $this->weight,
+                'context'          => $this->context,
+                'timestamp'        => $this->created_at->toIso8601String(),
             ];
 
-            // PERBAIKAN: Tambahkan header untuk mencegah duplikasi di sisi API
+            // PERBAIKAN: Tambahkan unique identifier untuk mencegah duplicate processing di API
+            $uniqueId = md5("{$this->user_id}:{$this->project_id}:{$this->interaction_type}:{$this->created_at->timestamp}");
+
+            Log::info("Mengirim interaksi ke engine: {$uniqueId}", $data);
+
             $response = Http::timeout(2)
                 ->withHeaders([
-                    'X-Interaction-ID' => md5("{$this->user_id}:{$this->project_id}:{$this->interaction_type}:{$this->created_at->timestamp}")
+                    'X-Interaction-ID' => $uniqueId,
+                    'X-Source'         => 'Laravel-App',
                 ])
                 ->post("{$apiUrl}/interactions/record", $data);
 
             if ($response->successful()) {
+                Log::info("Interaction berhasil dikirim ke engine rekomendasi: {$uniqueId}");
                 return true;
             } else {
                 Log::warning("Gagal mengirim interaksi ke engine: " . $response->body());

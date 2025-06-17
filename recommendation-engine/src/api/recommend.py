@@ -684,11 +684,21 @@ async def get_trending_projects(
 @router.get("/popular", response_model=List[ProjectResponse])
 async def get_popular_projects(
     limit: int = Query(10, ge=1, le=100),
-    model_type: str = Query("fecf", enum=["fecf", "ncf", "hybrid"])
+    model_type: str = Query("fecf", enum=["fecf", "ncf", "hybrid"]),
+    sort: str = Query("popularity_score", enum=["popularity_score", "market_cap", "trend_score"]),
+    order: str = Query("desc", enum=["desc", "asc"])
 ):
     try:
         model = get_model(model_type)
         popular = model.get_popular_projects(n=limit)
+        
+        # PERBAIKAN: Pastikan data diurutkan berdasarkan parameter yang diminta
+        if sort == "popularity_score":
+            popular = sorted(popular, key=lambda x: x.get('popularity_score', 0), reverse=(order == "desc"))
+        elif sort == "market_cap":
+            popular = sorted(popular, key=lambda x: x.get('market_cap', 0), reverse=(order == "desc"))
+        elif sort == "trend_score":
+            popular = sorted(popular, key=lambda x: x.get('trend_score', 0), reverse=(order == "desc"))
         
         # Create response with sanitized data
         project_responses = []
@@ -727,7 +737,7 @@ async def get_popular_projects(
             except Exception as e:
                 logger.warning(f"Error processing popular item: {e}. Skipping item.")
                 continue
-            
+                
         return project_responses
     
     except Exception as e:

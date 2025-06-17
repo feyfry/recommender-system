@@ -33,15 +33,32 @@
     </div>
     @endif
 
+    {{-- TAMBAHAN: Alert khusus untuk project yang baru ditambahkan --}}
+    @if(request()->has('add_project'))
+    <div class="clay-alert clay-alert-info mb-6" id="add-project-alert">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center">
+                <i class="fas fa-info-circle mr-2"></i>
+                <span>Proyek <strong id="selected-project-name">{{ request('add_project') }}</strong> sudah dipilih di form transaksi. Silakan lengkapi detail transaksi di bawah.</span>
+            </div>
+            <button onclick="document.getElementById('add-project-alert').style.display='none'" class="text-gray-500 hover:text-gray-700">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    </div>
+    @endif
+
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        <!-- Transaction Stats -->
+        <!-- Transaction Stats (existing code...) -->
         <div class="lg:col-span-2">
+            <!-- Keep existing transaction stats code -->
             <div class="clay-card p-6">
                 <h2 class="text-xl font-bold mb-4 flex items-center">
                     <i class="fas fa-chart-pie mr-2 text-primary"></i>
                     Statistik Transaksi
                 </h2>
 
+                {{-- Keep all existing stats code... --}}
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                     @php
                         $buyTotal = 0;
@@ -80,6 +97,7 @@
                     </div>
                 </div>
 
+                {{-- Keep existing most traded projects and recommendation influence code... --}}
                 <!-- Most Traded Projects -->
                 <h3 class="font-bold mb-3">Proyek Paling Sering Diperdagangkan</h3>
                 <div class="overflow-x-auto mb-6">
@@ -114,7 +132,7 @@
                     </table>
                 </div>
 
-                <!-- Recommendation Influence -->
+                <!-- Recommendation Influence (keep existing code...) -->
                 @if(isset($recommendationInfluence) && count($recommendationInfluence) > 0)
                 <h3 class="font-bold mb-3">Pengaruh Rekomendasi Terhadap Transaksi</h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -167,7 +185,12 @@
                         <select name="project_id" id="project_id" class="clay-select" required>
                             <option value="">-- Pilih Proyek --</option>
                             @foreach(\App\Models\Project::orderBy('name')->get() as $project)
-                                <option value="{{ $project->id }}">{{ $project->name }} ({{ $project->symbol }})</option>
+                                <option value="{{ $project->id }}"
+                                    data-symbol="{{ $project->symbol }}"
+                                    data-name="{{ $project->name }}"
+                                    {{ request('add_project') == $project->id ? 'selected' : '' }}>
+                                    {{ $project->name }} ({{ $project->symbol }})
+                                </option>
                             @endforeach
                         </select>
                     </div>
@@ -175,14 +198,14 @@
                     <div>
                         <label for="transaction_type" class="block font-medium mb-2">Tipe Transaksi</label>
                         <div class="grid grid-cols-2 gap-4">
-                            <label class="clay-card bg-success/10 p-3 cursor-pointer">
+                            <label class="clay-card bg-success/10 p-3 cursor-pointer transaction-type-card">
                                 <input type="radio" name="transaction_type" value="buy" class="sr-only" checked>
                                 <div class="flex items-center justify-center">
                                     <i class="fas fa-arrow-circle-down text-success mr-2"></i>
                                     <span class="font-medium">Buy</span>
                                 </div>
                             </label>
-                            <label class="clay-card bg-danger/10 p-3 cursor-pointer">
+                            <label class="clay-card bg-danger/10 p-3 cursor-pointer transaction-type-card">
                                 <input type="radio" name="transaction_type" value="sell" class="sr-only">
                                 <div class="flex items-center justify-center">
                                     <i class="fas fa-arrow-circle-up text-danger mr-2"></i>
@@ -220,6 +243,7 @@
         </div>
     </div>
 
+    {{-- Keep all existing transactions list and tips code... --}}
     <!-- Transactions List -->
     <div class="clay-card p-6 mb-8">
         <h2 class="text-xl font-bold mb-6 flex items-center">
@@ -303,7 +327,7 @@
         @endif
     </div>
 
-    <!-- Tips and Guidance -->
+    <!-- Tips and Guidance (keep existing code...) -->
     <div class="clay-card p-6">
         <h2 class="text-xl font-bold mb-4 flex items-center">
             <i class="fas fa-lightbulb mr-2 text-warning"></i>
@@ -360,7 +384,7 @@
                     </li>
                     <li class="flex items-start">
                         <i class="fas fa-exclamation-circle text-warning mt-1 mr-2"></i>
-                        <span>Manfaatkan data historikal untuk perbaikan strategi</span>
+                        <span>Rekam jejak yang akurat membantu evaluasi strategi investasi</span>
                     </li>
                 </ul>
             </div>
@@ -371,25 +395,64 @@
 @push('scripts')
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+        // TAMBAHAN: Auto-populate project ketika ada parameter add_project
+        const urlParams = new URLSearchParams(window.location.search);
+        const addProjectId = urlParams.get('add_project');
+
+        if (addProjectId) {
+            const projectSelect = document.getElementById('project_id');
+            const option = projectSelect.querySelector(`option[value="${addProjectId}"]`);
+
+            if (option) {
+                projectSelect.value = addProjectId;
+
+                // Update alert message dengan nama proyek yang sebenarnya
+                const projectName = option.dataset.name + ' (' + option.dataset.symbol + ')';
+                const selectedProjectNameEl = document.getElementById('selected-project-name');
+                if (selectedProjectNameEl) {
+                    selectedProjectNameEl.textContent = projectName;
+                }
+
+                // Focus ke field berikutnya
+                setTimeout(() => {
+                    const amountField = document.getElementById('amount');
+                    if (amountField) {
+                        amountField.focus();
+                    }
+                }, 100);
+
+                // Scroll to form
+                setTimeout(() => {
+                    const form = document.querySelector('form[action*="add-transaction"]');
+                    if (form) {
+                        form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                }, 200);
+            }
+        }
+
         // Transaction type radio buttons
         const radios = document.querySelectorAll('input[name="transaction_type"]');
         for (const radio of radios) {
             radio.addEventListener('change', function(event) {
-                const cards = document.querySelectorAll('.clay-card.bg-success\\/10, .clay-card.bg-danger\\/10');
+                const cards = document.querySelectorAll('.transaction-type-card');
                 cards.forEach(card => {
                     card.classList.remove('border-2', 'border-success', 'border-danger');
                 });
 
                 if (event.target.value === 'buy') {
-                    event.target.closest('.clay-card').classList.add('border-2', 'border-success');
+                    event.target.closest('.transaction-type-card').classList.add('border-2', 'border-success');
                 } else {
-                    event.target.closest('.clay-card').classList.add('border-2', 'border-danger');
+                    event.target.closest('.transaction-type-card').classList.add('border-2', 'border-danger');
                 }
             });
         }
 
         // Trigger change for the default checked radio
-        document.querySelector('input[name="transaction_type"]:checked').dispatchEvent(new Event('change'));
+        const defaultRadio = document.querySelector('input[name="transaction_type"]:checked');
+        if (defaultRadio) {
+            defaultRadio.dispatchEvent(new Event('change'));
+        }
     });
 </script>
 @endpush

@@ -102,6 +102,9 @@ async def record_interaction(interaction: InteractionRecord):
         # Buat path ke csv file
         interactions_path = os.path.join("data", "processed", "interactions.csv")
         
+        # PERBAIKAN: Pastikan direktori ada
+        os.makedirs(os.path.dirname(interactions_path), exist_ok=True)
+        
         # Append interaction to CSV
         import pandas as pd
         from datetime import datetime
@@ -114,6 +117,9 @@ async def record_interaction(interaction: InteractionRecord):
             'weight': interaction.weight,
             'timestamp': interaction.timestamp or datetime.now().isoformat()
         }])
+        
+        # Log untuk debugging
+        logger.info(f"Recording interaction: {interaction.user_id} -> {interaction.project_id} ({interaction.interaction_type})")
         
         # Jika file sudah ada, append tanpa header
         if os.path.exists(interactions_path):
