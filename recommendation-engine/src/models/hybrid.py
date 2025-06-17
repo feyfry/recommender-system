@@ -36,20 +36,20 @@ class HybridRecommender:
     def __init__(self, params: Optional[Dict[str, Any]] = None):
         # Model parameters dengan default yang lebih baik
         default_params = {
-            "ncf_weight": 0.5,              # PERBAIKAN: Dari 0.35 ke 0.5
-            "fecf_weight": 0.5,             # PERBAIKAN: Dari 0.65 ke 0.5
-            "interaction_threshold_low": 10,  # PERBAIKAN: Dari 5 ke 10
-            "interaction_threshold_high": 30, # PERBAIKAN: Dari 15 ke 30
-            "diversity_factor": 0.3,        
-            "cold_start_fecf_weight": 0.95,  # PERBAIKAN: Dari 0.75 ke 0.95
+            "ncf_weight": 0.5,             # Base weight - akan di-adjust secara adaptive
+            "fecf_weight": 0.5,            # Base weight - akan di-adjust secara adaptive
+            "interaction_threshold_low": 10,  # Dinaikkan dari 5
+            "interaction_threshold_high": 30, # Dinaikkan dari 15
+            "diversity_factor": 0.25,       # PERBAIKAN: Turunkan dari 0.3 untuk lebih fokus ke score
+            "cold_start_fecf_weight": 0.95, # FECF sangat dominan untuk cold start
             "explore_ratio": 0.30,          
-            "normalization": "percentile",   # PERBAIKAN: Dari sigmoid ke percentile
-            "ensemble_method": "selective",  # PERBAIKAN: Dari stacking ke selective
-            "n_candidates_factor": 3,       
-            "category_diversity_weight": 0.25,
-            "trending_boost_factor": 0.2,    
-            "confidence_threshold": 0.4,     # TAMBAHAN: Threshold untuk NCF confidence
-            "min_ncf_interactions": 20,     # TAMBAHAN: Minimal interactions untuk NCF
+            "normalization": "robust",      # PERBAIKAN: Ganti ke robust normalization
+            "ensemble_method": "selective", # PERBAIKAN: Tetap selective tapi diperbaiki
+            "n_candidates_factor": 3,        
+            "category_diversity_weight": 0.2, # PERBAIKAN: Turunkan dari 0.25
+            "trending_boost_factor": 0.15,   # PERBAIKAN: Turunkan dari 0.2
+            "confidence_threshold": 0.3,     # PERBAIKAN: Turunkan dari 0.4 untuk lebih fleksibel
+            "min_ncf_interactions": 20,     # Minimal interactions untuk NCF
         }
         
         # Update dengan parameter yang disediakan atau dari config
@@ -457,8 +457,8 @@ class HybridRecommender:
         if not recommendations:
             return []
             
-        # Use specified method or default from params
-        method = method or self.params.get('normalization', 'sigmoid')
+        # PERBAIKAN: Use specified method or default ke 'robust' dari params
+        method = method or self.params.get('normalization', 'robust')
         
         # Quick return if no normalization requested
         if method == 'none':
@@ -502,15 +502,89 @@ class HybridRecommender:
             normalized = np.exp(-0.5 * ranks / max_rank)
             # Re-normalize to [0,1] range
             normalized = (normalized - normalized.min()) / (normalized.max() - normalized.min())
+            
+        elif method == 'robust':
+            # TAMBAHAN: Robust normalization dengan percentile-based approach
+            if len(scores) == 0:
+                normalized = scores
+            elif len(scores) == 1:
+                # Single score, return middle value
+                normalized = np.array([0.5])
+            else:
+                # Use robust percentiles to handle outliers
+                p5 = np.percentile(scores, 5)
+                p95 = np.percentile(scores, 95)
+                
+                # Handle edge case where all scores are very similar
+                if p95 - p5 < 1e-6:
+                    # All scores are nearly identical, use mean-based normalization
+                    mean_score = scores.mean()
+                    if mean_score > 0.8:
+                        normalized = np.full_like(scores, 0.75)  # High scores
+                    elif mean_score < 0.2:
+                        normalized = np.full_like(scores, 0.25)  # Low scores
+                    else:
+                        normalized = np.full_like(scores, 0.5)   # Medium scores
+                else:
+                    # Normal robust normalization
+                    # Map p5-p95 range to 0.05-0.95 range for safety margin
+                    normalized = 0.05 + 0.9 * (scores - p5) / (p95 - p5)
+                    
+                    # Clip to ensure bounds and handle outliers
+                    normalized = np.clip(normalized, 0.05, 0.95)
+                    
+                    # PERBAIKAN: Preserve relative ordering untuk scores di luar p5-p95
+                    # Scores below p5 → map to 0.01-0.05
+                    below_p5 = scores < p5
+                    if np.any(below_p5):
+                        min_score = scores[below_p5].min()
+                        normalized[below_p5] = 0.01 + 0.04 * (scores[below_p5] - min_score) / max(p5 - min_score, 1e-6)
+                    
+                    # Scores above p95 → map to 0.95-0.99
+                    above_p95 = scores > p95
+                    if np.any(above_p95):
+                        max_score = scores[above_p95].max()
+                        normalized[above_p95] = 0.95 + 0.04 * (scores[above_p95] - p95) / max(max_score - p95, 1e-6)
+                
+        elif method == 'percentile':
+            # TAMBAHAN: Pure percentile-based normalization (alternative nama untuk robust)
+            if len(scores) <= 1:
+                normalized = np.full_like(scores, 0.5)
+            else:
+                # Convert scores to percentile ranks
+                percentile_ranks = np.zeros_like(scores)
+                for i, score in enumerate(scores):
+                    # Calculate what percentile this score is at
+                    percentile_ranks[i] = (scores <= score).sum() / len(scores)
+                
+                # Map percentiles to [0.1, 0.9] range
+                normalized = 0.1 + 0.8 * percentile_ranks
+                
         else:
-            # Fallback to original scores
-            normalized = scores
+            # Fallback to original scores with safety clipping
+            logger.warning(f"Unknown normalization method '{method}', using original scores")
+            normalized = np.clip(scores, 0.0, 1.0)
+            
+        # PERBAIKAN: Final safety check untuk semua methods
+        # Pastikan tidak ada NaN atau infinite values
+        normalized = np.nan_to_num(normalized, nan=0.5, posinf=0.95, neginf=0.05)
+        
+        # Ensure minimum variance untuk avoid flat distributions
+        if np.std(normalized) < 0.01 and len(normalized) > 1:
+            # Add small variance while preserving order
+            sorted_indices = np.argsort(scores)[::-1]  # Descending order
+            normalized = np.linspace(0.9, 0.1, len(normalized))
+            # Reorder to match original positions
+            reordered = np.zeros_like(normalized)
+            reordered[sorted_indices] = normalized
+            normalized = reordered
             
         # Create normalized recommendations
         normalized_recs = list(zip(items, normalized))
         
-        # Store in cache
-        self._normalization_cache[cache_key] = normalized_recs
+        # PERBAIKAN: Store in cache dengan validasi
+        if len(normalized_recs) == len(recommendations):
+            self._normalization_cache[cache_key] = normalized_recs
         
         return normalized_recs
     
@@ -530,12 +604,12 @@ class HybridRecommender:
         threshold_low (10): Di bawah ini, user dianggap cold-start, gunakan cold_start_fecf_weight
         min_ncf_interactions (20): Minimal interaksi untuk NCF mulai berkontribusi
         threshold_high (30): Di atas ini, NCF mulai lebih dipercaya
-        confidence_threshold (0.4): Minimal performance score untuk NCF dianggap reliable
+        confidence_threshold (0.3): Minimal performance score untuk NCF dianggap reliable
         """
         # Base weights dari config
         base_fecf_weight = self.params.get('fecf_weight', 0.5)
         base_ncf_weight = self.params.get('ncf_weight', 0.5)
-        diversity_factor = self.params.get('diversity_factor', 0.3)
+        diversity_factor = self.params.get('diversity_factor', 0.25)
         
         # Get thresholds dari params
         threshold_low = self.params.get('interaction_threshold_low', 10)
@@ -589,7 +663,7 @@ class HybridRecommender:
             ncf_score = np.mean([ncf_perf.get('precision', 0), ncf_perf.get('recall', 0)])
             
             # Get confidence threshold from params
-            confidence_threshold = self.params.get('confidence_threshold', 0.4)
+            confidence_threshold = self.params.get('confidence_threshold', 0.3)
             
             if fecf_score > 0 and ncf_score > 0:
                 # Jika NCF performance di bawah threshold, kurangi bobotnya
@@ -994,64 +1068,81 @@ class HybridRecommender:
             
         # Quick return if only one model's recommendations are available
         if not fecf_recs:
-            return ncf_recs
+            # Pastikan NCF results terurut dan score <= 1.0
+            ncf_normalized = [(item_id, min(1.0, score)) for item_id, score in ncf_recs]
+            ncf_normalized.sort(key=lambda x: x[1], reverse=True)
+            return ncf_normalized
         if not ncf_recs:
-            return fecf_recs
+            # Pastikan FECF results terurut dan score <= 1.0  
+            fecf_normalized = [(item_id, min(1.0, score)) for item_id, score in fecf_recs]
+            fecf_normalized.sort(key=lambda x: x[1], reverse=True)
+            return fecf_normalized
             
         ensemble_method = ensemble_method or self.params.get('ensemble_method', 'selective')
         
-        # PERBAIKAN: Implementasi selective ensemble
+        # PERBAIKAN: Implementasi selective ensemble dengan normalisasi yang konsisten
         if ensemble_method == 'selective':
-            # Analyze score distributions
-            fecf_scores = [score for _, score in fecf_recs]
-            ncf_scores = [score for _, score in ncf_recs]
+            # Analyze score distributions dengan robust statistics
+            fecf_scores = np.array([score for _, score in fecf_recs])
+            ncf_scores = np.array([score for _, score in ncf_recs])
             
             # Calculate confidence metrics
-            fecf_mean = np.mean(fecf_scores) if fecf_scores else 0
+            fecf_mean = np.mean(fecf_scores) if len(fecf_scores) > 0 else 0
             fecf_std = np.std(fecf_scores) if len(fecf_scores) > 1 else 0
-            ncf_mean = np.mean(ncf_scores) if ncf_scores else 0
+            ncf_mean = np.mean(ncf_scores) if len(ncf_scores) > 0 else 0
             ncf_std = np.std(ncf_scores) if len(ncf_scores) > 1 else 0
             
             # NCF confidence check - jika scores terlalu rendah atau terlalu uniform, ignore NCF
-            ncf_confidence_threshold = 0.4
-            ncf_is_confident = ncf_mean > ncf_confidence_threshold and ncf_std > 0.1
+            ncf_confidence_threshold = 0.3  # Turunkan threshold untuk lebih fleksibel
+            ncf_is_confident = ncf_mean > ncf_confidence_threshold and ncf_std > 0.05
             
             if not ncf_is_confident:
                 logger.debug(f"NCF confidence low (mean={ncf_mean:.3f}, std={ncf_std:.3f}), using FECF only")
-                # Just use FECF recommendations
-                return fecf_recs[:len(fecf_recs)]
+                # Just use FECF recommendations dengan normalisasi
+                fecf_normalized = [(item_id, min(1.0, score)) for item_id, score in fecf_recs]
+                fecf_normalized.sort(key=lambda x: x[1], reverse=True)
+                return fecf_normalized
             
-            # Create score dictionaries with better normalization
+            # PERBAIKAN: Robust score normalization 
+            # Gunakan min-max normalization dengan clipping
+            def robust_normalize(scores):
+                """Normalisasi robust dengan clipping"""
+                if len(scores) == 0:
+                    return {}
+                
+                scores_array = np.array(scores)
+                
+                # Use robust percentiles instead of min/max to handle outliers
+                p5 = np.percentile(scores_array, 5)
+                p95 = np.percentile(scores_array, 95)
+                
+                # Avoid division by zero
+                if p95 - p5 < 1e-6:
+                    # All scores are very similar, use mean
+                    mean_score = np.mean(scores_array)
+                    return {i: min(0.95, max(0.05, mean_score)) for i in range(len(scores))}
+                
+                # Normalize to [0.05, 0.95] range to avoid extreme values
+                normalized = 0.05 + 0.9 * (scores_array - p5) / (p95 - p5)
+                
+                # Clip to ensure bounds
+                normalized = np.clip(normalized, 0.05, 0.95)
+                
+                return {i: normalized[i] for i in range(len(scores))}
+            
+            # Normalize both score arrays
+            fecf_norm_dict = robust_normalize([score for _, score in fecf_recs])
+            ncf_norm_dict = robust_normalize([score for _, score in ncf_recs])
+            
+            # Create score dictionaries with normalized scores
             fecf_dict = {}
             ncf_dict = {}
             
-            # PERBAIKAN: Better score normalization
-            # Use percentile-based normalization instead of min-max
-            fecf_scores_array = np.array(fecf_scores)
-            ncf_scores_array = np.array(ncf_scores)
-            
-            # Calculate percentiles for normalization
-            fecf_p10 = np.percentile(fecf_scores_array, 10)
-            fecf_p90 = np.percentile(fecf_scores_array, 90)
-            ncf_p10 = np.percentile(ncf_scores_array, 10)
-            ncf_p90 = np.percentile(ncf_scores_array, 90)
-            
-            # Normalize scores to [0, 1] using percentiles
-            for item_id, score in fecf_recs:
-                if fecf_p90 > fecf_p10:
-                    normalized_score = (score - fecf_p10) / (fecf_p90 - fecf_p10)
-                    normalized_score = np.clip(normalized_score, 0, 1)
-                else:
-                    normalized_score = 0.5
-                fecf_dict[item_id] = normalized_score
+            for i, (item_id, _) in enumerate(fecf_recs):
+                fecf_dict[item_id] = fecf_norm_dict.get(i, 0.5)
                 
-            for item_id, score in ncf_recs:
-                if ncf_p90 > ncf_p10:
-                    normalized_score = (score - ncf_p10) / (ncf_p90 - ncf_p10)
-                    normalized_score = np.clip(normalized_score, 0, 1)
-                else:
-                    normalized_score = 0.5
-                ncf_dict[item_id] = normalized_score
+            for i, (item_id, _) in enumerate(ncf_recs):
+                ncf_dict[item_id] = ncf_norm_dict.get(i, 0.5)
             
             # Get all unique items
             all_items = set(fecf_dict.keys()) | set(ncf_dict.keys())
@@ -1063,40 +1154,49 @@ class HybridRecommender:
                 fecf_score = fecf_dict.get(item, 0)
                 ncf_score = ncf_dict.get(item, 0)
                 
-                # PERBAIKAN: Selective combination based on agreement and confidence
+                # PERBAIKAN: Selective combination yang lebih hati-hati dengan bounds
                 if item in fecf_dict and item in ncf_dict:
                     # Both models recommend
                     score_diff = abs(fecf_score - ncf_score)
                     
-                    if score_diff < 0.2:  # Models agree
-                        # Use weighted average with bonus for agreement
-                        combined_score = (fecf_score * fecf_weight + ncf_score * ncf_weight) * 1.1
+                    if score_diff < 0.15:  # Models agree (threshold dikurangi)
+                        # Use weighted average dengan agreement bonus yang terkontrol
+                        base_score = fecf_score * fecf_weight + ncf_score * ncf_weight
+                        # PERBAIKAN: Agreement bonus maksimal 5% dan ensure <= 1.0
+                        agreement_bonus = min(0.05, (0.15 - score_diff) * 0.3)
+                        combined_score = min(0.95, base_score + agreement_bonus)
                     else:
-                        # Models disagree - trust FECF more due to better performance
+                        # Models disagree - trust FECF more due to better cold-start performance
                         if fecf_score > ncf_score:
-                            combined_score = fecf_score * 0.9 + ncf_score * 0.1
+                            combined_score = fecf_score * 0.85 + ncf_score * 0.15
                         else:
-                            # NCF ranks higher - be cautious
-                            combined_score = fecf_score * 0.7 + ncf_score * 0.3
+                            # NCF ranks higher - be cautious but fair
+                            combined_score = fecf_score * 0.65 + ncf_score * 0.35
                             
-                    results[item] = min(1.0, combined_score)
+                    results[item] = min(0.95, combined_score)  # Ensure max 0.95
                     
                 elif item in fecf_dict:
                     # Only FECF recommends - slight penalty
-                    results[item] = fecf_score * 0.95
+                    results[item] = min(0.90, fecf_score * 0.95)
                     
                 else:
                     # Only NCF recommends - larger penalty due to lower confidence
-                    results[item] = ncf_score * 0.8
+                    results[item] = min(0.85, ncf_score * 0.8)
             
-            # Convert to list and sort
+            # PERBAIKAN: Convert to list dan pastikan sorting benar
             combined_recs = [(item, score) for item, score in results.items()]
+            
+            # CRITICAL: Sort by score descending - ini yang paling penting!
             combined_recs.sort(key=lambda x: x[1], reverse=True)
+            
+            # DEBUGGING: Log untuk memastikan sorting benar
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Ensemble results sorted: {[(item, f'{score:.4f}') for item, score in combined_recs[:5]]}")
             
             return combined_recs
         
         else:
-            # Fallback ke strategi ensemble yang lebih adaptif
+            # Fallback ke strategi ensemble yang lebih sederhana
             try:
                 return self._apply_ensemble_fallback_strategies(fecf_recs, ncf_recs, fecf_weight, ncf_weight)
             except Exception as e:
@@ -1105,50 +1205,78 @@ class HybridRecommender:
         
     def _weighted_average_ensemble(self, fecf_recs: List[Tuple[str, float]], ncf_recs: List[Tuple[str, float]], fecf_weight: float = 0.5, ncf_weight: float = 0.5) -> List[Tuple[str, float]]:
         """
-        Menggabungkan rekomendasi dengan weighted average sederhana
-        Method ini dipanggil sebagai fallback ketika selective ensemble tidak digunakan
+        PERBAIKAN: Menggabungkan rekomendasi dengan weighted average yang konsisten
+        Semua score dinormalisasi dan hasil dipastikan terurut
         """
         if not fecf_recs and not ncf_recs:
             return []
             
         # Quick return if only one model's recommendations are available
         if not fecf_recs:
-            return ncf_recs
+            ncf_normalized = [(item_id, min(1.0, score)) for item_id, score in ncf_recs]
+            ncf_normalized.sort(key=lambda x: x[1], reverse=True)
+            return ncf_normalized
         if not ncf_recs:
-            return fecf_recs
+            fecf_normalized = [(item_id, min(1.0, score)) for item_id, score in fecf_recs]
+            fecf_normalized.sort(key=lambda x: x[1], reverse=True)
+            return fecf_normalized
             
-        # Normalisasi skor untuk memastikan rentang yang konsisten
-        fecf_normalized = self.normalize_scores(fecf_recs, method='linear')
-        ncf_normalized = self.normalize_scores(ncf_recs, method='linear')
+        # PERBAIKAN: Normalisasi skor dengan method yang konsisten
+        def normalize_scores_robust(scores_list):
+            """Normalisasi robust untuk menghindari outlier"""
+            if not scores_list:
+                return {}
+            
+            scores = np.array([score for _, score in scores_list])
+            
+            # Use robust statistics
+            q25 = np.percentile(scores, 25)
+            q75 = np.percentile(scores, 75)
+            
+            # Handle edge case where all scores are similar
+            if q75 - q25 < 1e-6:
+                median_score = np.median(scores)
+                normalized = np.full_like(scores, min(0.8, max(0.2, median_score)))
+            else:
+                # Normalize using IQR with clipping
+                normalized = (scores - q25) / (q75 - q25)
+                # Scale to [0.1, 0.9] range
+                normalized = 0.1 + 0.8 * normalized
+                # Clip outliers
+                normalized = np.clip(normalized, 0.1, 0.9)
+            
+            return {item_id: normalized[i] for i, (item_id, _) in enumerate(scores_list)}
         
-        # Buat dictionary untuk mempermudah penggabungan
-        fecf_dict = dict(fecf_normalized)
-        ncf_dict = dict(ncf_normalized)
+        # Normalize both recommendation lists
+        fecf_normalized = normalize_scores_robust(fecf_recs)
+        ncf_normalized = normalize_scores_robust(ncf_recs)
         
         # Gabungkan semua item unik
-        all_items = set(fecf_dict.keys()) | set(ncf_dict.keys())
+        all_items = set(fecf_normalized.keys()) | set(ncf_normalized.keys())
         
         # Hitung weighted average untuk setiap item
         combined_results = []
         
         for item in all_items:
-            fecf_score = fecf_dict.get(item, 0)
-            ncf_score = ncf_dict.get(item, 0)
+            fecf_score = fecf_normalized.get(item, 0)
+            ncf_score = ncf_normalized.get(item, 0)
             
-            # Weighted average dengan penalty untuk item yang hanya ada di satu model
-            if item in fecf_dict and item in ncf_dict:
+            # PERBAIKAN: Weighted average dengan penalty untuk item yang hanya ada di satu model
+            if item in fecf_normalized and item in ncf_normalized:
                 # Kedua model merekomendasikan - gunakan weighted average penuh
-                combined_score = (fecf_score * fecf_weight + ncf_score * ncf_weight)
-            elif item in fecf_dict:
-                # Hanya FECF - gunakan skor FECF dengan slight penalty
-                combined_score = fecf_score * fecf_weight * 0.95
+                combined_score = fecf_score * fecf_weight + ncf_score * ncf_weight
+            elif item in fecf_normalized:
+                # Hanya FECF - gunakan skor FECF dengan penalty
+                combined_score = fecf_score * fecf_weight * 0.92
             else:
-                # Hanya NCF - gunakan skor NCF dengan slight penalty
-                combined_score = ncf_score * ncf_weight * 0.95
+                # Hanya NCF - gunakan skor NCF dengan penalty
+                combined_score = ncf_score * ncf_weight * 0.88
             
+            # PERBAIKAN: Pastikan score tidak melebihi 0.95
+            combined_score = min(0.95, combined_score)
             combined_results.append((item, combined_score))
         
-        # Urutkan berdasarkan skor gabungan (tertinggi ke terendah)
+        # CRITICAL: Urutkan berdasarkan skor gabungan (tertinggi ke terendah)
         combined_results.sort(key=lambda x: x[1], reverse=True)
         
         return combined_results
@@ -1283,7 +1411,7 @@ class HybridRecommender:
         """Apply trending boost to results with configurable boost factor"""
         if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
             # Use provided boost_factor or get from params
-            trend_boost_factor = boost_factor if boost_factor is not None else self.params.get('trending_boost_factor', 0.2)
+            trend_boost_factor = boost_factor if boost_factor is not None else self.params.get('trending_boost_factor', 0.15)
             
             if trend_boost_factor > 0:
                 # Create item to trend lookup
@@ -1303,8 +1431,13 @@ class HybridRecommender:
                             results[item] = min(1.0, results[item] + boost)
     
     def apply_diversity(self, recommendations: List[Tuple[str, float]], 
-                    n: int, diversity_weight: float = 0.25) -> List[Tuple[str, float]]:
+                n: int, diversity_weight: float = 0.25) -> List[Tuple[str, float]]:
+        """
+        PERBAIKAN: Apply diversity sambil mempertahankan score ordering yang benar
+        """
         if not recommendations or len(recommendations) <= n:
+            # PERBAIKAN: Pastikan hasil tetap terurut meskipun tidak perlu diversity
+            recommendations.sort(key=lambda x: x[1], reverse=True)
             return recommendations
             
         # Prepare item metadata
@@ -1313,7 +1446,7 @@ class HybridRecommender:
         item_market_caps = {}
         
         if self.projects_df is not None:
-            # Extract item metadata
+            # Extract item metadata dengan error handling
             for _, row in self.projects_df.iterrows():
                 if 'id' not in row:
                     continue
@@ -1322,22 +1455,39 @@ class HybridRecommender:
                 
                 # Extract multiple categories if available
                 if 'categories_list' in row:
-                    item_categories[item_id] = row['categories_list']
+                    try:
+                        item_categories[item_id] = row['categories_list']
+                    except:
+                        item_categories[item_id] = ['unknown']
                 elif 'primary_category' in row:
-                    item_categories[item_id] = self.process_categories(row['primary_category'])
+                    try:
+                        item_categories[item_id] = self.process_categories(row['primary_category'])
+                    except:
+                        item_categories[item_id] = ['unknown']
                 
                 # Extract chain information
                 if 'chain' in row:
-                    item_chains[item_id] = row['chain']
+                    try:
+                        item_chains[item_id] = row['chain']
+                    except:
+                        item_chains[item_id] = 'unknown'
                     
                 # Extract market cap for balance between new/established projects
                 if 'market_cap' in row:
-                    item_market_caps[item_id] = row['market_cap']
+                    try:
+                        item_market_caps[item_id] = row['market_cap']
+                    except:
+                        item_market_caps[item_id] = 0
         
-        # If no category/chain data available, just return top-n
+        # If no category/chain data available, just return top-n terurut
         if not item_categories and not item_chains:
-            return recommendations[:n]
+            result = recommendations[:n]
+            result.sort(key=lambda x: x[1], reverse=True)
+            return result
             
+        # PERBAIKAN: Pastikan input recommendations sudah terurut
+        recommendations.sort(key=lambda x: x[1], reverse=True)
+        
         # Select top items without diversity first (guaranteed selection)
         top_count = max(n // 4, 1)  # ~25% by pure score
         result = recommendations[:top_count]
@@ -1349,11 +1499,11 @@ class HybridRecommender:
         
         # Define market cap thresholds (can be derived from data)
         if item_market_caps:
-            market_caps = list(item_market_caps.values())
-            market_caps.sort()
+            market_caps = [cap for cap in item_market_caps.values() if cap > 0]
             if market_caps:
-                market_cap_high = market_caps[int(len(market_caps) * 0.9)]  # Top 10%
-                market_cap_medium = market_caps[int(len(market_caps) * 0.5)]  # Medium 40%
+                market_caps.sort()
+                market_cap_high = market_caps[int(len(market_caps) * 0.9)] if len(market_caps) > 10 else 1e9
+                market_cap_medium = market_caps[int(len(market_caps) * 0.5)] if len(market_caps) > 5 else 1e8
             else:
                 market_cap_high = 1e9
                 market_cap_medium = 1e8
@@ -1385,58 +1535,46 @@ class HybridRecommender:
             else:
                 selected_market_cap_tiers['unknown'] += 1
         
-        # Calculate diversity limits with more nuanced approach
-        # Adjust based on total recommendations requested
-        max_per_category = max(2, int(n * 0.25))  # Maximum ~25% per category
-        max_per_chain = max(3, int(n * 0.33))     # Maximum ~33% per chain
+        # Calculate diversity limits dengan lebih konservatif
+        max_per_category = max(2, int(n * 0.3))  # Maximum ~30% per category
+        max_per_chain = max(3, int(n * 0.4))     # Maximum ~40% per chain
         
         # Market cap tier targets (percentages of total)
-        # Aim for diverse mix of established/mid/new projects
         market_cap_targets = {
-            'high': int(n * 0.3),    # 30% high cap
-            'medium': int(n * 0.4),  # 40% medium cap
-            'low': int(n * 0.3),     # 30% low cap
-            'unknown': int(n * 0.1)  # Allow 10% unknown
+            'high': int(n * 0.35),    # 35% high cap
+            'medium': int(n * 0.4),   # 40% medium cap  
+            'low': int(n * 0.2),      # 20% low cap
+            'unknown': int(n * 0.05)  # 5% unknown
         }
         
-        # Process remaining candidates
+        # Process remaining candidates dengan preserve ordering
         remaining = recommendations[top_count:]
         
-        # Calculate diversity adjusted scores for all remaining items
-        diversity_adjusted = []
+        # PERBAIKAN: Calculate diversity adjusted scores untuk ranking yang lebih baik
+        diversity_candidates = []
         
-        for item_id, score in remaining:
-            category_adjustment = 0
-            chain_adjustment = 0
-            market_cap_adjustment = 0
+        for item_id, original_score in remaining:
+            diversity_score = 0
             
-            # Category diversity adjustment with underrepresented boost
+            # Category diversity adjustment
             if item_id in item_categories:
-                # Periksa semua kategori item
-                cat_adjustments = []
                 item_cats = item_categories[item_id]
+                cat_adjustments = []
                 
                 for category in item_cats:
                     cat_count = selected_categories.get(category, 0)
                     
                     if cat_count >= max_per_category:
-                        # Heavy penalty for overrepresented category
-                        cat_adjustments.append(-0.5)
+                        cat_adjustments.append(-0.15)  # Penalty untuk over-representation
                     elif cat_count == 0:
-                        # Strong boost for new categories - especially underrepresented ones
-                        category_freq = self.category_distribution.get(category, 0.05)
-                        rarity_boost = 0.2 + (0.2 * (1 - min(1.0, category_freq * 20)))
-                        cat_adjustments.append(rarity_boost)
+                        cat_adjustments.append(0.1)   # Bonus untuk kategori baru
                     else:
-                        # Smaller adjustment based on count
-                        adjustment = 0.15 * (1 - cat_count / max_per_category)
-                        cat_adjustments.append(adjustment)
+                        # Gradual penalty
+                        cat_adjustments.append(0.05 * (1 - cat_count / max_per_category))
                 
-                # Use mean of top adjustments for better balance
+                # Use average of category adjustments
                 if cat_adjustments:
-                    cat_adjustments.sort(reverse=True)  # Sort by highest boost first
-                    top_n_adjustments = cat_adjustments[:min(2, len(cat_adjustments))]  # Use top 2 adjustments
-                    category_adjustment = sum(top_n_adjustments) / len(top_n_adjustments)
+                    diversity_score += sum(cat_adjustments) / len(cat_adjustments)
             
             # Chain diversity adjustment
             if item_id in item_chains:
@@ -1444,59 +1582,44 @@ class HybridRecommender:
                 chain_count = selected_chains.get(chain, 0)
                 
                 if chain_count >= max_per_chain:
-                    chain_adjustment = -0.4  # Stronger penalty
+                    diversity_score -= 0.1
                 elif chain_count == 0:
-                    chain_adjustment = 0.25  # Stronger bonus
+                    diversity_score += 0.08
                 else:
-                    chain_adjustment = 0.1 * (1 - chain_count / max_per_chain)
+                    diversity_score += 0.02 * (1 - chain_count / max_per_chain)
             
             # Market cap diversity adjustment
             if item_id in item_market_caps:
                 market_cap = item_market_caps[item_id]
                 tier = 'high' if market_cap >= market_cap_high else 'medium' if market_cap >= market_cap_medium else 'low'
                 
-                # Calculate how full this tier is compared to target
                 tier_count = selected_market_cap_tiers[tier]
                 tier_target = market_cap_targets[tier]
                 
                 if tier_count >= tier_target:
-                    # Tier is full or overrepresented
-                    fullness_ratio = tier_count / tier_target
-                    market_cap_adjustment = -0.2 * fullness_ratio
-                elif tier_count < tier_target * 0.5:
-                    # Tier is significantly underrepresented
-                    market_cap_adjustment = 0.15
+                    diversity_score -= 0.05
                 else:
-                    # Small positive adjustment
-                    market_cap_adjustment = 0.05
+                    diversity_score += 0.05 * (1 - tier_count / tier_target if tier_target > 0 else 0)
             
-            # Apply diversity weight
-            # Adaptive weights for more nuanced diversity control
-            category_weight = 0.6  # Categories are most important for crypto
-            chain_weight = 0.25    # Chains are secondary
-            market_cap_weight = 0.15  # Market cap is tertiary
+            # PERBAIKAN: Kombinasi score dengan weight yang reasonable
+            # Jangan sampai diversity weight terlalu besar
+            adjusted_score = original_score + (diversity_score * diversity_weight * 0.5)  # Kurangi impact diversity
             
-            # Calculate weighted diversity adjustment
-            diversity_score = (
-                category_adjustment * category_weight + 
-                chain_adjustment * chain_weight + 
-                market_cap_adjustment * market_cap_weight
-            ) * diversity_weight
+            # CRITICAL: Pastikan adjusted score tidak melebihi original + 0.1
+            adjusted_score = min(original_score + 0.1, adjusted_score)
+            adjusted_score = max(original_score - 0.2, adjusted_score)  # Juga jangan terlalu rendah
             
-            adjusted_score = score + diversity_score
-            
-            # Store original item, score, and adjusted score
-            diversity_adjusted.append((item_id, score, adjusted_score))
+            diversity_candidates.append((item_id, original_score, adjusted_score))
         
         # Sort by adjusted score
-        diversity_adjusted.sort(key=lambda x: x[2], reverse=True)
+        diversity_candidates.sort(key=lambda x: x[2], reverse=True)
         
-        # Select remaining items with greater diversity consciousness
-        for item_id, original_score, _ in diversity_adjusted:
+        # Select remaining items berdasarkan adjusted ranking
+        for item_id, original_score, adjusted_score in diversity_candidates:
             if len(result) >= n:
                 break
                 
-            # Update category and chain tracking
+            # Update tracking
             if item_id in item_categories:
                 for category in item_categories[item_id]:
                     selected_categories[category] = selected_categories.get(category, 0) + 1
@@ -1517,12 +1640,19 @@ class HybridRecommender:
             else:
                 selected_market_cap_tiers['unknown'] += 1
             
-            # Add to result with original score
+            # PERBAIKAN: Add dengan original score untuk menjaga consistency
             result.append((item_id, original_score))
         
-        return result
+        # CRITICAL: Final sort untuk memastikan result terurut dengan benar
+        # Sort by original score untuk menjaga ranking integrity
+        result.sort(key=lambda x: x[1], reverse=True)
+        
+        return result[:n]
     
     def recommend_for_user(self, user_id: str, n: int = 10, exclude_known: bool = True) -> List[Tuple[str, float]]:
+        """
+        PERBAIKAN: Pastikan rekomendasi selalu terurut dan score konsisten
+        """
         # OPTIMIZATION: Check cache first
         cache_key = f"{user_id}_{n}_{exclude_known}"
         if hasattr(self, '_recommendation_cache') and cache_key in self._recommendation_cache:
@@ -1530,7 +1660,10 @@ class HybridRecommender:
             cache_time = cache_entry.get('time', 0)
             # Use cache if it's less than 15 minutes old
             if time.time() - cache_time < 900:  # 15 minutes in seconds
-                return cache_entry['recommendations']
+                cached_results = cache_entry['recommendations']
+                # PERBAIKAN: Pastikan cached results juga terurut
+                cached_results.sort(key=lambda x: x[1], reverse=True)
+                return cached_results
         
         # Check if this is a cold-start user
         is_cold_start = True
@@ -1539,7 +1672,10 @@ class HybridRecommender:
             
         # Handle cold-start case
         if is_cold_start:
-            return self._get_cold_start_recommendations(user_id, n)
+            cold_start_recs = self._get_cold_start_recommendations(user_id, n)
+            # PERBAIKAN: Pastikan cold-start results terurut
+            cold_start_recs.sort(key=lambda x: x[1], reverse=True)
+            return cold_start_recs
             
         # Get effective weights
         fecf_weight, ncf_weight, diversity_weight = self.get_effective_weights(user_id)
@@ -1565,6 +1701,8 @@ class HybridRecommender:
                     n=n_candidates,
                     exclude_known=exclude_known
                 )
+                # PERBAIKAN: Pastikan FECF results terurut dari awal
+                fecf_recs.sort(key=lambda x: x[1], reverse=True)
                 logger.debug(f"FECF recommendations for {user_id} took {time.time() - start_time:.3f}s")
             except Exception as e:
                 logger.warning(f"Error getting FECF recommendations: {e}")
@@ -1574,7 +1712,9 @@ class HybridRecommender:
                     fecf_weight = 0.0
                 else:
                     # Both models failed, fallback to cold-start
-                    return self._get_cold_start_recommendations(user_id, n)
+                    fallback_recs = self._get_cold_start_recommendations(user_id, n)
+                    fallback_recs.sort(key=lambda x: x[1], reverse=True)
+                    return fallback_recs
         
         # Get NCF recommendations if available
         ncf_recs = []
@@ -1586,6 +1726,8 @@ class HybridRecommender:
                     n=n_candidates,
                     exclude_known=exclude_known
                 )
+                # PERBAIKAN: Pastikan NCF results terurut dari awal
+                ncf_recs.sort(key=lambda x: x[1], reverse=True)
                 logger.debug(f"NCF recommendations for {user_id} took {time.time() - start_time:.3f}s")
             except Exception as e:
                 logger.warning(f"Error getting NCF recommendations: {e}")
@@ -1595,19 +1737,42 @@ class HybridRecommender:
                     ncf_weight = 0.0
                 else:
                     # Both models failed, fallback to cold-start
-                    return self._get_cold_start_recommendations(user_id, n)
+                    fallback_recs = self._get_cold_start_recommendations(user_id, n)
+                    fallback_recs.sort(key=lambda x: x[1], reverse=True)
+                    return fallback_recs
+        
+        # PERBAIKAN: Validasi input sebelum ensemble
+        if fecf_recs:
+            # Clip extreme scores
+            fecf_recs = [(item_id, min(1.0, max(0.0, score))) for item_id, score in fecf_recs]
+            logger.debug(f"FECF top 3 scores: {[(item, f'{score:.4f}') for item, score in fecf_recs[:3]]}")
+        
+        if ncf_recs:
+            # Clip extreme scores 
+            ncf_recs = [(item_id, min(1.0, max(0.0, score))) for item_id, score in ncf_recs]
+            logger.debug(f"NCF top 3 scores: {[(item, f'{score:.4f}') for item, score in ncf_recs[:3]]}")
         
         # Use enhanced ensemble to combine recommendations
         start_time = time.time()
         combined_recs = self.get_ensemble_recommendations(
             fecf_recs=fecf_recs,
             ncf_recs=ncf_recs,
-            fecf_weight=fecf_weight,  # Ini akan override default parameters
-            ncf_weight=ncf_weight,    # Ini akan override default parameters
-            user_id=user_id,          # Pass user_id untuk context
+            fecf_weight=fecf_weight,
+            ncf_weight=ncf_weight,
+            user_id=user_id,
             ensemble_method=self.params.get('ensemble_method', 'selective')
         )
         logger.debug(f"Ensemble recommendations for {user_id} took {time.time() - start_time:.3f}s")
+        
+        # PERBAIKAN: Validasi hasil ensemble
+        if combined_recs:
+            # Pastikan tidak ada score > 1.0
+            combined_recs = [(item_id, min(0.95, score)) for item_id, score in combined_recs]
+            
+            # CRITICAL: Pastikan hasil terurut
+            combined_recs.sort(key=lambda x: x[1], reverse=True)
+            
+            logger.debug(f"Combined top 3 scores: {[(item, f'{score:.4f}') for item, score in combined_recs[:3]]}")
         
         # Apply diversity
         start_time = time.time()
@@ -1618,12 +1783,23 @@ class HybridRecommender:
         )
         logger.debug(f"Diversity application for {user_id} took {time.time() - start_time:.3f}s")
         
+        # PERBAIKAN: Final validation dan sorting
+        if diversified_recs:
+            # Pastikan semua score valid
+            diversified_recs = [(item_id, min(0.95, max(0.05, score))) for item_id, score in diversified_recs]
+            
+            # CRITICAL: Final sorting untuk memastikan urutan benar
+            diversified_recs.sort(key=lambda x: x[1], reverse=True)
+            
+            logger.debug(f"Final top 3 scores: {[(item, f'{score:.4f}') for item, score in diversified_recs[:3]]}")
+        
         # Store in cache
         if not hasattr(self, '_recommendation_cache'):
             self._recommendation_cache = {}
             
+        final_result = diversified_recs[:n]
         self._recommendation_cache[cache_key] = {
-            'recommendations': diversified_recs[:n],
+            'recommendations': final_result,
             'time': time.time()
         }
         
@@ -1631,7 +1807,7 @@ class HybridRecommender:
         fecf_items = {item_id for item_id, _ in fecf_recs}
         ncf_items = {item_id for item_id, _ in ncf_recs}
         
-        for item_id, _ in diversified_recs[:n]:
+        for item_id, _ in final_result:
             sources = []
             if item_id in fecf_items:
                 sources.append('fecf')
@@ -1643,9 +1819,12 @@ class HybridRecommender:
                 
             self.recommendation_sources[item_id] = sources
         
-        return diversified_recs[:n]
+        return final_result
     
     def _get_cold_start_recommendations(self, user_id: str, n: int = 10) -> List[Tuple[str, float]]:
+        """
+        PERBAIKAN: Generate cold-start recommendations dengan score konsisten dan hasil terurut
+        """
         logger.info(f"Generating cold-start recommendations for user {user_id}")
         
         # Use optimized weights for cold-start with FECF heavily favored
@@ -1658,8 +1837,10 @@ class HybridRecommender:
             try:
                 start_time = time.time()
                 fecf_cold_start = self.fecf_model.get_cold_start_recommendations(n=n*3)
-                fecf_recs = [(rec['id'], rec['recommendation_score']) 
-                           for rec in fecf_cold_start if 'id' in rec]
+                fecf_recs = [(rec['id'], min(0.9, rec['recommendation_score'])) 
+                        for rec in fecf_cold_start if 'id' in rec and 'recommendation_score' in rec]
+                # PERBAIKAN: Pastikan FECF cold-start terurut
+                fecf_recs.sort(key=lambda x: x[1], reverse=True)
                 logger.debug(f"FECF cold-start recommendations took {time.time() - start_time:.3f}s")
             except Exception as e:
                 logger.warning(f"Error getting FECF cold-start recommendations: {e}")
@@ -1670,8 +1851,10 @@ class HybridRecommender:
             try:
                 start_time = time.time()
                 ncf_cold_start = self.ncf_model.get_popular_projects(n=n*3)
-                ncf_recs = [(rec['id'], rec['recommendation_score']) 
-                          for rec in ncf_cold_start if 'id' in rec]
+                ncf_recs = [(rec['id'], min(0.85, rec['recommendation_score'])) 
+                        for rec in ncf_cold_start if 'id' in rec and 'recommendation_score' in rec]
+                # PERBAIKAN: Pastikan NCF cold-start terurut
+                ncf_recs.sort(key=lambda x: x[1], reverse=True)
                 logger.debug(f"NCF cold-start recommendations took {time.time() - start_time:.3f}s")
             except Exception as e:
                 logger.warning(f"Error getting NCF cold-start recommendations: {e}")
@@ -1680,76 +1863,76 @@ class HybridRecommender:
         if not fecf_recs and not ncf_recs:
             logger.warning("Both models failed for cold-start, using trending/popular fallback")
             
-            trending_projects = []
-            if hasattr(self, 'projects_df'):
+            fallback_projects = []
+            if hasattr(self, 'projects_df') and self.projects_df is not None:
                 if 'trend_score' in self.projects_df.columns:
                     # Get highly trending projects
                     trending = self.projects_df.sort_values('trend_score', ascending=False).head(n*3)
-                    trending_projects = [(row['id'], row['trend_score']/100) 
-                                      for _, row in trending.iterrows()]
+                    fallback_projects = [(row['id'], min(0.8, row['trend_score']/100)) 
+                                    for _, row in trending.iterrows()]
                     
                     # Mix with some popular by market cap
-                    if 'market_cap' in self.projects_df.columns and len(trending_projects) < n*3:
-                        popular = self.projects_df.sort_values('market_cap', ascending=False).head(n*3)
-                        # Convert market_cap to normalized score
+                    if 'market_cap' in self.projects_df.columns and len(fallback_projects) < n*2:
+                        popular = self.projects_df.sort_values('market_cap', ascending=False).head(n*2)
                         max_market_cap = popular['market_cap'].max()
                         if max_market_cap > 0:
-                            popular_projects = [(row['id'], row['market_cap']/max_market_cap * 0.8) 
-                                             for _, row in popular.iterrows() 
-                                             if row['id'] not in [p[0] for p in trending_projects]]
-                            trending_projects.extend(popular_projects)
+                            popular_projects = [(row['id'], min(0.75, row['market_cap']/max_market_cap * 0.8)) 
+                                            for _, row in popular.iterrows() 
+                                            if row['id'] not in [p[0] for p in fallback_projects]]
+                            fallback_projects.extend(popular_projects)
                 elif 'popularity_score' in self.projects_df.columns:
                     # Fallback to popularity
                     popular = self.projects_df.sort_values('popularity_score', ascending=False).head(n*3)
-                    trending_projects = [(row['id'], row['popularity_score']/100) 
-                                      for _, row in popular.iterrows()]
+                    fallback_projects = [(row['id'], min(0.8, row['popularity_score']/100)) 
+                                    for _, row in popular.iterrows()]
                 else:
-                    # Last resort: random projects
-                    trending_projects = [(row['id'], 0.5) 
-                                      for _, row in self.projects_df.sample(min(n*3, len(self.projects_df))).iterrows()]
+                    # Last resort: random projects with low score
+                    sample_size = min(n*2, len(self.projects_df))
+                    fallback_projects = [(row['id'], 0.5) 
+                                    for _, row in self.projects_df.sample(sample_size).iterrows()]
             
-            return trending_projects[:n]
-                
-        # Get category distribution (if available) for diversity
-        category_distribution = {}
-        if hasattr(self, 'projects_df') and 'primary_category' in self.projects_df.columns:
-            for _, row in self.projects_df.iterrows():
-                category = row['primary_category']
-                if category in category_distribution:
-                    category_distribution[category] += 1
-                else:
-                    category_distribution[category] = 1
-            
-            # Normalize
-            total = sum(category_distribution.values())
-            if total > 0:
-                category_distribution = {k: v/total for k, v in category_distribution.items()}
+            # PERBAIKAN: Sort fallback dan return
+            fallback_projects.sort(key=lambda x: x[1], reverse=True)
+            return fallback_projects[:n]
         
-        # Use sophisticated ensemble with heavy weight on FECF for cold-start
+        # PERBAIKAN: Pastikan input untuk ensemble sudah terurut dan valid
+        if fecf_recs:
+            fecf_recs = [(item_id, min(0.9, max(0.1, score))) for item_id, score in fecf_recs]
+            fecf_recs.sort(key=lambda x: x[1], reverse=True)
+        
+        if ncf_recs:
+            ncf_recs = [(item_id, min(0.85, max(0.1, score))) for item_id, score in ncf_recs]
+            ncf_recs.sort(key=lambda x: x[1], reverse=True)
+        
+        # Use ensemble with simple method for cold-start (lebih stabil)
         combined_recs = self.get_ensemble_recommendations(
             fecf_recs=fecf_recs,
             ncf_recs=ncf_recs,
             fecf_weight=fecf_weight,
             ncf_weight=ncf_weight,
-            ensemble_method='stacking'  # Simpler method for cold-start
+            ensemble_method='weighted_average'  # Gunakan weighted average untuk cold-start
         )
+        
+        # PERBAIKAN: Validasi combined results
+        if combined_recs:
+            # Clip scores untuk safety
+            combined_recs = [(item_id, min(0.85, max(0.1, score))) for item_id, score in combined_recs]
+            # Pastikan terurut
+            combined_recs.sort(key=lambda x: x[1], reverse=True)
         
         # Also get purely trending projects as a source of diversity
         trending_recs = []
-        if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
+        if hasattr(self, 'projects_df') and self.projects_df is not None and 'trend_score' in self.projects_df.columns:
             trending = self.projects_df.sort_values('trend_score', ascending=False).head(n*2)
-            trending_recs = [(row['id'], row['trend_score']/100 * 0.9)  # Scale trend score and apply minor discount
-                           for _, row in trending.iterrows()]
+            trending_recs = [(row['id'], min(0.8, row['trend_score']/100 * 0.9)) 
+                        for _, row in trending.iterrows()]
+            trending_recs.sort(key=lambda x: x[1], reverse=True)
         
         # Balance model-based and trending-based recommendations for cold-start
-        # More algorithmic approach to ratio
-        model_ratio = 0.7  # Start with 70% model-based
-        trend_ratio = 0.3  # And 30% trending
+        model_ratio = 0.7  # 70% model-based
+        trend_ratio = 0.3  # 30% trending
         
-        # Adjust ratios based on data quality (we can check here if needed)
-        # Just using static values for now, but could be dynamic
-        
-        # Calculate counts with minimum guarantees
+        # Calculate counts dengan minimum guarantees
         model_count = max(int(n * model_ratio), n // 2)
         trend_count = max(n - model_count, n // 5)
         
@@ -1761,8 +1944,8 @@ class HybridRecommender:
             else:
                 trend_count -= excess
         
-        # Ensure we're using the best of each source
-        selected_model_recs = combined_recs[:model_count]
+        # PERBAIKAN: Ensure we're using the best of each source dengan proper selection
+        selected_model_recs = combined_recs[:model_count] if combined_recs else []
         
         # Filter trending to avoid duplicates with model recs
         model_items = {item_id for item_id, _ in selected_model_recs}
@@ -1770,15 +1953,27 @@ class HybridRecommender:
                             if item_id not in model_items]
         selected_trending_recs = filtered_trending[:trend_count]
         
-        # Combine recommendations with guaranteed diversity
+        # Combine recommendations dengan guaranteed diversity
         diversity_seeds = selected_model_recs + selected_trending_recs
         
-        # Apply even more diversity enhancement
+        # PERBAIKAN: Sort before applying diversity untuk input yang konsisten
+        diversity_seeds.sort(key=lambda x: x[1], reverse=True)
+        
+        # Apply diversity enhancement dengan weight yang lebih kecil untuk cold-start
         diversified = self.apply_diversity(
             diversity_seeds, 
             n=n, 
-            diversity_weight=self.params.get('category_diversity_weight', 0.25) * 1.5  # Stronger diversity for cold-start
+            diversity_weight=self.params.get('category_diversity_weight', 0.2) * 1.2  # Sedikit lebih tinggi
         )
+        
+        # PERBAIKAN: Final validation dan sort
+        if diversified:
+            # Clip final scores
+            diversified = [(item_id, min(0.85, max(0.1, score))) for item_id, score in diversified]
+            # Final sort
+            diversified.sort(key=lambda x: x[1], reverse=True)
+            
+            logger.debug(f"Cold-start final top 3: {[(item, f'{score:.4f}') for item, score in diversified[:3]]}")
         
         return diversified[:n]
     
@@ -2710,7 +2905,7 @@ class HybridRecommender:
             enhanced_recommendations = self.apply_diversity(
                 enhanced_recommendations, 
                 n=n, 
-                diversity_weight=self.params.get('category_diversity_weight', 0.25) * 1.5  # Stronger diversity
+                diversity_weight=self.params.get('category_diversity_weight', 0.2) * 1.5  # Stronger diversity
             )
         else:
             # Fallback to regular cold-start when no interests specified

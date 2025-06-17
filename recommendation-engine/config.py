@@ -61,21 +61,21 @@ FECF_PARAMS = {
     "content_alpha": 0.55           # Lebih seimbang antara collaborative dan content features
 }
 
-# Hybrid Model - BALANCED ADAPTIVE SETTINGS
+# Hybrid Model - BALANCED ADAPTIVE SETTINGS (UPDATED)
 HYBRID_PARAMS = {
     "ncf_weight": 0.5,             # Base weight - akan di-adjust secara adaptive
     "fecf_weight": 0.5,            # Base weight - akan di-adjust secara adaptive
     "interaction_threshold_low": 10,  # Dinaikkan dari 5
     "interaction_threshold_high": 30, # Dinaikkan dari 15
-    "diversity_factor": 0.3,        
-    "cold_start_fecf_weight": 0.95,  # FECF sangat dominan untuk cold start
+    "diversity_factor": 0.25,       # PERBAIKAN: Turunkan dari 0.3 untuk lebih fokus ke score
+    "cold_start_fecf_weight": 0.95, # FECF sangat dominan untuk cold start
     "explore_ratio": 0.30,          
-    "normalization": "percentile",   # Ganti ke percentile-based
-    "ensemble_method": "selective",  # Ganti dari stacking ke selective
+    "normalization": "robust",      # PERBAIKAN: Ganti ke robust normalization
+    "ensemble_method": "selective", # PERBAIKAN: Tetap selective tapi diperbaiki
     "n_candidates_factor": 3,        
-    "category_diversity_weight": 0.25,
-    "trending_boost_factor": 0.2,    
-    "confidence_threshold": 0.4,     # Threshold untuk NCF confidence
+    "category_diversity_weight": 0.2, # PERBAIKAN: Turunkan dari 0.25
+    "trending_boost_factor": 0.15,   # PERBAIKAN: Turunkan dari 0.2
+    "confidence_threshold": 0.3,     # PERBAIKAN: Turunkan dari 0.4 untuk lebih fleksibel
     "min_ncf_interactions": 20,     # Minimal interactions untuk NCF
 }
 
