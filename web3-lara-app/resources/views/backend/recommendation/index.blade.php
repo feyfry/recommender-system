@@ -300,15 +300,12 @@
                                     <span>Melihat detail</span>
                                 </template>
                                 <template x-if="interaction.interaction_type === 'favorite'">
-                                    <span>Menambahkan ke favorit</span>
+                                    <span>Sukai</span>
                                 </template>
                                 <template x-if="interaction.interaction_type === 'portfolio_add'">
                                     <span>Menambahkan ke portfolio</span>
                                 </template>
-                                <template x-if="interaction.interaction_type === 'research'">
-                                    <span>Meriset</span>
-                                </template>
-                                <template x-if="!['view', 'favorite', 'portfolio_add', 'research'].includes(interaction.interaction_type)">
+                                <template x-if="!['view', 'favorite', 'portfolio_add'].includes(interaction.interaction_type)">
                                     <span>Berinteraksi dengan</span>
                                 </template>
 

@@ -323,7 +323,7 @@
                                 @csrf
                                 <input type="hidden" name="project_id" :value="recommendation.id">
                                 <button type="submit" class="clay-badge clay-badge-primary px-2 py-1 text-xs">
-                                    <i class="fas fa-heart mr-1"></i> Favorit
+                                    <i class="fas fa-heart mr-1"></i> Sukai
                                 </button>
                             </form>
                         </div>
@@ -390,7 +390,7 @@
                                 @csrf
                                 <input type="hidden" name="project_id" :value="recommendation.id">
                                 <button type="submit" class="clay-badge clay-badge-primary px-2 py-1 text-xs">
-                                    <i class="fas fa-heart mr-1"></i> Favorit
+                                    <i class="fas fa-heart mr-1"></i> Sukai
                                 </button>
                             </form>
                         </div>
@@ -450,7 +450,7 @@
                                 @csrf
                                 <input type="hidden" name="project_id" :value="recommendation.id">
                                 <button type="submit" class="clay-badge clay-badge-primary px-2 py-1 text-xs">
-                                    <i class="fas fa-heart mr-1"></i> Favorit
+                                    <i class="fas fa-heart mr-1"></i> Sukai
                                 </button>
                             </form>
                         </div>

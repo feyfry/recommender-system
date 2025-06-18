@@ -290,8 +290,8 @@
             </div>
 
             <div class="clay-card p-3 bg-secondary/5">
-                <h3 class="font-bold mb-2"><i class="fas fa-heart mr-2"></i> Favorit</h3>
-                <p>Tambahkan proyek ke favorit untuk menunjukkan minat yang lebih kuat, yang akan meningkatkan kemungkinan proyek serupa direkomendasikan.</p>
+                <h3 class="font-bold mb-2"><i class="fas fa-heart mr-2"></i> Sukai</h3>
+                <p>Sukai proyek untuk menunjukkan minat yang lebih kuat, yang akan meningkatkan kemungkinan proyek serupa direkomendasikan.</p>
             </div>
 
             <div class="clay-card p-3 bg-info/5">

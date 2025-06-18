@@ -133,6 +133,15 @@ class Interaction extends Model
     }
 
     /**
+     * PERBAIKAN: Method untuk format timestamp yang konsisten
+     */
+    private function getFormattedTimestamp()
+    {
+        // Format: Y-m-d\TH:i:s.u (dengan microseconds, tanpa timezone)
+        return $this->created_at->format('Y-m-d\TH:i:s.u');
+    }
+
+    /**
      * PERBAIKAN: Override method save dengan duplicate prevention
      */
     public function save(array $options = [])
@@ -204,21 +213,21 @@ class Interaction extends Model
     }
 
     /**
-     * Kirim interaksi ke engine rekomendasi
+     * PERBAIKAN: Kirim interaksi ke engine rekomendasi dengan format timestamp yang konsisten
      */
     public function sendToRecommendationEngine(): bool
     {
         $apiUrl = env('RECOMMENDATION_API_URL', 'http://localhost:8001');
 
         try {
-            // Siapkan data untuk dikirim
+            // PERBAIKAN: Gunakan format timestamp yang konsisten
             $data = [
                 'user_id'          => $this->user_id,
                 'project_id'       => $this->project_id,
                 'interaction_type' => $this->interaction_type,
                 'weight'           => $this->weight,
                 'context'          => $this->context,
-                'timestamp'        => $this->created_at->toIso8601String(),
+                'timestamp'        => $this->getFormattedTimestamp(), // PERBAIKAN: Gunakan format konsisten
             ];
 
             // PERBAIKAN: Tambahkan unique identifier untuk mencegah duplicate processing di API

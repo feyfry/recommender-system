@@ -413,7 +413,8 @@ def prepare_test_data(user_item_matrix: pd.DataFrame,
                      max_test_users: int = 100,
                      temporal_split: bool = True) -> Tuple[List[str], Dict[str, List[str]]]:
     """
-    Menyiapkan data test dengan strategi temporal split yang lebih realistis
+    PERBAIKAN: Menyiapkan data test dengan strategi temporal split yang lebih realistis
+    dan penanganan format timestamp yang robust
     """
     logger.info(f"Preparing test data with test_ratio={test_ratio}, "
                f"min_interactions={min_interactions}, random_seed={random_seed}, "
@@ -483,52 +484,76 @@ def prepare_test_data(user_item_matrix: pd.DataFrame,
         sampled_users.extend(sampled)
         logger.info(f"Sampled {len(sampled)} users from range {low}-{high}")
     
-    # Use temporal split if requested
+    # PERBAIKAN: Use temporal split if requested dengan robust timestamp parsing
     if temporal_split and 'timestamp' in interactions_df.columns:
         logger.info("Using temporal split for test data")
         
-        # Convert timestamp to datetime if it's a string
-        if interactions_df['timestamp'].dtype == 'object':
-            interactions_df['timestamp'] = pd.to_datetime(interactions_df['timestamp'])
+        # PERBAIKAN: Robust timestamp parsing dengan multiple format support
+        try:
+            # Coba parsing dengan format utama yang diharapkan: Y-m-d\TH:i:s.u
+            logger.info("Attempting to parse timestamps with microseconds format...")
+            interactions_df['timestamp'] = pd.to_datetime(interactions_df['timestamp'], format='%Y-%m-%dT%H:%M:%S.%f')
+            logger.info("✅ Timestamps successfully parsed with microseconds format")
+        except ValueError as e:
+            logger.warning(f"Failed to parse with microseconds format: {e}")
+            try:
+                # Format fallback pertama: ISO8601 dengan timezone
+                logger.info("Attempting to parse timestamps with ISO8601 format...")
+                interactions_df['timestamp'] = pd.to_datetime(interactions_df['timestamp'], format='ISO8601')
+                logger.warning("⚠️ Timestamps parsed with ISO8601 format (fallback)")
+            except ValueError as e2:
+                logger.warning(f"Failed to parse with ISO8601 format: {e2}")
+                try:
+                    # Format fallback kedua: format mixed untuk menangani berbagai format
+                    logger.info("Attempting to parse timestamps with mixed format...")
+                    interactions_df['timestamp'] = pd.to_datetime(interactions_df['timestamp'], format='mixed')
+                    logger.warning("⚠️ Timestamps parsed with mixed format (fallback)")
+                except ValueError as e3:
+                    logger.error(f"All timestamp parsing methods failed: {e3}")
+                    logger.error("Falling back to random split due to timestamp parsing issues")
+                    temporal_split = False
         
-        # For each sampled user, split interactions temporally
-        for user_id in sampled_users:
-            # Get user's interactions in chronological order
-            user_inters = interactions_df[interactions_df['user_id'] == user_id].sort_values('timestamp')
-            
-            if len(user_inters) < min_interactions:
-                continue
+        # PERBAIKAN: Jika temporal split berhasil, lakukan split berdasarkan waktu
+        if temporal_split:
+            # For each sampled user, split interactions temporally
+            for user_id in sampled_users:
+                # Get user's interactions in chronological order
+                user_inters = interactions_df[interactions_df['user_id'] == user_id].sort_values('timestamp')
                 
-            # IMPROVEMENT: Use a more realistic temporal split
-            # Instead of a fixed percentage split, use a time-based split
-            # to better simulate real-world evaluation scenarios
-            
-            # Get timestamp range
-            earliest_time = user_inters['timestamp'].min()
-            latest_time = user_inters['timestamp'].max()
-            
-            # Calculate split point at 70% of the time range
-            time_range = latest_time - earliest_time
-            split_time = earliest_time + time_range * 0.7
-            
-            # Use interactions after split_time for testing
-            test_interactions_df = user_inters[user_inters['timestamp'] > split_time]
-            
-            # Ensure at least 2 test interactions
-            if len(test_interactions_df) < 2:
-                # Fall back to percentage-based split
-                split_idx = int(len(user_inters) * (1 - test_ratio))
-                split_idx = min(split_idx, len(user_inters) - 2)  # Ensure at least 2 test interactions
-                test_interactions_df = user_inters.iloc[split_idx:]
-            
-            # Extract test items
-            test_items = test_interactions_df['project_id'].tolist()
-            
-            if test_items:
-                test_interactions[user_id] = test_items
-                test_users.append(user_id)
-    else:
-        # Use random split if temporal split not requested or timestamp not available
+                if len(user_inters) < min_interactions:
+                    continue
+                    
+                # IMPROVEMENT: Use a more realistic temporal split
+                # Instead of a fixed percentage split, use a time-based split
+                # to better simulate real-world evaluation scenarios
+                
+                # Get timestamp range
+                earliest_time = user_inters['timestamp'].min()
+                latest_time = user_inters['timestamp'].max()
+                
+                # Calculate split point at 70% of the time range
+                time_range = latest_time - earliest_time
+                split_time = earliest_time + time_range * 0.7
+                
+                # Use interactions after split_time for testing
+                test_interactions_df = user_inters[user_inters['timestamp'] > split_time]
+                
+                # Ensure at least 2 test interactions
+                if len(test_interactions_df) < 2:
+                    # Fall back to percentage-based split
+                    split_idx = int(len(user_inters) * (1 - test_ratio))
+                    split_idx = min(split_idx, len(user_inters) - 2)  # Ensure at least 2 test interactions
+                    test_interactions_df = user_inters.iloc[split_idx:]
+                
+                # Extract test items
+                test_items = test_interactions_df['project_id'].tolist()
+                
+                if test_items:
+                    test_interactions[user_id] = test_items
+                    test_users.append(user_id)
+    
+    # PERBAIKAN: Fallback ke random split jika temporal split gagal atau tidak diminta
+    if not temporal_split or not test_interactions:
         logger.info("Using random split for test data")
         
         # Split interactions for each user with consistent seed
@@ -577,7 +602,8 @@ def evaluate_all_models(models: Dict[str, Any],
                        cold_start_runs: int = 5,
                        regular_runs: int = 5) -> Dict[str, Dict[str, Any]]:
     """
-    Perbaikan untuk mengevaluasi semua model dengan multiple runs untuk hasil yang lebih robust
+    PERBAIKAN: Mengevaluasi semua model dengan multiple runs untuk hasil yang lebih robust
+    dan penanganan error timestamp yang lebih baik
     """
     # Main evaluation start time
     evaluation_start_time = time.perf_counter()
@@ -593,14 +619,33 @@ def evaluate_all_models(models: Dict[str, Any],
         logger.error("No interactions data found in any model")
         return {"error": "No interactions data found"}
 
-    test_users, test_interactions = prepare_test_data(
-        user_item_matrix, 
-        interactions_df,
-        test_ratio=test_ratio,
-        min_interactions=min_interactions,
-        random_seed=EVAL_RANDOM_SEED,
-        max_test_users=max_test_users
-    )
+    # PERBAIKAN: Gunakan try-catch untuk menangani error timestamp parsing
+    try:
+        test_users, test_interactions = prepare_test_data(
+            user_item_matrix, 
+            interactions_df,
+            test_ratio=test_ratio,
+            min_interactions=min_interactions,
+            random_seed=EVAL_RANDOM_SEED,
+            max_test_users=max_test_users
+        )
+    except Exception as e:
+        logger.error(f"Error in prepare_test_data: {str(e)}")
+        # PERBAIKAN: Coba tanpa temporal split jika terjadi error
+        logger.info("Retrying without temporal split...")
+        try:
+            test_users, test_interactions = prepare_test_data(
+                user_item_matrix, 
+                interactions_df,
+                test_ratio=test_ratio,
+                min_interactions=min_interactions,
+                random_seed=EVAL_RANDOM_SEED,
+                max_test_users=max_test_users,
+                temporal_split=False  # PERBAIKAN: Matikan temporal split sebagai fallback
+            )
+        except Exception as e2:
+            logger.error(f"Error even without temporal split: {str(e2)}")
+            return {"error": f"Failed to prepare test data: {str(e2)}"}
     
     logger.info(f"Prepared test data with {len(test_users)} users and {sum(len(items) for items in test_interactions.values())} test interactions")
     
@@ -1320,6 +1365,43 @@ def _generate_markdown_report(results: Dict[str, Dict[str, Any]]) -> str:
         
     return "\n".join(lines)
 
+
+def debug_timestamp_formats(interactions_df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Fungsi untuk debugging format timestamp dalam interactions dataframe
+    """
+    timestamp_col = interactions_df['timestamp']
+    
+    # Sample beberapa timestamp untuk analisis
+    sample_timestamps = timestamp_col.head(20).tolist()
+    
+    # Analisis format
+    formats_found = []
+    for ts in sample_timestamps:
+        if isinstance(ts, str):
+            if '+' in ts and 'T' in ts:
+                formats_found.append('ISO8601_with_timezone')
+            elif '.' in ts and 'T' in ts:
+                formats_found.append('microseconds_format')
+            elif 'T' in ts:
+                formats_found.append('basic_ISO8601')
+            else:
+                formats_found.append('unknown_string_format')
+        else:
+            formats_found.append(f'non_string_{type(ts).__name__}')
+    
+    format_counts = {fmt: formats_found.count(fmt) for fmt in set(formats_found)}
+    
+    logger.info("Timestamp format analysis:")
+    logger.info(f"Sample timestamps: {sample_timestamps[:5]}")
+    logger.info(f"Format distribution: {format_counts}")
+    
+    return {
+        'sample_timestamps': sample_timestamps,
+        'format_distribution': format_counts,
+        'total_records': len(timestamp_col),
+        'null_count': timestamp_col.isnull().sum()
+    }
 
 if __name__ == "__main__":
     print("Improved evaluation module loaded - run python main.py evaluate to use it")

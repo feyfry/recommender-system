@@ -70,14 +70,14 @@
                         @csrf
                         <input type="hidden" name="project_id" value="{{ $project->id }}">
                         <button type="submit" class="clay-button clay-button-success py-1.5 px-3 text-sm">
-                            <i class="fas fa-wallet mr-1"></i> Sukai
+                            <i class="fas fa-wallet mr-1"></i> Tambah ke Portfolio
                         </button>
                     </form>
                     @else
-                    <a href="#" class="clay-button clay-button-secondary py-1.5 px-3 text-sm disabled" onclick="alert('Proyek harus ada di database lokal untuk ditambahkan ke favorit.'); return false;">
-                        <i class="fas fa-heart mr-1"></i> Tambah ke Favorit
+                    <a href="#" class="clay-button clay-button-secondary py-1.5 px-3 text-sm disabled" onclick="alert('Proyek belum tersedia dalam sistem kami untuk Disukai.'); return false;">
+                        <i class="fas fa-heart mr-1"></i> Sukai
                     </a>
-                    <a href="#" class="clay-button clay-button-success py-1.5 px-3 text-sm disabled" onclick="alert('Proyek harus ada di database lokal untuk ditambahkan ke portfolio.'); return false;">
+                    <a href="#" class="clay-button clay-button-success py-1.5 px-3 text-sm disabled" onclick="alert('Proyek belum tersedia dalam sistem kami untuk Ditambahkan ke Portfolio.'); return false;">
                         <i class="fas fa-wallet mr-1"></i> Tambah ke Portfolio
                     </a>
                     @endif

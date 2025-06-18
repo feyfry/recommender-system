@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
@@ -68,6 +67,9 @@ class SyncRecommendationData extends Command
         }
     }
 
+    /**
+     * PERBAIKAN: Sinkronisasi interaksi dengan format timestamp yang konsisten
+     */
     protected function syncInteractions()
     {
         $this->info('Mengekspor interaksi ke engine rekomendasi...');
@@ -92,7 +94,7 @@ class SyncRecommendationData extends Command
 
             // PERBAIKAN: Track interaksi yang sudah ditulis untuk menghindari duplikasi
             $exportedInteractions = [];
-            $duplicateCount = 0;
+            $duplicateCount       = 0;
 
             foreach ($interactions as $interaction) {
                 // Buat unique key berdasarkan data penting (tanpa timestamp untuk menghindari masalah timezone)
@@ -100,7 +102,7 @@ class SyncRecommendationData extends Command
 
                 // PERBAIKAN: Cek duplikasi berdasarkan key yang sama dalam rentang waktu dekat
                 $interactionTime = strtotime($interaction->created_at);
-                $isDuplicate = false;
+                $isDuplicate     = false;
 
                 foreach ($exportedInteractions as $existingKey => $existingTime) {
                     if (strpos($existingKey, $uniqueKey) === 0) {
@@ -118,8 +120,10 @@ class SyncRecommendationData extends Command
                     continue;
                 }
 
-                // PERBAIKAN: Format timestamp dengan benar untuk konsistensi
-                $timestamp = date('Y-m-d\TH:i:s\Z', strtotime($interaction->created_at));
+                // PERBAIKAN: Format timestamp yang konsisten dengan engine
+                // Gunakan format Y-m-d\TH:i:s.u (dengan microseconds, tanpa timezone)
+                $carbonDate = \Carbon\Carbon::parse($interaction->created_at);
+                $timestamp  = $carbonDate->format('Y-m-d\TH:i:s.u');
 
                 fputcsv($file, [
                     $interaction->user_id,
@@ -127,7 +131,7 @@ class SyncRecommendationData extends Command
                     $interaction->interaction_type,
                     $interaction->weight,
                     is_string($interaction->context) ? $interaction->context : json_encode($interaction->context),
-                    $timestamp, // Gunakan format ISO8601 dengan timezone UTC
+                    $timestamp, // PERBAIKAN: Format konsisten dengan microseconds
                 ]);
 
                 // Simpan interaksi yang sudah diekspor dengan timestamp
