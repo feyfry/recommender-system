@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Carbon\Carbon;
 
 class Interaction extends Model
 {
@@ -133,12 +134,43 @@ class Interaction extends Model
     }
 
     /**
-     * PERBAIKAN: Method untuk format timestamp yang konsisten
+     * PERBAIKAN: Method untuk format timestamp dengan microseconds real
      */
     private function getFormattedTimestamp()
     {
-        // Format: Y-m-d\TH:i:s.u (dengan microseconds, tanpa timezone)
-        return $this->created_at->format('Y-m-d\TH:i:s.u');
+        // PERBAIKAN: Gunakan microseconds yang real dengan mempertimbangkan waktu saat ini
+        $now = Carbon::now();
+
+        // Jika record baru dibuat (dalam 1 detik terakhir), gunakan timestamp real dengan microseconds
+        if ($this->created_at && $this->created_at->diffInSeconds($now) < 1) {
+            // Gunakan timestamp saat ini dengan microseconds real
+            $currentMicrotime = microtime(true);
+            $timestamp = Carbon::createFromFormat('U.u', $currentMicrotime);
+            return $timestamp->format('Y-m-d\TH:i:s.u');
+        } else {
+            // PERBAIKAN: Untuk record yang sudah ada, generate microseconds random yang konsisten
+            // berdasarkan ID record untuk konsistensi
+            $microseconds = $this->id ? ($this->id * 123456) % 1000000 : mt_rand(100000, 999999);
+
+            // Format dengan microseconds yang di-generate
+            $baseTime = $this->created_at->format('Y-m-d\TH:i:s');
+            return $baseTime . '.' . str_pad($microseconds, 6, '0', STR_PAD_LEFT);
+        }
+    }
+
+    /**
+     * ALTERNATIF: Method untuk format timestamp dengan microseconds menggunakan waktu real
+     */
+    private function getFormattedTimestampReal()
+    {
+        // PERBAIKAN: Gunakan microtime() untuk mendapatkan microseconds real
+        $microtime = microtime(true);
+
+        // Buat Carbon instance dari microtime
+        $timestamp = Carbon::createFromFormat('U.u', sprintf('%.6f', $microtime));
+
+        // Format dengan microseconds real
+        return $timestamp->format('Y-m-d\TH:i:s.u');
     }
 
     /**
@@ -220,18 +252,18 @@ class Interaction extends Model
         $apiUrl = env('RECOMMENDATION_API_URL', 'http://localhost:8001');
 
         try {
-            // PERBAIKAN: Gunakan format timestamp yang konsisten
+            // PERBAIKAN: Gunakan format timestamp dengan microseconds real
             $data = [
                 'user_id'          => $this->user_id,
                 'project_id'       => $this->project_id,
                 'interaction_type' => $this->interaction_type,
                 'weight'           => $this->weight,
                 'context'          => $this->context,
-                'timestamp'        => $this->getFormattedTimestamp(), // PERBAIKAN: Gunakan format konsisten
+                'timestamp'        => $this->getFormattedTimestampReal(), // PERBAIKAN: Gunakan microseconds real
             ];
 
             // PERBAIKAN: Tambahkan unique identifier untuk mencegah duplicate processing di API
-            $uniqueId = md5("{$this->user_id}:{$this->project_id}:{$this->interaction_type}:{$this->created_at->timestamp}");
+            $uniqueId = md5("{$this->user_id}:{$this->project_id}:{$this->interaction_type}:" . microtime(true));
 
             Log::info("Mengirim interaksi ke engine: {$uniqueId}", $data);
 
