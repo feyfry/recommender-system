@@ -8,7 +8,7 @@
             <div>
                 <h1 class="text-3xl font-bold mb-2">Selamat Datang, {{ $user->profile?->username ?? 'Pengguna' }}!</h1>
                 <p class="text-gray-600">
-                    Dapatkan rekomendasi personal proyek Web3 berdasarkan preferensi dan interaksi Anda.
+                    Dapatkan rekomendasi proyek Web3 yang sesuai dengan minat dan interaksi Anda. <br> Jelajahi, kelola portfolio, dan pantau aktivitas terbaru Anda di sini.
                 </p>
             </div>
             <div class="mt-4 md:mt-0">
@@ -19,41 +19,8 @@
         </div>
     </div>
 
-    <!-- Profile Completion Widget (if profile is incomplete) -->
-    @if(!$user->profile || !$user->profile->isComplete())
-    <div class="clay-card p-6 mb-8 bg-info/5">
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
-            <div>
-                <h2 class="text-xl font-bold mb-3 flex items-center">
-                    <i class="fas fa-user-edit text-info mr-2"></i>
-                    Lengkapi Profil Anda
-                </h2>
-                <p class="text-gray-600 mb-2">
-                    Lengkapi profil Anda untuk mendapatkan rekomendasi yang lebih personal.
-                </p>
-                <div class="w-full md:w-80 mt-2">
-                    <div class="flex justify-between text-sm mb-1">
-                        <span>Kelengkapan Profil</span>
-                        <span>{{ $user->profile ? $user->profile->completeness_percentage : 0 }}%</span>
-                    </div>
-                    <div class="clay-progress">
-                        <div class="clay-progress-bar clay-progress-info"
-                            style="width: {{ $user->profile ? $user->profile->completeness_percentage : 0 }}%">
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="mt-4 md:mt-0">
-                <a href="{{ route('panel.profile.edit') }}" class="clay-button clay-button-info">
-                    <i class="fas fa-edit mr-2"></i> Edit Profil
-                </a>
-            </div>
-        </div>
-    </div>
-    @endif
-
     <!-- Stats Overview -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <!-- Portfolio Summary dengan Lazy Loading -->
         <div class="clay-card p-6" x-data="{ loading: true, portfolioData: null }">
             <h2 class="text-lg font-bold mb-3 flex items-center">
@@ -146,67 +113,6 @@
             </div>
         </div>
 
-        <!-- Personal Preferences -->
-        <div class="clay-card p-6">
-            <h2 class="text-lg font-bold mb-3 flex items-center">
-                <i class="fas fa-sliders-h text-primary mr-2"></i>
-                Preferensi Personal
-            </h2>
-            <div class="space-y-3">
-                <div>
-                    <label class="block text-gray-600 text-sm">Toleransi Risiko:</label>
-                    @if($user->profile && $user->profile->risk_tolerance)
-                        <div class="clay-badge clay-badge-{{ $user->profile->risk_tolerance == 'low' ? 'success' : ($user->profile->risk_tolerance == 'medium' ? 'warning' : 'danger') }} py-1 px-2">
-                            {{ $user->profile->risk_tolerance_text }}
-                        </div>
-                        <p class="text-xs text-gray-500 mt-1">{{ $user->profile->risk_tolerance_description }}</p>
-                    @else
-                        <span class="text-gray-500">Belum diatur</span>
-                    @endif
-                </div>
-                <div>
-                    <label class="block text-gray-600 text-sm">Gaya Investasi:</label>
-                    @if($user->profile && $user->profile->investment_style)
-                        <div class="clay-badge clay-badge-{{ $user->profile->investment_style == 'conservative' ? 'info' : ($user->profile->investment_style == 'balanced' ? 'warning' : 'secondary') }} py-1 px-2">
-                            {{ $user->profile->investment_style_text }}
-                        </div>
-                        <p class="text-xs text-gray-500 mt-1">{{ $user->profile->investment_style_description }}</p>
-                    @else
-                        <span class="text-gray-500">Belum diatur</span>
-                    @endif
-                </div>
-                <div>
-                    <label class="block text-gray-600 text-sm">Kategori Favorit:</label>
-                    @if($user->profile && !empty($user->profile->preferred_categories))
-                        <div class="flex flex-wrap gap-2 mt-1">
-                            @foreach($user->profile->preferred_categories as $category)
-                                <span class="clay-badge clay-badge-primary py-1 px-2 text-xs">{{ $category }}</span>
-                            @endforeach
-                        </div>
-                    @else
-                        <span class="text-gray-500">Belum diatur</span>
-                    @endif
-                </div>
-                <div>
-                    <label class="block text-gray-600 text-sm">Blockchain Favorit:</label>
-                    @if($user->profile && !empty($user->profile->preferred_chains))
-                        <div class="flex flex-wrap gap-2 mt-1">
-                            @foreach($user->profile->preferred_chains as $chain)
-                                <span class="clay-badge clay-badge-secondary py-1 px-2 text-xs">{{ $chain }}</span>
-                            @endforeach
-                        </div>
-                    @else
-                        <span class="text-gray-500">Belum diatur</span>
-                    @endif
-                </div>
-            </div>
-            <div class="mt-4">
-                <a href="{{ route('panel.profile.edit') }}" class="clay-button clay-button-primary py-1.5 px-3 text-sm">
-                    Edit Preferensi
-                </a>
-            </div>
-        </div>
-
         <!-- Recent Activity dengan Lazy Loading -->
         <div class="clay-card p-6" x-data="{ loading: true, interactions: [] }">
             <h2 class="text-lg font-bold mb-3 flex items-center">
@@ -265,8 +171,6 @@
                                 <div class="text-xs text-gray-500 mt-1" x-text="new Date(interaction.created_at).toLocaleString()"></div>
                             </div>
                         </template>
-
-                        <!-- PERBAIKAN: Tidak perlu button "Lihat Aktivitas" karena sudah ada di dashboard -->
                     </div>
                 </template>
 
@@ -282,13 +186,13 @@
         </div>
     </div>
 
-    <!-- Recommendations Section dengan Pagination -->
+    <!-- Recommendations Section -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <!-- Personal Recommendations -->
         <div class="clay-card p-6">
             <h2 class="text-xl font-bold mb-6 flex items-center">
                 <i class="fas fa-star mr-2 text-warning"></i>
-                Rekomendasi Personal
+                Rekomendasi Terbaru
             </h2>
 
             @if(isset($personalRecommendations) && count($personalRecommendations) > 0)
@@ -331,12 +235,12 @@
                 </div>
                 <div class="mt-6 text-center">
                     <a href="{{ route('panel.recommendations.personal') }}" class="clay-button clay-button-warning">
-                        Lihat Semua Rekomendasi Personal
+                        Lihat Semua Rekomendasi
                     </a>
                 </div>
             @else
                 <div class="py-6 text-center text-gray-500">
-                    <p class="mb-2">Belum ada rekomendasi personal. Interaksi dengan proyek untuk mendapatkan rekomendasi yang lebih baik.</p>
+                    <p class="mb-2">Belum ada rekomendasi. Interaksi dengan proyek untuk mendapatkan rekomendasi yang lebih baik.</p>
                     <a href="{{ route('panel.recommendations') }}" class="clay-button clay-button-warning py-1.5 px-3 text-sm mt-4">
                         Jelajahi Rekomendasi
                     </a>
@@ -344,16 +248,14 @@
             @endif
         </div>
 
-        <!-- Trending Projects dengan Lazy Loading -->
+        <!-- Trending Projects -->
         <div class="clay-card p-6" x-data="{ loading: false, trendingProjects: [] }" x-init="
-            // Load trending projects
             trendingProjects = {{ json_encode($trendingProjects ?? []) }};
             loading = false;
         ">
             <h2 class="text-xl font-bold mb-6 flex items-center">
                 <i class="fas fa-chart-line mr-2 text-info"></i>
                 Proyek Trending
-                <!-- PERBAIKAN: Hapus button refresh karena tidak berguna -->
             </h2>
 
             <template x-if="trendingProjects && trendingProjects.length > 0">
@@ -377,7 +279,6 @@
                             <template x-if="project.current_price">
                                 <div class="flex justify-between text-sm">
                                     <span x-text="'$' + (project.current_price || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span>
-                                    <!-- PERBAIKAN: Handle undefined price_change_24h -->
                                     <span :class="(project.price_change_24h || 0) >= 0 ? 'text-success' : 'text-danger'">
                                         <template x-if="project.price_change_24h !== undefined && project.price_change_24h !== null">
                                             <span x-text="((project.price_change_24h || 0) >= 0 ? '+' : '') + (project.price_change_24h || 0).toFixed(8) + '$'"></span>
@@ -433,10 +334,10 @@
                 <p class="text-sm mt-1">Lihat proyek yang sedang trending</p>
             </a>
 
-            <a href="{{ route('panel.profile.edit') }}" class="clay-card p-4 bg-secondary/10 text-center hover:translate-y-[-5px] transition-transform">
-                <i class="fas fa-user-edit text-3xl text-secondary mb-2"></i>
-                <div class="font-bold">Profil</div>
-                <p class="text-sm mt-1">Edit profil dan preferensi</p>
+            <a href="{{ route('panel.technical-analysis') }}" class="clay-card p-4 bg-secondary/10 text-center hover:translate-y-[-5px] transition-transform">
+                <i class="fas fa-chart-bar text-3xl text-secondary mb-2"></i>
+                <div class="font-bold">Analisis Teknikal</div>
+                <p class="text-sm mt-1">Analisis teknikal proyek</p>
             </a>
         </div>
     </div>

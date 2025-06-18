@@ -66,9 +66,6 @@
                                     <a href="{{ route('panel.profile.edit') }}" class="clay-dropdown-item text-sm">
                                         <i class="fas fa-user mr-2"></i> Profil
                                     </a>
-                                    <a href="{{ route('panel.profile.notification-settings') }}" class="clay-dropdown-item text-sm">
-                                        <i class="fas fa-bell mr-2"></i> Notifikasi
-                                    </a>
                                     @if(Auth::user()->isAdmin())
                                     <div class="clay-dropdown-divider"></div>
                                     <a href="{{ route('admin.dashboard') }}" class="clay-dropdown-item text-sm">
@@ -118,20 +115,11 @@
                                 </div>
                             </div>
 
-                            <div class="text-xs text-gray-600 mt-3">
-                                <div class="flex items-center mb-1">
-                                    <i class="fas fa-chart-line mr-2 text-primary"></i>
-                                    <span>Risk: {{ Auth::user()->profile?->risk_tolerance_text ?? 'Belum diatur' }}</span>
-                                </div>
-                                <div class="flex items-center">
-                                    <i class="fas fa-wallet mr-2 text-secondary"></i>
-                                    <span>Style: {{ Auth::user()->profile?->investment_style_text ?? 'Belum diatur' }}</span>
-                                </div>
-                            </div>
+                            {{-- REMOVED: Risk tolerance and investment style display --}}
                         </div>
 
                         {{-- Sidebar Menu --}}
-                        <nav class="space-y-1 px-2" aria-label="Sidebar">
+                        <nav class="space-y-1 px-2 border-t border-gray-200 pt-1" aria-label="Sidebar">
                             {{-- Dashboard --}}
                             <a href="{{ route('panel.dashboard') }}" class="clay-nav-button {{ request()->routeIs('panel.dashboard') ? 'active' : '' }}">
                                 <i class="fas fa-home w-5 mr-3"></i>

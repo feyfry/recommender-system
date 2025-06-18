@@ -11,7 +11,8 @@
             Rekomendasi Personal
         </h1>
         <p class="text-lg">
-            Rekomendasi proyek cryptocurrency yang dipersonalisasi khusus untuk Anda berdasarkan preferensi dan interaksi sebelumnya.
+            Rekomendasi proyek cryptocurrency yang dipersonalisasi berdasarkan interaksi dan pola penggunaan Anda.
+            Gunakan filter untuk menemukan proyek yang sesuai dengan minat Anda.
         </p>
     </div>
 
@@ -530,112 +531,6 @@
                             ...dan {{ count($chains ?? []) - 10 }} blockchain lainnya
                         </span>
                     </template>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- User Preferences Information -->
-    <div class="clay-card p-6 mb-8" x-data="{ loaded: false, prefs: {} }" x-init="
-        setTimeout(() => {
-            prefs = {
-                risk_tolerance: '{{ Auth::user()->risk_tolerance }}',
-                investment_style: '{{ Auth::user()->investment_style }}',
-                preferred_categories: {{ json_encode(Auth::user()->profile->preferred_categories ?? []) }},
-                preferred_chains: {{ json_encode(Auth::user()->profile->preferred_chains ?? []) }}
-            };
-            loaded = true;
-        }, 100);">
-
-        <h2 class="text-xl font-bold mb-4 flex items-center">
-            <i class="fas fa-sliders-h mr-2 text-primary"></i>
-            Preferensi Anda
-        </h2>
-
-        <!-- Loading Placeholder -->
-        <div x-show="!loaded" class="py-4 text-center">
-            <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary"></div>
-            <p class="mt-2 text-gray-500">Memuat preferensi Anda...</p>
-        </div>
-
-        <div x-show="loaded" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="clay-card bg-secondary/10 p-4">
-                <h3 class="font-bold mb-3">Profil Investasi</h3>
-                <div class="space-y-2">
-                    <div class="flex justify-between">
-                        <span>Toleransi Risiko:</span>
-                        <span class="font-medium">
-                            <template x-if="prefs.risk_tolerance === 'low'">
-                                <span class="clay-badge clay-badge-success">Rendah</span>
-                            </template>
-                            <template x-if="prefs.risk_tolerance === 'medium'">
-                                <span class="clay-badge clay-badge-warning">Sedang</span>
-                            </template>
-                            <template x-if="prefs.risk_tolerance === 'high'">
-                                <span class="clay-badge clay-badge-danger">Tinggi</span>
-                            </template>
-                            <template x-if="!prefs.risk_tolerance">
-                                <span class="text-gray-400">Belum diatur</span>
-                            </template>
-                        </span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span>Gaya Investasi:</span>
-                        <span class="font-medium">
-                            <template x-if="prefs.investment_style === 'conservative'">
-                                <span class="clay-badge clay-badge-info">Konservatif</span>
-                            </template>
-                            <template x-if="prefs.investment_style === 'balanced'">
-                                <span class="clay-badge clay-badge-warning">Seimbang</span>
-                            </template>
-                            <template x-if="prefs.investment_style === 'aggressive'">
-                                <span class="clay-badge clay-badge-danger">Agresif</span>
-                            </template>
-                            <template x-if="!prefs.investment_style">
-                                <span class="text-gray-400">Belum diatur</span>
-                            </template>
-                        </span>
-                    </div>
-                </div>
-
-                <template x-if="!prefs.risk_tolerance || !prefs.investment_style">
-                    <div class="mt-4">
-                        <a href="{{ route('panel.profile.edit') }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
-                            <i class="fas fa-edit mr-1"></i> Lengkapi Profil
-                        </a>
-                    </div>
-                </template>
-            </div>
-
-            <div class="clay-card bg-info/10 p-4">
-                <h3 class="font-bold mb-3">Kategori & Chain Pilihan</h3>
-
-                <div class="mb-3">
-                    <div class="font-medium mb-1">Kategori:</div>
-                    <div class="flex flex-wrap gap-2">
-                        <template x-if="prefs.preferred_categories && prefs.preferred_categories.length > 0">
-                            <template x-for="(category, index) in prefs.preferred_categories" :key="index">
-                                <span class="clay-badge clay-badge-primary" x-text="category"></span>
-                            </template>
-                        </template>
-                        <template x-if="!prefs.preferred_categories || prefs.preferred_categories.length === 0">
-                            <span class="text-gray-400">Belum ada kategori yang dipilih</span>
-                        </template>
-                    </div>
-                </div>
-
-                <div>
-                    <div class="font-medium mb-1">Blockchain:</div>
-                    <div class="flex flex-wrap gap-2">
-                        <template x-if="prefs.preferred_chains && prefs.preferred_chains.length > 0">
-                            <template x-for="(chain, index) in prefs.preferred_chains" :key="index">
-                                <span class="clay-badge clay-badge-secondary" x-text="chain"></span>
-                            </template>
-                        </template>
-                        <template x-if="!prefs.preferred_chains || prefs.preferred_chains.length === 0">
-                            <span class="text-gray-400">Belum ada blockchain yang dipilih</span>
-                        </template>
-                    </div>
                 </div>
             </div>
         </div>

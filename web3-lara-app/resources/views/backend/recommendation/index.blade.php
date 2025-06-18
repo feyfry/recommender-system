@@ -11,7 +11,7 @@
             Rekomendasi
         </h1>
         <p class="text-lg">
-            Dapatkan rekomendasi proyek cryptocurrency berdasarkan popularitas, tren, dan preferensi personal Anda.
+            Dapatkan rekomendasi proyek cryptocurrency berdasarkan popularitas, tren, dan filter yang Anda pilih.
             Sistem kami menggunakan model hybrid untuk memberikan rekomendasi yang paling relevan.
         </p>
     </div>
@@ -26,7 +26,7 @@
                 <h2 class="text-xl font-bold">Personal</h2>
             </div>
             <p class="text-sm text-gray-600">
-                Rekomendasi khusus untuk Anda berdasarkan interaksi dan preferensi Anda.
+                Rekomendasi berdasarkan interaksi dan pola penggunaan Anda.
             </p>
         </a>
 
@@ -67,12 +67,12 @@
         </a>
     </div>
 
-    <!-- Personal Recommendations Preview dengan Lazy Loading yang DIPERBAIKI -->
+    <!-- Personal Recommendations Preview -->
     <div class="clay-card p-6 mb-8" x-data="{ loading: true, recommendations: [] }">
         <div class="flex justify-between items-center mb-6">
             <h2 class="text-xl font-bold flex items-center">
                 <i class="fas fa-user-check mr-2 text-secondary"></i>
-                Rekomendasi Personal
+                Rekomendasi Terbaru
             </h2>
             <a href="{{ route('panel.recommendations.personal') }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
                 Lihat Semua <i class="fas fa-arrow-right ml-1"></i>
@@ -82,12 +82,11 @@
         <!-- Loading Spinner -->
         <div x-show="loading" class="py-4 text-center">
             <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-secondary"></div>
-            <p class="mt-2 text-gray-500">Memuat rekomendasi personal...</p>
+            <p class="mt-2 text-gray-500">Memuat rekomendasi...</p>
         </div>
 
-        <!-- Rekomendasi Personal Content -->
+        <!-- Rekomendasi Content -->
         <div x-show="!loading" x-init="
-            // PERBAIKAN: Prioritaskan data dari server jika tersedia
             @if(!empty($personalRecommendations))
                 recommendations = {{ json_encode($personalRecommendations) }};
                 loading = false;
@@ -96,7 +95,6 @@
                     fetch('{{ route('panel.recommendations.personal') }}?format=json')
                         .then(response => response.json())
                         .then(data => {
-                            // PERBAIKAN: Tangani berbagai format data
                             if (data.recommendations) {
                                 recommendations = data.recommendations.slice(0, 4);
                             } else if (data.data) {
@@ -124,7 +122,6 @@
                                         ((recommendation.price_change_24h || 0).toFixed(8)) + '$'">
                             </span>
                         </div>
-                        <!-- PERBAIKAN: Tampilkan kategori dengan fallback -->
                         <div class="clay-badge clay-badge-secondary mb-3" x-text="recommendation.primary_category || recommendation.category || 'Umum'"></div>
                         <div class="flex justify-between items-center">
                             <div class="text-xs font-medium">Score: <span class="text-secondary"
@@ -139,7 +136,7 @@
 
             <template x-if="recommendations.length === 0">
                 <div class="col-span-full clay-card p-6 text-center">
-                    <p>Tidak ada rekomendasi personal yang tersedia saat ini.</p>
+                    <p>Tidak ada rekomendasi yang tersedia saat ini.</p>
                     <p class="text-sm mt-2 text-gray-500">Mulai berinteraksi dengan proyek untuk mendapatkan rekomendasi yang lebih baik.</p>
                     <a href="{{ route('panel.recommendations.trending') }}" class="clay-button clay-button-primary mt-4">Lihat Trending</a>
                 </div>
@@ -147,14 +144,13 @@
         </div>
     </div>
 
-    <!-- Trending Projects Preview dengan Lazy Loading yang DIPERBAIKI -->
+    <!-- Trending Projects Preview -->
     <div class="clay-card p-6 mb-8" x-data="{ loading: true, trendingProjects: [] }">
         <div class="flex justify-between items-center mb-6">
             <h2 class="text-xl font-bold flex items-center">
                 <i class="fas fa-fire mr-2 text-warning"></i>
                 Proyek Trending
             </h2>
-            <!-- PERBAIKAN: Hapus button refresh dan hanya sisakan link ke halaman trending -->
             <a href="{{ route('panel.recommendations.trending') }}" class="clay-button clay-button-warning py-1.5 px-3 text-sm">
                 Lihat Semua <i class="fas fa-arrow-right ml-1"></i>
             </a>
@@ -168,7 +164,6 @@
 
         <!-- Trending Projects Table -->
         <div class="overflow-x-auto" x-show="!loading" x-init="
-            // PERBAIKAN: Hanya gunakan data dari server tanpa refresh
             @if(!empty($trendingProjects))
                 @if(is_object($trendingProjects) && method_exists($trendingProjects, 'items'))
                     trendingProjects = {{ json_encode($trendingProjects->items()) }};
@@ -177,7 +172,6 @@
                 @endif
                 loading = false;
             @else
-                // PERBAIKAN: Langsung set loading false jika tidak ada data
                 loading = false;
             @endif">
 
@@ -239,7 +233,7 @@
         </div>
     </div>
 
-    <!-- Recent Interactions dengan Lazy Loading -->
+    <!-- Recent Interactions -->
     <div class="clay-card p-6 mb-8" x-data="{ loading: true, interactions: [] }">
         <div class="flex justify-between items-center mb-6">
             <h2 class="text-xl font-bold flex items-center">
@@ -385,147 +379,34 @@
         </div>
     </div>
 
-    <!-- Technical Analysis -->
-    <div class="clay-card p-6 mb-8">
+    <!-- Filter & Search Info -->
+    <div class="clay-card p-6">
         <h2 class="text-xl font-bold mb-6 flex items-center">
-            <i class="fas fa-chart-line mr-2 text-warning"></i>
-            Analisis Teknikal
+            <i class="fas fa-filter mr-2 text-warning"></i>
+            Filter & Pencarian
         </h2>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div class="clay-card bg-warning/10 p-4">
-                <h3 class="font-bold mb-2">Short-Term Trading</h3>
-                <div class="text-sm space-y-1">
-                    <p><span class="font-medium">RSI:</span> 7 periode</p>
-                    <p><span class="font-medium">MACD:</span> 8-17-9</p>
-                    <p><span class="font-medium">Bollinger:</span> 10 periode</p>
-                    <p><span class="font-medium">MA:</span> 10-30-60</p>
-                </div>
-            </div>
-
-            <div class="clay-card bg-primary/10 p-4">
-                <h3 class="font-bold mb-2">Standard Trading</h3>
-                <div class="text-sm space-y-1">
-                    <p><span class="font-medium">RSI:</span> 14 periode</p>
-                    <p><span class="font-medium">MACD:</span> 12-26-9</p>
-                    <p><span class="font-medium">Bollinger:</span> 20 periode</p>
-                    <p><span class="font-medium">MA:</span> 20-50-200</p>
-                </div>
-            </div>
-
-            <div class="clay-card bg-info/10 p-4">
-                <h3 class="font-bold mb-2">Long-Term Trading</h3>
-                <div class="text-sm space-y-1">
-                    <p><span class="font-medium">RSI:</span> 21 periode</p>
-                    <p><span class="font-medium">MACD:</span> 19-39-9</p>
-                    <p><span class="font-medium">Bollinger:</span> 30 periode</p>
-                    <p><span class="font-medium">MA:</span> 50-100-200</p>
-                </div>
-            </div>
-        </div>
-
-        <p class="mt-4 text-sm text-center">
-            Lihat halaman detail proyek untuk mendapatkan sinyal trading berdasarkan analisis teknikal dengan periode indikator yang dapat dikonfigurasi.
-        </p>
-    </div>
-
-    <!-- User Preferences dengan Lazy Loading -->
-    @if(Auth::check())
-    <div class="clay-card p-6" x-data="{ loaded: false, userPrefs: null }" x-init="
-        setTimeout(() => {
-            userPrefs = {
-                risk_tolerance: '{{ Auth::user()->profile?->risk_tolerance ?? '' }}',
-                investment_style: '{{ Auth::user()->profile?->investment_style ?? '' }}',
-                preferred_categories: {{ json_encode(Auth::user()->profile?->preferred_categories ?? []) }},
-                preferred_chains: {{ json_encode(Auth::user()->profile?->preferred_chains ?? []) }}
-            };
-            loaded = true;
-        }, 300);">
-
-        <h2 class="text-xl font-bold mb-6 flex items-center">
-            <i class="fas fa-sliders-h mr-2 text-secondary"></i>
-            Preferensi Investasi Anda
-        </h2>
-
-        <!-- Loading Placeholder -->
-        <div x-show="!loaded" class="py-4 text-center">
-            <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-secondary"></div>
-            <p class="mt-2 text-gray-500">Memuat preferensi Anda...</p>
-        </div>
-
-        <div x-show="loaded" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="clay-card bg-secondary/10 p-4">
-                <h3 class="font-bold mb-3">Profil Anda</h3>
-                <div class="space-y-3">
-                    <div class="flex justify-between">
-                        <span>Toleransi Risiko:</span>
-                        <span class="font-medium">
-                            <template x-if="userPrefs && userPrefs.risk_tolerance === 'low'">
-                                <span class="clay-badge clay-badge-success">Rendah</span>
-                            </template>
-                            <template x-if="userPrefs && userPrefs.risk_tolerance === 'medium'">
-                                <span class="clay-badge clay-badge-warning">Sedang</span>
-                            </template>
-                            <template x-if="userPrefs && userPrefs.risk_tolerance === 'high'">
-                                <span class="clay-badge clay-badge-danger">Tinggi</span>
-                            </template>
-                            <template x-if="!userPrefs || !userPrefs.risk_tolerance">
-                                <span class="text-gray-400">Belum diatur</span>
-                            </template>
-                        </span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span>Gaya Investasi:</span>
-                        <span class="font-medium">
-                            <template x-if="userPrefs && userPrefs.investment_style === 'conservative'">
-                                <span class="clay-badge clay-badge-info">Konservatif</span>
-                            </template>
-                            <template x-if="userPrefs && userPrefs.investment_style === 'balanced'">
-                                <span class="clay-badge clay-badge-warning">Seimbang</span>
-                            </template>
-                            <template x-if="userPrefs && userPrefs.investment_style === 'aggressive'">
-                                <span class="clay-badge clay-badge-danger">Agresif</span>
-                            </template>
-                            <template x-if="!userPrefs || !userPrefs.investment_style">
-                                <span class="text-gray-400">Belum diatur</span>
-                            </template>
-                        </span>
-                    </div>
-                </div>
-
-                <template x-if="userPrefs && (!userPrefs.risk_tolerance || !userPrefs.investment_style)">
-                    <div class="mt-4">
-                        <a href="{{ route('panel.profile.edit') }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
-                            <i class="fas fa-edit mr-1"></i> Lengkapi Profil
-                        </a>
-                    </div>
-                </template>
-            </div>
-
-            <div class="clay-card bg-primary/10 p-4">
-                <h3 class="font-bold mb-3">Rekomendasi Sesuai Preferensi</h3>
-                <p class="text-sm">
-                    Sistem rekomendasi kami memperhitungkan preferensi Anda dalam memberikan rekomendasi proyek.
-                    <template x-if="userPrefs && userPrefs.risk_tolerance && userPrefs.investment_style">
-                        <span>
-                            Dengan profil <strong x-text="userPrefs.risk_tolerance === 'low' ? 'Rendah' : (userPrefs.risk_tolerance === 'medium' ? 'Sedang' : 'Tinggi')"></strong>
-                            dan gaya investasi <strong x-text="userPrefs.investment_style === 'conservative' ? 'Konservatif' : (userPrefs.investment_style === 'balanced' ? 'Seimbang' : 'Agresif')"></strong>,
-                            Anda akan mendapatkan rekomendasi proyek yang sesuai dengan preferensi tersebut.
-                        </span>
-                    </template>
-                    <template x-if="!userPrefs || !userPrefs.risk_tolerance || !userPrefs.investment_style">
-                        <span>Lengkapi profil Anda untuk mendapatkan rekomendasi yang lebih personal!</span>
-                    </template>
+                <h3 class="font-bold mb-2">Filter Manual</h3>
+                <p class="text-sm mb-3">
+                    Gunakan filter kategori (DeFi, NFT, Gaming) dan blockchain (Ethereum, Solana, dll) untuk menemukan proyek yang sesuai dengan minat Anda saat ini.
                 </p>
+                <a href="{{ route('panel.recommendations.personal') }}" class="clay-button clay-button-warning py-1.5 px-3 text-sm">
+                    Coba Filter
+                </a>
+            </div>
 
-                <div class="mt-4">
-                    <a href="{{ route('panel.recommendations.personal') }}" class="clay-button clay-button-primary py-1.5 px-3 text-sm">
-                        <i class="fas fa-user-check mr-1"></i> Lihat Rekomendasi Personal
-                    </a>
-                </div>
+            <div class="clay-card bg-primary/10 p-4">
+                <h3 class="font-bold mb-2">Analisis Teknikal</h3>
+                <p class="text-sm mb-3">
+                    Gunakan analisis teknikal dengan periode indikator yang dapat disesuaikan untuk gaya trading Anda (short-term, standard, long-term).
+                </p>
+                <a href="{{ route('panel.technical-analysis') }}" class="clay-button clay-button-primary py-1.5 px-3 text-sm">
+                    Buka Analisis
+                </a>
             </div>
         </div>
     </div>
-    @endif
 </div>
 @endsection

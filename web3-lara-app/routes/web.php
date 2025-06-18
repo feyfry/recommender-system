@@ -39,8 +39,6 @@ Route::prefix('panel')->middleware('auth')->group(function () {
     // Profil Pengguna
     Route::get('/profile', [ProfileController::class, 'edit'])->name('panel.profile.edit');
     Route::put('/profile', [ProfileController::class, 'update'])->name('panel.profile.update');
-    Route::get('/profile/notifications', [ProfileController::class, 'notificationSettings'])->name('panel.profile.notification-settings');
-    Route::put('/profile/notifications', [ProfileController::class, 'updateNotificationSettings'])->name('panel.profile.update-notification-settings');
 
     // Rekomendasi
     Route::prefix('recommendations')->group(function () {

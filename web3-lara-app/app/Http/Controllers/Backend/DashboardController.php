@@ -37,8 +37,7 @@ class DashboardController extends Controller
         $user   = Auth::user();
         $userId = $user->user_id;
 
-        // PERBAIKAN: Menggunakan cache key yang konsisten dengan RecommendationController
-        // dan mengambil subset dari hasil yang sudah di-cache
+        // CLEANED: Menggunakan cache key yang konsisten dan mengambil subset dari hasil yang sudah di-cache
         $data = [
             'user'                    => $user,
             'personalRecommendations' => Cache::remember("rec_personal_hybrid_{$userId}_10", 15, function () use ($userId) {
@@ -159,11 +158,10 @@ class DashboardController extends Controller
     }
 
     /**
-     * DITAMBAHKAN: Normalisasi rekomendasi - memastikan konsistensi dengan RecommendationController
+     * CLEANED: Normalisasi rekomendasi - sinkronkan dengan RecommendationController
      */
     private function normalizeRecommendations($recommendations)
     {
-        // PERBAIKAN: Sinkronkan dengan normalizeRecommendationData di RecommendationController
         return $this->normalizeRecommendationData($recommendations);
     }
 
@@ -260,12 +258,12 @@ class DashboardController extends Controller
     }
 
     /**
-     * Mendapatkan rekomendasi personal untuk pengguna (Dioptimalkan)
+     * CLEANED: Mendapatkan rekomendasi personal untuk pengguna (tanpa parameter yang tidak berguna)
      */
     private function getPersonalRecommendations($userId, $modelType = 'hybrid', $limit = 10)
     {
         try {
-            // DIOPTIMALKAN: Cache key yang konsisten dengan RecommendationController
+            // CLEANED: Cache key yang konsisten dengan RecommendationController
             $cacheKey   = "personal_recommendations_{$userId}_{$modelType}_{$limit}";
             $cachedData = Cache::get($cacheKey);
 
@@ -273,14 +271,12 @@ class DashboardController extends Controller
                 return $cachedData;
             }
 
-            // DIOPTIMALKAN: Gunakan timeout yang lebih rendah untuk HTTP requests
+            // CLEANED: Request params tanpa parameter yang tidak berguna
             $response = Http::timeout(2)->post("{$this->apiUrl}/recommend/projects", [
                 'user_id'             => $userId,
                 'model_type'          => $modelType,
                 'num_recommendations' => $limit,
                 'exclude_known'       => true,
-                'risk_tolerance'      => Auth::user()->risk_tolerance ?? 'medium',
-                'investment_style'    => Auth::user()->investment_style ?? 'balanced',
             ]);
 
             // Apakah respons berhasil dan memiliki format yang benar
@@ -312,7 +308,7 @@ class DashboardController extends Controller
     private function getTrendingProjects($limit = 10)
     {
         try {
-            // DIOPTIMALKAN: Cache key yang konsisten
+            // CLEANED: Cache key yang konsisten
             $cacheKey   = "trending_projects_{$limit}";
             $cachedData = Cache::get($cacheKey);
 
@@ -320,7 +316,7 @@ class DashboardController extends Controller
                 return $cachedData;
             }
 
-            // DIOPTIMALKAN: Gunakan timeout yang lebih rendah untuk HTTP requests
+            // CLEANED: Request tanpa parameter yang tidak perlu
             $response = Http::timeout(2)->get("{$this->apiUrl}/recommend/trending", [
                 'limit' => $limit,
             ])->json();

@@ -285,24 +285,4 @@ class User extends Authenticatable
     {
         return $this->profile?->username ?? substr($this->wallet_address, 0, 10) . '...';
     }
-
-    /**
-     * Mendapatkan toleransi risiko dari profile.
-     *
-     * @return string|null
-     */
-    public function getRiskToleranceAttribute()
-    {
-        return $this->profile?->risk_tolerance;
-    }
-
-    /**
-     * Mendapatkan gaya investasi dari profile.
-     *
-     * @return string|null
-     */
-    public function getInvestmentStyleAttribute()
-    {
-        return $this->profile?->investment_style;
-    }
 }

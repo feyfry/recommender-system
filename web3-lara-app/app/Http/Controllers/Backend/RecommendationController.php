@@ -659,18 +659,16 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Mendapatkan rekomendasi personal - DIOPTIMALKAN untuk mendukung parameter filter
+     * Mendapatkan rekomendasi personal
      */
     private function getPersonalRecommendations($userId, $modelType = 'hybrid', $limit = 10, $category = null, $chain = null, $strictFilter = false)
     {
-        // TAMBAHAN: Parameter filter yang ada di API endpoint "/recommend/projects"
+        // CLEANED: Parameter request hanya yang benar-benar digunakan
         $requestParams = [
             'user_id'             => $userId,
             'model_type'          => $modelType,
             'num_recommendations' => $limit,
             'exclude_known'       => true,
-            'risk_tolerance'      => Auth::user()->risk_tolerance ?? 'medium',
-            'investment_style'    => Auth::user()->investment_style ?? 'balanced',
         ];
 
         // Tambahkan parameter filter jika ada
@@ -699,7 +697,7 @@ class RecommendationController extends Controller
         }
 
         try {
-            // DIOPTIMALKAN: Deteksi cold-start users dengan caching
+            // CLEANED: Deteksi cold-start users dengan caching (tanpa risk tolerance logic)
             $interactionCount = Cache::remember("user_interactions_count_{$userId}", 30, function () use ($userId) {
                 return Interaction::where('user_id', $userId)->count();
             });
@@ -707,7 +705,7 @@ class RecommendationController extends Controller
             $isColdStart = $interactionCount < 10;
             $timeout     = $isColdStart ? 5 : 3; // 5 detik untuk cold-start, 3 detik untuk regular
 
-            // PERBAIKAN: Log request params untuk debugging
+            // Log request params untuk debugging
             Log::info("Mengirim permintaan rekomendasi ke API", [
                 'user_id' => $userId,
                 'model' => $modelType,
@@ -718,12 +716,12 @@ class RecommendationController extends Controller
 
             // Validasi respons
             if ($response->successful() && isset($response['recommendations']) && !empty($response['recommendations'])) {
-                // PERBAIKAN: Log exact_match_count untuk debugging filter
+                // Log exact_match_count untuk debugging filter
                 if (isset($response['exact_match_count'])) {
                     Log::info("Jumlah exact match: " . $response['exact_match_count']);
                 }
 
-                // PERBAIKAN: Simpan ke cache untuk 15 menit - konsisten dengan waktu cache lainnya
+                // Simpan ke cache untuk 15 menit - konsisten dengan waktu cache lainnya
                 Cache::put($cacheKey, $response['recommendations'], 15);
                 return $response['recommendations'];
             } else {
