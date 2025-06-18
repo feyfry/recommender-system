@@ -65,13 +65,12 @@
             Statistik Interaksi
         </h2>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             @php
                 $typeStats = [
                     'view' => 0,
                     'favorite' => 0,
-                    'portfolio_add' => 0,
-                    'research' => 0,
+                    'portfolio_add' => 0
                 ];
 
                 // Hitung statistik dari data yang sudah di-filter
@@ -89,17 +88,12 @@
 
             <div class="clay-card bg-secondary/10 p-4 text-center">
                 <div class="text-3xl font-bold mb-2">{{ $typeStats['favorite'] }}</div>
-                <div class="text-sm">Favorite</div>
+                <div class="text-sm">Liked</div>
             </div>
 
             <div class="clay-card bg-success/10 p-4 text-center">
                 <div class="text-3xl font-bold mb-2">{{ $typeStats['portfolio_add'] }}</div>
                 <div class="text-sm">Portfolio Add</div>
-            </div>
-
-            <div class="clay-card bg-primary/10 p-4 text-center">
-                <div class="text-3xl font-bold mb-2">{{ $typeStats['research'] }}</div>
-                <div class="text-sm">Research</div>
             </div>
         </div>
     </div>
@@ -163,13 +157,10 @@
                                     <span class="clay-badge clay-badge-info">View</span>
                                     @break
                                 @case('favorite')
-                                    <span class="clay-badge clay-badge-secondary">Favorite</span>
+                                    <span class="clay-badge clay-badge-secondary">Liked</span>
                                     @break
                                 @case('portfolio_add')
                                     <span class="clay-badge clay-badge-success">Portfolio</span>
-                                    @break
-                                @case('research')
-                                    <span class="clay-badge clay-badge-primary">Research</span>
                                     @break
                                 @default
                                     <span class="clay-badge">{{ $interaction->interaction_type }}</span>

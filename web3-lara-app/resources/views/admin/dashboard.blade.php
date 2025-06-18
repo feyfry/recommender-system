@@ -103,7 +103,7 @@
                     <span class="font-bold">{{ $interactionStats['views'] ?? 0 }}</span>
                 </div>
                 <div class="flex justify-between">
-                    <span>Favorite:</span>
+                    <span>Liked:</span>
                     <span class="font-bold">{{ $interactionStats['favorites'] ?? 0 }}</span>
                 </div>
                 <div class="flex justify-between">
@@ -192,7 +192,7 @@
                                 @if($interaction->interaction_type == 'view')
                                     <span class="clay-badge clay-badge-info">View</span>
                                 @elseif($interaction->interaction_type == 'favorite')
-                                    <span class="clay-badge clay-badge-secondary">Favorite</span>
+                                    <span class="clay-badge clay-badge-secondary">Liked</span>
                                 @elseif($interaction->interaction_type == 'portfolio_add')
                                     <span class="clay-badge clay-badge-success">Portfolio</span>
                                 @else

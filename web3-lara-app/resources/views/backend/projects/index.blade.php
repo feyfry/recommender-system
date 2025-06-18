@@ -285,17 +285,17 @@
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
             <div class="clay-card p-3 bg-primary/5">
-                <h3 class="font-bold mb-2"><i class="fas fa-eye mr-2"></i> Lihat Detail</h3>
+                <h3 class="font-bold mb-2"><i class="fas fa-eye mr-2"></i> Lihat Detail (View)</h3>
                 <p>Setiap kali Anda melihat detail proyek, sistem rekomendasi akan mencatat minat Anda dan meningkatkan akurasi rekomendasi.</p>
             </div>
 
             <div class="clay-card p-3 bg-secondary/5">
-                <h3 class="font-bold mb-2"><i class="fas fa-heart mr-2"></i> Sukai</h3>
+                <h3 class="font-bold mb-2"><i class="fas fa-heart mr-2"></i> Sukai (Liked)</h3>
                 <p>Sukai proyek untuk menunjukkan minat yang lebih kuat, yang akan meningkatkan kemungkinan proyek serupa direkomendasikan.</p>
             </div>
 
             <div class="clay-card p-3 bg-info/5">
-                <h3 class="font-bold mb-2"><i class="fas fa-wallet mr-2"></i> Portfolio</h3>
+                <h3 class="font-bold mb-2"><i class="fas fa-wallet mr-2"></i> Portfolio (Portfolio Add)</h3>
                 <p>Tambahkan proyek ke portfolio Anda untuk menandakan bahwa Anda berinteraksi secara signifikan dengan proyek tersebut.</p>
             </div>
         </div>

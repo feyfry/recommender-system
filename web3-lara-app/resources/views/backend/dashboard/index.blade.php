@@ -252,7 +252,7 @@
                                             <span class="clay-badge clay-badge-info py-0.5 px-1 text-xs">View</span>
                                         </template>
                                         <template x-if="interaction.interaction_type === 'favorite'">
-                                            <span class="clay-badge clay-badge-secondary py-0.5 px-1 text-xs">Favorite</span>
+                                            <span class="clay-badge clay-badge-secondary py-0.5 px-1 text-xs">Liked</span>
                                         </template>
                                         <template x-if="interaction.interaction_type === 'portfolio_add'">
                                             <span class="clay-badge clay-badge-success py-0.5 px-1 text-xs">Portfolio</span>

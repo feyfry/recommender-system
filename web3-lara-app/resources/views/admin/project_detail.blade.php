@@ -230,7 +230,7 @@
 
                         <div class="clay-card bg-secondary/10 p-3 text-center">
                             <div class="text-2xl font-bold">{{ $favoriteCount }}</div>
-                            <div class="text-sm">Favorite</div>
+                            <div class="text-sm">Liked</div>
                         </div>
 
                         <div class="clay-card bg-success/10 p-3 text-center">
@@ -264,7 +264,7 @@
                                         @if($interaction->interaction_type == 'view')
                                             <span class="clay-badge clay-badge-info">View</span>
                                         @elseif($interaction->interaction_type == 'favorite')
-                                            <span class="clay-badge clay-badge-secondary">Favorite</span>
+                                            <span class="clay-badge clay-badge-secondary">Liked</span>
                                         @elseif($interaction->interaction_type == 'portfolio_add')
                                             <span class="clay-badge clay-badge-success">Portfolio</span>
                                         @else
