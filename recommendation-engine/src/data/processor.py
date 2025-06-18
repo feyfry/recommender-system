@@ -827,7 +827,7 @@ class DataProcessor:
             if col in result_df.columns:
                 result_df[col] = pd.to_numeric(result_df[col], errors='coerce').fillna(0)
         
-        # 1. Enhanced Popularity Score - with outlier handling
+        # 1. Enhanced Popularity Score - PERBAIKAN: Pastikan tidak melebihi 100
         # Winsorize metrics to handle outliers before log transformation
         market_cap = winsorize(result_df['market_cap'].fillna(0))
         volume = winsorize(result_df['total_volume'].fillna(0))
@@ -876,11 +876,13 @@ class DataProcessor:
             0.10 * log_github        # Aktivitas developer
         )
         
-        # Scale to 0-100 using percentile ranking for more uniform distribution
+        # PERBAIKAN: Scale to 0-100 dengan clipping yang ketat
         popularity_score_ranked = popularity_score.rank(pct=True) * 100
-        result_df['popularity_score'] = popularity_score_ranked
         
-        # 2. Trend Score - More balanced approach with time decay and outlier handling
+        # CRITICAL: Pastikan tidak ada nilai yang melebihi 100
+        result_df['popularity_score'] = np.clip(popularity_score_ranked, 0.0, 100.0)
+        
+        # 2. Trend Score - PERBAIKAN: Pastikan tidak melebihi 100
         # Get price changes with better handling of missing values
         price_24h = result_df['price_change_percentage_24h'].fillna(0) / 100
         price_7d = result_df['price_change_percentage_7d_in_currency'].fillna(0) / 100
@@ -902,10 +904,35 @@ class DataProcessor:
             0.15 * price_30d_transformed    # Reduced from 0.2
         )
         
-        # Scale to 0-100 with 50 as neutral
-        result_df['trend_score'] = 50 + (trend_score * 50)
+        # PERBAIKAN: Scale to 0-100 with 50 as neutral DAN pastikan tidak melebihi 100
+        base_trend_score = 50 + (trend_score * 50)
         
-        # 3. Developer Activity Score - Improved calculation with more meaningful metrics
+        # CRITICAL: Clip ke range 0-100 sebelum apply trending boost
+        base_trend_score = np.clip(base_trend_score, 0.0, 100.0)
+        result_df['trend_score'] = base_trend_score
+        
+        # PERBAIKAN: Apply trending boost dengan batas yang aman
+        # Tambahkan skor trending jika ada data trending
+        if 'is_trending' in result_df.columns:
+            trending_mask = result_df['is_trending'] == 1
+            if trending_mask.any():
+                # PERBAIKAN: Gunakan boost yang tidak akan melebihi 100
+                current_scores = result_df.loc[trending_mask, 'trend_score']
+                
+                # Hitung boost maksimal yang aman (tidak akan melebihi 100)
+                max_safe_boost = 100.0 - current_scores
+                actual_boost = np.minimum(20.0, max_safe_boost)  # Max boost 20, tapi tidak melebihi 100
+                
+                # Apply boost dengan aman
+                result_df.loc[trending_mask, 'trend_score'] += actual_boost
+                
+                logger.info(f"Applied trending boost to {trending_mask.sum()} projects")
+        
+        # FINAL SAFETY CHECK: Pastikan semua score dalam range 0-100
+        result_df['trend_score'] = np.clip(result_df['trend_score'], 0.0, 100.0)
+        result_df['popularity_score'] = np.clip(result_df['popularity_score'], 0.0, 100.0)
+        
+        # 3. Developer Activity Score - dengan clipping
         if all(col in result_df.columns for col in ['github_stars', 'github_forks', 'github_subscribers']):
             # Create a composite score of all GitHub metrics
             github_stats = (
@@ -921,13 +948,13 @@ class DataProcessor:
             if ref_value > 0:
                 # Use a more gradual scaling function for better distribution
                 dev_score = np.tanh(github_stats / ref_value * 2) * 100
-                result_df['developer_activity_score'] = dev_score.clip(0, 100)
+                result_df['developer_activity_score'] = np.clip(dev_score, 0.0, 100.0)
             else:
                 result_df['developer_activity_score'] = 0
         else:
             result_df['developer_activity_score'] = 0
         
-        # 4. Social Engagement Score - Improved calculation with better normalization
+        # 4. Social Engagement Score - dengan clipping
         if 'market_cap' in result_df.columns and result_df['market_cap'].max() > 0:
             # Calculate social following with all available social metrics
             social_sum = result_df['twitter_followers']
@@ -952,8 +979,8 @@ class DataProcessor:
             # Scale using percentile ranking for more uniform distribution
             engagement_ranked = engagement_log.rank(pct=True)
             
-            # Scale to 0-100
-            result_df['social_engagement_score'] = engagement_ranked * 100
+            # Scale to 0-100 dengan clipping
+            result_df['social_engagement_score'] = np.clip(engagement_ranked * 100, 0.0, 100.0)
         else:
             result_df['social_engagement_score'] = 50
         
@@ -982,7 +1009,7 @@ class DataProcessor:
         else:
             result_df['age_days'] = 0
         
-        # 7. Maturity Score - Improved calculation with more balanced components
+        # 7. Maturity Score - dengan clipping
         # Logarithmic transformation of age for better scaling of old vs. new projects
         if result_df['age_days'].max() > 0:
             age_log = np.log1p(result_df['age_days'])
@@ -1009,8 +1036,24 @@ class DataProcessor:
             0.15 * desc_score         # Reduced from 0.2
         )
         
-        # Scale to 0-100
-        result_df['maturity_score'] = (maturity_score * 100).clip(0, 100)
+        # Scale to 0-100 dengan clipping
+        result_df['maturity_score'] = np.clip(maturity_score * 100, 0.0, 100.0)
+        
+        # FINAL VALIDATION: Log score ranges untuk memastikan semua dalam 0-100
+        score_columns = ['popularity_score', 'trend_score', 'developer_activity_score', 
+                        'social_engagement_score', 'maturity_score']
+        
+        for col in score_columns:
+            if col in result_df.columns:
+                min_score = result_df[col].min()
+                max_score = result_df[col].max()
+                logger.info(f"{col}: min={min_score:.2f}, max={max_score:.2f}")
+                
+                # ASSERTION: Pastikan tidak ada yang melebihi range
+                if max_score > 100.0 or min_score < 0.0:
+                    logger.error(f"SCORE RANGE ERROR in {col}: min={min_score}, max={max_score}")
+                    # Force clip jika masih ada yang salah
+                    result_df[col] = np.clip(result_df[col], 0.0, 100.0)
         
         return result_df
     

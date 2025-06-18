@@ -2456,9 +2456,16 @@ class NCFRecommender:
         return detailed_recommendations
     
     def get_trending_projects(self, n: int = 10) -> List[Dict[str, Any]]:
-        """Get trending projects with diversity"""
+        """
+        PERBAIKAN: Get trending projects dengan validasi score yang ketat
+        """
         if 'trend_score' in self.projects_df.columns:
-            trending = self.projects_df.sort_values('trend_score', ascending=False).head(n*2)
+            df = self.projects_df.copy()
+            
+            # PERBAIKAN: Validasi dan clip trend scores
+            df['trend_score'] = np.clip(df['trend_score'], 0.0, 100.0)
+            
+            trending = df.sort_values('trend_score', ascending=False).head(n*2)
             
             # Ensure category diversity
             if 'primary_category' in trending.columns:
@@ -2479,7 +2486,14 @@ class NCFRecommender:
                     
                     # Add to results
                     project_dict = project.to_dict()
-                    project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0)) / 100
+                    
+                    # PERBAIKAN: Validasi scores
+                    trend_score = float(np.clip(project_dict.get('trend_score', 0), 0.0, 100.0))
+                    recommendation_score = float(np.clip(trend_score / 100.0, 0.0, 1.0))
+                    
+                    project_dict['recommendation_score'] = recommendation_score
+                    project_dict['trend_score'] = trend_score
+                    
                     result.append(project_dict)
                     
                     # Update tracking
@@ -2497,7 +2511,13 @@ class NCFRecommender:
                     ]
                     
                     for project_dict in remaining[:n - len(result)]:
-                        project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0)) / 100
+                        # PERBAIKAN: Validasi scores
+                        trend_score = float(np.clip(project_dict.get('trend_score', 0), 0.0, 100.0))
+                        recommendation_score = float(np.clip(trend_score / 100.0, 0.0, 1.0))
+                        
+                        project_dict['recommendation_score'] = recommendation_score
+                        project_dict['trend_score'] = trend_score
+                        
                         result.append(project_dict)
                 
                 return result[:n]
@@ -2506,7 +2526,14 @@ class NCFRecommender:
                 result = []
                 for _, project in trending.head(n).iterrows():
                     project_dict = project.to_dict()
-                    project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0)) / 100
+                    
+                    # PERBAIKAN: Validasi scores
+                    trend_score = float(np.clip(project_dict.get('trend_score', 0), 0.0, 100.0))
+                    recommendation_score = float(np.clip(trend_score / 100.0, 0.0, 1.0))
+                    
+                    project_dict['recommendation_score'] = recommendation_score
+                    project_dict['trend_score'] = trend_score
+                    
                     result.append(project_dict)
                 return result
         else:
@@ -2514,9 +2541,16 @@ class NCFRecommender:
             return self.get_popular_projects(n)
     
     def get_popular_projects(self, n: int = 10) -> List[Dict[str, Any]]:
-        """Get popular projects with diversity"""
+        """
+        PERBAIKAN: Get popular projects dengan validasi score yang ketat
+        """
         if 'popularity_score' in self.projects_df.columns:
-            popular = self.projects_df.sort_values('popularity_score', ascending=False).head(n*2)
+            df = self.projects_df.copy()
+            
+            # PERBAIKAN: Validasi dan clip popularity scores
+            df['popularity_score'] = np.clip(df['popularity_score'], 0.0, 100.0)
+            
+            popular = df.sort_values('popularity_score', ascending=False).head(n*2)
             
             # Ensure category diversity
             if 'primary_category' in popular.columns:
@@ -2537,7 +2571,14 @@ class NCFRecommender:
                     
                     # Add to results
                     project_dict = project.to_dict()
-                    project_dict['recommendation_score'] = float(project_dict.get('popularity_score', 0)) / 100
+                    
+                    # PERBAIKAN: Validasi scores
+                    popularity_score = float(np.clip(project_dict.get('popularity_score', 0), 0.0, 100.0))
+                    recommendation_score = float(np.clip(popularity_score / 100.0, 0.0, 1.0))
+                    
+                    project_dict['recommendation_score'] = recommendation_score
+                    project_dict['popularity_score'] = popularity_score
+                    
                     result.append(project_dict)
                     
                     # Update tracking
@@ -2555,7 +2596,13 @@ class NCFRecommender:
                     ]
                     
                     for project_dict in remaining[:n - len(result)]:
-                        project_dict['recommendation_score'] = float(project_dict.get('popularity_score', 0)) / 100
+                        # PERBAIKAN: Validasi scores
+                        popularity_score = float(np.clip(project_dict.get('popularity_score', 0), 0.0, 100.0))
+                        recommendation_score = float(np.clip(popularity_score / 100.0, 0.0, 1.0))
+                        
+                        project_dict['recommendation_score'] = recommendation_score
+                        project_dict['popularity_score'] = popularity_score
+                        
                         result.append(project_dict)
                 
                 return result[:n]
@@ -2564,7 +2611,14 @@ class NCFRecommender:
                 result = []
                 for _, project in popular.head(n).iterrows():
                     project_dict = project.to_dict()
-                    project_dict['recommendation_score'] = float(project_dict.get('popularity_score', 0)) / 100
+                    
+                    # PERBAIKAN: Validasi scores
+                    popularity_score = float(np.clip(project_dict.get('popularity_score', 0), 0.0, 100.0))
+                    recommendation_score = float(np.clip(popularity_score / 100.0, 0.0, 1.0))
+                    
+                    project_dict['recommendation_score'] = recommendation_score
+                    project_dict['popularity_score'] = popularity_score
+                    
                     result.append(project_dict)
                 return result
         elif 'market_cap' in self.projects_df.columns:
@@ -2573,23 +2627,30 @@ class NCFRecommender:
             
             # Add recommendation score based on market cap
             result = []
+            max_cap = self.projects_df['market_cap'].max()
+            
             for _, project in popular.iterrows():
                 project_dict = project.to_dict()
-                # Normalize market cap to 0-1 range for recommendation score
-                max_cap = self.projects_df['market_cap'].max()
+                
+                # PERBAIKAN: Validasi market cap score
                 if max_cap > 0:
-                    project_dict['recommendation_score'] = float(project_dict.get('market_cap', 0)) / max_cap
+                    market_cap_score = float(np.clip(project_dict.get('market_cap', 0) / max_cap, 0.0, 1.0))
                 else:
-                    project_dict['recommendation_score'] = 0.5
+                    market_cap_score = 0.5
+                
+                project_dict['recommendation_score'] = market_cap_score
                 result.append(project_dict)
             
             return result
         else:
             # Just return first n projects with default score
-            return [
-                {**row.to_dict(), 'recommendation_score': 0.5}
-                for _, row in self.projects_df.head(n).iterrows()
-            ]
+            result = []
+            for _, row in self.projects_df.head(n).iterrows():
+                project_dict = row.to_dict()
+                project_dict['recommendation_score'] = 0.5
+                result.append(project_dict)
+            
+            return result
 
 
 if __name__ == "__main__":

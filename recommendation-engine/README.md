@@ -514,8 +514,13 @@ Project ini menyediakan CLI komprehensif untuk semua fungsi utama:
 python main.py collect --limit 1000 --detail-limit 1000
 # tambahkan param --rate-limit 3 jika ingin menghindari rate limit lebih panjang
 
-# Memproses data yang dikumpulkan (realistic weights)
+# Memproses data yang dikumpulkan
+# Development mode (generate synthetic users)
 python main.py process --users 5000
+
+# Production mode (preserve existing interactions)
+python main.py process --production
+# ALTERNATIVE: python main.py update-projects
 
 # Melatih model rekomendasi
 python main.py train --fecf --ncf --hybrid
@@ -543,11 +548,111 @@ python main.py signals --project-id bitcoin --risk medium --rsi-period 9 --macd-
 python main.py api
 
 # Menjalankan pipeline lengkap terorganisir
-python main.py run
+# Development mode (with synthetic data generation)
+python main.py run --users 5000
+
+# Production mode (preserve existing interactions)
+python main.py run --production
 
 # Debugging rekomendasi untuk pengguna tertentu
 python main.py debug --user-id user_1 --model hybrid --num 20
 ```
+
+### Workflow Development vs Production
+
+#### **Development Workflow (Setup Awal)**
+```bash
+# 1. Collect data
+python main.py collect --limit 1000 --detail-limit 1000
+
+# 2. Process dengan synthetic users
+python main.py process --users 5000
+
+# 3. Train models
+python main.py train --fecf --ncf --hybrid
+
+# 4. Evaluate models
+python main.py evaluate --cold-start --min-interactions 20
+
+# ALTERNATIVE: Pipeline lengkap development
+python main.py run --users 5000 --evaluate
+```
+
+#### **Production Workflow (Update Rutin)**
+```bash
+# 1. Collect latest data
+python main.py collect --limit 1000 --detail-limit 1000
+
+# 2. Update projects (preserve existing interactions)
+python main.py process --production
+# ALTERNATIVE: python main.py update-projects
+
+# 3. Retrain models dengan data terbaru
+python main.py train --fecf --ncf --hybrid
+
+# 4. Quick evaluation
+python main.py evaluate --cold-start --min-interactions 20
+
+# ALTERNATIVE: Pipeline lengkap production
+python main.py run --production --evaluate
+```
+
+### Production Mode Commands
+
+Untuk environment production, gunakan salah satu dari command berikut untuk memperbarui data tanpa kehilangan interaksi user yang sudah ada:
+
+```bash
+# Primary method (recommended)
+python main.py process --production
+
+# Alternative method (same functionality)
+python main.py update-projects
+```
+
+**Kedua command di atas melakukan hal yang sama:**
+- ✅ Update projects data dengan market information terbaru
+- ✅ Recalculate popularity, trend, dan engagement scores
+- ✅ Preserve existing user interactions
+- ✅ Clean outdated interactions untuk projects yang tidak ada lagi
+- ✅ Update features matrix untuk model training
+
+### Pipeline yang Terorganisir
+
+Pipeline baru yang terorganisir memiliki langkah-langkah yang ditentukan dengan jelas dan status kemajuan yang mudah dipantau:
+
+1. **Data Collection**: Mengumpulkan data dari CoinGecko API
+2. **Data Processing**: Memproses data mentah dengan perhitungan metrik
+3. **Model Training**: Melatih model rekomendasi
+4. **Model Evaluation**: Evaluasi performa model (opsional)
+5. **Sample Recommendations**: Generasi rekomendasi sampel (opsional, development only)
+6. **Result Analysis**: Analisis hasil rekomendasi (opsional, development only)
+
+Untuk menjalankan pipeline dengan opsi kustom:
+
+```bash
+# Development: Pipeline lengkap dengan synthetic data
+python main.py run --users 5000 --evaluate
+
+# Production: Pipeline dengan preserve existing data
+python main.py run --production --evaluate
+
+# Skip certain steps
+python main.py run --skip-collection --production
+python main.py run --skip-recommendations --skip-analysis
+```
+
+### Mode Comparison
+
+| Aspek | Development Mode | Production Mode |
+|-------|------------------|-----------------|
+| **Data Collection** | ✅ Fresh data | ✅ Fresh data |
+| **Projects Update** | ✅ Latest metrics | ✅ Latest metrics |
+| **User Interactions** | 🔄 Generate synthetic | 🛡️ Preserve existing |
+| **Features Matrix** | ✅ Regenerate | ✅ Regenerate |
+| **Model Training** | ✅ Full training | ✅ Full training |
+| **Use Case** | Setup, Testing | Production updates |
+| **Command** | `process --users 5000` | `process --production` |
+| **Alternative** | `run --users 5000` | `update-projects` atau `run --production` |
 
 ### Konfigurasi Periode Indikator Teknikal
 
@@ -601,23 +706,6 @@ Sistem ini mendukung konfigurasi penuh dari periode indikator teknikal untuk men
    - `standard`: Periode standar untuk analisis teknikal (default)
    - `long_term`: Periode lebih panjang untuk perspektif jangka panjang
 
-### Pipeline yang Terorganisir
-Pipeline baru yang terorganisir memiliki langkah-langkah yang ditentukan dengan jelas dan status kemajuan yang mudah dipantau:
-
-1. **Data Collection**: Mengumpulkan data dari CoinGecko API
-2. **Data Processing**: Memproses data mentah dengan perhitungan metrik
-3. **Model Training**: Melatih model rekomendasi
-4. **Sample Recommendations**: Generasi rekomendasi sampel (opsional)
-5. **Result Analysis**: Analisis hasil rekomendasi (opsional)
-
-Untuk menjalankan pipeline dengan opsi kustom:
-```bash
-# Jalankan pipeline lengkap
-python main.py run
-
-# Jalankan pipeline tanpa rekomendasi sampel dan analisis
-python main.py run --skip-recommendations --skip-analysis
-```
 
 ## 🌐 API Reference
 

@@ -72,18 +72,155 @@ def process_data(args):
     
     # Get arguments
     n_users = getattr(args, 'users', 500)
+    production_mode = getattr(args, 'production', False)
     
     start_time = time.time()
-    result = processor.process_data(n_users=n_users)
     
-    if result:
+    try:
+        if production_mode:
+            # Production mode: preserve existing interactions
+            logger.info("Production mode: Preserving existing interactions")
+            print("🏭 Production mode: Updating projects while preserving existing interactions")
+            
+            # Load data terbaru
+            projects_df, _, trending_df = processor.load_latest_data()  # ✅ Use _ for unused variable
+            
+            if projects_df is None or projects_df.empty:
+                logger.error("No project data available")
+                print("❌ No project data available")
+                return False
+            
+            # Clean dan update project data
+            projects_df = processor._clean_project_data(projects_df, trending_df)
+            
+            # Create features matrix
+            features_df = processor._create_features(projects_df)
+            
+            # Load existing interactions
+            interactions_path = os.path.join(PROCESSED_DIR, "interactions.csv")
+            
+            if os.path.exists(interactions_path):
+                interactions_df = pd.read_csv(interactions_path)
+                
+                # Validate dan clean interactions
+                valid_projects = set(projects_df['id'])
+                original_count = len(interactions_df)
+                interactions_df = interactions_df[interactions_df['project_id'].isin(valid_projects)]
+                
+                removed_count = original_count - len(interactions_df)
+                if removed_count > 0:
+                    logger.info(f"Removed {removed_count} interactions for projects no longer available")
+                    print(f"🧹 Cleaned {removed_count} outdated interactions")
+                
+                logger.info(f"Preserved {len(interactions_df)} existing interactions")
+                print(f"✅ Preserved {len(interactions_df)} existing interactions")
+                
+            else:
+                logger.warning("No existing interactions found in production mode")
+                print("⚠️ No existing interactions found. Consider running in development mode first.")
+                return False
+        else:
+            # Development mode: full processing with synthetic data
+            logger.info("Development mode: Full processing with synthetic data generation")
+            print("🔧 Development mode: Full processing with synthetic data generation")
+            
+            result = processor.process_data(n_users=n_users)
+            if not result:
+                logger.error("Data processing failed")
+                print("❌ Data processing failed")
+                return False
+                
+            projects_df, interactions_df, features_df = result
+        
+        # Save processed data
+        if production_mode:
+            processor._save_processed_data(projects_df, interactions_df, features_df)
+        
         elapsed_time = time.time() - start_time
         logger.info(f"Data processing completed in {elapsed_time:.2f} seconds")
         print(f"✅ Data processing completed in {elapsed_time:.2f} seconds")
+        
+        if production_mode:
+            print(f"📊 Production stats: {len(projects_df)} projects, {len(interactions_df)} interactions")
+        else:
+            print(f"📊 Development stats: {len(projects_df)} projects, {len(interactions_df)} interactions, {features_df.shape} features")
+        
         return True
-    else:
-        logger.error("Data processing failed")
-        print("❌ Data processing failed")
+        
+    except Exception as e:
+        logger.error(f"Error during data processing: {str(e)}")
+        print(f"❌ Error during data processing: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
+    
+def update_projects_only():
+    """
+    Update projects data dan features tanpa regenerate interactions (untuk production)
+    """
+    from src.data.processor import DataProcessor
+    
+    logger.info("Starting projects update for production (preserving existing interactions)")
+    print("Updating projects data for production...")
+    
+    processor = DataProcessor()
+    
+    start_time = time.time()
+    
+    try:
+        # 1. Load data terbaru
+        projects_df, _, trending_df = processor.load_latest_data()  # ✅ Use _ for unused variable
+        
+        if projects_df is None or projects_df.empty:
+            logger.error("No project data available")
+            print("❌ No project data available")
+            return False
+        
+        # 2. Clean dan update project data dengan metrik terbaru
+        projects_df = processor._clean_project_data(projects_df, trending_df)
+        logger.info(f"Updated {len(projects_df)} projects with latest metrics")
+        
+        # 3. Create features matrix dengan data terbaru
+        features_df = processor._create_features(projects_df)
+        logger.info(f"Created features matrix with shape {features_df.shape}")
+        
+        # 4. Load existing interactions (jangan regenerate)
+        interactions_path = os.path.join(PROCESSED_DIR, "interactions.csv")
+        
+        if os.path.exists(interactions_path):
+            interactions_df = pd.read_csv(interactions_path)
+            logger.info(f"Loaded existing interactions: {len(interactions_df)} records")
+            print(f"✅ Preserved existing interactions: {len(interactions_df)} records")
+            
+            # Validate interactions masih kompatibel dengan projects terbaru
+            valid_projects = set(projects_df['id'])
+            original_count = len(interactions_df)
+            interactions_df = interactions_df[interactions_df['project_id'].isin(valid_projects)]
+            removed_count = original_count - len(interactions_df)
+            
+            if removed_count > 0:
+                logger.info(f"Removed {removed_count} interactions for projects no longer available")
+                print(f"🧹 Cleaned {removed_count} outdated interactions")
+        else:
+            logger.warning("No existing interactions found, will need to generate synthetic data")
+            print("⚠️ No existing interactions found. Run full process to generate synthetic data.")
+            return False
+        
+        # 5. Save updated data
+        processor._save_processed_data(projects_df, interactions_df, features_df)
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"Projects update completed in {elapsed_time:.2f} seconds")
+        print(f"✅ Projects update completed in {elapsed_time:.2f} seconds")
+        print(f"📊 Updated: {len(projects_df)} projects, {len(interactions_df)} interactions preserved")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error during projects update: {str(e)}")
+        print(f"❌ Error during projects update: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return False
 
 def train_models(args):
@@ -1349,67 +1486,117 @@ def run_pipeline(args):
     print("Starting complete recommendation engine pipeline...")
     print(f"{'='*70}")
     
+    # Check for production mode
+    production_mode = getattr(args, 'production', False)
+    
+    if production_mode:
+        print("🏭 PRODUCTION MODE: Preserving existing interactions")
+    else:
+        print("🔧 DEVELOPMENT MODE: Full processing with synthetic data")
+    
     # Override arguments as needed
-    if args.skip_collection:
+    if getattr(args, 'skip_collection', False):
         print("Skipping collection step (--skip-collection flag used)")
     
-    if args.skip_processing:
+    if getattr(args, 'skip_processing', False):
         print("Skipping processing step (--skip-processing flag used)")
     
-    if args.skip_training:
+    if getattr(args, 'skip_training', False):
         print("Skipping training step (--skip-training flag used)")
     
-    # Tentukan langkah-langkah pipeline
-    pipeline_steps = [
-        {
-            "name": "Data Collection",
-            "function": collect_data,
-            "description": "Collecting data from CoinGecko API",
-            "required": True,
-            "skip_if": lambda args: args.skip_collection,
-            "args": args
-        },
-        {
-            "name": "Data Processing",
-            "function": process_data,
-            "description": "Processing raw data into usable formats",
-            "required": True,
-            "skip_if": lambda args: args.skip_processing,
-            "args": args
-        },
-        {
-            "name": "Training Models",
-            "function": train_models,
-            "description": "Training recommendation models",
-            "required": True,
-            "skip_if": lambda args: args.skip_training,
-            "args": args
-        },
-        {
-            "name": "Model Evaluation",  # NEW: Added model evaluation step
-            "function": evaluate_models,
-            "description": "Evaluating model performance",
-            "required": False,
-            "skip_if": lambda args: not args.evaluate,
-            "args": args
-        },
-        {
-            "name": "Sample Recommendations",
-            "function": generate_sample_recommendations,
-            "description": "Generating sample recommendations",
-            "required": False,
-            "skip_if": lambda args: getattr(args, 'skip_recommendations', False),
-            "args": args
-        },
-        {
-            "name": "Result Analysis",
-            "function": analyze_results,
-            "description": "Analyzing recommendation results",
-            "required": False,
-            "skip_if": lambda args: getattr(args, 'skip_analysis', False),
-            "args": args
-        }
-    ]
+    # PERBAIKAN: Pastikan args memiliki flag production untuk step processing
+    if production_mode:
+        # Set production flag explicitly untuk step processing
+        args.production = True
+
+    # Tentukan langkah-langkah pipeline berdasarkan mode
+    if production_mode:
+        pipeline_steps = [
+            {
+                "name": "Data Collection",
+                "function": collect_data,
+                "description": "Collecting latest data from CoinGecko API",
+                "required": True,
+                "skip_if": lambda args: getattr(args, 'skip_collection', False),
+                "args": args
+            },
+            {
+                "name": "Projects Update",
+                "function": process_data,  # Will use --production flag
+                "description": "Updating projects data (preserving existing interactions)",
+                "required": True,
+                "skip_if": lambda args: getattr(args, 'skip_processing', False),
+                "args": args
+            },
+            {
+                "name": "Model Training",
+                "function": train_models,
+                "description": "Training recommendation models with updated data",
+                "required": True,
+                "skip_if": lambda args: getattr(args, 'skip_training', False),
+                "args": args
+            },
+            {
+                "name": "Model Evaluation",
+                "function": evaluate_models,
+                "description": "Evaluating model performance",
+                "required": False,
+                "skip_if": lambda args: not getattr(args, 'evaluate', False),
+                "args": args
+            }
+        ]
+    else:
+        # Development mode - full pipeline
+        pipeline_steps = [
+            {
+                "name": "Data Collection",
+                "function": collect_data,
+                "description": "Collecting data from CoinGecko API",
+                "required": True,
+                "skip_if": lambda args: getattr(args, 'skip_collection', False),
+                "args": args
+            },
+            {
+                "name": "Data Processing",
+                "function": process_data,
+                "description": "Processing raw data and generating synthetic interactions",
+                "required": True,
+                "skip_if": lambda args: getattr(args, 'skip_processing', False),
+                "args": args
+            },
+            {
+                "name": "Training Models",
+                "function": train_models,
+                "description": "Training recommendation models",
+                "required": True,
+                "skip_if": lambda args: getattr(args, 'skip_training', False),
+                "args": args
+            },
+            {
+                "name": "Model Evaluation",
+                "function": evaluate_models,
+                "description": "Evaluating model performance",
+                "required": False,
+                "skip_if": lambda args: not getattr(args, 'evaluate', False),
+                "args": args
+            },
+            {
+                "name": "Sample Recommendations",
+                "function": generate_sample_recommendations,
+                "description": "Generating sample recommendations",
+                "required": False,
+                "skip_if": lambda args: getattr(args, 'skip_recommendations', False),
+                "args": args
+            },
+            {
+                "name": "Result Analysis",
+                "function": analyze_results,
+                "description": "Analyzing recommendation results",
+                "required": False,
+                "skip_if": lambda args: getattr(args, 'skip_analysis', False),
+                "args": args
+            }
+        ]
     
     # Jalankan pipeline
     pipeline_results = []
@@ -1431,16 +1618,25 @@ def run_pipeline(args):
         # Execute step
         print(f"\n{'-'*70}")
         print(f"Step {step_idx+1}/{len(pipeline_steps)}: {step_name}")
+        if production_mode and step_name == "Data Processing":
+            print(f"🏭 PRODUCTION: {step_desc}")
+        else:
+            print(f"🔧 {step_desc}")
         print(f"{'-'*70}")
-        print(f"Description: {step_desc}")
         print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
         try:
             start_time = time.time()
             
-            # Special handling for sample recommendations and analysis
-            if step_name == "Sample Recommendations":
-                success = generate_sample_recommendations(step_args)
+            # Special handling for different steps in production
+            if step_name == "Sample Recommendations" and production_mode:
+                # Skip sample recommendations in production
+                success = True
+                print("✅ Skipped sample recommendations in production mode")
+            elif step_name == "Result Analysis" and production_mode:
+                # Skip result analysis in production
+                success = True
+                print("✅ Skipped result analysis in production mode")
             else:
                 success = step_func(step_args)
                 
@@ -1470,7 +1666,10 @@ def run_pipeline(args):
     
     # Pipeline summary
     print(f"\n{'='*70}")
-    print("Pipeline Execution Summary")
+    if production_mode:
+        print("🏭 PRODUCTION Pipeline Execution Summary")
+    else:
+        print("🔧 DEVELOPMENT Pipeline Execution Summary")
     print(f"{'='*70}")
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
@@ -1490,13 +1689,20 @@ def run_pipeline(args):
         print(f"{step_name}: {status}")
     
     if all_required_success:
-        print("\n🎉 Pipeline completed successfully!")
-        
-        # NEW: Add final recommendations if successful
-        print("\nRecommendations for Next Steps:")
-        print("- View evaluation report in the data/models directory")
-        print("- Test the system with real users using: python main.py recommend --user-id <user_id>")
-        print("- Start the API server to serve recommendations: python main.py api")
+        if production_mode:
+            print("\n🎉 Production pipeline completed successfully!")
+            print("\n🏭 Production Recommendations:")
+            print("- Projects data updated with latest market information")
+            print("- Existing user interactions preserved")
+            print("- Models retrained with fresh data")
+            print("- System ready for production use")
+        else:
+            print("\n🎉 Development pipeline completed successfully!")
+            print("\nRecommendations for Next Steps:")
+            print("- View evaluation report in the data/models directory")
+            print("- Test the system with real users using: python main.py recommend --user-id <user_id>")
+            print("- Start the API server to serve recommendations: python main.py api")
+            print("- For production, use: python main.py run --production")
     else:
         print("\n⚠️ Pipeline completed with errors in required steps.")
         print("Check logs for more details: logs/main.log")
@@ -1552,6 +1758,10 @@ Examples:
     # process command
     process_parser = subparsers.add_parser("process", help="Process collected data")
     process_parser.add_argument("--users", type=int, default=1000, help="Number of synthetic users to generate")
+    process_parser.add_argument("--production", action="store_true", help="Production mode: preserve existing interactions")
+
+    # update-projects command
+    update_parser = subparsers.add_parser("update-projects", help="Update projects data only (production mode)")
     
     # train command
     train_parser = subparsers.add_parser("train", help="Train recommendation models")
@@ -1649,6 +1859,8 @@ Examples:
                         help="Force training even if data quality validation fails")
     run_parser.add_argument("--debug", action="store_true",
                         help="Enable debug logging")
+    run_parser.add_argument("--production", action="store_true",
+                        help="Production mode: preserve existing interactions")
     
     # Parse arguments
     args = parser.parse_args()
@@ -1666,6 +1878,8 @@ Examples:
         collect_data(args)
     elif args.command == "process":
         process_data(args)
+    elif args.command == "update-projects":
+        update_projects_only()
     elif args.command == "train":
         # If no specific model is selected, train all models
         if not (args.fecf or args.ncf or args.hybrid) and not args.include_all:

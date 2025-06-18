@@ -1753,15 +1753,25 @@ class FeatureEnhancedCF:
     def get_trending_projects(self, n: int = 10) -> List[Dict[str, Any]]:
         """
         Get trending crypto projects with enhanced diversity
+        PERBAIKAN: Pastikan semua score dalam range 0-100
         """
         if 'trend_score' in self.projects_df.columns:
             # Sort by trend score
             trending = self.projects_df.sort_values('trend_score', ascending=False).head(n*2)
             
+            # PERBAIKAN: Validasi dan clip trend scores
+            trending = trending.copy()
+            trending['trend_score'] = np.clip(trending['trend_score'], 0.0, 100.0)
+            
             # Ensure category diversity
             if 'primary_category' in trending.columns or 'categories_list' in trending.columns:
                 # Apply diversity directly
-                trend_tuples = [(row['id'], row['trend_score']/100) for _, row in trending.iterrows()]
+                trend_tuples = []
+                for _, row in trending.iterrows():
+                    # PERBAIKAN: Pastikan score dinormalisasi dengan benar ke range 0-1
+                    normalized_score = np.clip(row['trend_score'] / 100.0, 0.0, 1.0)
+                    trend_tuples.append((row['id'], normalized_score))
+                
                 diversified = self._apply_diversity_with_metadata(trend_tuples, n)
                 
                 # Convert back to dictionaries
@@ -1770,8 +1780,15 @@ class FeatureEnhancedCF:
                     project_data = self.projects_df[self.projects_df['id'] == item_id]
                     if not project_data.empty:
                         project_dict = project_data.iloc[0].to_dict()
-                        project_dict['recommendation_score'] = float(score)
-                        project_dict['trend_score'] = project_dict.get('trend_score', score * 100)
+                        
+                        # PERBAIKAN: Validasi recommendation_score
+                        recommendation_score = float(np.clip(score, 0.0, 1.0))
+                        project_dict['recommendation_score'] = recommendation_score
+                        
+                        # PERBAIKAN: Pastikan trend_score tidak melebihi 100
+                        original_trend_score = project_dict.get('trend_score', score * 100)
+                        project_dict['trend_score'] = float(np.clip(original_trend_score, 0.0, 100.0))
+                        
                         result.append(project_dict)
                 
                 return result[:n]
@@ -1780,7 +1797,14 @@ class FeatureEnhancedCF:
                 result = []
                 for _, project in trending.head(n).iterrows():
                     project_dict = project.to_dict()
-                    project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0)) / 100
+                    
+                    # PERBAIKAN: Validasi semua scores
+                    trend_score = float(np.clip(project_dict.get('trend_score', 0), 0.0, 100.0))
+                    recommendation_score = float(np.clip(trend_score / 100.0, 0.0, 1.0))
+                    
+                    project_dict['recommendation_score'] = recommendation_score
+                    project_dict['trend_score'] = trend_score
+                    
                     result.append(project_dict)
                 return result
         else:
@@ -1790,10 +1814,15 @@ class FeatureEnhancedCF:
     def get_popular_projects(self, n: int = 10) -> List[Dict[str, Any]]:
         """
         Get popular crypto projects with enhanced diversity and ranking
+        PERBAIKAN: Pastikan semua score dalam range 0-100
         """
         if 'popularity_score' in self.projects_df.columns and 'trend_score' in self.projects_df.columns:
             # IMPROVED: Create balanced score with market cap influence
             df = self.projects_df.copy()
+            
+            # PERBAIKAN: Validasi dan clip scores sebelum digunakan
+            df['popularity_score'] = np.clip(df['popularity_score'], 0.0, 100.0)
+            df['trend_score'] = np.clip(df['trend_score'], 0.0, 100.0)
             
             # Create normalized scores
             df['popularity_normalized'] = df['popularity_score'] / 100 
@@ -1815,11 +1844,19 @@ class FeatureEnhancedCF:
                 market_cap_boost = self.crypto_weights.get("market_cap_influence", 0.4)
                 df['combined_score'] += df['market_cap_rank'] * 20 * market_cap_boost
             
+            # PERBAIKAN: Pastikan combined_score tidak melebihi 100
+            df['combined_score'] = np.clip(df['combined_score'], 0.0, 100.0)
+            
             # Sort by combined score
             popular = df.sort_values('combined_score', ascending=False).head(n*2)
             
             # Apply diversity to popular projects
-            popular_tuples = [(row['id'], row['combined_score']/100) for _, row in popular.iterrows()]
+            popular_tuples = []
+            for _, row in popular.iterrows():
+                # PERBAIKAN: Pastikan score dinormalisasi dengan benar ke range 0-1
+                normalized_score = np.clip(row['combined_score'] / 100.0, 0.0, 1.0)
+                popular_tuples.append((row['id'], normalized_score))
+            
             diversified = self._apply_diversity_with_metadata(popular_tuples, n)
             
             # Convert back to dictionaries
@@ -1828,16 +1865,38 @@ class FeatureEnhancedCF:
                 project_data = df[df['id'] == item_id]
                 if not project_data.empty:
                     project_dict = project_data.iloc[0].to_dict()
-                    project_dict['recommendation_score'] = float(score)
+                    
+                    # PERBAIKAN: Validasi recommendation_score
+                    recommendation_score = float(np.clip(score, 0.0, 1.0))
+                    project_dict['recommendation_score'] = recommendation_score
+                    
+                    # PERBAIKAN: Pastikan popularity_score tidak melebihi 100
+                    popularity_score = project_dict.get('popularity_score', score * 100)
+                    project_dict['popularity_score'] = float(np.clip(popularity_score, 0.0, 100.0))
+                    
+                    # PERBAIKAN: Pastikan trend_score tidak melebihi 100
+                    trend_score = project_dict.get('trend_score', 0)
+                    project_dict['trend_score'] = float(np.clip(trend_score, 0.0, 100.0))
+                    
                     result.append(project_dict)
             
             return result[:n]
+            
         elif 'popularity_score' in self.projects_df.columns:
             # Just use popularity score
-            popular = self.projects_df.sort_values('popularity_score', ascending=False).head(n*2)
+            df = self.projects_df.copy()
+            
+            # PERBAIKAN: Validasi dan clip popularity scores
+            df['popularity_score'] = np.clip(df['popularity_score'], 0.0, 100.0)
+            
+            popular = df.sort_values('popularity_score', ascending=False).head(n*2)
             
             # Apply diversity
-            popular_tuples = [(row['id'], row['popularity_score']/100) for _, row in popular.iterrows()]
+            popular_tuples = []
+            for _, row in popular.iterrows():
+                normalized_score = np.clip(row['popularity_score'] / 100.0, 0.0, 1.0)
+                popular_tuples.append((row['id'], normalized_score))
+            
             diversified = self._apply_diversity_with_metadata(popular_tuples, n)
             
             # Convert to dictionaries
@@ -1846,18 +1905,29 @@ class FeatureEnhancedCF:
                 project_data = self.projects_df[self.projects_df['id'] == item_id]
                 if not project_data.empty:
                     project_dict = project_data.iloc[0].to_dict()
-                    project_dict['recommendation_score'] = float(score)
+                    
+                    # PERBAIKAN: Validasi scores
+                    recommendation_score = float(np.clip(score, 0.0, 1.0))
+                    popularity_score = float(np.clip(project_dict.get('popularity_score', score * 100), 0.0, 100.0))
+                    
+                    project_dict['recommendation_score'] = recommendation_score
+                    project_dict['popularity_score'] = popularity_score
+                    
                     result.append(project_dict)
             
             return result[:n]
+            
         elif 'market_cap' in self.projects_df.columns:
             # Use market cap as fallback
             popular = self.projects_df.sort_values('market_cap', ascending=False).head(n*2)
             
             # Apply diversity
             if popular['market_cap'].max() > 0:
-                popular_tuples = [(row['id'], row['market_cap']/popular['market_cap'].max() * 0.9) 
-                                for _, row in popular.iterrows()]
+                popular_tuples = []
+                max_market_cap = popular['market_cap'].max()
+                for _, row in popular.iterrows():
+                    normalized_score = np.clip(row['market_cap'] / max_market_cap * 0.9, 0.0, 1.0)
+                    popular_tuples.append((row['id'], normalized_score))
             else:
                 popular_tuples = [(row['id'], 0.5) for _, row in popular.iterrows()]
             
@@ -1869,13 +1939,18 @@ class FeatureEnhancedCF:
                 project_data = self.projects_df[self.projects_df['id'] == item_id]
                 if not project_data.empty:
                     project_dict = project_data.iloc[0].to_dict()
-                    project_dict['recommendation_score'] = float(score)
+                    
+                    # PERBAIKAN: Validasi recommendation_score
+                    recommendation_score = float(np.clip(score, 0.0, 1.0))
+                    project_dict['recommendation_score'] = recommendation_score
+                    
                     result.append(project_dict)
             
             return result[:n]
         else:
             # Just return random selection with diversity
-            random_tuples = [(row['id'], 0.5) for _, row in self.projects_df.sample(min(n*2, len(self.projects_df))).iterrows()]
+            sample_size = min(n*2, len(self.projects_df))
+            random_tuples = [(row['id'], 0.5) for _, row in self.projects_df.sample(sample_size).iterrows()]
             diversified = self._apply_diversity_with_metadata(random_tuples, n)
             
             # Convert to dictionaries
@@ -1884,7 +1959,11 @@ class FeatureEnhancedCF:
                 project_data = self.projects_df[self.projects_df['id'] == item_id]
                 if not project_data.empty:
                     project_dict = project_data.iloc[0].to_dict()
-                    project_dict['recommendation_score'] = float(score)
+                    
+                    # PERBAIKAN: Validasi recommendation_score
+                    recommendation_score = float(np.clip(score, 0.0, 1.0))
+                    project_dict['recommendation_score'] = recommendation_score
+                    
                     result.append(project_dict)
             
             return result[:n]

@@ -2997,18 +2997,52 @@ class HybridRecommender:
         return detailed_recommendations
     
     def get_trending_projects(self, n: int = 10) -> List[Dict[str, Any]]:
+        """
+        PERBAIKAN: Get trending projects dengan validasi score yang ketat
+        """
         # Leverage FECF for trending recommendations
         if self.fecf_model is not None:
-            return self.fecf_model.get_trending_projects(n)
+            trending_results = self.fecf_model.get_trending_projects(n)
+            
+            # PERBAIKAN: Validasi semua scores dari FECF
+            validated_results = []
+            for project in trending_results:
+                project_copy = project.copy()
+                
+                # Validasi dan clip trend_score
+                trend_score = project_copy.get('trend_score', 0)
+                project_copy['trend_score'] = float(np.clip(trend_score, 0.0, 100.0))
+                
+                # Validasi dan clip recommendation_score
+                rec_score = project_copy.get('recommendation_score', 0)
+                project_copy['recommendation_score'] = float(np.clip(rec_score, 0.0, 1.0))
+                
+                # Validasi popularity_score jika ada
+                if 'popularity_score' in project_copy:
+                    pop_score = project_copy.get('popularity_score', 0)
+                    project_copy['popularity_score'] = float(np.clip(pop_score, 0.0, 100.0))
+                
+                validated_results.append(project_copy)
+            
+            return validated_results
         
         # Fallback if FECF not available
         if hasattr(self, 'projects_df') and 'trend_score' in self.projects_df.columns:
-            trending = self.projects_df.sort_values('trend_score', ascending=False).head(n*2)
+            df = self.projects_df.copy()
+            
+            # PERBAIKAN: Validasi dan clip trend scores
+            df['trend_score'] = np.clip(df['trend_score'], 0.0, 100.0)
+            
+            trending = df.sort_values('trend_score', ascending=False).head(n*2)
             
             # Ensure category diversity
             if 'primary_category' in trending.columns or 'categories_list' in trending.columns:
                 # Apply diversity directly
-                trend_tuples = [(row['id'], row['trend_score']/100) for _, row in trending.iterrows()]
+                trend_tuples = []
+                for _, row in trending.iterrows():
+                    normalized_score = np.clip(row['trend_score'] / 100.0, 0.0, 1.0)
+                    trend_tuples.append((row['id'], normalized_score))
+                
                 diversified = self.apply_diversity(trend_tuples, n, diversity_weight=0.3)
                 
                 # Convert back to dictionaries
@@ -3017,8 +3051,14 @@ class HybridRecommender:
                     project_data = self.projects_df[self.projects_df['id'] == item_id]
                     if not project_data.empty:
                         project_dict = project_data.iloc[0].to_dict()
-                        project_dict['recommendation_score'] = float(score)
-                        project_dict['trend_score'] = project_dict.get('trend_score', score * 100)
+                        
+                        # PERBAIKAN: Validasi scores
+                        recommendation_score = float(np.clip(score, 0.0, 1.0))
+                        trend_score = float(np.clip(project_dict.get('trend_score', score * 100), 0.0, 100.0))
+                        
+                        project_dict['recommendation_score'] = recommendation_score
+                        project_dict['trend_score'] = trend_score
+                        
                         result.append(project_dict)
                 
                 return result[:n]
@@ -3027,7 +3067,14 @@ class HybridRecommender:
                 result = []
                 for _, project in trending.head(n).iterrows():
                     project_dict = project.to_dict()
-                    project_dict['recommendation_score'] = float(project_dict.get('trend_score', 0)) / 100
+                    
+                    # PERBAIKAN: Validasi scores
+                    trend_score = float(np.clip(project_dict.get('trend_score', 0), 0.0, 100.0))
+                    recommendation_score = float(np.clip(trend_score / 100.0, 0.0, 1.0))
+                    
+                    project_dict['recommendation_score'] = recommendation_score
+                    project_dict['trend_score'] = trend_score
+                    
                     result.append(project_dict)
                 return result
         else:
@@ -3035,9 +3082,34 @@ class HybridRecommender:
             return self.get_popular_projects(n)
     
     def get_popular_projects(self, n: int = 10) -> List[Dict[str, Any]]:
+        """
+        PERBAIKAN: Get popular projects dengan validasi score yang ketat
+        """
         # Leverage FECF for popularity with cryptocurreny optimizations
         if self.fecf_model is not None:
-            return self.fecf_model.get_popular_projects(n)
+            popular_results = self.fecf_model.get_popular_projects(n)
+            
+            # PERBAIKAN: Validasi semua scores dari FECF
+            validated_results = []
+            for project in popular_results:
+                project_copy = project.copy()
+                
+                # Validasi dan clip popularity_score
+                pop_score = project_copy.get('popularity_score', 0)
+                project_copy['popularity_score'] = float(np.clip(pop_score, 0.0, 100.0))
+                
+                # Validasi dan clip recommendation_score
+                rec_score = project_copy.get('recommendation_score', 0)
+                project_copy['recommendation_score'] = float(np.clip(rec_score, 0.0, 1.0))
+                
+                # Validasi trend_score jika ada
+                if 'trend_score' in project_copy:
+                    trend_score = project_copy.get('trend_score', 0)
+                    project_copy['trend_score'] = float(np.clip(trend_score, 0.0, 100.0))
+                
+                validated_results.append(project_copy)
+            
+            return validated_results
         
         # Direct implementation with enhancements
         if hasattr(self, 'projects_df'):
@@ -3045,6 +3117,10 @@ class HybridRecommender:
             df = self.projects_df.copy()
             
             if 'popularity_score' in df.columns and 'trend_score' in df.columns:
+                # PERBAIKAN: Validasi dan clip scores sebelum digunakan
+                df['popularity_score'] = np.clip(df['popularity_score'], 0.0, 100.0)
+                df['trend_score'] = np.clip(df['trend_score'], 0.0, 100.0)
+                
                 # Create balanced score with market cap influence
                 df['combined_score'] = df['popularity_score'] * 0.6
                 
@@ -3057,11 +3133,18 @@ class HybridRecommender:
                     df['market_cap_normalized'] = df['market_cap'] / df['market_cap'].max()
                     df['combined_score'] += df['market_cap_normalized'] * 10
                 
+                # PERBAIKAN: Pastikan combined_score tidak melebihi 100
+                df['combined_score'] = np.clip(df['combined_score'], 0.0, 100.0)
+                
                 # Sort by this comprehensive metric
                 popular = df.sort_values('combined_score', ascending=False).head(n*2)
                 
                 # Apply diversity to popular projects
-                popular_tuples = [(row['id'], row['combined_score']/100) for _, row in popular.iterrows()]
+                popular_tuples = []
+                for _, row in popular.iterrows():
+                    normalized_score = np.clip(row['combined_score'] / 100.0, 0.0, 1.0)
+                    popular_tuples.append((row['id'], normalized_score))
+                
                 diversified = self.apply_diversity(popular_tuples, n, diversity_weight=0.25)
                 
                 # Convert back to dictionaries
@@ -3070,16 +3153,33 @@ class HybridRecommender:
                     project_data = df[df['id'] == item_id]
                     if not project_data.empty:
                         project_dict = project_data.iloc[0].to_dict()
-                        project_dict['recommendation_score'] = float(score)
+                        
+                        # PERBAIKAN: Validasi semua scores
+                        recommendation_score = float(np.clip(score, 0.0, 1.0))
+                        popularity_score = float(np.clip(project_dict.get('popularity_score', score * 100), 0.0, 100.0))
+                        trend_score = float(np.clip(project_dict.get('trend_score', 0), 0.0, 100.0))
+                        
+                        project_dict['recommendation_score'] = recommendation_score
+                        project_dict['popularity_score'] = popularity_score
+                        project_dict['trend_score'] = trend_score
+                        
                         result.append(project_dict)
                 
                 return result[:n]
+                
             elif 'popularity_score' in df.columns:
+                # PERBAIKAN: Validasi popularity_score
+                df['popularity_score'] = np.clip(df['popularity_score'], 0.0, 100.0)
+                
                 # Just use popularity score
                 popular = df.sort_values('popularity_score', ascending=False).head(n*2)
                 
                 # Apply diversity
-                popular_tuples = [(row['id'], row['popularity_score']/100) for _, row in popular.iterrows()]
+                popular_tuples = []
+                for _, row in popular.iterrows():
+                    normalized_score = np.clip(row['popularity_score'] / 100.0, 0.0, 1.0)
+                    popular_tuples.append((row['id'], normalized_score))
+                
                 diversified = self.apply_diversity(popular_tuples, n, diversity_weight=0.25)
                 
                 # Convert to dictionaries
@@ -3088,18 +3188,29 @@ class HybridRecommender:
                     project_data = df[df['id'] == item_id]
                     if not project_data.empty:
                         project_dict = project_data.iloc[0].to_dict()
-                        project_dict['recommendation_score'] = float(score)
+                        
+                        # PERBAIKAN: Validasi scores
+                        recommendation_score = float(np.clip(score, 0.0, 1.0))
+                        popularity_score = float(np.clip(project_dict.get('popularity_score', score * 100), 0.0, 100.0))
+                        
+                        project_dict['recommendation_score'] = recommendation_score
+                        project_dict['popularity_score'] = popularity_score
+                        
                         result.append(project_dict)
                 
                 return result[:n]
+                
             elif 'market_cap' in df.columns:
                 # Use market cap as fallback
                 popular = df.sort_values('market_cap', ascending=False).head(n*2)
                 
                 # Apply diversity
                 if popular['market_cap'].max() > 0:
-                    popular_tuples = [(row['id'], row['market_cap']/popular['market_cap'].max() * 0.9) 
-                                   for _, row in popular.iterrows()]
+                    popular_tuples = []
+                    max_market_cap = popular['market_cap'].max()
+                    for _, row in popular.iterrows():
+                        normalized_score = np.clip(row['market_cap'] / max_market_cap * 0.9, 0.0, 1.0)
+                        popular_tuples.append((row['id'], normalized_score))
                 else:
                     popular_tuples = [(row['id'], 0.5) for _, row in popular.iterrows()]
                 
@@ -3111,13 +3222,18 @@ class HybridRecommender:
                     project_data = df[df['id'] == item_id]
                     if not project_data.empty:
                         project_dict = project_data.iloc[0].to_dict()
-                        project_dict['recommendation_score'] = float(score)
+                        
+                        # PERBAIKAN: Validasi recommendation_score
+                        recommendation_score = float(np.clip(score, 0.0, 1.0))
+                        project_dict['recommendation_score'] = recommendation_score
+                        
                         result.append(project_dict)
                 
                 return result[:n]
             else:
                 # Just return random selection with diversity
-                random_tuples = [(row['id'], 0.5) for _, row in df.sample(min(n*2, len(df))).iterrows()]
+                sample_size = min(n*2, len(df))
+                random_tuples = [(row['id'], 0.5) for _, row in df.sample(sample_size).iterrows()]
                 diversified = self.apply_diversity(random_tuples, n, diversity_weight=0.3)
                 
                 # Convert to dictionaries
@@ -3126,7 +3242,11 @@ class HybridRecommender:
                     project_data = df[df['id'] == item_id]
                     if not project_data.empty:
                         project_dict = project_data.iloc[0].to_dict()
-                        project_dict['recommendation_score'] = float(score)
+                        
+                        # PERBAIKAN: Validasi recommendation_score
+                        recommendation_score = float(np.clip(score, 0.0, 1.0))
+                        project_dict['recommendation_score'] = recommendation_score
+                        
                         result.append(project_dict)
                 
                 return result[:n]

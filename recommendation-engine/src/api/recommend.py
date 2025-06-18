@@ -254,6 +254,9 @@ def get_cache_key(request: RecommendationRequest) -> str:
     return f"{request.user_id}:{request.model_type}:{request.num_recommendations}:{request.category}:{request.chain}"
 
 def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    PERBAIKAN: Sanitize project data dengan validasi score yang ketat
+    """
     result = {}
     
     # Pastikan project_dict adalah dictionary
@@ -346,6 +349,25 @@ def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 result[key] = None
     
+    # PERBAIKAN: Validasi khusus untuk score fields
+    score_fields = ['trend_score', 'popularity_score', 'developer_activity_score', 
+                   'social_engagement_score', 'maturity_score']
+    
+    for field in score_fields:
+        if field in result and result[field] is not None:
+            try:
+                # Pastikan score dalam range 0-100
+                score_value = float(result[field])
+                result[field] = float(np.clip(score_value, 0.0, 100.0))
+                
+                # Log warning jika score di-clip
+                if score_value > 100.0 or score_value < 0.0:
+                    logger.warning(f"Score {field} di-clip: {score_value} -> {result[field]}")
+                    
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid {field} value: {result[field]}, setting to 0")
+                result[field] = 0.0
+    
     # Final safety check for category and primary_category
     if 'primary_category' in result and isinstance(result['primary_category'], (list, tuple)):
         if result['primary_category']:
@@ -366,7 +388,7 @@ def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
             if len(result['recommendation_score']) > 0:
                 value = result['recommendation_score'][0]
                 try:
-                    result['recommendation_score'] = float(value)
+                    result['recommendation_score'] = float(np.clip(value, 0.0, 1.0))
                 except:
                     result['recommendation_score'] = 0.5
             else:
@@ -375,7 +397,14 @@ def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
             result['recommendation_score'] = 0.5
         else:
             try:
-                result['recommendation_score'] = float(result['recommendation_score'])
+                # PERBAIKAN: Pastikan recommendation_score dalam range 0-1
+                rec_score = float(result['recommendation_score'])
+                result['recommendation_score'] = float(np.clip(rec_score, 0.0, 1.0))
+                
+                # Log warning jika score di-clip
+                if rec_score > 1.0 or rec_score < 0.0:
+                    logger.warning(f"Recommendation score di-clip: {rec_score} -> {result['recommendation_score']}")
+                    
             except:
                 result['recommendation_score'] = 0.5
     
@@ -643,6 +672,16 @@ async def get_trending_projects(
                 # Sanitize data (handle NaN values)
                 clean_rec = sanitize_project_data(rec)
                 
+                # PERBAIKAN: Validasi khusus untuk trending endpoint
+                # Pastikan trend_score dalam range 0-100
+                if 'trend_score' in clean_rec and clean_rec['trend_score'] is not None:
+                    trend_score = float(clean_rec['trend_score'])
+                    clean_rec['trend_score'] = float(np.clip(trend_score, 0.0, 100.0))
+                    
+                    # Log warning jika ada yang di-clip
+                    if trend_score > 100.0:
+                        logger.warning(f"Trending project {clean_rec.get('id', 'unknown')} had trend_score {trend_score} > 100, clipped to 100")
+                
                 # PERBAIKAN: Pastikan semua nilai numerik adalah float Python native
                 for field in ['current_price', 'market_cap', 'total_volume', 'price_change_24h', 
                             'price_change_percentage_7d_in_currency', 'popularity_score', 
@@ -707,6 +746,16 @@ async def get_popular_projects(
                 # PERBAIKAN: Gunakan try-except untuk menangani error pada setiap item
                 # Sanitize data (handle NaN values)
                 clean_rec = sanitize_project_data(rec)
+                
+                # PERBAIKAN: Validasi khusus untuk popular endpoint
+                # Pastikan popularity_score dalam range 0-100
+                if 'popularity_score' in clean_rec and clean_rec['popularity_score'] is not None:
+                    pop_score = float(clean_rec['popularity_score'])
+                    clean_rec['popularity_score'] = float(np.clip(pop_score, 0.0, 100.0))
+                    
+                    # Log warning jika ada yang di-clip
+                    if pop_score > 100.0:
+                        logger.warning(f"Popular project {clean_rec.get('id', 'unknown')} had popularity_score {pop_score} > 100, clipped to 100")
                 
                 # PERBAIKAN: Pastikan semua nilai numerik adalah float Python native
                 for field in ['current_price', 'market_cap', 'total_volume', 'price_change_24h', 
