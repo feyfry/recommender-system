@@ -427,7 +427,7 @@ class TechnicalAnalysisController extends Controller
     }
 
     /**
-     * Mendapatkan prediksi harga
+     * PERBAIKAN: Enhanced getPricePrediction method dengan timeout dan error handling yang lebih baik
      */
     public function getPricePrediction(Request $request, $projectId)
     {
@@ -448,32 +448,98 @@ class TechnicalAnalysisController extends Controller
                     'model'           => $model,
                 ];
 
-                // PERBAIKAN: Timeout lebih lama untuk prediksi ML
-                $response = Http::timeout(30)->get("{$this->apiUrl}/analysis/price-prediction/{$projectId}", $params);
+                // PERBAIKAN: Timeout yang lebih lama untuk ML predictions (terutama LSTM)
+                $timeout = $model === 'ml' || $model === 'auto' ? 90 : 30; // 90 detik untuk ML, 30 untuk lainnya
+
+                Log::info("Starting price prediction for {$projectId} with model {$model}, timeout: {$timeout}s");
+
+                $response = Http::timeout($timeout)->get("{$this->apiUrl}/analysis/price-prediction/{$projectId}", $params);
 
                 if ($response->successful()) {
                     $data = $response->json();
 
-                    // PERBAIKAN: Validasi dan normalisasi response data
-                    if (!isset($data['error']) && isset($data['model_type'])) {
+                    // PERBAIKAN: Enhanced data validation dan normalisasi
+                    if (!isset($data['error'])) {
+                        // Validate predictions array
+                        if (isset($data['predictions']) && is_array($data['predictions'])) {
+                            $validPredictions = [];
+                            foreach ($data['predictions'] as $prediction) {
+                                // Validate each prediction point
+                                if (isset($prediction['date'], $prediction['value'], $prediction['confidence'])) {
+                                    // Ensure numeric values are valid
+                                    $value = is_numeric($prediction['value']) ? (float)$prediction['value'] : 0.0;
+                                    $confidence = is_numeric($prediction['confidence']) ? (float)$prediction['confidence'] : 0.0;
+
+                                    // Only include valid predictions
+                                    if ($value > 0 && is_finite($value)) {
+                                        $validPredictions[] = [
+                                            'date' => $prediction['date'],
+                                            'value' => $value,
+                                            'confidence' => max(0.0, min(1.0, $confidence)) // Clamp confidence to 0-1
+                                        ];
+                                    }
+                                }
+                            }
+                            $data['predictions'] = $validPredictions;
+                        }
+
+                        // Validate other numeric fields
+                        $numericFields = ['current_price', 'predicted_change_percent', 'confidence', 'reversal_probability'];
+                        foreach ($numericFields as $field) {
+                            if (isset($data[$field]) && !is_numeric($data[$field])) {
+                                $data[$field] = 0.0;
+                            }
+                        }
+
+                        // Ensure required fields exist
+                        $data['model_type'] = $data['model_type'] ?? 'Unknown';
+                        $data['prediction_direction'] = $data['prediction_direction'] ?? 'unknown';
+                        $data['market_regime'] = $data['market_regime'] ?? 'unknown';
+
                         // Log keberhasilan model untuk debugging
                         Log::info("Price prediction successful for {$projectId}: Model = {$data['model_type']}, Confidence = " . ($data['confidence'] ?? 'N/A'));
-                    }
 
-                    return response()->json($data);
+                        return $data;
+                    } else {
+                        Log::warning("API returned error for {$projectId}: " . ($data['message'] ?? 'Unknown error'));
+                        return [
+                            'error'   => true,
+                            'message' => $data['message'] ?? 'Gagal mendapatkan prediksi harga.',
+                        ];
+                    }
                 } else {
-                    Log::warning("Gagal mendapatkan prediksi harga: " . $response->body());
-                    return response()->json([
-                        'error'   => true,
-                        'message' => 'Gagal mendapatkan prediksi harga. Coba lagi nanti.',
-                    ], 500);
+                    $statusCode = $response->status();
+                    $errorBody = $response->body();
+
+                    Log::warning("HTTP {$statusCode} error for price prediction {$projectId}: {$errorBody}");
+
+                    // PERBAIKAN: Handle specific HTTP errors
+                    if ($statusCode === 504 || $statusCode === 408) {
+                        return [
+                            'error'   => true,
+                            'message' => 'Prediksi harga membutuhkan waktu lebih lama dari biasanya. Silakan coba lagi dalam beberapa menit.',
+                            'timeout' => true
+                        ];
+                    } else {
+                        return [
+                            'error'   => true,
+                            'message' => "Gagal mendapatkan prediksi harga (HTTP {$statusCode}). Coba lagi nanti.",
+                        ];
+                    }
                 }
+            } catch (\Illuminate\Http\Client\ConnectionException $e) {
+                Log::error("Connection timeout for price prediction {$projectId}: " . $e->getMessage());
+                return [
+                    'error'   => true,
+                    'message' => 'Koneksi timeout. Prediksi harga mungkin membutuhkan waktu lebih lama. Silakan coba lagi.',
+                    'timeout' => true
+                ];
             } catch (\Exception $e) {
-                Log::error("Error mendapatkan prediksi harga: " . $e->getMessage());
-                return response()->json([
+                Log::error("Error mendapatkan prediksi harga {$projectId}: " . $e->getMessage());
+                return [
                     'error'   => true,
                     'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
-                ], 500);
+                ];
             }
         });
     }

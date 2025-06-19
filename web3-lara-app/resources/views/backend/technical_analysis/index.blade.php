@@ -141,17 +141,20 @@
                     return true;
                 },
 
-                // PERBAIKAN: Improved error display
+                // PERBAIKAN: Enhanced error display with retry button
                 showError(type, message) {
-                    this.errors[type] = message;
+                    this.errors[type] = {
+                        message: message,
+                        timestamp: new Date().toLocaleTimeString()
+                    };
                     console.error(`${type} error:`, message);
 
-                    // Auto-clear error after 10 seconds
+                    // Auto-clear error after 15 seconds (increased from 10)
                     setTimeout(() => {
-                        if (this.errors[type] === message) {
+                        if (this.errors[type] && this.errors[type].message === message) {
                             this.errors[type] = null;
                         }
-                    }, 10000);
+                    }, 15000);
                 },
 
                 clearError(type) {
@@ -372,7 +375,7 @@
                     }
                 },
 
-                // PERBAIKAN: Enhanced loadPricePrediction dengan logging
+                // PERBAIKAN: Enhanced loadPricePrediction method dengan proper loading state dan error handling
                 async loadPricePrediction() {
                     if (!this.projectId) return;
 
@@ -384,14 +387,63 @@
 
                         console.log(`Loading price prediction for ${this.projectId} with ${this.days} days data and ${this.predictionDays} prediction days`);
 
-                        const response = await fetch(url);
+                        // PERBAIKAN: Timeout yang disesuaikan untuk berbagai model
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 menit timeout
+
+                        const response = await fetch(url, {
+                            signal: controller.signal
+                        });
+
+                        clearTimeout(timeoutId);
 
                         if (!response.ok) {
                             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                         }
 
                         const data = await response.json();
-                        this.validateResponse(data, 'price prediction');
+
+                        // PERBAIKAN: Enhanced validation dan error handling
+                        if (data.error) {
+                            if (data.timeout) {
+                                this.showError('prediction', 'Prediksi harga membutuhkan waktu lebih lama. Silakan tunggu sebentar dan coba lagi.');
+                            } else {
+                                this.showError('prediction', data.message || 'Gagal memuat prediksi harga');
+                            }
+                            return;
+                        }
+
+                        // PERBAIHAN: Validate prediction data structure
+                        if (!data.predictions || !Array.isArray(data.predictions)) {
+                            console.warn('Invalid predictions data structure:', data);
+                            this.showError('prediction', 'Data prediksi tidak valid');
+                            return;
+                        }
+
+                        // PERBAIKAN: Validate individual prediction points
+                        const validPredictions = data.predictions.filter(prediction => {
+                            return prediction &&
+                                prediction.date &&
+                                typeof prediction.value === 'number' &&
+                                isFinite(prediction.value) &&
+                                prediction.value > 0;
+                        });
+
+                        if (validPredictions.length === 0) {
+                            console.warn('No valid predictions found in data:', data);
+                            this.showError('prediction', 'Tidak ada data prediksi yang valid');
+                            return;
+                        }
+
+                        // Update predictions with valid data
+                        data.predictions = validPredictions;
+
+                        // PERBAIKAN: Validate other required fields
+                        data.current_price = typeof data.current_price === 'number' ? data.current_price : 0;
+                        data.predicted_change_percent = typeof data.predicted_change_percent === 'number' ? data.predicted_change_percent : 0;
+                        data.confidence = typeof data.confidence === 'number' ? Math.max(0, Math.min(1, data.confidence)) : 0;
+                        data.model_type = data.model_type || 'Unknown';
+                        data.prediction_direction = data.prediction_direction || 'unknown';
 
                         // PERBAIKAN: Log model type untuk debugging
                         if (data.model_type) {
@@ -402,7 +454,15 @@
 
                     } catch (error) {
                         console.error('Error loading price prediction:', error);
-                        this.showError('prediction', `Gagal memuat prediksi harga: ${error.message}`);
+
+                        // PERBAIKAN: Handle specific error types
+                        if (error.name === 'AbortError') {
+                            this.showError('prediction', 'Prediksi harga membutuhkan waktu terlalu lama. Silakan coba lagi dengan periode data yang lebih pendek.');
+                        } else if (error.message.includes('HTTP 504') || error.message.includes('HTTP 408')) {
+                            this.showError('prediction', 'Server timeout. Prediksi ML membutuhkan waktu lebih lama. Silakan tunggu dan coba lagi.');
+                        } else {
+                            this.showError('prediction', `Gagal memuat prediksi harga: ${error.message}`);
+                        }
                     } finally {
                         this.loadingPrediction = false;
                     }
@@ -439,9 +499,14 @@
                     }
                 },
 
-                // PERBAIKAN: Helper method untuk retry failed requests
+                // PERBAIKAN: Enhanced retry function dengan delay
                 async retryRequest(type) {
                     this.clearError(type);
+
+                    // Add delay for prediction requests to allow server recovery
+                    if (type === 'prediction') {
+                        await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
+                    }
 
                     switch(type) {
                         case 'signals':
@@ -1646,22 +1711,56 @@
 
             <!-- Tab Content - Price Prediction -->
             <div x-show="activeTab === 'prediction'">
-                <div x-show="loadingPrediction" class="text-center py-6">
-                    <i class="fas fa-spinner fa-spin text-2xl text-primary"></i>
-                    <p class="mt-2">Memuat prediksi harga...</p>
+                <!-- Loading State dengan progress indicator -->
+                <div x-show="loadingPrediction" class="text-center py-8">
+                    <div class="flex flex-col items-center">
+                        <div class="relative">
+                            <i class="fas fa-circle-notch fa-spin text-4xl text-primary mb-4"></i>
+                        </div>
+                        <p class="text-lg font-medium">Memuat prediksi harga...</p>
+                        <p class="text-sm text-gray-600 mt-2">Prediksi ML mungkin membutuhkan waktu 1-2 menit</p>
+                        <div class="mt-4 w-64 bg-gray-200 rounded-full h-2">
+                            <div class="bg-primary h-2 rounded-full animate-pulse" style="width: 60%"></div>
+                        </div>
+                    </div>
                 </div>
 
-                <div x-show="!loadingPrediction && predictionData">
+                <!-- Error State dengan retry button -->
+                <div x-show="!loadingPrediction && errors.prediction" class="text-center py-8">
+                    <div class="clay-card p-6 bg-danger/5 border border-danger/20">
+                        <i class="fas fa-exclamation-triangle text-4xl text-danger mb-4"></i>
+                        <h3 class="text-lg font-bold text-danger mb-2">Gagal Memuat Prediksi Harga</h3>
+                        <p class="text-gray-700 mb-4" x-text="errors.prediction?.message || errors.prediction"></p>
+                        <div class="flex justify-center space-x-3">
+                            <button @click="retryRequest('prediction')" class="clay-button clay-button-primary">
+                                <i class="fas fa-redo mr-2"></i> Coba Lagi
+                            </button>
+                            <button @click="clearError('prediction')" class="clay-button clay-button-secondary">
+                                <i class="fas fa-times mr-2"></i> Tutup
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-3" x-show="errors.prediction?.timestamp">
+                            Error pada: <span x-text="errors.prediction?.timestamp"></span>
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Success State - Prediction Data -->
+                <div x-show="!loadingPrediction && !errors.prediction && predictionData">
                     <div class="clay-card p-4 mb-4 bg-primary/5">
                         <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4">
                             <h3 class="font-bold mb-3 md:mb-0">Prediksi Harga</h3>
-                            <div>
+                            <div class="flex items-center space-x-2">
                                 <span class="clay-badge px-3 py-1" :class="{
                                     'clay-badge-success': predictionData?.prediction_direction === 'up',
                                     'clay-badge-danger': predictionData?.prediction_direction === 'down',
-                                    'clay-badge-warning': predictionData?.prediction_direction === 'sideways'
+                                    'clay-badge-warning': predictionData?.prediction_direction === 'neutral' || predictionData?.prediction_direction === 'sideways'
                                 }">
                                     Model: <span class="font-medium" x-text="predictionData?.model_type"></span>
+                                </span>
+                                <!-- PERBAIKAN: Show confidence badge -->
+                                <span class="clay-badge clay-badge-info px-2 py-1">
+                                    Confidence: <span x-text="predictionData?.confidence ? Math.round(predictionData.confidence * 100) + '%' : 'N/A'"></span>
                                 </span>
                             </div>
                         </div>
@@ -1674,7 +1773,7 @@
                                 <div class="p-3 clay-card mb-3" :class="{
                                     'bg-success/10': predictionData?.prediction_direction === 'up',
                                     'bg-danger/10': predictionData?.prediction_direction === 'down',
-                                    'bg-warning/10': predictionData?.prediction_direction === 'sideways'
+                                    'bg-warning/10': predictionData?.prediction_direction === 'neutral' || predictionData?.prediction_direction === 'sideways'
                                 }">
                                     <div class="flex items-center justify-between">
                                         <div>
@@ -1688,37 +1787,45 @@
                                             <template x-if="predictionData?.prediction_direction === 'down'">
                                                 <i class="fas fa-arrow-circle-down text-3xl text-danger"></i>
                                             </template>
-                                            <template x-if="predictionData?.prediction_direction === 'sideways'">
+                                            <template x-if="predictionData?.prediction_direction === 'neutral' || predictionData?.prediction_direction === 'sideways'">
                                                 <i class="fas fa-minus-circle text-3xl text-warning"></i>
+                                            </template>
+                                            <template x-if="!predictionData?.prediction_direction || (predictionData?.prediction_direction !== 'up' && predictionData?.prediction_direction !== 'down' && predictionData?.prediction_direction !== 'neutral' && predictionData?.prediction_direction !== 'sideways')">
+                                                <i class="fas fa-question-circle text-3xl text-info"></i>
                                             </template>
                                         </div>
                                     </div>
 
                                     <div class="mt-2">
                                         <div class="text-sm text-gray-600">Perubahan yang Diprediksi:</div>
-                                        <div class="font-bold" x-text="predictionData?.predicted_change_percent.toFixed(2) + '%'"></div>
+                                        <div class="font-bold" x-text="predictionData?.predicted_change_percent ? predictionData.predicted_change_percent.toFixed(2) + '%' : '0%'"></div>
                                     </div>
 
                                     <div class="mt-2">
-                                        <div class="text-sm text-gray-600">Kepercayaan:</div>
-                                        <div class="font-medium" x-text="(predictionData?.confidence * 100).toFixed(0) + '%'"></div>
+                                        <div class="text-sm text-gray-600">Kepercayaan Model:</div>
+                                        <div class="font-medium" x-text="predictionData?.confidence ? (predictionData.confidence * 100).toFixed(0) + '%' : 'N/A'"></div>
                                     </div>
                                 </div>
 
                                 <div class="grid grid-cols-2 gap-2">
                                     <div class="p-2 clay-card bg-info/5">
                                         <div class="text-xs text-gray-600">Harga Saat Ini:</div>
-                                        <div class="font-bold">$<span x-text="predictionData?.current_price?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span></div>
+                                        <div class="font-bold">$<span x-text="predictionData?.current_price ? predictionData.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8}) : 'N/A'"></span></div>
                                     </div>
 
                                     <div class="p-2 clay-card bg-info/5">
                                         <div class="text-xs text-gray-600">Market Regime:</div>
-                                        <div class="font-medium capitalize" x-text="predictionData?.market_regime?.replace('_', ' ')"></div>
+                                        <div class="font-medium capitalize" x-text="predictionData?.market_regime ? predictionData.market_regime.replace(/_/g, ' ') : 'N/A'"></div>
                                     </div>
 
                                     <div class="p-2 clay-card bg-info/5">
                                         <div class="text-xs text-gray-600">Probabilitas Pembalikan:</div>
                                         <div class="font-medium" x-text="predictionData?.reversal_probability ? (predictionData.reversal_probability * 100).toFixed(0) + '%' : 'N/A'"></div>
+                                    </div>
+
+                                    <div class="p-2 clay-card bg-info/5">
+                                        <div class="text-xs text-gray-600">Jumlah Prediksi:</div>
+                                        <div class="font-medium" x-text="predictionData?.predictions ? predictionData.predictions.length + ' hari' : 'N/A'"></div>
                                     </div>
                                 </div>
                             </div>
@@ -1731,12 +1838,12 @@
                                     <template x-if="predictionData?.resistance_levels && Object.keys(predictionData.resistance_levels).length > 0">
                                         <div class="p-2 clay-card bg-danger/5">
                                             <h5 class="font-medium text-sm text-danger mb-2">Resistance Levels</h5>
-                                            <div class="grid grid-cols-2 gap-2">
+                                            <div class="grid grid-cols-1 gap-2">
                                                 <template x-for="(value, level) in predictionData.resistance_levels" :key="level">
-                                                    <template x-if="value">
+                                                    <template x-if="value && value > 0">
                                                         <div class="flex justify-between items-center">
-                                                            <span class="capitalize" x-text="level.replace('_', ' ')"></span>
-                                                            <span class="font-medium">$<span x-text="value?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span></span>
+                                                            <span class="capitalize text-sm" x-text="level.replace(/_/g, ' ')"></span>
+                                                            <span class="font-medium">$<span x-text="value.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span></span>
                                                         </div>
                                                     </template>
                                                 </template>
@@ -1747,16 +1854,24 @@
                                     <template x-if="predictionData?.support_levels && Object.keys(predictionData.support_levels).length > 0">
                                         <div class="p-2 clay-card bg-success/5">
                                             <h5 class="font-medium text-sm text-success mb-2">Support Levels</h5>
-                                            <div class="grid grid-cols-2 gap-2">
+                                            <div class="grid grid-cols-1 gap-2">
                                                 <template x-for="(value, level) in predictionData.support_levels" :key="level">
-                                                    <template x-if="value">
+                                                    <template x-if="value && value > 0">
                                                         <div class="flex justify-between items-center">
-                                                            <span class="capitalize" x-text="level.replace('_', ' ')"></span>
-                                                            <span class="font-medium">$<span x-text="value?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span></span>
+                                                            <span class="capitalize text-sm" x-text="level.replace(/_/g, ' ')"></span>
+                                                            <span class="font-medium">$<span x-text="value.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span></span>
                                                         </div>
                                                     </template>
                                                 </template>
                                             </div>
+                                        </div>
+                                    </template>
+
+                                    <!-- PERBAIKAN: Show message when no support/resistance data -->
+                                    <template x-if="(!predictionData?.resistance_levels || Object.keys(predictionData.resistance_levels).length === 0) && (!predictionData?.support_levels || Object.keys(predictionData.support_levels).length === 0)">
+                                        <div class="p-3 text-center text-gray-500">
+                                            <i class="fas fa-info-circle mb-2"></i>
+                                            <p class="text-sm">Data support dan resistance tidak tersedia</p>
                                         </div>
                                     </template>
                                 </div>
@@ -1770,18 +1885,33 @@
                                 <div class="overflow-x-auto">
                                     <table class="min-w-full bg-white clay-card">
                                         <thead>
-                                            <tr>
+                                            <tr class="bg-gray-100">
                                                 <th class="py-2 px-4 border-b text-left">Tanggal</th>
                                                 <th class="py-2 px-4 border-b text-right">Harga Prediksi</th>
                                                 <th class="py-2 px-4 border-b text-right">Kepercayaan</th>
+                                                <th class="py-2 px-4 border-b text-right">Perubahan</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             <template x-for="(prediction, index) in predictionData.predictions" :key="index">
                                                 <tr :class="index % 2 === 0 ? 'bg-gray-50' : ''">
                                                     <td class="py-2 px-4 border-b" x-text="prediction.date"></td>
-                                                    <td class="py-2 px-4 border-b text-right font-medium">$<span x-text="prediction.value?.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></span></td>
-                                                    <td class="py-2 px-4 border-b text-right" x-text="(prediction.confidence * 100).toFixed(0) + '%'"></td>
+                                                    <td class="py-2 px-4 border-b text-right font-medium">
+                                                        $<span x-text="prediction.value ? prediction.value.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8}) : 'N/A'"></span>
+                                                    </td>
+                                                    <td class="py-2 px-4 border-b text-right" x-text="prediction.confidence ? (prediction.confidence * 100).toFixed(0) + '%' : 'N/A'"></td>
+                                                    <td class="py-2 px-4 border-b text-right"
+                                                        :class="{
+                                                            'text-success': index === 0 ? false : (prediction.value > predictionData.predictions[index-1].value),
+                                                            'text-danger': index === 0 ? false : (prediction.value < predictionData.predictions[index-1].value)
+                                                        }">
+                                                        <template x-if="index === 0">
+                                                            <span class="text-gray-500">-</span>
+                                                        </template>
+                                                        <template x-if="index > 0">
+                                                            <span x-text="((prediction.value / predictionData.predictions[index-1].value - 1) * 100).toFixed(2) + '%'"></span>
+                                                        </template>
+                                                    </td>
                                                 </tr>
                                             </template>
                                         </tbody>
@@ -1789,6 +1919,23 @@
                                 </div>
                             </div>
                         </template>
+
+                        <!-- PERBAIKAN: Show message when no prediction data -->
+                        <template x-if="(!predictionData?.predictions || predictionData.predictions.length === 0)">
+                            <div class="mt-6 p-4 text-center text-gray-500 clay-card">
+                                <i class="fas fa-chart-line text-2xl mb-2"></i>
+                                <p>Tidak ada data prediksi yang tersedia</p>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Empty State ketika belum ada request -->
+                <div x-show="!loadingPrediction && !errors.prediction && !predictionData" class="text-center py-8">
+                    <div class="clay-card p-6">
+                        <i class="fas fa-crystal-ball text-4xl text-gray-400 mb-4"></i>
+                        <h3 class="text-lg font-medium text-gray-600 mb-2">Prediksi Harga Belum Dimuat</h3>
+                        <p class="text-gray-500 mb-4">Silakan pilih proyek dan klik "Analisis Proyek" untuk memuat prediksi harga</p>
                     </div>
                 </div>
             </div>

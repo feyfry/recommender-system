@@ -2095,12 +2095,29 @@ def predict_price_ml(prices_df: pd.DataFrame, days_to_predict: int = 7) -> Dict[
             logger.warning(f"Error making predictions: {str(e)}")
             return predict_price_arima(prices_df, days_to_predict)
         
-        # Inverse transform predictions
+        # PERBAIKAN: Enhanced inverse transform predictions dengan error handling
         try:
-            predictions_reshaped = np.array(predictions).reshape(-1, 1)
-            predictions_inverse = scaler.inverse_transform(predictions_reshaped)
+            # Reshape predictions untuk inverse transform
+            predictions_array = np.array(predictions).reshape(-1, 1)
+            
+            # PERBAIKAN: Pastikan shape yang benar untuk inverse transform
+            if predictions_array.shape[1] != 1:
+                logger.warning(f"Invalid prediction shape: {predictions_array.shape}, reshaping...")
+                predictions_array = predictions_array.reshape(-1, 1)
+            
+            # Inverse transform dengan error handling
+            try:
+                predictions_inverse = scaler.inverse_transform(predictions_array)
+            except ValueError as e:
+                logger.warning(f"Error in inverse transform: {str(e)}, trying alternative approach")
+                # Alternative approach: manual inverse scaling
+                scale_factor = scaler.scale_[0]
+                min_val = scaler.min_[0]
+                predictions_inverse = (predictions_array - min_val) / scale_factor
+                predictions_inverse = predictions_inverse.reshape(-1, 1)
+                
         except Exception as e:
-            logger.warning(f"Error inverse transforming: {str(e)}")
+            logger.error(f"Critical error in inverse transforming: {str(e)}")
             return predict_price_arima(prices_df, days_to_predict)
         
         # Format results
@@ -2117,15 +2134,21 @@ def predict_price_ml(prices_df: pd.DataFrame, days_to_predict: int = 7) -> Dict[
             horizon_penalty = 0.98 ** i  # Confidence decreases with prediction horizon
             confidence = base_confidence * horizon_penalty
             
+            # PERBAIKAN: Extract scalar value from array safely
+            if isinstance(pred_value, np.ndarray) and pred_value.size > 0:
+                value = float(pred_value.flatten()[0])
+            else:
+                value = float(pred_value)
+            
             prediction_data.append({
                 'date': dates[i].strftime('%Y-%m-%d'),
-                'value': float(pred_value[0]),
+                'value': value,
                 'confidence': confidence
             })
         
         # Determine trend
         last_price = float(close_data.iloc[-1])
-        final_prediction = float(predictions_inverse[-1][0])
+        final_prediction = prediction_data[-1]['value']
         
         if final_prediction > last_price * 1.01:
             trend = "up"

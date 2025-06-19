@@ -1000,7 +1000,7 @@ async def get_market_events(
         logger.error(f"Error detecting market events: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
-# PERBAIKAN: Update price prediction endpoint untuk logging yang lebih baik
+# PERBAIKAN: Update price prediction endpoint untuk handling yang lebih baik
 @router.get("/price-prediction/{project_id}", response_model=PricePredictionResponse)
 async def predict_future_price(
     project_id: str = Path(..., description="Project ID"),
@@ -1036,7 +1036,7 @@ async def predict_future_price(
         market_regime = detect_market_regime(price_data)
         logger.info(f"Market regime detected: {market_regime}")
         
-        # Pilih model yang sesuai berdasarkan data dan kecepatan yang dibutuhkan
+        # PERBAIKAN: Enhanced model selection dengan timeout handling
         if model == "auto":
             if days >= 180 and len(price_data) >= 180:
                 try:
@@ -1053,44 +1053,56 @@ async def predict_future_price(
                 model = "simple"
                 logger.info(f"Using Simple model for {project_id} with {len(price_data)} data points")
         
-        # Import asyncio untuk mendukung timeout
+        # PERBAIKAN: Enhanced prediction execution dengan timeout dan error handling
         import asyncio
         
-        # Buat fungsi async untuk membungkus fungsi prediksi
-        async def run_prediction():
-            if model == "ml":
-                try:
-                    # PERBAIKAN: Timeout lebih lama dan logging lebih baik
+        async def run_prediction_with_timeout():
+            try:
+                if model == "ml":
                     logger.info(f"Starting ML prediction for {project_id}...")
+                    
+                    # PERBAIKAN: Timeout yang lebih lama untuk training LSTM
                     result = await asyncio.wait_for(
                         asyncio.to_thread(predict_price_ml, price_data, prediction_days),
-                        timeout=45.0  # Timeout diperpanjang
+                        timeout=60.0  # Timeout diperpanjang menjadi 60 detik
                     )
-                    logger.info(f"ML prediction completed for {project_id}: {result.get('model_type', 'Unknown')}")
+                    
+                    if result and 'error' not in result:
+                        logger.info(f"ML prediction completed for {project_id}: {result.get('model_type', 'Unknown')}")
+                        return result
+                    else:
+                        logger.warning(f"ML prediction failed for {project_id}, falling back to ARIMA")
+                        return await asyncio.to_thread(predict_price_arima, price_data, days_to_predict=prediction_days)
+                        
+                elif model == "arima":
+                    logger.info(f"Starting ARIMA prediction for {project_id}...")
+                    result = await asyncio.to_thread(predict_price_arima, price_data, days_to_predict=prediction_days)
+                    logger.info(f"ARIMA prediction completed for {project_id}: {result.get('model_type', 'Unknown')}")
                     return result
-                except asyncio.TimeoutError:
-                    logger.warning(f"ML prediction timeout for {project_id}, falling back to ARIMA")
-                    return predict_price_arima(price_data, days_to_predict=prediction_days)
-                except Exception as e:
-                    logger.warning(f"ML prediction error for {project_id}: {str(e)}, falling back to ARIMA")
-                    return predict_price_arima(price_data, days_to_predict=prediction_days)
-            elif model == "arima":
-                logger.info(f"Starting ARIMA prediction for {project_id}...")
-                result = predict_price_arima(price_data, days_to_predict=prediction_days)
-                logger.info(f"ARIMA prediction completed for {project_id}: {result.get('model_type', 'Unknown')}")
-                return result
-            else:
-                logger.info(f"Starting Simple prediction for {project_id}...")
-                result = predict_price_simple(price_data, days_to_predict=prediction_days)
-                logger.info(f"Simple prediction completed for {project_id}: {result.get('model_type', 'Unknown')}")
-                return result
-                
-        # Jalankan prediksi
-        prediction_result = await run_prediction()
+                else:
+                    logger.info(f"Starting Simple prediction for {project_id}...")
+                    result = await asyncio.to_thread(predict_price_simple, price_data, days_to_predict=prediction_days)
+                    logger.info(f"Simple prediction completed for {project_id}: {result.get('model_type', 'Unknown')}")
+                    return result
+                    
+            except asyncio.TimeoutError:
+                logger.warning(f"Prediction timeout for {project_id}, falling back to simple model")
+                return await asyncio.to_thread(predict_price_simple, price_data, days_to_predict=prediction_days)
+            except Exception as e:
+                logger.error(f"Error in prediction for {project_id}: {str(e)}")
+                return await asyncio.to_thread(predict_price_simple, price_data, days_to_predict=prediction_days)
         
-        # Fallback jika terjadi error
+        # Jalankan prediksi dengan timeout handling
+        prediction_result = await run_prediction_with_timeout()
+        
+        # PERBAIKAN: Enhanced fallback handling
         if prediction_result is None or 'error' in prediction_result:
-            logger.warning(f"Prediction failed for {project_id}, falling back to simple model")
+            logger.warning(f"Prediction failed for {project_id}, using simple model fallback")
+            prediction_result = predict_price_simple(price_data, days_to_predict=prediction_days)
+        
+        # PERBAIKAN: Validasi hasil prediksi
+        if not prediction_result.get('prediction_data') or len(prediction_result.get('prediction_data', [])) == 0:
+            logger.warning(f"Empty prediction data for {project_id}, regenerating with simple model")
             prediction_result = predict_price_simple(price_data, days_to_predict=prediction_days)
         
         # PERBAIKAN: Logging hasil prediksi untuk debugging
@@ -1101,56 +1113,128 @@ async def predict_future_price(
         reversal_data = ti.generate_reversal_signals()
         trend_prediction = ti.predict_price_trend(periods=prediction_days)
         
-        # Format data prediksi
+        # PERBAIKAN: Enhanced prediction data formatting
         predictions = []
         if prediction_result.get('prediction_data'):
             for point in prediction_result.get('prediction_data', []):
+                try:
+                    # PERBAIKAN: Validate individual prediction points
+                    date_str = point.get('date', '')
+                    value = point.get('value', 0)
+                    confidence = point.get('confidence', 0.5)
+                    
+                    # Ensure value is a valid number
+                    if not isinstance(value, (int, float)) or not np.isfinite(value):
+                        logger.warning(f"Invalid prediction value: {value}, skipping point")
+                        continue
+                        
+                    predictions.append(PredictionDataPoint(
+                        date=date_str,
+                        value=float(value),
+                        confidence=float(confidence)
+                    ))
+                except Exception as e:
+                    logger.warning(f"Error formatting prediction point: {str(e)}")
+                    continue
+        
+        # PERBAIKAN: Fallback jika tidak ada prediction data yang valid
+        if not predictions:
+            logger.warning(f"No valid predictions generated for {project_id}, creating fallback")
+            current_price = float(price_data['close'].iloc[-1])
+            dates = pd.date_range(
+                start=price_data.index[-1] + pd.Timedelta(days=1),
+                periods=prediction_days,
+                freq='D'
+            )
+            
+            for i, date in enumerate(dates):
                 predictions.append(PredictionDataPoint(
-                    date=point['date'],
-                    value=point['value'],
-                    confidence=point['confidence']
+                    date=date.strftime('%Y-%m-%d'),
+                    value=current_price,  # Flat prediction as fallback
+                    confidence=0.3
                 ))
         
-        # Buat response
-        response = PricePredictionResponse(
-            project_id=project_id,
-            current_price=prediction_result.get('current_price', float(price_data['close'].iloc[-1])),
-            prediction_direction=prediction_result.get('trend', 'unknown'),
-            predicted_change_percent=prediction_result.get('change_percent', 0.0),
-            confidence=prediction_result.get('confidence', 0.5),
-            model_type=prediction_result.get('model_type', 'Simple'),
-            market_regime=market_regime,
-            reversal_probability=reversal_data.get('reversal_probability'),
-            support_levels={
-                "support_1": trend_prediction.get('support_1'),
-                "support_2": trend_prediction.get('support_2')
-            },
-            resistance_levels={
-                "resistance_1": trend_prediction.get('target_1'),
-                "resistance_2": trend_prediction.get('target_2')
-            },
-            predictions=predictions,
-            timestamp=datetime.now()
-        )
+        # PERBAIHAN: Enhanced response creation dengan proper error handling
+        try:
+            current_price = prediction_result.get('current_price', float(price_data['close'].iloc[-1]))
+            
+            response = PricePredictionResponse(
+                project_id=project_id,
+                current_price=float(current_price),
+                prediction_direction=prediction_result.get('trend', 'unknown'),
+                predicted_change_percent=float(prediction_result.get('change_percent', 0.0)),
+                confidence=float(prediction_result.get('confidence', 0.5)),
+                model_type=prediction_result.get('model_type', 'Simple'),
+                market_regime=market_regime,
+                reversal_probability=reversal_data.get('reversal_probability'),
+                support_levels={
+                    "support_1": trend_prediction.get('support_1'),
+                    "support_2": trend_prediction.get('support_2')
+                },
+                resistance_levels={
+                    "resistance_1": trend_prediction.get('target_1'),
+                    "resistance_2": trend_prediction.get('target_2')
+                },
+                predictions=predictions,
+                timestamp=datetime.now()
+            )
+        except Exception as e:
+            logger.error(f"Error creating response for {project_id}: {str(e)}")
+            # Create minimal fallback response
+            response = PricePredictionResponse(
+                project_id=project_id,
+                current_price=float(price_data['close'].iloc[-1]),
+                prediction_direction='unknown',
+                predicted_change_percent=0.0,
+                confidence=0.3,
+                model_type='Simple (Fallback)',
+                market_regime=market_regime,
+                reversal_probability=0.0,
+                support_levels={},
+                resistance_levels={},
+                predictions=predictions if predictions else [],
+                timestamp=datetime.now()
+            )
         
         # Hitung waktu eksekusi
         execution_time = time.time() - start_time
-        if execution_time > 5:
-            logger.info(f"Price prediction completed in {execution_time:.2f}s using {model} model")
+        logger.info(f"Price prediction completed in {execution_time:.2f}s using {model} model")
         
-        # Simpan ke cache dengan TTL lebih lama
+        # PERBAIKAN: Cache dengan TTL yang disesuaikan berdasarkan model
+        cache_ttl_minutes = 60 if model == "ml" else 30  # ML cache lebih lama
         _price_data_cache[cache_key] = {
             'data': response,
-            'expires': datetime.now() + timedelta(minutes=60)  # Cache 1 jam untuk prediksi
+            'expires': datetime.now() + timedelta(minutes=cache_ttl_minutes)
         }
         
         return response
         
     except Exception as e:
-        logger.error(f"Error generating price prediction for {project_id}: {str(e)}")
+        logger.error(f"Critical error generating price prediction for {project_id}: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        
+        # PERBAIKAN: Return proper error response instead of raising exception
+        try:
+            current_price = float(price_data['close'].iloc[-1]) if 'price_data' in locals() else 100.0
+            error_response = PricePredictionResponse(
+                project_id=project_id,
+                current_price=current_price,
+                prediction_direction='unknown',
+                predicted_change_percent=0.0,
+                confidence=0.0,
+                model_type='Error',
+                market_regime='unknown',
+                reversal_probability=0.0,
+                support_levels={},
+                resistance_levels={},
+                predictions=[],
+                timestamp=datetime.now()
+            )
+            return error_response
+        except:
+            # Final fallback - raise HTTP exception
+            raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 @router.get("/alerts/{project_id}")
 async def get_technical_alerts(
