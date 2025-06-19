@@ -1816,250 +1816,700 @@ class TechnicalIndicators:
                 "confidence": 0.0
             }
 
-
-# Helper functions for ML-based price predictions
+def determine_optimal_model(prices_df: pd.DataFrame, days_to_predict: int = 7) -> str:
+        """
+        Menentukan model terbaik berdasarkan karakteristik data
+        """
+        data_length = len(prices_df)
+        
+        # Analisis volatilitas
+        if 'close' in prices_df.columns:
+            returns = prices_df['close'].pct_change().dropna()
+            volatility = returns.std() * np.sqrt(252)  # Annualized volatility
+            
+            # Analisis trend strength
+            if data_length >= 50:
+                sma_20 = prices_df['close'].rolling(20).mean()
+                sma_50 = prices_df['close'].rolling(50).mean()
+                trend_strength = abs(sma_20.iloc[-1] / sma_50.iloc[-1] - 1) if not pd.isna(sma_50.iloc[-1]) else 0
+            else:
+                trend_strength = 0
+                
+            # Data quality score
+            null_percentage = prices_df['close'].isnull().sum() / len(prices_df)
+            data_quality = 1 - null_percentage
+            
+            logger.info(f"Data analysis: Length={data_length}, Volatility={volatility:.3f}, Trend_strength={trend_strength:.3f}, Quality={data_quality:.3f}")
+            
+            # Model selection logic yang diperbaiki
+            if data_length >= 200 and data_quality > 0.95:
+                # Data sangat lengkap, coba ML
+                try:
+                    import tensorflow as tf
+                    if volatility < 1.0 and trend_strength > 0.05:
+                        # Kondisi ideal untuk ML: volatilitas terkontrol dengan tren yang jelas
+                        logger.info("Optimal conditions for ML model: sufficient data, good quality, controlled volatility")
+                        return "ml"
+                    else:
+                        logger.info("Data sufficient for ML but conditions not optimal, trying ML anyway")
+                        return "ml"
+                except ImportError:
+                    logger.info("TensorFlow not available, falling back to ARIMA")
+                    return "arima"
+                    
+            elif data_length >= 60 and data_quality > 0.90:
+                # Data cukup untuk ARIMA
+                if volatility < 2.0:  # Volatilitas tidak terlalu ekstrem
+                    logger.info("Good conditions for ARIMA model")
+                    return "arima"
+                else:
+                    logger.info("High volatility detected, using simple model for stability")
+                    return "simple"
+                    
+            else:
+                # Data terbatas atau kualitas rendah
+                logger.info("Limited data or poor quality, using simple model")
+                return "simple"
+        else:
+            logger.warning("No close price data available, using simple model")
+            return "simple"
+        
+# Helper functions for ML-based price predictions - PERBAIKAN
 def predict_price_ml(prices_df: pd.DataFrame, days_to_predict: int = 7) -> Dict[str, Any]:
     try:
+        # PERBAIKAN: Pre-check untuk menentukan apakah ML layak digunakan
+        model_recommendation = determine_optimal_model(prices_df, days_to_predict)
+        
+        if model_recommendation != "ml":
+            logger.info(f"ML not recommended for this data, using {model_recommendation} instead")
+            if model_recommendation == "arima":
+                return predict_price_arima(prices_df, days_to_predict)
+            else:
+                return predict_price_simple(prices_df, days_to_predict)
+        
         # Check if we have TensorFlow
         try:
             import tensorflow as tf
-            # Meredam output TensorFlow
+            import os
+            
+            # PERBAIKAN: Set TensorFlow logging yang lebih ketat
+            os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
             tf.get_logger().setLevel('ERROR')
+            tf.autograph.set_verbosity(0)
             
             from tensorflow.keras.models import Sequential
-            from tensorflow.keras.layers import LSTM, Dense, Dropout, Input
+            from tensorflow.keras.layers import LSTM, Dense, Dropout
             from sklearn.preprocessing import MinMaxScaler
             
             has_tensorflow = True
-        except ImportError:
-            has_tensorflow = False
-            logger.info("TensorFlow tidak tersedia, menggunakan model ARIMA")
+            logger.info("TensorFlow available and configured for ML prediction")
+        except ImportError as e:
+            logger.info(f"TensorFlow tidak tersedia: {str(e)}")
             return predict_price_arima(prices_df, days_to_predict)
         
-        # Verify we have enough data
-        if len(prices_df) < 60:
-            logger.info("Data tidak cukup untuk model ML, menggunakan model ARIMA")
+        # PERBAIKAN: Validasi data yang lebih komprehensif
+        if len(prices_df) < 100:  # Threshold minimal untuk ML yang efektif
+            logger.info(f"Data insufficient for effective ML ({len(prices_df)} < 100), using ARIMA")
+            return predict_price_arima(prices_df, days_to_predict)
+        
+        # Data quality checks
+        close_data = prices_df['close'].dropna()
+        if len(close_data) < len(prices_df) * 0.95:  # More than 5% missing data
+            logger.warning("Too much missing data for ML model")
+            return predict_price_arima(prices_df, days_to_predict)
+            
+        if close_data.std() == 0:  # No variance in data
+            logger.warning("No variance in price data, using simple model")
+            return predict_price_simple(prices_df, days_to_predict)
+        
+        # Check for outliers
+        q1, q3 = close_data.quantile([0.25, 0.75])
+        iqr = q3 - q1
+        outlier_count = ((close_data < (q1 - 1.5 * iqr)) | (close_data > (q3 + 1.5 * iqr))).sum()
+        outlier_percentage = outlier_count / len(close_data)
+        
+        if outlier_percentage > 0.1:  # More than 10% outliers
+            logger.warning(f"Too many outliers ({outlier_percentage:.1%}) for ML model")
             return predict_price_arima(prices_df, days_to_predict)
         
         # Prepare data for LSTM
-        data = prices_df['close'].values.reshape(-1, 1)
+        data = close_data.values.reshape(-1, 1)
         
         # Scale the data
         scaler = MinMaxScaler(feature_range=(0, 1))
-        scaled_data = scaler.fit_transform(data)
         
-        # Create features and target
-        time_steps = 60  # Using 60 days to predict
+        try:
+            scaled_data = scaler.fit_transform(data)
+        except Exception as e:
+            logger.warning(f"Error scaling data: {str(e)}")
+            return predict_price_arima(prices_df, days_to_predict)
         
-        # Initialize arrays
-        X = []
-        y = []
+        # PERBAIKAN: Dynamic time steps based on data characteristics
+        volatility = close_data.pct_change().std()
+        if volatility > 0.05:  # High volatility
+            time_steps = min(30, len(scaled_data) // 4)  # Shorter memory for volatile data
+        else:
+            time_steps = min(60, len(scaled_data) // 3)  # Longer memory for stable data
+            
+        time_steps = max(10, time_steps)  # Minimum 10 time steps
+        
+        logger.info(f"Using {time_steps} time steps for LSTM based on volatility {volatility:.4f}")
         
         # Create sequences
+        X, y = [], []
         for i in range(time_steps, len(scaled_data)):
             X.append(scaled_data[i-time_steps:i, 0])
             y.append(scaled_data[i, 0])
             
-        # Convert to numpy arrays
-        X = np.array(X)
-        y = np.array(y)
+        X, y = np.array(X), np.array(y)
+        
+        # PERBAIKAN: Minimum data requirements for stable training
+        if len(X) < 50:  # Need at least 50 samples for meaningful training
+            logger.warning(f"Insufficient training samples ({len(X)}) for ML model")
+            return predict_price_arima(prices_df, days_to_predict)
         
         # Reshape for LSTM
         X = np.reshape(X, (X.shape[0], X.shape[1], 1))
         
-        # Build LSTM model - dengan Input layer yang benar
-        model = Sequential([
-            # Gunakan Input layer yang benar
-            LSTM(units=50, return_sequences=True, input_shape=(time_steps, 1)),
-            Dropout(0.2),
-            LSTM(units=50),
-            Dropout(0.2),
-            Dense(units=1)
-        ])
-        
-        # Compile and fit model with no output
-        model.compile(optimizer='adam', loss='mean_squared_error')
-        model.fit(X, y, epochs=25, batch_size=32, verbose=0)
-        
-        # Get the last sequence for prediction
-        last_sequence = scaled_data[-time_steps:]
-        
-        # Initialize prediction array
-        predictions = []
-        current_sequence = last_sequence.copy()
+        # PERBAIKAN: Adaptive model architecture based on data size
+        if len(X) > 200:
+            # Complex model for large datasets
+            lstm_units = [64, 32]
+            dropout_rate = 0.3
+            epochs = 50
+        elif len(X) > 100:
+            # Medium model
+            lstm_units = [32, 16]
+            dropout_rate = 0.2
+            epochs = 30
+        else:
+            # Simple model for smaller datasets
+            lstm_units = [16]
+            dropout_rate = 0.1
+            epochs = 20
+            
+        try:
+            # Build adaptive model
+            model = Sequential()
+            
+            # First LSTM layer
+            if len(lstm_units) > 1:
+                model.add(LSTM(units=lstm_units[0], return_sequences=True, input_shape=(time_steps, 1)))
+                model.add(Dropout(dropout_rate))
+                
+                # Additional LSTM layers
+                for i in range(1, len(lstm_units)):
+                    return_seq = i < len(lstm_units) - 1
+                    model.add(LSTM(units=lstm_units[i], return_sequences=return_seq))
+                    model.add(Dropout(dropout_rate))
+            else:
+                model.add(LSTM(units=lstm_units[0], input_shape=(time_steps, 1)))
+                model.add(Dropout(dropout_rate))
+            
+            model.add(Dense(units=1))
+            
+            # Compile with adaptive learning rate
+            learning_rate = 0.001 if len(X) > 100 else 0.01
+            optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+            model.compile(optimizer=optimizer, loss='mse', metrics=['mae'])
+            
+            logger.info(f"Built adaptive LSTM model: {lstm_units} units, {epochs} epochs, lr={learning_rate}")
+            
+            # PERBAIKAN: Enhanced training with callbacks
+            from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+            
+            callbacks = [
+                EarlyStopping(
+                    monitor='val_loss',
+                    patience=10,
+                    restore_best_weights=True,
+                    verbose=0
+                ),
+                ReduceLROnPlateau(
+                    monitor='val_loss',
+                    factor=0.5,
+                    patience=5,
+                    min_lr=1e-6,
+                    verbose=0
+                )
+            ]
+            
+            # Smart train/validation split
+            val_split = min(0.2, max(0.1, 20 / len(X)))  # 10-20% validation, adjusted for sample size
+            
+            # Training dengan validation
+            history = model.fit(
+                X, y,
+                validation_split=val_split,
+                epochs=epochs,
+                batch_size=min(32, max(8, len(X) // 10)),  # Adaptive batch size
+                verbose=0,
+                callbacks=callbacks
+            )
+            
+            # PERBAIKAN: Evaluate training quality
+            final_loss = history.history['loss'][-1]
+            final_val_loss = history.history['val_loss'][-1]
+            training_epochs = len(history.history['loss'])
+            
+            logger.info(f"Training completed: {training_epochs} epochs, loss={final_loss:.6f}, val_loss={final_val_loss:.6f}")
+            
+            # Check for overfitting
+            if final_val_loss > final_loss * 2:
+                logger.warning("Possible overfitting detected, reducing confidence")
+                overfitting_penalty = 0.5
+            else:
+                overfitting_penalty = 1.0
+                
+        except Exception as e:
+            logger.warning(f"Error training LSTM model: {str(e)}")
+            return predict_price_arima(prices_df, days_to_predict)
         
         # Make predictions
-        for i in range(days_to_predict):
-            # Reshape for prediction
-            current_input = current_sequence[-time_steps:].reshape(1, time_steps, 1)
+        try:
+            last_sequence = scaled_data[-time_steps:]
+            predictions = []
+            current_sequence = last_sequence.copy()
             
-            # Predict next value
-            next_value = model.predict(current_input, verbose=0)[0, 0]
-            
-            # Append to predictions
-            predictions.append(next_value)
-            
-            # Update current sequence
-            current_sequence = np.append(current_sequence, next_value)
-            current_sequence = current_sequence[1:]
-            
-        # Inverse transform the predictions
-        predictions_reshaped = np.array(predictions).reshape(-1, 1)
-        predictions_inverse = scaler.inverse_transform(predictions_reshaped)
+            for i in range(days_to_predict):
+                current_input = current_sequence[-time_steps:].reshape(1, time_steps, 1)
+                next_value = model.predict(current_input, verbose=0)[0, 0]
+                
+                # PERBAIKAN: Validate and constrain predictions
+                if not np.isfinite(next_value):
+                    logger.warning(f"Invalid prediction at day {i+1}, using last valid value")
+                    next_value = current_sequence[-1]
+                
+                # Constraint predictions to reasonable bounds
+                if i == 0:  # First prediction
+                    max_change = 0.1  # 10% max change from last actual price
+                    last_actual = current_sequence[-1]
+                    next_value = np.clip(next_value, 
+                                       last_actual * (1 - max_change), 
+                                       last_actual * (1 + max_change))
+                
+                predictions.append(next_value)
+                current_sequence = np.append(current_sequence, next_value)[1:]
+                
+        except Exception as e:
+            logger.warning(f"Error making predictions: {str(e)}")
+            return predict_price_arima(prices_df, days_to_predict)
         
-        # Create result dictionary
+        # Inverse transform predictions
+        try:
+            predictions_reshaped = np.array(predictions).reshape(-1, 1)
+            predictions_inverse = scaler.inverse_transform(predictions_reshaped)
+        except Exception as e:
+            logger.warning(f"Error inverse transforming: {str(e)}")
+            return predict_price_arima(prices_df, days_to_predict)
+        
+        # Format results
         dates = pd.date_range(
-            start=prices_df.index[-1] + pd.Timedelta(days=1), 
-            periods=days_to_predict, 
+            start=prices_df.index[-1] + pd.Timedelta(days=1),
+            periods=days_to_predict,
             freq='D'
         )
         
         prediction_data = []
-        
-        for i in range(len(predictions_inverse)):
+        for i, pred_value in enumerate(predictions_inverse):
+            # PERBAIKAN: Adaptive confidence based on training quality and prediction horizon
+            base_confidence = min(0.9, max(0.3, 1 - final_val_loss)) * overfitting_penalty
+            horizon_penalty = 0.98 ** i  # Confidence decreases with prediction horizon
+            confidence = base_confidence * horizon_penalty
+            
             prediction_data.append({
                 'date': dates[i].strftime('%Y-%m-%d'),
-                'value': float(predictions_inverse[i, 0]),
-                'confidence': max(0.1, 0.9 - (i * 0.05))
+                'value': float(pred_value[0]),
+                'confidence': confidence
             })
         
-        # Determine trend direction
-        last_price = prices_df['close'].iloc[-1]
-        final_prediction = prediction_data[-1]['value']
+        # Determine trend
+        last_price = float(close_data.iloc[-1])
+        final_prediction = float(predictions_inverse[-1][0])
         
-        if final_prediction > last_price:
+        if final_prediction > last_price * 1.01:
             trend = "up"
             change_pct = (final_prediction / last_price - 1) * 100
-        else:
+        elif final_prediction < last_price * 0.99:
             trend = "down"
             change_pct = (1 - final_prediction / last_price) * 100
+        else:
+            trend = "neutral"
+            change_pct = abs(final_prediction / last_price - 1) * 100
+        
+        # PERBAIKAN: Model confidence based on multiple factors
+        model_confidence = min(0.9, max(0.4, 
+            (base_confidence * 0.7) +  # Training quality
+            (min(len(X) / 200, 1) * 0.2) +  # Data sufficiency
+            ((1 - outlier_percentage) * 0.1)  # Data quality
+        ))
+        
+        logger.info(f"ML prediction successful: Model confidence={model_confidence:.3f}, Trend={trend}, Change={change_pct:.2f}%")
         
         return {
-            'current_price': float(last_price),
+            'current_price': last_price,
             'prediction_data': prediction_data,
             'trend': trend,
-            'change_percent': float(change_pct),
+            'change_percent': abs(change_pct),
             'model_type': 'LSTM',
-            'confidence': 0.7
+            'confidence': model_confidence,
+            'training_info': {
+                'epochs_trained': training_epochs,
+                'final_loss': final_loss,
+                'data_points': len(X),
+                'time_steps': time_steps
+            }
         }
         
     except Exception as e:
-        logger.info(f"Error dalam prediksi ML: {str(e)}")
+        logger.error(f"Critical error in ML prediction: {str(e)}")
+        import traceback
+        logger.debug(traceback.format_exc())
         return predict_price_arima(prices_df, days_to_predict)
 
+# PERBAIKAN: ARIMA Model yang lebih robust
 def predict_price_arima(prices_df: pd.DataFrame, days_to_predict: int = 7) -> Dict[str, Any]:
     try:
-        # Check if statsmodels available
+        # Check statsmodels availability
         try:
             from statsmodels.tsa.arima.model import ARIMA
+            from statsmodels.tools.sm_exceptions import ValueWarning, ConvergenceWarning
+            from statsmodels.tsa.stattools import adfuller
+            import warnings
+            warnings.filterwarnings("ignore", category=ValueWarning)
+            warnings.filterwarnings("ignore", category=ConvergenceWarning)
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
             has_statsmodels = True
-        except ImportError:
-            has_statsmodels = False
-            logger.info("statsmodels tidak tersedia, menggunakan model prediksi sederhana")
+        except ImportError as e:
+            logger.info(f"statsmodels not available: {str(e)}")
             return predict_price_simple(prices_df, days_to_predict)
         
-        # Gunakan pendekatan yang berbeda untuk menghindari masalah frekuensi
-        # Buat salinan dan reset index untuk menghindari warning frekuensi
+        # PERBAIKAN: Enhanced data validation
+        if len(prices_df) < 30:
+            logger.info(f"Insufficient data for ARIMA ({len(prices_df)} < 30)")
+            return predict_price_simple(prices_df, days_to_predict)
+        
+        # Clean and prepare data
         price_df_copy = prices_df.copy()
         
-        # Simpan tanggal asli untuk hasil prediksi nanti
+        if price_df_copy['close'].isnull().any():
+            logger.warning("Cleaning null values from data")
+            price_df_copy = price_df_copy.dropna()
+            
+        if len(price_df_copy) < 30:
+            logger.info("Insufficient data after cleaning")
+            return predict_price_simple(prices_df, days_to_predict)
+        
+        # Reset index to avoid frequency issues
         original_dates = None
         if isinstance(price_df_copy.index, pd.DatetimeIndex):
             original_dates = price_df_copy.index
-            # Reset index - ini menghilangkan masalah "inferred frequency None"
             price_df_copy = price_df_copy.reset_index(drop=True)
             
-        # Prepare data
         price_series = price_df_copy['close']
         
-        # Fit ARIMA model dengan parameter stabil
-        try:
-            model = ARIMA(price_series, order=(1, 1, 1))
-            model_fit = model.fit()
+        # PERBAIKAN: Enhanced stationarity testing and data preprocessing
+        def make_stationary(series, max_diff=2):
+            """Make series stationary with optimal differencing"""
+            original_series = series.copy()
+            diff_order = 0
             
-            # Prediksi
-            forecast = model_fit.forecast(steps=days_to_predict)
+            for d in range(max_diff + 1):
+                # Test stationarity
+                try:
+                    adf_test = adfuller(series, autolag='AIC')
+                    adf_pvalue = adf_test[1]
+                    
+                    if adf_pvalue < 0.05:  # Series is stationary
+                        logger.info(f"Series is stationary with {d} differencing (p-value: {adf_pvalue:.4f})")
+                        return series, d
+                        
+                except Exception as e:
+                    logger.warning(f"ADF test failed for d={d}: {str(e)}")
+                
+                # If not stationary and not max diff, try differencing
+                if d < max_diff:
+                    series = series.diff().dropna()
+                    diff_order = d + 1
+                    
+                    if len(series) < 20:  # Not enough data after differencing
+                        logger.warning("Too little data after differencing")
+                        return original_series, 0
             
-            # Validasi hasil prediksi
-            if forecast is None or len(forecast) == 0 or np.isnan(forecast).any() or np.isinf(forecast).any():
-                logger.info("Hasil prediksi ARIMA tidak valid, menggunakan model sederhana")
-                return predict_price_simple(prices_df, days_to_predict)
-        except Exception as e:
-            # Perbaikan pesan error yang kosong atau tidak informatif
-            error_msg = str(e) if str(e) and str(e) != "0" else "Kesalahan tidak diketahui dalam proses ARIMA"
-            logger.info(f"Menggunakan model prediksi sederhana: {error_msg}")
+            logger.info(f"Using {diff_order} differencing (may not be fully stationary)")
+            return original_series, min(diff_order, 1)  # Limit to 1 for safety
+        
+        # Test and adjust for stationarity
+        stationary_series, d_order = make_stationary(price_series)
+        
+        # PERBAIKAN: Comprehensive ARIMA parameter search
+        def find_best_arima_params(series, max_p=3, max_q=3, max_d=2):
+            """Find optimal ARIMA parameters using AIC"""
+            best_aic = float('inf')
+            best_params = (1, 1, 1)
+            best_model = None
+            
+            # Parameter combinations to test
+            param_combinations = []
+            
+            # Standard parameters first (most likely to work)
+            standard_params = [(1,1,1), (1,1,0), (0,1,1), (2,1,1), (1,1,2)]
+            for params in standard_params:
+                param_combinations.append(params)
+            
+            # Extended search if data is sufficient
+            if len(series) > 100:
+                for p in range(max_p + 1):
+                    for d in range(min(max_d + 1, 3)):  # Limit d to 2
+                        for q in range(max_q + 1):
+                            if (p, d, q) not in param_combinations:
+                                param_combinations.append((p, d, q))
+            
+            logger.info(f"Testing {len(param_combinations)} ARIMA parameter combinations")
+            
+            successful_fits = 0
+            for i, (p, d, q) in enumerate(param_combinations):
+                try:
+                    # Skip if parameters are too complex for data size
+                    if p + q > len(series) // 10:
+                        continue
+                        
+                    temp_model = ARIMA(series, order=(p, d, q))
+                    temp_fitted = temp_model.fit()
+                    
+                    # Validate model
+                    if hasattr(temp_fitted, 'aic') and np.isfinite(temp_fitted.aic):
+                        successful_fits += 1
+                        
+                        if temp_fitted.aic < best_aic:
+                            best_aic = temp_fitted.aic
+                            best_params = (p, d, q)
+                            best_model = temp_fitted
+                            
+                        # Early stopping if we find a very good model
+                        if temp_fitted.aic < -1000:  # Very good fit
+                            logger.info(f"Found excellent model early: {(p,d,q)} with AIC {temp_fitted.aic:.2f}")
+                            break
+                            
+                except Exception:
+                    continue
+            
+            logger.info(f"Successfully fitted {successful_fits} models out of {len(param_combinations)} attempts")
+            
+            if best_model is not None:
+                logger.info(f"Best ARIMA model: {best_params} with AIC: {best_aic:.2f}")
+            
+            return best_model, best_params, best_aic
+        
+        # Find optimal parameters
+        best_model, best_params, best_aic = find_best_arima_params(price_series)
+        
+        if best_model is None:
+            logger.info("No suitable ARIMA model found, using simple model")
             return predict_price_simple(prices_df, days_to_predict)
         
-        # Buat tanggal untuk hasil prediksi
+        # PERBAIKAN: Enhanced forecast generation with confidence intervals
+        try:
+            # Generate forecast
+            forecast = best_model.forecast(steps=days_to_predict)
+            
+            # Get confidence intervals if possible
+            try:
+                forecast_result = best_model.get_forecast(steps=days_to_predict)
+                forecast_ci = forecast_result.conf_int()
+                forecast_std = forecast_result.se_mean
+                
+                # Calculate confidence based on prediction intervals
+                ci_width = (forecast_ci.iloc[:, 1] - forecast_ci.iloc[:, 0]).mean()
+                last_price = price_series.iloc[-1]
+                relative_ci_width = ci_width / last_price
+                
+                # Confidence decreases with wider intervals
+                base_confidence = max(0.3, min(0.8, 1 - relative_ci_width))
+                
+            except Exception:
+                forecast_ci = None
+                forecast_std = None
+                base_confidence = 0.6
+                
+        except Exception as e:
+            logger.warning(f"Forecast generation failed: {str(e)}")
+            return predict_price_simple(prices_df, days_to_predict)
+        
+        # PERBAIKAN: Validate forecast quality
+        if forecast is None or len(forecast) == 0:
+            logger.warning("Empty forecast generated")
+            return predict_price_simple(prices_df, days_to_predict)
+            
+        # Check for invalid values
+        if np.isnan(forecast).any() or np.isinf(forecast).any():
+            logger.warning("Invalid values in forecast")
+            return predict_price_simple(prices_df, days_to_predict)
+        
+        # Check for unrealistic predictions
+        last_price = price_series.iloc[-1]
+        max_reasonable_change = 0.5  # 50% max change over prediction period
+        
+        unrealistic_predictions = False
+        for pred in forecast:
+            if abs(pred / last_price - 1) > max_reasonable_change:
+                unrealistic_predictions = True
+                break
+                
+        if unrealistic_predictions:
+            logger.warning("Unrealistic predictions detected, using simple model")
+            return predict_price_simple(prices_df, days_to_predict)
+        
+        # Create date range for predictions
         if original_dates is not None:
             last_date = original_dates[-1]
         else:
             last_date = datetime.now()
             
         dates = pd.date_range(
-            start=last_date + pd.Timedelta(days=1), 
-            periods=days_to_predict, 
+            start=last_date + pd.Timedelta(days=1),
+            periods=days_to_predict,
             freq='D'
         )
         
-        # Format hasil prediksi
+        # PERBAIKAN: Enhanced prediction data with adaptive confidence
         prediction_data = []
         for i in range(len(forecast)):
+            # Adaptive confidence based on multiple factors
+            horizon_penalty = 0.95 ** i  # Confidence decreases with time
+            
+            # Model quality factor
+            if best_aic < 0:
+                model_quality = 0.8
+            elif best_aic < 1000:
+                model_quality = 0.6
+            else:
+                model_quality = 0.4
+                
+            # Data sufficiency factor
+            data_sufficiency = min(1.0, len(price_series) / 100)
+            
+            # Combined confidence
+            confidence = base_confidence * horizon_penalty * model_quality * data_sufficiency
+            confidence = max(0.1, min(0.8, confidence))
+            
             prediction_data.append({
                 'date': dates[i].strftime('%Y-%m-%d'),
-                'value': float(forecast[i]),
-                'confidence': max(0.1, 0.7 - (i * 0.05))
+                'value': float(forecast.iloc[i] if hasattr(forecast, 'iloc') else forecast[i]),
+                'confidence': confidence
             })
         
         # Determine trend direction
-        last_price = prices_df['close'].iloc[-1]
         final_prediction = prediction_data[-1]['value']
         
-        if final_prediction > last_price:
+        if final_prediction > last_price * 1.02:
             trend = "up"
             change_pct = (final_prediction / last_price - 1) * 100
-        else:
+        elif final_prediction < last_price * 0.98:
             trend = "down"
             change_pct = (1 - final_prediction / last_price) * 100
+        else:
+            trend = "neutral"
+            change_pct = abs(final_prediction / last_price - 1) * 100
+        
+        # PERBAIKAN: Enhanced model confidence calculation
+        model_confidence = min(0.8, max(0.3,
+            (base_confidence * 0.5) +  # Forecast quality
+            (model_quality * 0.3) +   # Model fit quality
+            (data_sufficiency * 0.2)  # Data adequacy
+        ))
+        
+        logger.info(f"ARIMA prediction successful: {best_params}, AIC={best_aic:.2f}, Confidence={model_confidence:.3f}")
         
         return {
             'current_price': float(last_price),
             'prediction_data': prediction_data,
             'trend': trend,
-            'change_percent': float(change_pct),
-            'model_type': 'ARIMA',
-            'confidence': 0.5
+            'change_percent': abs(change_pct),
+            'model_type': f'ARIMA{best_params}',
+            'confidence': model_confidence,
+            'model_info': {
+                'aic': best_aic,
+                'parameters': best_params,
+                'data_points': len(price_series)
+            }
         }
         
     except Exception as e:
-        error_msg = str(e) if str(e) and str(e) != "0" else "Kesalahan tidak diketahui dalam prediksi"
-        logger.info(f"Menggunakan model prediksi sederhana karena: {error_msg}")
+        error_msg = str(e) if str(e) and str(e) != "0" else "Unknown ARIMA error"
+        logger.info(f"ARIMA failed: {error_msg}, using simple model")
         return predict_price_simple(prices_df, days_to_predict)
 
 def predict_price_simple(prices_df: pd.DataFrame, days_to_predict: int = 7) -> Dict[str, Any]:
     try:
-        # Calculate moving averages
+        # PERBAIKAN: Validasi minimal data
+        if len(prices_df) < 5:
+            logger.warning(f"Data terlalu sedikit ({len(prices_df)}), menggunakan prediksi konstan")
+            last_price = prices_df['close'].iloc[-1] if len(prices_df) > 0 else 100
+            
+            dates = pd.date_range(
+                start=prices_df.index[-1] + pd.Timedelta(days=1) if len(prices_df) > 0 else datetime.now(), 
+                periods=days_to_predict, 
+                freq='D'
+            )
+            
+            prediction_data = []
+            for i in range(days_to_predict):
+                prediction_data.append({
+                    'date': dates[i].strftime('%Y-%m-%d'),
+                    'value': float(last_price),
+                    'confidence': 0.3
+                })
+            
+            return {
+                'current_price': float(last_price),
+                'prediction_data': prediction_data,
+                'trend': 'neutral',
+                'change_percent': 0.0,
+                'model_type': 'Simple (Constant)',
+                'confidence': 0.3
+            }
+        
+        # Calculate moving averages dengan data yang tersedia
         if len(prices_df) >= 20:
             prices_df['sma_5'] = prices_df['close'].rolling(window=5).mean()
             prices_df['sma_20'] = prices_df['close'].rolling(window=20).mean()
             
             # Calculate recent trend
-            trend_factor = prices_df['sma_5'].iloc[-1] / prices_df['sma_20'].iloc[-1] - 1
+            if not prices_df['sma_5'].iloc[-1] or not prices_df['sma_20'].iloc[-1]:
+                trend_factor = 0
+            else:
+                trend_factor = prices_df['sma_5'].iloc[-1] / prices_df['sma_20'].iloc[-1] - 1
+        elif len(prices_df) >= 10:
+            # Gunakan trend sederhana untuk data terbatas
+            trend_factor = prices_df['close'].pct_change(5).iloc[-1]
         else:
-            # Not enough data for MA, use simple trend
-            trend_factor = prices_df['close'].pct_change(min(5, len(prices_df)-1)).iloc[-1]
+            # Data sangat terbatas, gunakan trend dari 3 hari terakhir
+            recent_days = min(3, len(prices_df) - 1)
+            if recent_days > 0:
+                trend_factor = prices_df['close'].pct_change(recent_days).iloc[-1]
+            else:
+                trend_factor = 0
         
+        # PERBAIKAN: Validasi trend factor
+        if not np.isfinite(trend_factor):
+            trend_factor = 0
+            
         # Adjust trend factor to be reasonable
         trend_factor = min(0.03, max(-0.03, trend_factor))  # Limit to ±3% per day
         
         # Current price
         last_price = prices_df['close'].iloc[-1]
         
-        # Calculate volatility
+        # Calculate volatility dengan data yang tersedia
         if len(prices_df) >= 10:
             volatility = prices_df['close'].pct_change().std()
         else:
             volatility = 0.02  # Default 2% for crypto
+            
+        # PERBAIKAN: Validasi volatility
+        if not np.isfinite(volatility) or volatility <= 0:
+            volatility = 0.02
         
         # Generate predictions
         dates = pd.date_range(
@@ -2073,18 +2523,34 @@ def predict_price_simple(prices_df: pd.DataFrame, days_to_predict: int = 7) -> D
         # Initialize with current price
         current_pred = last_price
         
+        # PERBAIKAN: Seed untuk konsistensi
+        np.random.seed(42)
+        
         for i in range(days_to_predict):
-            # Add trend and random component
-            random_factor = np.random.normal(0, volatility * current_pred)
-            next_pred = current_pred * (1 + trend_factor) + random_factor
+            # Add trend and random component dengan dampening
+            dampening_factor = 0.98 ** i  # Trend effect berkurang seiring waktu
+            adjusted_trend = trend_factor * dampening_factor
             
-            # Ensure positive
+            random_factor = np.random.normal(0, volatility * current_pred * 0.5)  # Kurangi random factor
+            next_pred = current_pred * (1 + adjusted_trend) + random_factor
+            
+            # Ensure positive dan reasonable
             next_pred = max(0.001, next_pred)
+            
+            # PERBAIKAN: Prevent extreme predictions
+            max_change = current_pred * 0.1  # Max 10% change per day
+            if abs(next_pred - current_pred) > max_change:
+                if next_pred > current_pred:
+                    next_pred = current_pred + max_change
+                else:
+                    next_pred = current_pred - max_change
+            
+            confidence = max(0.1, 0.4 - (i * 0.02))  # Confidence decreases with time
             
             prediction_data.append({
                 'date': dates[i].strftime('%Y-%m-%d'),
                 'value': float(next_pred),
-                'confidence': max(0.1, 0.5 - (i * 0.05))  # Confidence decreases with time
+                'confidence': confidence
             })
             
             # Update current prediction for next iteration
@@ -2093,12 +2559,17 @@ def predict_price_simple(prices_df: pd.DataFrame, days_to_predict: int = 7) -> D
         # Determine trend direction
         final_prediction = prediction_data[-1]['value']
         
-        if final_prediction > last_price:
+        if final_prediction > last_price * 1.02:  # > 2% increase
             trend = "up"
             change_pct = (final_prediction / last_price - 1) * 100
-        else:
+        elif final_prediction < last_price * 0.98:  # > 2% decrease
             trend = "down"
             change_pct = (1 - final_prediction / last_price) * 100
+        else:
+            trend = "neutral"
+            change_pct = abs(final_prediction / last_price - 1) * 100
+        
+        logger.info(f"Model Simple berhasil melakukan prediksi dengan trend {trend}")
         
         return {
             'current_price': float(last_price),
@@ -2106,16 +2577,36 @@ def predict_price_simple(prices_df: pd.DataFrame, days_to_predict: int = 7) -> D
             'trend': trend,
             'change_percent': float(change_pct),
             'model_type': 'Simple',
-            'confidence': 0.3  # Lower confidence for simple model
+            'confidence': 0.4  # Confidence sedang untuk simple model
         }
         
     except Exception as e:
         logger.error(f"Error in simple price prediction: {str(e)}")
+        
+        # PERBAIKAN: Fallback final yang selalu berhasil
+        try:
+            last_price = float(prices_df['close'].iloc[-1]) if 'close' in prices_df.columns and len(prices_df) > 0 else 100
+        except:
+            last_price = 100
+            
+        # Generate minimal prediction
+        dates = pd.date_range(start=datetime.now() + pd.Timedelta(days=1), periods=days_to_predict, freq='D')
+        prediction_data = []
+        
+        for i in range(days_to_predict):
+            prediction_data.append({
+                'date': dates[i].strftime('%Y-%m-%d'),
+                'value': last_price,
+                'confidence': 0.2
+            })
+        
         return {
-            'error': f"Prediction failed: {str(e)}",
-            'current_price': float(prices_df['close'].iloc[-1]) if 'close' in prices_df.columns else 0,
+            'current_price': last_price,
+            'prediction_data': prediction_data,
             'trend': 'unknown',
-            'confidence': 0.1
+            'change_percent': 0.0,
+            'model_type': 'Simple (Fallback)',
+            'confidence': 0.2
         }
 
 

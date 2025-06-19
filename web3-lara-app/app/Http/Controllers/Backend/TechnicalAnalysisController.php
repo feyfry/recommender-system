@@ -180,11 +180,31 @@ class TechnicalAnalysisController extends Controller
                     $requestData['periods'] = $periods;
                 }
 
-                $response = Http::timeout(5)->post("{$this->apiUrl}/analysis/trading-signals", $requestData);
+                $response = Http::timeout(10)->post("{$this->apiUrl}/analysis/trading-signals", $requestData);
 
                 if ($response->successful()) {
-                    // Return data langsung, bukan response object
-                    return $response->json();
+                    $data = $response->json();
+
+                    // PERBAIKAN: Normalisasi format reversal_signals
+                    if (isset($data['reversal_signals']) && is_array($data['reversal_signals'])) {
+                        $normalizedSignals = [];
+                        foreach ($data['reversal_signals'] as $signal) {
+                            if (is_array($signal) && isset($signal['description'])) {
+                                // Signal sudah dalam format object yang benar
+                                $normalizedSignals[] = $signal;
+                            } elseif (is_string($signal)) {
+                                // Convert string signal ke object format
+                                $normalizedSignals[] = [
+                                    'type' => 'general',
+                                    'description' => $signal,
+                                    'strength' => 0.5
+                                ];
+                            }
+                        }
+                        $data['reversal_signals'] = $normalizedSignals;
+                    }
+
+                    return $data;
                 } else {
                     Log::warning("Gagal mendapatkan sinyal trading: " . $response->body());
                     return [
@@ -201,7 +221,6 @@ class TechnicalAnalysisController extends Controller
             }
         });
 
-        // Return data dalam format json
         return response()->json($resultData);
     }
 
@@ -257,7 +276,7 @@ class TechnicalAnalysisController extends Controller
                     $requestData['periods'] = $periods;
                 }
 
-                $response = Http::timeout(5)->post("{$this->apiUrl}/analysis/indicators", $requestData);
+                $response = Http::timeout(10)->post("{$this->apiUrl}/analysis/indicators", $requestData);
 
                 if ($response->successful()) {
                     return response()->json($response->json());
@@ -312,11 +331,14 @@ class TechnicalAnalysisController extends Controller
                     'window_size' => $windowSize,
                 ];
 
-                if (! empty($thresholds)) {
-                    $params['thresholds'] = $thresholds;
+                // PERBAIKAN: Format thresholds sebagai query parameters individual
+                if (!empty($thresholds)) {
+                    foreach ($thresholds as $key => $value) {
+                        $params[$key . '_threshold'] = $value;
+                    }
                 }
 
-                $response = Http::timeout(5)->get("{$this->apiUrl}/analysis/market-events/{$projectId}", $params);
+                $response = Http::timeout(10)->get("{$this->apiUrl}/analysis/market-events/{$projectId}", $params);
 
                 if ($response->successful()) {
                     return response()->json($response->json());
@@ -345,6 +367,7 @@ class TechnicalAnalysisController extends Controller
         $days     = $request->input('days', 30);
         $interval = $request->input('interval', '1d');
         $lookback = $request->input('lookback', 5);
+        $tradingStyle = $request->input('trading_style', 'standard');
 
         // Ambil periode kustom jika ada
         $periods       = [];
@@ -360,25 +383,29 @@ class TechnicalAnalysisController extends Controller
         }
 
         // Tentukan cache key yang unik
-        $cacheKey = "alerts_{$projectId}_{$days}_{$interval}_{$lookback}";
+        $cacheKey = "alerts_{$projectId}_{$days}_{$interval}_{$lookback}_{$tradingStyle}";
 
         if (! empty($periods)) {
             $cacheKey .= "_" . md5(json_encode($periods));
         }
 
-        return Cache::remember($cacheKey, 30, function () use ($projectId, $days, $interval, $lookback, $periods) {
+        return Cache::remember($cacheKey, 30, function () use ($projectId, $days, $interval, $lookback, $tradingStyle, $periods) {
             try {
                 $params = [
                     'days'     => $days,
                     'interval' => $interval,
                     'lookback' => $lookback,
+                    'trading_style' => $tradingStyle,
                 ];
 
+                // PERBAIKAN: Handle periods sebagai JSON string di query parameter
                 if (! empty($periods)) {
-                    $params['periods'] = $periods;
+                    foreach ($periods as $key => $value) {
+                        $params[$key] = $value;
+                    }
                 }
 
-                $response = Http::timeout(5)->get("{$this->apiUrl}/analysis/alerts/{$projectId}", $params);
+                $response = Http::timeout(10)->get("{$this->apiUrl}/analysis/alerts/{$projectId}", $params);
 
                 if ($response->successful()) {
                     return response()->json($response->json());
@@ -412,7 +439,7 @@ class TechnicalAnalysisController extends Controller
         // Tentukan cache key yang unik
         $cacheKey = "price_prediction_{$projectId}_{$days}_{$predictionDays}_{$interval}_{$model}";
 
-        return Cache::remember($cacheKey, 30, function () use ($projectId, $days, $predictionDays, $interval, $model) {
+        return Cache::remember($cacheKey, 60, function () use ($projectId, $days, $predictionDays, $interval, $model) {
             try {
                 $params = [
                     'days'            => $days,
@@ -421,10 +448,19 @@ class TechnicalAnalysisController extends Controller
                     'model'           => $model,
                 ];
 
-                $response = Http::timeout(8)->get("{$this->apiUrl}/analysis/price-prediction/{$projectId}", $params);
+                // PERBAIKAN: Timeout lebih lama untuk prediksi ML
+                $response = Http::timeout(30)->get("{$this->apiUrl}/analysis/price-prediction/{$projectId}", $params);
 
                 if ($response->successful()) {
-                    return response()->json($response->json());
+                    $data = $response->json();
+
+                    // PERBAIKAN: Validasi dan normalisasi response data
+                    if (!isset($data['error']) && isset($data['model_type'])) {
+                        // Log keberhasilan model untuk debugging
+                        Log::info("Price prediction successful for {$projectId}: Model = {$data['model_type']}, Confidence = " . ($data['confidence'] ?? 'N/A'));
+                    }
+
+                    return response()->json($data);
                 } else {
                     Log::warning("Gagal mendapatkan prediksi harga: " . $response->body());
                     return response()->json([

@@ -29,7 +29,7 @@
         </div>
     </div>
 
-    <!-- Script untuk AlpineJS -->
+    <!-- PERBAIKAN: Script untuk AlpineJS -->
     <script>
         document.addEventListener('alpine:init', () => {
             Alpine.data('technicalAnalysis', () => ({
@@ -38,14 +38,14 @@
                 tradingStyle: 'standard',
                 riskTolerance: 'medium',
                 days: 30,
-                interval: '1d', // Default interval
-                lookback: 5,     // Default lookback
-                predictionDays: 7, // Default predictionDays
-                windowSize: 14,    // Default windowSize
-                pumpThreshold: 10, // Default pumpThreshold (%)
-                dumpThreshold: 10, // Default dumpThreshold (%)
-                volatilityThreshold: 15, // Default volatilityThreshold
-                showAdvanced: false, // Toggle untuk advanced settings
+                interval: '1d',
+                lookback: 5,
+                predictionDays: 7,
+                windowSize: 14,
+                pumpThreshold: 10,
+                dumpThreshold: 10,
+                volatilityThreshold: 15,
+                showAdvanced: false,
                 params: {
                     rsi_period: 14,
                     macd_fast: 12,
@@ -68,7 +68,14 @@
                 loadingMarketEvents: false,
                 loadingAlerts: false,
                 loadingPrediction: false,
-                activeTab: 'signals', // 'signals', 'indicators', 'events', 'alerts', 'prediction'
+                activeTab: 'signals',
+                errors: {
+                    signals: null,
+                    indicators: null,
+                    events: null,
+                    alerts: null,
+                    prediction: null
+                },
                 presets: {
                     'short_term': {
                         rsi_period: 7,
@@ -107,9 +114,11 @@
                         ma_long: 200
                     }
                 },
+
                 init() {
                     this.applyPreset();
                 },
+
                 applyPreset() {
                     if (!this.customParams) {
                         const style = this.tradingStyle;
@@ -118,7 +127,39 @@
                         });
                     }
                 },
-                analyze() {
+
+                // PERBAIKAN: Enhanced error handling dan response validation
+                validateResponse(response, type) {
+                    if (!response) {
+                        throw new Error(`No response received for ${type}`);
+                    }
+
+                    if (response.error) {
+                        throw new Error(response.message || `Error in ${type} analysis`);
+                    }
+
+                    return true;
+                },
+
+                // PERBAIKAN: Improved error display
+                showError(type, message) {
+                    this.errors[type] = message;
+                    console.error(`${type} error:`, message);
+
+                    // Auto-clear error after 10 seconds
+                    setTimeout(() => {
+                        if (this.errors[type] === message) {
+                            this.errors[type] = null;
+                        }
+                    }, 10000);
+                },
+
+                clearError(type) {
+                    this.errors[type] = null;
+                },
+
+                // PERBAIKAN: Enhanced analyze function dengan error handling
+                async analyze() {
                     if (!this.projectId) {
                         alert('Silakan pilih proyek terlebih dahulu');
                         return;
@@ -126,187 +167,320 @@
 
                     this.loading = true;
                     this.results = null;
+                    this.clearError('signals');
 
-                    const requestData = {
-                        project_id: this.projectId,
-                        days: this.days,
-                        interval: this.interval, // Sekarang menggunakan interval dari UI
-                        risk_tolerance: this.riskTolerance,
-                        trading_style: this.tradingStyle
-                    };
+                    try {
+                        const requestData = {
+                            project_id: this.projectId,
+                            days: this.days,
+                            interval: this.interval,
+                            risk_tolerance: this.riskTolerance,
+                            trading_style: this.tradingStyle
+                        };
 
-                    if (this.customParams) {
-                        Object.keys(this.params).forEach(key => {
-                            requestData[key] = this.params[key];
+                        if (this.customParams) {
+                            Object.keys(this.params).forEach(key => {
+                                requestData[key] = this.params[key];
+                            });
+                        }
+
+                        const response = await fetch('{{ route("panel.technical-analysis.trading-signals") }}', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                            },
+                            body: JSON.stringify(requestData)
                         });
-                    }
 
-                    fetch('{{ route("panel.technical-analysis.trading-signals") }}', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-                        },
-                        body: JSON.stringify(requestData)
-                    })
-                    .then(response => {
                         if (!response.ok) {
-                            throw new Error('Network response was not ok: ' + response.statusText);
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                         }
-                        return response.json();
-                    })
-                    .then(data => {
-                        if (data && data.error) {
-                            throw new Error(data.message || 'Terjadi kesalahan pada analisis');
-                        }
-                        this.results = data;
-                        this.loading = false;
 
-                        // After getting signals, load additional data in the background
-                        this.loadIndicators();
-                        this.loadMarketEvents();
-                        this.loadAlerts();
-                        this.loadPricePrediction();
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
+                        const data = await response.json();
+
+                        // PERBAIKAN: Validate and process response
+                        this.validateResponse(data, 'signals');
+
+                        // PERBAIKAN: Process reversal signals dengan format yang konsisten
+                        if (data.reversal_signals && Array.isArray(data.reversal_signals)) {
+                            data.reversal_signals = data.reversal_signals.map(signal => {
+                                if (typeof signal === 'object' && signal !== null) {
+                                    return {
+                                        type: signal.type || 'general',
+                                        description: signal.description || 'Unknown signal',
+                                        strength: signal.strength || 0.5
+                                    };
+                                } else if (typeof signal === 'string') {
+                                    return {
+                                        type: 'general',
+                                        description: signal,
+                                        strength: 0.5
+                                    };
+                                }
+                                return signal;
+                            });
+                        }
+
+                        this.results = data;
+
+                        // Load additional data after successful signal analysis
+                        this.loadAdditionalData();
+
+                    } catch (error) {
+                        console.error('Error in analyze:', error);
+                        this.showError('signals', `Terjadi kesalahan saat menganalisis: ${error.message}`);
+                    } finally {
                         this.loading = false;
-                        alert('Terjadi kesalahan saat menganalisis: ' + error.message);
+                    }
+                },
+
+                // PERBAIKAN: Load additional data dengan error handling per component
+                async loadAdditionalData() {
+                    // Load components in parallel but handle errors separately
+                    Promise.allSettled([
+                        this.loadIndicators(),
+                        this.loadMarketEvents(),
+                        this.loadAlerts(),
+                        this.loadPricePrediction()
+                    ]).then(results => {
+                        results.forEach((result, index) => {
+                            const componentNames = ['indicators', 'events', 'alerts', 'prediction'];
+                            if (result.status === 'rejected') {
+                                console.warn(`Failed to load ${componentNames[index]}:`, result.reason);
+                            }
+                        });
                     });
                 },
-                loadIndicators() {
+
+                // PERBAIKAN: Enhanced loadIndicators dengan error handling
+                async loadIndicators() {
                     if (!this.projectId) return;
 
                     this.loadingIndicators = true;
+                    this.clearError('indicators');
 
-                    const requestData = {
-                        project_id: this.projectId,
-                        days: this.days,
-                        interval: this.interval, // Gunakan interval dari UI
-                        indicators: ["rsi", "macd", "bollinger", "sma", "stochastic", "adx", "atr", "ichimoku"],
-                        trading_style: this.tradingStyle
-                    };
+                    try {
+                        const requestData = {
+                            project_id: this.projectId,
+                            days: this.days,
+                            interval: this.interval,
+                            indicators: ["rsi", "macd", "bollinger", "sma", "stochastic", "adx", "atr", "ichimoku"],
+                            trading_style: this.tradingStyle
+                        };
 
-                    if (this.customParams) {
-                        requestData.periods = {};
-                        Object.keys(this.params).forEach(key => {
-                            requestData.periods[key] = this.params[key];
+                        if (this.customParams) {
+                            requestData.periods = {};
+                            Object.keys(this.params).forEach(key => {
+                                requestData.periods[key] = this.params[key];
+                            });
+                        }
+
+                        const response = await fetch('{{ route("panel.technical-analysis.indicators") }}', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                            },
+                            body: JSON.stringify(requestData)
                         });
-                    }
 
-                    fetch('{{ route("panel.technical-analysis.indicators") }}', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-                        },
-                        body: JSON.stringify(requestData)
-                    })
-                    .then(response => response.json())
-                    .then(data => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+
+                        const data = await response.json();
+                        this.validateResponse(data, 'indicators');
                         this.indicatorsData = data;
-                        this.loadingIndicators = false;
-                    })
-                    .catch(error => {
+
+                    } catch (error) {
                         console.error('Error loading indicators:', error);
+                        this.showError('indicators', `Gagal memuat indikator: ${error.message}`);
+                    } finally {
                         this.loadingIndicators = false;
-                    });
+                    }
                 },
-                loadMarketEvents() {
+
+                // PERBAIKAN: Enhanced loadMarketEvents
+                async loadMarketEvents() {
                     if (!this.projectId) return;
 
                     this.loadingMarketEvents = true;
+                    this.clearError('events');
 
-                    // Tambahkan parameter window_size dan thresholds jika digunakan
-                    let url = `{{ url("panel/technical-analysis/market-events") }}/${this.projectId}?days=${this.days}&interval=${this.interval}`;
+                    try {
+                        let url = `{{ url("panel/technical-analysis/market-events") }}/${this.projectId}?days=${this.days}&interval=${this.interval}`;
 
-                    // Tambahkan parameter lanjutan jika advanced settings diaktifkan
-                    if (this.showAdvanced) {
-                        url += `&window_size=${this.windowSize}`;
+                        if (this.showAdvanced) {
+                            url += `&window_size=${this.windowSize}`;
 
-                        // Buat objek thresholds jika nilai tidak default
-                        const thresholds = {};
-                        if (this.pumpThreshold !== 10) thresholds.pump = this.pumpThreshold;
-                        if (this.dumpThreshold !== 10) thresholds.dump = this.dumpThreshold;
-                        if (this.volatilityThreshold !== 15) thresholds.volatility = this.volatilityThreshold;
-
-                        // Tambahkan ke URL jika ada thresholds yang berbeda dari default
-                        if (Object.keys(thresholds).length > 0) {
-                            url += `&thresholds=${encodeURIComponent(JSON.stringify(thresholds))}`;
+                            // Add threshold parameters
+                            if (this.pumpThreshold !== 10) url += `&pump_threshold=${this.pumpThreshold}`;
+                            if (this.dumpThreshold !== 10) url += `&dump_threshold=${this.dumpThreshold}`;
+                            if (this.volatilityThreshold !== 15) url += `&volatility_threshold=${this.volatilityThreshold}`;
                         }
-                    }
 
-                    fetch(url)
-                    .then(response => response.json())
-                    .then(data => {
+                        const response = await fetch(url);
+
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+
+                        const data = await response.json();
+                        this.validateResponse(data, 'market events');
                         this.marketEvents = data;
-                        this.loadingMarketEvents = false;
-                    })
-                    .catch(error => {
+
+                    } catch (error) {
                         console.error('Error loading market events:', error);
+                        this.showError('events', `Gagal memuat peristiwa pasar: ${error.message}`);
+                    } finally {
                         this.loadingMarketEvents = false;
-                    });
+                    }
                 },
-                loadAlerts() {
+
+                // PERBAIKAN: Enhanced loadAlerts
+                async loadAlerts() {
                     if (!this.projectId) return;
 
                     this.loadingAlerts = true;
+                    this.clearError('alerts');
 
-                    let url = `{{ url("panel/technical-analysis/alerts") }}/${this.projectId}?days=${this.days}&interval=${this.interval}&lookback=${this.lookback}&trading_style=${this.tradingStyle}`;
+                    try {
+                        let url = `{{ url("panel/technical-analysis/alerts") }}/${this.projectId}?days=${this.days}&interval=${this.interval}&lookback=${this.lookback}&trading_style=${this.tradingStyle}`;
 
-                    // Tambahkan periods jika menggunakan custom params
-                    if (this.customParams) {
-                        const periods = {};
-                        Object.keys(this.params).forEach(key => {
-                            periods[key] = this.params[key];
-                        });
-
-                        if (Object.keys(periods).length > 0) {
-                            url += `&periods=${encodeURIComponent(JSON.stringify(periods))}`;
+                        if (this.customParams) {
+                            Object.keys(this.params).forEach(key => {
+                                url += `&${key}=${this.params[key]}`;
+                            });
                         }
-                    }
 
-                    fetch(url)
-                    .then(response => response.json())
-                    .then(data => {
+                        const response = await fetch(url);
+
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+
+                        const data = await response.json();
+                        this.validateResponse(data, 'alerts');
                         this.alertsData = data;
-                        this.loadingAlerts = false;
-                    })
-                    .catch(error => {
+
+                    } catch (error) {
                         console.error('Error loading alerts:', error);
+                        this.showError('alerts', `Gagal memuat alert: ${error.message}`);
+                    } finally {
                         this.loadingAlerts = false;
-                    });
+                    }
                 },
-                loadPricePrediction() {
+
+                // PERBAIKAN: Enhanced loadPricePrediction dengan logging
+                async loadPricePrediction() {
                     if (!this.projectId) return;
 
                     this.loadingPrediction = true;
+                    this.clearError('prediction');
 
-                    // Sekarang menggunakan predictionDays dari UI
-                    fetch(`{{ url("panel/technical-analysis/price-prediction") }}/${this.projectId}?days=${this.days}&interval=${this.interval}&prediction_days=${this.predictionDays}`)
-                    .then(response => response.json())
-                    .then(data => {
+                    try {
+                        const url = `{{ url("panel/technical-analysis/price-prediction") }}/${this.projectId}?days=${this.days}&interval=${this.interval}&prediction_days=${this.predictionDays}`;
+
+                        console.log(`Loading price prediction for ${this.projectId} with ${this.days} days data and ${this.predictionDays} prediction days`);
+
+                        const response = await fetch(url);
+
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+
+                        const data = await response.json();
+                        this.validateResponse(data, 'price prediction');
+
+                        // PERBAIKAN: Log model type untuk debugging
+                        if (data.model_type) {
+                            console.log(`Price prediction completed using ${data.model_type} model with confidence ${data.confidence}`);
+                        }
+
                         this.predictionData = data;
-                        this.loadingPrediction = false;
-                    })
-                    .catch(error => {
+
+                    } catch (error) {
                         console.error('Error loading price prediction:', error);
+                        this.showError('prediction', `Gagal memuat prediksi harga: ${error.message}`);
+                    } finally {
                         this.loadingPrediction = false;
-                    });
+                    }
                 },
+
+                // PERBAIKAN: Enhanced setActiveTab dengan lazy loading dan error handling
                 setActiveTab(tab) {
                     this.activeTab = tab;
 
-                    // Load data if not already loaded
-                    if (tab === 'indicators' && !this.indicatorsData && !this.loadingIndicators) {
-                        this.loadIndicators();
-                    } else if (tab === 'events' && !this.marketEvents && !this.loadingMarketEvents) {
-                        this.loadMarketEvents();
-                    } else if (tab === 'alerts' && !this.alertsData && !this.loadingAlerts) {
-                        this.loadAlerts();
-                    } else if (tab === 'prediction' && !this.predictionData && !this.loadingPrediction) {
-                        this.loadPricePrediction();
+                    // Load data if not already loaded and no current error
+                    if (!this.errors[tab]) {
+                        switch(tab) {
+                            case 'indicators':
+                                if (!this.indicatorsData && !this.loadingIndicators) {
+                                    this.loadIndicators();
+                                }
+                                break;
+                            case 'events':
+                                if (!this.marketEvents && !this.loadingMarketEvents) {
+                                    this.loadMarketEvents();
+                                }
+                                break;
+                            case 'alerts':
+                                if (!this.alertsData && !this.loadingAlerts) {
+                                    this.loadAlerts();
+                                }
+                                break;
+                            case 'prediction':
+                                if (!this.predictionData && !this.loadingPrediction) {
+                                    this.loadPricePrediction();
+                                }
+                                break;
+                        }
                     }
+                },
+
+                // PERBAIKAN: Helper method untuk retry failed requests
+                async retryRequest(type) {
+                    this.clearError(type);
+
+                    switch(type) {
+                        case 'signals':
+                            await this.analyze();
+                            break;
+                        case 'indicators':
+                            await this.loadIndicators();
+                            break;
+                        case 'events':
+                            await this.loadMarketEvents();
+                            break;
+                        case 'alerts':
+                            await this.loadAlerts();
+                            break;
+                        case 'prediction':
+                            await this.loadPricePrediction();
+                            break;
+                    }
+                },
+
+                // PERBAIKAN: Helper untuk format nilai
+                formatPrice(value) {
+                    if (!value) return 'N/A';
+                    return new Intl.NumberFormat('en-US', {
+                        style: 'currency',
+                        currency: 'USD',
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 8
+                    }).format(value);
+                },
+
+                formatPercentage(value) {
+                    if (!value && value !== 0) return 'N/A';
+                    return `${Math.round(value * 100)}%`;
+                },
+
+                formatNumber(value, decimals = 2) {
+                    if (!value && value !== 0) return 'N/A';
+                    return Number(value).toFixed(decimals);
                 }
             }));
         });
@@ -714,6 +888,7 @@
                             </ul>
                         </template>
 
+                        <!-- PERBAIKAN: Bagian Sinyal Pembalikan di template -->
                         <template x-if="results?.reversal_signals && results?.reversal_signals.length > 0">
                             <div class="mt-4">
                                 <h4 class="font-medium mb-2">Sinyal Pembalikan:</h4>
@@ -721,7 +896,8 @@
                                     <template x-for="(signal, index) in results?.reversal_signals" :key="index">
                                         <li class="flex items-start">
                                             <i class="fas fa-exchange-alt text-warning mt-1 mr-2"></i>
-                                            <span x-text="signal"></span>
+                                            <!-- PERBAIKAN: Ekstrak properti description dari object signal -->
+                                            <span x-text="typeof signal === 'object' ? signal.description : signal"></span>
                                         </li>
                                     </template>
                                 </ul>
