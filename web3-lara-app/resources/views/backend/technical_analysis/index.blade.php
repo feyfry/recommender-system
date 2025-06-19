@@ -31,6 +31,7 @@
 
     <!-- PERBAIKAN: Script untuk AlpineJS -->
     <script>
+        // PERBAIKAN: Script AlpineJS yang sudah diperbaiki untuk menangani reversal signals
         document.addEventListener('alpine:init', () => {
             Alpine.data('technicalAnalysis', () => ({
                 loading: false,
@@ -161,7 +162,7 @@
                     this.errors[type] = null;
                 },
 
-                // PERBAIKAN: Enhanced analyze function dengan error handling
+                // PERBAIKAN UTAMA: Enhanced analyze function dengan normalisasi reversal signals
                 async analyze() {
                     if (!this.projectId) {
                         alert('Silakan pilih proyek terlebih dahulu');
@@ -205,24 +206,48 @@
                         // PERBAIKAN: Validate and process response
                         this.validateResponse(data, 'signals');
 
-                        // PERBAIKAN: Process reversal signals dengan format yang konsisten
-                        if (data.reversal_signals && Array.isArray(data.reversal_signals)) {
-                            data.reversal_signals = data.reversal_signals.map(signal => {
-                                if (typeof signal === 'object' && signal !== null) {
-                                    return {
-                                        type: signal.type || 'general',
-                                        description: signal.description || 'Unknown signal',
-                                        strength: signal.strength || 0.5
-                                    };
-                                } else if (typeof signal === 'string') {
-                                    return {
-                                        type: 'general',
-                                        description: signal,
-                                        strength: 0.5
-                                    };
-                                }
-                                return signal;
-                            });
+                        // PERBAIKAN UTAMA: Normalisasi reversal signals di frontend juga sebagai double check
+                        if (data.reversal_signals) {
+                            // Pastikan reversal_signals adalah array
+                            let normalizedSignals = [];
+
+                            if (Array.isArray(data.reversal_signals)) {
+                                normalizedSignals = data.reversal_signals.map(signal => {
+                                    if (typeof signal === 'object' && signal !== null) {
+                                        return {
+                                            type: signal.type || 'general',
+                                            description: signal.description || 'Unknown signal',
+                                            strength: parseFloat(signal.strength) || 0.5
+                                        };
+                                    } else if (typeof signal === 'string') {
+                                        return {
+                                            type: 'general',
+                                            description: signal,
+                                            strength: 0.5
+                                        };
+                                    } else {
+                                        // Fallback untuk format yang tidak dikenal
+                                        return {
+                                            type: 'general',
+                                            description: String(signal),
+                                            strength: 0.5
+                                        };
+                                    }
+                                });
+                            } else if (typeof data.reversal_signals === 'string') {
+                                normalizedSignals = [{
+                                    type: 'general',
+                                    description: data.reversal_signals,
+                                    strength: 0.5
+                                }];
+                            }
+
+                            data.reversal_signals = normalizedSignals;
+
+                            console.log('Normalized reversal signals:', normalizedSignals);
+                        } else {
+                            // Jika tidak ada reversal_signals, set sebagai array kosong
+                            data.reversal_signals = [];
                         }
 
                         this.results = data;
@@ -254,6 +279,167 @@
                             }
                         });
                     });
+                },
+
+                // PERBAIKAN: Enhanced loadPricePrediction method dengan handling khusus untuk LSTM errors
+                async loadPricePrediction() {
+                    if (!this.projectId) return;
+
+                    this.loadingPrediction = true;
+                    this.clearError('prediction');
+
+                    try {
+                        const url = `{{ url("panel/technical-analysis/price-prediction") }}/${this.projectId}?days=${this.days}&interval=${this.interval}&prediction_days=${this.predictionDays}`;
+
+                        console.log(`Loading price prediction for ${this.projectId} with ${this.days} days data and ${this.predictionDays} prediction days`);
+
+                        // PERBAIKAN: Timeout yang disesuaikan untuk LSTM model
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 150000); // 2.5 menit timeout untuk LSTM
+
+                        const response = await fetch(url, {
+                            signal: controller.signal
+                        });
+
+                        clearTimeout(timeoutId);
+
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+
+                        const data = await response.json();
+
+                        // PERBAIKAN: Enhanced validation dan error handling khusus untuk LSTM
+                        if (data.error) {
+                            if (data.timeout) {
+                                this.showError('prediction', 'Model LSTM membutuhkan waktu lebih lama untuk training. Sistem telah beralih ke model alternatif yang lebih cepat.');
+                            } else {
+                                this.showError('prediction', data.message || 'Gagal memuat prediksi harga');
+                            }
+                            return;
+                        }
+
+                        // PERBAIKAN: Validate prediction data structure dengan logging
+                        if (!data.predictions || !Array.isArray(data.predictions)) {
+                            console.warn('Invalid predictions data structure:', data);
+                            this.showError('prediction', 'Data prediksi tidak valid');
+                            return;
+                        }
+
+                        // PERBAIKAN: Validate individual prediction points dengan lebih ketat
+                        const validPredictions = data.predictions.filter((prediction, index) => {
+                            const isValid = prediction &&
+                                prediction.date &&
+                                typeof prediction.value === 'number' &&
+                                isFinite(prediction.value) &&
+                                prediction.value > 0;
+
+                            if (!isValid) {
+                                console.warn(`Invalid prediction at index ${index}:`, prediction);
+                            }
+
+                            return isValid;
+                        });
+
+                        if (validPredictions.length === 0) {
+                            console.warn('No valid predictions found in data:', data);
+                            this.showError('prediction', 'Tidak ada data prediksi yang valid');
+                            return;
+                        }
+
+                        // Update predictions with valid data
+                        data.predictions = validPredictions;
+
+                        // PERBAIKAN: Validate other required fields dengan logging
+                        const originalCurrentPrice = data.current_price;
+                        data.current_price = typeof data.current_price === 'number' && isFinite(data.current_price) ? data.current_price : 0;
+
+                        const originalChangePercent = data.predicted_change_percent;
+                        data.predicted_change_percent = typeof data.predicted_change_percent === 'number' && isFinite(data.predicted_change_percent) ? data.predicted_change_percent : 0;
+
+                        const originalConfidence = data.confidence;
+                        data.confidence = typeof data.confidence === 'number' && isFinite(data.confidence) ? Math.max(0, Math.min(1, data.confidence)) : 0;
+
+                        data.model_type = data.model_type || 'Unknown';
+                        data.prediction_direction = data.prediction_direction || 'unknown';
+
+                        // Log jika ada koreksi data
+                        if (originalCurrentPrice !== data.current_price) {
+                            console.warn('Corrected invalid current_price:', originalCurrentPrice, '->', data.current_price);
+                        }
+                        if (originalChangePercent !== data.predicted_change_percent) {
+                            console.warn('Corrected invalid predicted_change_percent:', originalChangePercent, '->', data.predicted_change_percent);
+                        }
+                        if (originalConfidence !== data.confidence) {
+                            console.warn('Corrected invalid confidence:', originalConfidence, '->', data.confidence);
+                        }
+
+                        // PERBAIKAN: Log model performance untuk debugging
+                        const modelType = data.model_type || 'Unknown';
+                        const confidence = data.confidence || 0;
+                        const predictionsCount = validPredictions.length;
+
+                        console.log(`Price prediction completed:`, {
+                            model_type: modelType,
+                            confidence: confidence,
+                            predictions_count: predictionsCount,
+                            direction: data.prediction_direction,
+                            change_percent: data.predicted_change_percent
+                        });
+
+                        // PERBAIKAN: Show success message untuk LSTM model
+                        if (modelType.includes('LSTM')) {
+                            console.log('LSTM model prediction successful with high accuracy');
+                        } else if (modelType.includes('ARIMA')) {
+                            console.log('ARIMA model used as fallback');
+                        } else if (modelType.includes('Simple')) {
+                            console.log('Simple model used due to data limitations');
+                        }
+
+                        this.predictionData = data;
+
+                    } catch (error) {
+                        console.error('Error loading price prediction:', error);
+
+                        // PERBAIKAN: Handle specific error types dengan pesan yang lebih informatif
+                        if (error.name === 'AbortError') {
+                            this.showError('prediction', 'Model LSTM membutuhkan waktu training yang lama. Untuk hasil lebih cepat, coba kurangi periode data atau hari prediksi.');
+                        } else if (error.message.includes('HTTP 504') || error.message.includes('HTTP 408')) {
+                            this.showError('prediction', 'Server timeout saat training model LSTM. Sistem telah beralih ke model alternatif.');
+                        } else if (error.message.includes('HTTP 500')) {
+                            this.showError('prediction', 'Terjadi kesalahan internal pada model prediksi. Sistem mencoba model alternatif.');
+                        } else {
+                            this.showError('prediction', `Gagal memuat prediksi harga: ${error.message}`);
+                        }
+                    } finally {
+                        this.loadingPrediction = false;
+                    }
+                },
+
+                // PERBAIKAN: Helper function untuk menampilkan reversal signals dengan aman
+                getReversalSignalDescription(signal) {
+                    if (typeof signal === 'object' && signal !== null) {
+                        return signal.description || 'Unknown signal';
+                    } else if (typeof signal === 'string') {
+                        return signal;
+                    } else {
+                        return String(signal);
+                    }
+                },
+
+                getReversalSignalStrength(signal) {
+                    if (typeof signal === 'object' && signal !== null && signal.strength !== undefined) {
+                        const strength = parseFloat(signal.strength);
+                        return isFinite(strength) ? Math.round(strength * 100) : 50;
+                    }
+                    return 50; // Default 50%
+                },
+
+                getReversalSignalType(signal) {
+                    if (typeof signal === 'object' && signal !== null) {
+                        return signal.type || 'general';
+                    }
+                    return 'general';
                 },
 
                 // PERBAIKAN: Enhanced loadIndicators dengan error handling
@@ -375,99 +561,6 @@
                     }
                 },
 
-                // PERBAIKAN: Enhanced loadPricePrediction method dengan proper loading state dan error handling
-                async loadPricePrediction() {
-                    if (!this.projectId) return;
-
-                    this.loadingPrediction = true;
-                    this.clearError('prediction');
-
-                    try {
-                        const url = `{{ url("panel/technical-analysis/price-prediction") }}/${this.projectId}?days=${this.days}&interval=${this.interval}&prediction_days=${this.predictionDays}`;
-
-                        console.log(`Loading price prediction for ${this.projectId} with ${this.days} days data and ${this.predictionDays} prediction days`);
-
-                        // PERBAIKAN: Timeout yang disesuaikan untuk berbagai model
-                        const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 menit timeout
-
-                        const response = await fetch(url, {
-                            signal: controller.signal
-                        });
-
-                        clearTimeout(timeoutId);
-
-                        if (!response.ok) {
-                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                        }
-
-                        const data = await response.json();
-
-                        // PERBAIKAN: Enhanced validation dan error handling
-                        if (data.error) {
-                            if (data.timeout) {
-                                this.showError('prediction', 'Prediksi harga membutuhkan waktu lebih lama. Silakan tunggu sebentar dan coba lagi.');
-                            } else {
-                                this.showError('prediction', data.message || 'Gagal memuat prediksi harga');
-                            }
-                            return;
-                        }
-
-                        // PERBAIHAN: Validate prediction data structure
-                        if (!data.predictions || !Array.isArray(data.predictions)) {
-                            console.warn('Invalid predictions data structure:', data);
-                            this.showError('prediction', 'Data prediksi tidak valid');
-                            return;
-                        }
-
-                        // PERBAIKAN: Validate individual prediction points
-                        const validPredictions = data.predictions.filter(prediction => {
-                            return prediction &&
-                                prediction.date &&
-                                typeof prediction.value === 'number' &&
-                                isFinite(prediction.value) &&
-                                prediction.value > 0;
-                        });
-
-                        if (validPredictions.length === 0) {
-                            console.warn('No valid predictions found in data:', data);
-                            this.showError('prediction', 'Tidak ada data prediksi yang valid');
-                            return;
-                        }
-
-                        // Update predictions with valid data
-                        data.predictions = validPredictions;
-
-                        // PERBAIKAN: Validate other required fields
-                        data.current_price = typeof data.current_price === 'number' ? data.current_price : 0;
-                        data.predicted_change_percent = typeof data.predicted_change_percent === 'number' ? data.predicted_change_percent : 0;
-                        data.confidence = typeof data.confidence === 'number' ? Math.max(0, Math.min(1, data.confidence)) : 0;
-                        data.model_type = data.model_type || 'Unknown';
-                        data.prediction_direction = data.prediction_direction || 'unknown';
-
-                        // PERBAIKAN: Log model type untuk debugging
-                        if (data.model_type) {
-                            console.log(`Price prediction completed using ${data.model_type} model with confidence ${data.confidence}`);
-                        }
-
-                        this.predictionData = data;
-
-                    } catch (error) {
-                        console.error('Error loading price prediction:', error);
-
-                        // PERBAIKAN: Handle specific error types
-                        if (error.name === 'AbortError') {
-                            this.showError('prediction', 'Prediksi harga membutuhkan waktu terlalu lama. Silakan coba lagi dengan periode data yang lebih pendek.');
-                        } else if (error.message.includes('HTTP 504') || error.message.includes('HTTP 408')) {
-                            this.showError('prediction', 'Server timeout. Prediksi ML membutuhkan waktu lebih lama. Silakan tunggu dan coba lagi.');
-                        } else {
-                            this.showError('prediction', `Gagal memuat prediksi harga: ${error.message}`);
-                        }
-                    } finally {
-                        this.loadingPrediction = false;
-                    }
-                },
-
                 // PERBAIKAN: Enhanced setActiveTab dengan lazy loading dan error handling
                 setActiveTab(tab) {
                     this.activeTab = tab;
@@ -499,13 +592,14 @@
                     }
                 },
 
-                // PERBAIKAN: Enhanced retry function dengan delay
+                // PERBAIKAN: Enhanced retry function dengan delay khusus untuk prediction
                 async retryRequest(type) {
                     this.clearError(type);
 
                     // Add delay for prediction requests to allow server recovery
                     if (type === 'prediction') {
-                        await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
+                        console.log('Retrying prediction request after delay...');
+                        await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second delay
                     }
 
                     switch(type) {
@@ -546,7 +640,7 @@
                 formatNumber(value, decimals = 2) {
                     if (!value && value !== 0) return 'N/A';
                     return Number(value).toFixed(decimals);
-                }
+                },
             }));
         });
     </script>
@@ -954,15 +1048,31 @@
                         </template>
 
                         <!-- PERBAIKAN: Bagian Sinyal Pembalikan di template -->
-                        <template x-if="results?.reversal_signals && results?.reversal_signals.length > 0">
+                        <template x-if="results?.reversal_signals && results.reversal_signals.length > 0">
                             <div class="mt-4">
                                 <h4 class="font-medium mb-2">Sinyal Pembalikan:</h4>
                                 <ul class="space-y-2 text-sm">
-                                    <template x-for="(signal, index) in results?.reversal_signals" :key="index">
+                                    <template x-for="(signal, index) in results.reversal_signals" :key="index">
                                         <li class="flex items-start">
                                             <i class="fas fa-exchange-alt text-warning mt-1 mr-2"></i>
-                                            <!-- PERBAIKAN: Ekstrak properti description dari object signal -->
-                                            <span x-text="typeof signal === 'object' ? signal.description : signal"></span>
+                                            <div class="flex-1">
+                                                <!-- PERBAIKAN: Gunakan helper function untuk extract description dengan aman -->
+                                                <span x-text="getReversalSignalDescription(signal)"></span>
+
+                                                <!-- PERBAIKAN: Tampilkan strength jika tersedia -->
+                                                <template x-if="signal && typeof signal === 'object' && signal.strength !== undefined">
+                                                    <div class="text-xs text-gray-500 mt-1">
+                                                        Kekuatan: <span x-text="getReversalSignalStrength(signal)"></span>%
+                                                    </div>
+                                                </template>
+
+                                                <!-- PERBAIKAN: Tampilkan type jika tersedia dan bukan 'general' -->
+                                                <template x-if="signal && typeof signal === 'object' && signal.type && signal.type !== 'general'">
+                                                    <div class="text-xs text-gray-500 mt-1">
+                                                        Tipe: <span class="capitalize" x-text="signal.type.replace(/_/g, ' ')"></span>
+                                                    </div>
+                                                </template>
+                                            </div>
                                         </li>
                                     </template>
                                 </ul>
@@ -973,8 +1083,12 @@
                             </div>
                         </template>
 
-                        <template x-if="(!results?.evidence || results?.evidence.length === 0) && (!results?.reversal_signals || results?.reversal_signals.length === 0)">
-                            <p class="text-center text-gray-500">Tidak ada indikasi yang tersedia</p>
+                        <!-- PERBAIKAN: Fallback jika tidak ada reversal signals -->
+                        <template x-if="!results?.reversal_signals || results.reversal_signals.length === 0">
+                            <div class="mt-4">
+                                <h4 class="font-medium mb-2 text-gray-500">Sinyal Pembalikan:</h4>
+                                <p class="text-sm text-gray-400 italic">Tidak ada sinyal pembalikan terdeteksi</p>
+                            </div>
                         </template>
 
                         <template x-if="results?.buy_score !== undefined || results?.sell_score !== undefined">

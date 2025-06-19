@@ -185,23 +185,54 @@ class TechnicalAnalysisController extends Controller
                 if ($response->successful()) {
                     $data = $response->json();
 
-                    // PERBAIKAN: Normalisasi format reversal_signals
-                    if (isset($data['reversal_signals']) && is_array($data['reversal_signals'])) {
+                    // PERBAIKAN UTAMA: Normalisasi format reversal_signals dengan validasi yang ketat
+                    if (isset($data['reversal_signals'])) {
                         $normalizedSignals = [];
-                        foreach ($data['reversal_signals'] as $signal) {
-                            if (is_array($signal) && isset($signal['description'])) {
-                                // Signal sudah dalam format object yang benar
-                                $normalizedSignals[] = $signal;
-                            } elseif (is_string($signal)) {
-                                // Convert string signal ke object format
-                                $normalizedSignals[] = [
-                                    'type' => 'general',
-                                    'description' => $signal,
-                                    'strength' => 0.5
-                                ];
+
+                        if (is_array($data['reversal_signals'])) {
+                            foreach ($data['reversal_signals'] as $signal) {
+                                if (is_array($signal)) {
+                                    // Signal sudah dalam format array yang benar
+                                    $normalizedSignals[] = [
+                                        'type' => $signal['type'] ?? 'general',
+                                        'description' => $signal['description'] ?? 'Unknown signal',
+                                        'strength' => is_numeric($signal['strength'] ?? 0) ? (float)$signal['strength'] : 0.5
+                                    ];
+                                } elseif (is_string($signal)) {
+                                    // Convert string signal ke array format
+                                    $normalizedSignals[] = [
+                                        'type' => 'general',
+                                        'description' => $signal,
+                                        'strength' => 0.5
+                                    ];
+                                } elseif (is_object($signal)) {
+                                    // Convert object ke array
+                                    $normalizedSignals[] = [
+                                        'type' => $signal->type ?? 'general',
+                                        'description' => $signal->description ?? 'Unknown signal',
+                                        'strength' => is_numeric($signal->strength ?? 0) ? (float)$signal->strength : 0.5
+                                    ];
+                                }
                             }
+                        } elseif (is_string($data['reversal_signals'])) {
+                            // Single string signal
+                            $normalizedSignals[] = [
+                                'type' => 'general',
+                                'description' => $data['reversal_signals'],
+                                'strength' => 0.5
+                            ];
                         }
+
                         $data['reversal_signals'] = $normalizedSignals;
+
+                        Log::info("Normalized reversal signals", [
+                            'project_id' => $projectId,
+                            'signal_count' => count($normalizedSignals),
+                            'signals' => $normalizedSignals
+                        ]);
+                    } else {
+                        // Jika tidak ada reversal_signals, buat array kosong
+                        $data['reversal_signals'] = [];
                     }
 
                     return $data;
@@ -427,7 +458,7 @@ class TechnicalAnalysisController extends Controller
     }
 
     /**
-     * PERBAIKAN: Enhanced getPricePrediction method dengan timeout dan error handling yang lebih baik
+     * PERBAIKAN: Enhanced getPricePrediction method dengan handling yang lebih robust untuk LSTM errors
      */
     public function getPricePrediction(Request $request, $projectId)
     {
@@ -448,17 +479,19 @@ class TechnicalAnalysisController extends Controller
                     'model'           => $model,
                 ];
 
-                // PERBAIKAN: Timeout yang lebih lama untuk ML predictions (terutama LSTM)
-                $timeout = $model === 'ml' || $model === 'auto' ? 90 : 30; // 90 detik untuk ML, 30 untuk lainnya
+                // PERBAIKAN: Timeout yang disesuaikan untuk berbagai model dengan penanganan khusus LSTM
+                $timeout = 120; // 2 menit untuk semua model
 
-                Log::info("Starting price prediction for {$projectId} with model {$model}, timeout: {$timeout}s");
+                if ($model === 'ml' || $model === 'auto') {
+                    Log::info("Starting ML/auto prediction for {$projectId} - may take up to 2 minutes for LSTM");
+                }
 
                 $response = Http::timeout($timeout)->get("{$this->apiUrl}/analysis/price-prediction/{$projectId}", $params);
 
                 if ($response->successful()) {
                     $data = $response->json();
 
-                    // PERBAIKAN: Enhanced data validation dan normalisasi
+                    // PERBAIKAN: Enhanced validation untuk prediction data
                     if (!isset($data['error'])) {
                         // Validate predictions array
                         if (isset($data['predictions']) && is_array($data['predictions'])) {
@@ -481,13 +514,27 @@ class TechnicalAnalysisController extends Controller
                                 }
                             }
                             $data['predictions'] = $validPredictions;
+
+                            // Log jika ada masalah dengan predictions
+                            if (count($validPredictions) < $predictionDays) {
+                                Log::warning("Some predictions were invalid for {$projectId}", [
+                                    'requested' => $predictionDays,
+                                    'valid' => count($validPredictions),
+                                    'model' => $data['model_type'] ?? 'unknown'
+                                ]);
+                            }
                         }
 
-                        // Validate other numeric fields
+                        // Validate dan bersihkan numeric fields
                         $numericFields = ['current_price', 'predicted_change_percent', 'confidence', 'reversal_probability'];
                         foreach ($numericFields as $field) {
-                            if (isset($data[$field]) && !is_numeric($data[$field])) {
-                                $data[$field] = 0.0;
+                            if (isset($data[$field])) {
+                                if (!is_numeric($data[$field]) || !is_finite($data[$field])) {
+                                    Log::warning("Invalid numeric value for {$field} in {$projectId}: " . $data[$field]);
+                                    $data[$field] = 0.0;
+                                } else {
+                                    $data[$field] = (float)$data[$field];
+                                }
                             }
                         }
 
@@ -496,15 +543,26 @@ class TechnicalAnalysisController extends Controller
                         $data['prediction_direction'] = $data['prediction_direction'] ?? 'unknown';
                         $data['market_regime'] = $data['market_regime'] ?? 'unknown';
 
-                        // Log keberhasilan model untuk debugging
-                        Log::info("Price prediction successful for {$projectId}: Model = {$data['model_type']}, Confidence = " . ($data['confidence'] ?? 'N/A'));
+                        // PERBAIKAN: Log successful predictions dengan model info
+                        $modelType = $data['model_type'] ?? 'Unknown';
+                        $confidence = $data['confidence'] ?? 0;
+                        $predictionsCount = count($data['predictions'] ?? []);
+
+                        Log::info("Price prediction successful for {$projectId}", [
+                            'model_type' => $modelType,
+                            'confidence' => $confidence,
+                            'predictions_count' => $predictionsCount,
+                            'prediction_direction' => $data['prediction_direction'] ?? 'unknown'
+                        ]);
 
                         return $data;
                     } else {
-                        Log::warning("API returned error for {$projectId}: " . ($data['message'] ?? 'Unknown error'));
+                        $errorMessage = $data['message'] ?? 'Unknown error';
+                        Log::warning("API returned error for {$projectId}: {$errorMessage}");
+
                         return [
                             'error'   => true,
-                            'message' => $data['message'] ?? 'Gagal mendapatkan prediksi harga.',
+                            'message' => $errorMessage,
                         ];
                     }
                 } else {
@@ -517,7 +575,7 @@ class TechnicalAnalysisController extends Controller
                     if ($statusCode === 504 || $statusCode === 408) {
                         return [
                             'error'   => true,
-                            'message' => 'Prediksi harga membutuhkan waktu lebih lama dari biasanya. Silakan coba lagi dalam beberapa menit.',
+                            'message' => 'Prediksi harga membutuhkan waktu lebih lama dari biasanya. Sistem secara otomatis beralih ke model alternatif.',
                             'timeout' => true
                         ];
                     } else {
@@ -531,14 +589,14 @@ class TechnicalAnalysisController extends Controller
                 Log::error("Connection timeout for price prediction {$projectId}: " . $e->getMessage());
                 return [
                     'error'   => true,
-                    'message' => 'Koneksi timeout. Prediksi harga mungkin membutuhkan waktu lebih lama. Silakan coba lagi.',
+                    'message' => 'Koneksi timeout. Model LSTM membutuhkan waktu lebih lama untuk prediksi yang akurat. Sistem telah beralih ke model alternatif.',
                     'timeout' => true
                 ];
             } catch (\Exception $e) {
                 Log::error("Error mendapatkan prediksi harga {$projectId}: " . $e->getMessage());
                 return [
                     'error'   => true,
-                    'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
+                    'message' => 'Terjadi kesalahan dalam prediksi harga: ' . $e->getMessage(),
                 ];
             }
         });

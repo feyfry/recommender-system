@@ -1029,23 +1029,26 @@ async def predict_future_price(
             interval=interval
         )
         
-        # PERBAIKAN: Logging untuk debugging
+        # PERBAIKAN: Enhanced logging untuk debugging
         logger.info(f"Retrieved {len(price_data)} data points for {project_id}")
         
         # Detect market regime
         market_regime = detect_market_regime(price_data)
         logger.info(f"Market regime detected: {market_regime}")
         
-        # PERBAIKAN: Enhanced model selection dengan timeout handling
+        # PERBAIKAN: Enhanced model selection dengan better error handling
         if model == "auto":
             if days >= 180 and len(price_data) >= 180:
                 try:
                     import tensorflow as tf
+                    # PERBAIKAN: Test TensorFlow availability dengan simple operation
+                    test_tensor = tf.constant([1.0, 2.0])
+                    test_result = tf.reduce_sum(test_tensor)
                     model = "ml"
                     logger.info(f"Auto-selected ML model for {project_id} with {len(price_data)} data points")
-                except ImportError:
+                except Exception as tf_error:
+                    logger.warning(f"TensorFlow test failed: {str(tf_error)}, using ARIMA for {project_id}")
                     model = "arima"
-                    logger.info(f"TensorFlow not available, using ARIMA for {project_id}")
             elif len(price_data) >= 60:
                 model = "arima"
                 logger.info(f"Using ARIMA model for {project_id} with {len(price_data)} data points")
@@ -1053,7 +1056,7 @@ async def predict_future_price(
                 model = "simple"
                 logger.info(f"Using Simple model for {project_id} with {len(price_data)} data points")
         
-        # PERBAIKAN: Enhanced prediction execution dengan timeout dan error handling
+        # PERBAIKAN: Enhanced prediction execution dengan comprehensive error handling
         import asyncio
         
         async def run_prediction_with_timeout():
@@ -1061,18 +1064,56 @@ async def predict_future_price(
                 if model == "ml":
                     logger.info(f"Starting ML prediction for {project_id}...")
                     
-                    # PERBAIKAN: Timeout yang lebih lama untuk training LSTM
+                    # PERBAIKAN: Pre-validation untuk ML model
+                    if len(price_data) < 100:
+                        logger.warning(f"Insufficient data for ML ({len(price_data)} < 100), switching to ARIMA")
+                        return await asyncio.to_thread(predict_price_arima, price_data, days_to_predict=prediction_days)
+                    
+                    # PERBAIKAN: Check data quality sebelum ML training
+                    close_data = price_data['close'].dropna()
+                    if len(close_data) < len(price_data) * 0.95:
+                        logger.warning(f"Too much missing data for ML model, switching to ARIMA")
+                        return await asyncio.to_thread(predict_price_arima, price_data, days_to_predict=prediction_days)
+                    
+                    # PERBAIKAN: Timeout yang disesuaikan berdasarkan data size
+                    data_size = len(price_data)
+                    if data_size > 300:
+                        timeout = 90  # 1.5 menit untuk data besar
+                    elif data_size > 200:
+                        timeout = 75  # 1.25 menit untuk data sedang
+                    else:
+                        timeout = 60  # 1 menit untuk data kecil
+                    
+                    logger.info(f"Using {timeout}s timeout for ML model with {data_size} data points")
+                    
                     result = await asyncio.wait_for(
                         asyncio.to_thread(predict_price_ml, price_data, prediction_days),
-                        timeout=60.0  # Timeout diperpanjang menjadi 60 detik
+                        timeout=timeout
                     )
                     
+                    # PERBAIKAN: Validate ML result lebih ketat
                     if result and 'error' not in result:
-                        logger.info(f"ML prediction completed for {project_id}: {result.get('model_type', 'Unknown')}")
-                        return result
+                        # Check if predictions are valid
+                        if 'prediction_data' in result and result['prediction_data']:
+                            valid_predictions = [p for p in result['prediction_data'] 
+                                               if p.get('value', 0) > 0 and 
+                                               isinstance(p.get('value'), (int, float)) and
+                                               not np.isnan(p.get('value', 0)) and
+                                               np.isfinite(p.get('value', 0))]
+                            
+                            if len(valid_predictions) >= prediction_days * 0.8:  # At least 80% valid predictions
+                                result['prediction_data'] = valid_predictions[:prediction_days]  # Limit to requested days
+                                logger.info(f"ML prediction completed for {project_id}: {result.get('model_type', 'Unknown')}")
+                                return result
+                            else:
+                                logger.warning(f"ML predictions quality too low ({len(valid_predictions)}/{prediction_days}), falling back to ARIMA")
+                        else:
+                            logger.warning(f"ML prediction returned no valid data, falling back to ARIMA")
                     else:
                         logger.warning(f"ML prediction failed for {project_id}, falling back to ARIMA")
-                        return await asyncio.to_thread(predict_price_arima, price_data, days_to_predict=prediction_days)
+                    
+                    # Fallback to ARIMA
+                    return await asyncio.to_thread(predict_price_arima, price_data, days_to_predict=prediction_days)
                         
                 elif model == "arima":
                     logger.info(f"Starting ARIMA prediction for {project_id}...")
@@ -1086,27 +1127,90 @@ async def predict_future_price(
                     return result
                     
             except asyncio.TimeoutError:
-                logger.warning(f"Prediction timeout for {project_id}, falling back to simple model")
+                logger.warning(f"Prediction timeout for {project_id} using {model} model, falling back to simple model")
                 return await asyncio.to_thread(predict_price_simple, price_data, days_to_predict=prediction_days)
             except Exception as e:
-                logger.error(f"Error in prediction for {project_id}: {str(e)}")
-                return await asyncio.to_thread(predict_price_simple, price_data, days_to_predict=prediction_days)
+                logger.error(f"Error in {model} prediction for {project_id}: {str(e)}")
+                # PERBAIKAN: Specific error handling untuk LSTM
+                if "inverse transform" in str(e).lower() or "array element" in str(e).lower():
+                    logger.error(f"LSTM inverse transform error detected, using ARIMA fallback")
+                    try:
+                        return await asyncio.to_thread(predict_price_arima, price_data, days_to_predict=prediction_days)
+                    except:
+                        return await asyncio.to_thread(predict_price_simple, price_data, days_to_predict=prediction_days)
+                else:
+                    return await asyncio.to_thread(predict_price_simple, price_data, days_to_predict=prediction_days)
         
-        # Jalankan prediksi dengan timeout handling
+        # Jalankan prediksi dengan enhanced timeout handling
         prediction_result = await run_prediction_with_timeout()
         
-        # PERBAIKAN: Enhanced fallback handling
+        # PERBAIKAN: Enhanced validation untuk prediction result
         if prediction_result is None or 'error' in prediction_result:
             logger.warning(f"Prediction failed for {project_id}, using simple model fallback")
             prediction_result = predict_price_simple(price_data, days_to_predict=prediction_days)
         
-        # PERBAIKAN: Validasi hasil prediksi
+        # PERBAIKAN: Comprehensive validation untuk prediction_data
         if not prediction_result.get('prediction_data') or len(prediction_result.get('prediction_data', [])) == 0:
             logger.warning(f"Empty prediction data for {project_id}, regenerating with simple model")
             prediction_result = predict_price_simple(price_data, days_to_predict=prediction_days)
         
-        # PERBAIKAN: Logging hasil prediksi untuk debugging
-        logger.info(f"Final prediction for {project_id}: Model={prediction_result.get('model_type')}, Trend={prediction_result.get('trend')}, Confidence={prediction_result.get('confidence')}")
+        # PERBAIKAN: Validate individual predictions
+        valid_predictions = []
+        if prediction_result.get('prediction_data'):
+            for i, point in enumerate(prediction_result.get('prediction_data', [])):
+                try:
+                    # Validate structure
+                    if not isinstance(point, dict):
+                        logger.warning(f"Invalid prediction point structure at index {i}: {type(point)}")
+                        continue
+                        
+                    # Validate required fields
+                    if 'date' not in point or 'value' not in point:
+                        logger.warning(f"Missing required fields in prediction point {i}: {point}")
+                        continue
+                        
+                    # Validate value
+                    value = point.get('value')
+                    if not isinstance(value, (int, float)) or not np.isfinite(value) or value <= 0:
+                        logger.warning(f"Invalid prediction value at index {i}: {value}")
+                        continue
+                        
+                    # Validate confidence
+                    confidence = point.get('confidence', 0.5)
+                    if not isinstance(confidence, (int, float)) or not np.isfinite(confidence):
+                        point['confidence'] = 0.5
+                    else:
+                        point['confidence'] = max(0.0, min(1.0, float(confidence)))
+                        
+                    valid_predictions.append(point)
+                    
+                except Exception as e:
+                    logger.warning(f"Error validating prediction point {i}: {str(e)}")
+                    continue
+        
+        # PERBAIKAN: Ensure we have enough valid predictions
+        if len(valid_predictions) < prediction_days * 0.5:  # At least 50% valid predictions
+            logger.warning(f"Too few valid predictions ({len(valid_predictions)}/{prediction_days}) for {project_id}, using simple fallback")
+            prediction_result = predict_price_simple(price_data, days_to_predict=prediction_days)
+            valid_predictions = prediction_result.get('prediction_data', [])
+        
+        # Update with validated predictions
+        prediction_result['prediction_data'] = valid_predictions[:prediction_days]  # Ensure exact count
+        
+        # PERBAIKAN: Enhanced logging untuk hasil prediksi
+        model_type = prediction_result.get('model_type', 'Unknown')
+        trend = prediction_result.get('trend', 'unknown')
+        confidence = prediction_result.get('confidence', 0)
+        valid_count = len(valid_predictions)
+        
+        logger.info(f"Final prediction for {project_id}: Model={model_type}, Trend={trend}, Confidence={confidence:.3f}, Valid_predictions={valid_count}")
+        
+        # PERBAIKAN: Special logging untuk ML models
+        if 'LSTM' in model_type:
+            training_info = prediction_result.get('training_info', {})
+            logger.info(f"LSTM model details: epochs={training_info.get('epochs_trained', 'N/A')}, "
+                       f"loss={training_info.get('final_loss', 'N/A'):.6f}, "
+                       f"data_points={training_info.get('data_points', 'N/A')}")
         
         # Get additional technical analysis
         ti = TechnicalIndicators(price_data)
@@ -1118,28 +1222,18 @@ async def predict_future_price(
         if prediction_result.get('prediction_data'):
             for point in prediction_result.get('prediction_data', []):
                 try:
-                    # PERBAIKAN: Validate individual prediction points
-                    date_str = point.get('date', '')
-                    value = point.get('value', 0)
-                    confidence = point.get('confidence', 0.5)
-                    
-                    # Ensure value is a valid number
-                    if not isinstance(value, (int, float)) or not np.isfinite(value):
-                        logger.warning(f"Invalid prediction value: {value}, skipping point")
-                        continue
-                        
                     predictions.append(PredictionDataPoint(
-                        date=date_str,
-                        value=float(value),
-                        confidence=float(confidence)
+                        date=point.get('date', ''),
+                        value=float(point.get('value', 0)),
+                        confidence=float(point.get('confidence', 0.5))
                     ))
                 except Exception as e:
                     logger.warning(f"Error formatting prediction point: {str(e)}")
                     continue
         
-        # PERBAIKAN: Fallback jika tidak ada prediction data yang valid
+        # PERBAIKAN: Final fallback jika masih belum ada predictions yang valid
         if not predictions:
-            logger.warning(f"No valid predictions generated for {project_id}, creating fallback")
+            logger.error(f"No valid predictions generated for {project_id}, creating minimal fallback")
             current_price = float(price_data['close'].iloc[-1])
             dates = pd.date_range(
                 start=price_data.index[-1] + pd.Timedelta(days=1),
@@ -1150,11 +1244,11 @@ async def predict_future_price(
             for i, date in enumerate(dates):
                 predictions.append(PredictionDataPoint(
                     date=date.strftime('%Y-%m-%d'),
-                    value=current_price,  # Flat prediction as fallback
-                    confidence=0.3
+                    value=current_price,  # Flat prediction as ultimate fallback
+                    confidence=0.2
                 ))
         
-        # PERBAIHAN: Enhanced response creation dengan proper error handling
+        # PERBAIKAN: Enhanced response creation dengan comprehensive error handling
         try:
             current_price = prediction_result.get('current_price', float(price_data['close'].iloc[-1]))
             
@@ -1192,7 +1286,7 @@ async def predict_future_price(
                 reversal_probability=0.0,
                 support_levels={},
                 resistance_levels={},
-                predictions=predictions if predictions else [],
+                predictions=predictions,
                 timestamp=datetime.now()
             )
         
@@ -1200,8 +1294,14 @@ async def predict_future_price(
         execution_time = time.time() - start_time
         logger.info(f"Price prediction completed in {execution_time:.2f}s using {model} model")
         
-        # PERBAIKAN: Cache dengan TTL yang disesuaikan berdasarkan model
-        cache_ttl_minutes = 60 if model == "ml" else 30  # ML cache lebih lama
+        # PERBAIKAN: Cache dengan TTL yang disesuaikan berdasarkan model dan performance
+        if 'LSTM' in response.model_type:
+            cache_ttl_minutes = 90  # LSTM cache lebih lama karena computationally expensive
+        elif 'ARIMA' in response.model_type:
+            cache_ttl_minutes = 60  # ARIMA cache medium
+        else:
+            cache_ttl_minutes = 30  # Simple model cache shorter
+            
         _price_data_cache[cache_key] = {
             'data': response,
             'expires': datetime.now() + timedelta(minutes=cache_ttl_minutes)

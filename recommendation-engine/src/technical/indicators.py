@@ -2095,29 +2095,113 @@ def predict_price_ml(prices_df: pd.DataFrame, days_to_predict: int = 7) -> Dict[
             logger.warning(f"Error making predictions: {str(e)}")
             return predict_price_arima(prices_df, days_to_predict)
         
-        # PERBAIKAN: Enhanced inverse transform predictions dengan error handling
+        # PERBAIKAN UTAMA: Enhanced inverse transform predictions dengan error handling yang lebih robust
         try:
-            # Reshape predictions untuk inverse transform
-            predictions_array = np.array(predictions).reshape(-1, 1)
+            # Pastikan predictions adalah list of scalars yang valid
+            predictions_clean = []
+            for i, pred in enumerate(predictions):
+                try:
+                    # Ekstrak nilai scalar dari prediction
+                    if isinstance(pred, np.ndarray):
+                        if pred.size == 1:
+                            val = float(pred.item())
+                        else:
+                            logger.warning(f"Prediction {i} is array with size {pred.size}, taking first element")
+                            val = float(pred.flatten()[0])
+                    else:
+                        val = float(pred)
+                    
+                    # Validasi nilai
+                    if np.isfinite(val) and val > 0:
+                        predictions_clean.append(val)
+                    else:
+                        logger.warning(f"Invalid prediction value at index {i}: {val}")
+                        # Gunakan nilai sebelumnya atau default
+                        if predictions_clean:
+                            predictions_clean.append(predictions_clean[-1])
+                        else:
+                            predictions_clean.append(current_sequence[-1])
+                            
+                except Exception as e:
+                    logger.warning(f"Error processing prediction {i}: {str(e)}")
+                    # Fallback ke nilai sebelumnya atau default
+                    if predictions_clean:
+                        predictions_clean.append(predictions_clean[-1])
+                    else:
+                        predictions_clean.append(float(current_sequence[-1]))
             
-            # PERBAIKAN: Pastikan shape yang benar untuk inverse transform
-            if predictions_array.shape[1] != 1:
-                logger.warning(f"Invalid prediction shape: {predictions_array.shape}, reshaping...")
-                predictions_array = predictions_array.reshape(-1, 1)
+            # PERBAIKAN: Validasi bahwa kita punya prediksi yang cukup
+            if len(predictions_clean) < days_to_predict:
+                logger.warning(f"Only got {len(predictions_clean)} valid predictions out of {days_to_predict}")
+                # Pad dengan nilai terakhir
+                last_val = predictions_clean[-1] if predictions_clean else float(current_sequence[-1])
+                while len(predictions_clean) < days_to_predict:
+                    predictions_clean.append(last_val)
             
-            # Inverse transform dengan error handling
+            # PERBAIKAN: Reshape array dengan kontrol yang ketat
+            predictions_array = np.array(predictions_clean, dtype=np.float64)
+            
+            # Pastikan array 1D
+            if predictions_array.ndim > 1:
+                predictions_array = predictions_array.flatten()
+            
+            # Pastikan ukuran yang tepat
+            if len(predictions_array) != days_to_predict:
+                logger.warning(f"Adjusting predictions array size from {len(predictions_array)} to {days_to_predict}")
+                if len(predictions_array) > days_to_predict:
+                    predictions_array = predictions_array[:days_to_predict]
+                else:
+                    # Pad dengan nilai terakhir
+                    last_val = predictions_array[-1] if len(predictions_array) > 0 else close_data.iloc[-1]
+                    while len(predictions_array) < days_to_predict:
+                        predictions_array = np.append(predictions_array, last_val)
+            
+            # PERBAIKAN: Reshape untuk inverse transform dengan validasi eksplisit
             try:
-                predictions_inverse = scaler.inverse_transform(predictions_array)
-            except ValueError as e:
-                logger.warning(f"Error in inverse transform: {str(e)}, trying alternative approach")
-                # Alternative approach: manual inverse scaling
-                scale_factor = scaler.scale_[0]
-                min_val = scaler.min_[0]
-                predictions_inverse = (predictions_array - min_val) / scale_factor
-                predictions_inverse = predictions_inverse.reshape(-1, 1)
+                # Pastikan shape yang tepat untuk scaler.inverse_transform()
+                predictions_reshaped = predictions_array.reshape(-1, 1)
+                
+                # Validasi shape sebelum inverse transform
+                expected_shape = (days_to_predict, 1)
+                if predictions_reshaped.shape != expected_shape:
+                    logger.error(f"Shape mismatch: expected {expected_shape}, got {predictions_reshaped.shape}")
+                    raise ValueError(f"Incorrect shape for inverse transform: {predictions_reshaped.shape}")
+                
+                # Lakukan inverse transform
+                predictions_inverse = scaler.inverse_transform(predictions_reshaped)
+                
+                # Ekstrak nilai dari hasil inverse transform
+                predictions_final = predictions_inverse.flatten()
+                
+                logger.info(f"Successfully inverse transformed {len(predictions_final)} predictions")
+                
+            except Exception as inverse_error:
+                logger.error(f"Critical error in inverse transforming: {str(inverse_error)}")
+                
+                # FALLBACK: Manual inverse transform
+                logger.info("Attempting manual inverse transform")
+                try:
+                    # Manual inverse scaling
+                    data_min = scaler.data_min_[0]
+                    data_max = scaler.data_max_[0]
+                    scale = scaler.scale_[0]
+                    
+                    predictions_final = []
+                    for pred_val in predictions_array:
+                        # Manual inverse: (X_scaled - min) / scale = X_original
+                        original_val = (pred_val / scale) + data_min
+                        predictions_final.append(original_val)
+                    
+                    predictions_final = np.array(predictions_final)
+                    logger.info(f"Manual inverse transform successful with {len(predictions_final)} predictions")
+                    
+                except Exception as manual_error:
+                    logger.error(f"Manual inverse transform also failed: {str(manual_error)}")
+                    # Ultimate fallback - use ARIMA
+                    return predict_price_arima(prices_df, days_to_predict)
                 
         except Exception as e:
-            logger.error(f"Critical error in inverse transforming: {str(e)}")
+            logger.error(f"Critical error in prediction processing: {str(e)}")
             return predict_price_arima(prices_df, days_to_predict)
         
         # Format results
@@ -2128,21 +2212,20 @@ def predict_price_ml(prices_df: pd.DataFrame, days_to_predict: int = 7) -> Dict[
         )
         
         prediction_data = []
-        for i, pred_value in enumerate(predictions_inverse):
+        for i, pred_value in enumerate(predictions_final):
             # PERBAIKAN: Adaptive confidence based on training quality and prediction horizon
             base_confidence = min(0.9, max(0.3, 1 - final_val_loss)) * overfitting_penalty
             horizon_penalty = 0.98 ** i  # Confidence decreases with prediction horizon
             confidence = base_confidence * horizon_penalty
             
-            # PERBAIKAN: Extract scalar value from array safely
-            if isinstance(pred_value, np.ndarray) and pred_value.size > 0:
-                value = float(pred_value.flatten()[0])
-            else:
-                value = float(pred_value)
+            # PERBAIKAN: Validate final prediction value
+            if not np.isfinite(pred_value) or pred_value <= 0:
+                logger.warning(f"Invalid final prediction at day {i+1}: {pred_value}")
+                pred_value = float(close_data.iloc[-1])  # Use last known price as fallback
             
             prediction_data.append({
                 'date': dates[i].strftime('%Y-%m-%d'),
-                'value': value,
+                'value': float(pred_value),
                 'confidence': confidence
             })
         
