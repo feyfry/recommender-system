@@ -52,33 +52,11 @@ class PortfolioController extends Controller
     }
 
     /**
-     * Menampilkan halaman transaksi
+     * Menampilkan halaman transaksi - Redirect ke TransactionController
      */
     public function transactions()
     {
-        $user = Auth::user();
-
-        // Ambil data transaksi
-        $transactions = Transaction::forUser($user->user_id)
-            ->with('project')
-            ->orderBy('created_at', 'desc')
-            ->paginate(20);
-
-        // Ambil statistik volume transaksi
-        $volumeStats = Transaction::getTotalVolume($user->user_id);
-
-        // Ambil proyek dengan transaksi terbanyak
-        $mostTradedProjects = Transaction::getMostTradedProjects($user->user_id, 5);
-
-        // Statistik pengaruh rekomendasi terhadap transaksi
-        $recommendationInfluence = Transaction::getRecommendationInfluence($user->user_id);
-
-        return view('backend.portfolio.transactions', [
-            'transactions'            => $transactions,
-            'volumeStats'             => $volumeStats,
-            'mostTradedProjects'      => $mostTradedProjects,
-            'recommendationInfluence' => $recommendationInfluence,
-        ]);
+        return redirect()->route('panel.portfolio.transactions');
     }
 
     /**
@@ -115,53 +93,53 @@ class PortfolioController extends Controller
     /**
      * Menambahkan transaksi baru
      */
-    public function addTransaction(Request $request)
-    {
-        $user = Auth::user();
+    // public function addTransaction(Request $request)
+    // {
+    //     $user = Auth::user();
 
-        // Validasi input
-        $validator = Validator::make($request->all(), [
-            'project_id'       => 'required|exists:projects,id',
-            'transaction_type' => 'required|in:buy,sell',
-            'amount'           => 'required|numeric|min:0',
-            'price'            => 'required|numeric|min:0',
-        ]);
+    //     // Validasi input
+    //     $validator = Validator::make($request->all(), [
+    //         'project_id'       => 'required|exists:projects,id',
+    //         'transaction_type' => 'required|in:buy,sell',
+    //         'amount'           => 'required|numeric|min:0',
+    //         'price'            => 'required|numeric|min:0',
+    //     ]);
 
-        if ($validator->fails()) {
-            return redirect()->back()
-                ->withErrors($validator)
-                ->withInput();
-        }
+    //     if ($validator->fails()) {
+    //         return redirect()->back()
+    //             ->withErrors($validator)
+    //             ->withInput();
+    //     }
 
-        // Ambil data proyek
-        $project = Project::find($request->project_id);
+    //     // Ambil data proyek
+    //     $project = Project::find($request->project_id);
 
-        // Hitung total nilai transaksi
-        $totalValue = $request->amount * $request->price;
+    //     // Hitung total nilai transaksi
+    //     $totalValue = $request->amount * $request->price;
 
-        // Simpan transaksi
-        $transaction = Transaction::create([
-            'user_id'                 => $user->user_id,
-            'project_id'              => $request->project_id,
-            'transaction_type'        => $request->transaction_type,
-            'amount'                  => $request->amount,
-            'price'                   => $request->price,
-            'total_value'             => $totalValue,
-            'transaction_hash'        => $request->transaction_hash,
-            'followed_recommendation' => $request->has('followed_recommendation'),
-            'recommendation_id'       => $request->recommendation_id,
-        ]);
+    //     // Simpan transaksi
+    //     $transaction = Transaction::create([
+    //         'user_id'                 => $user->user_id,
+    //         'project_id'              => $request->project_id,
+    //         'transaction_type'        => $request->transaction_type,
+    //         'amount'                  => $request->amount,
+    //         'price'                   => $request->price,
+    //         'total_value'             => $totalValue,
+    //         'transaction_hash'        => $request->transaction_hash,
+    //         'followed_recommendation' => $request->has('followed_recommendation'),
+    //         'recommendation_id'       => $request->recommendation_id,
+    //     ]);
 
-        // Update atau buat portfolio
-        if ($request->transaction_type === 'buy') {
-            $this->processBuyTransaction($user->user_id, $request->project_id, $request->amount, $request->price);
-        } else {
-            $this->processSellTransaction($user->user_id, $request->project_id, $request->amount, $request->price);
-        }
+    //     // Update atau buat portfolio
+    //     if ($request->transaction_type === 'buy') {
+    //         $this->processBuyTransaction($user->user_id, $request->project_id, $request->amount, $request->price);
+    //     } else {
+    //         $this->processSellTransaction($user->user_id, $request->project_id, $request->amount, $request->price);
+    //     }
 
-        return redirect()->route('panel.portfolio.transactions')
-            ->with('success', 'Transaksi berhasil ditambahkan.');
-    }
+    //     return redirect()->route('panel.portfolio.transactions')
+    //         ->with('success', 'Transaksi berhasil ditambahkan.');
+    // }
 
     /**
      * Menambahkan price alert baru

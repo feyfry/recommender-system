@@ -7,6 +7,7 @@ use App\Http\Controllers\Backend\ProfileController;
 use App\Http\Controllers\Backend\ProjectController;
 use App\Http\Controllers\Backend\DashboardController;
 use App\Http\Controllers\Backend\PortfolioController;
+use App\Http\Controllers\Backend\TransactionController;
 use App\Http\Controllers\Backend\RecommendationController;
 use App\Http\Controllers\Backend\TechnicalAnalysisController;
 
@@ -63,16 +64,29 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         Route::get('/price-prediction/{projectId}', [TechnicalAnalysisController::class, 'getPricePrediction'])->name('panel.technical-analysis.price-prediction');
     });
 
-    // Portfolio
+    // Portfolio & Transactions (Enhanced)
     Route::prefix('portfolio')->group(function () {
         Route::get('/', [PortfolioController::class, 'index'])->name('panel.portfolio');
-        Route::get('/transactions', [PortfolioController::class, 'transactions'])->name('panel.portfolio.transactions');
+        Route::get('/transactions', [TransactionController::class, 'index'])->name('panel.portfolio.transactions');
         Route::get('/price-alerts', [PortfolioController::class, 'priceAlerts'])->name('panel.portfolio.price-alerts');
 
-        Route::post('/transactions/add', [PortfolioController::class, 'addTransaction'])->name('panel.portfolio.add-transaction');
+        // Transaction Management
+        Route::post('/transactions/add', [TransactionController::class, 'addTransaction'])->name('panel.portfolio.add-transaction');
+        Route::delete('/transactions/{id}', [TransactionController::class, 'deleteTransaction'])->name('panel.portfolio.delete-transaction');
+        Route::get('/transactions/{id}/details', [TransactionController::class, 'getTransactionDetails'])->name('panel.portfolio.transaction-details');
+        Route::get('/transactions/export', [TransactionController::class, 'exportTransactions'])->name('panel.portfolio.export-transactions');
+
+        // Auto-Sync Transactions
+        Route::post('/transactions/sync', [TransactionController::class, 'syncTransactions'])->name('panel.portfolio.sync-transactions');
+        Route::post('/transactions/test-wallet', [TransactionController::class, 'testWallet'])->name('panel.portfolio.test-wallet');
+        Route::get('/transactions/sync-status', [TransactionController::class, 'getSyncStatus'])->name('panel.portfolio.sync-status');
+        Route::post('/transactions/update-prices', [TransactionController::class, 'updatePrices'])->name('panel.portfolio.update-prices');
+
+        // Price Alerts
         Route::post('/price-alerts/add', [PortfolioController::class, 'addPriceAlert'])->name('panel.portfolio.add-price-alert');
         Route::delete('/price-alerts/{id}', [PortfolioController::class, 'deletePriceAlert'])->name('panel.portfolio.delete-price-alert');
     });
+
 
     // Admin area (hanya untuk role admin)
     Route::prefix('admin')->middleware('role:admin')->group(function () {

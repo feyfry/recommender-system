@@ -18,6 +18,7 @@ from main import train_models, process_data
 # Import routers
 from src.api.recommend import router as recommend_router
 from src.api.analysis import router as analysis_router
+from src.api.transactions import router as transactions_router
 
 # Setup logging
 logging.basicConfig(
