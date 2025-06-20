@@ -18,7 +18,14 @@ from main import train_models, process_data
 # Import routers
 from src.api.recommend import router as recommend_router
 from src.api.analysis import router as analysis_router
-from src.api.transactions import router as transactions_router
+# Try to import transactions router, fallback jika error
+try:
+    from src.api.transactions import router as transactions_router
+    transactions_available = True
+except ImportError as e:
+    logging.warning(f"Transactions router not available: {e}")
+    transactions_router = None
+    transactions_available = False
 
 # Setup logging
 logging.basicConfig(

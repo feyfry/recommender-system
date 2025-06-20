@@ -9,7 +9,13 @@ import logging
 # Add the parent directory to sys.path to import our modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.data.multi_api_collector import MultiAPICollector, TransactionData
+try:
+    from src.data.multi_api_collector import MultiAPICollector, TransactionData
+except ImportError as e:
+    logging.error(f"Error importing MultiAPICollector: {e}")
+    # Fallback untuk development
+    MultiAPICollector = None
+    TransactionData = None
 
 # Setup router
 router = APIRouter(

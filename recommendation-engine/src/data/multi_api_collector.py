@@ -2,12 +2,20 @@ import os
 import requests
 import time
 import logging
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any
 from datetime import datetime, timedelta
-import pandas as pd
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+
+# Try to import pandas, fallback jika tidak ada
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    logging.warning("Pandas not available - some features will be limited")
+    pd = None
+    PANDAS_AVAILABLE = False
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)

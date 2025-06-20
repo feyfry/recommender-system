@@ -487,21 +487,29 @@ class Transaction extends Model
      */
     public static function getMostTradedProjects($userId = null, $limit = 10)
     {
-        $query = self::join('projects', 'transactions.project_id', '=', 'projects.id')
-            ->selectRaw('projects.id, projects.name, projects.symbol, projects.image,
-                        COUNT(*) as transaction_count,
-                        SUM(transactions.total_value) as total_value,
-                        COUNT(CASE WHEN transactions.source = "manual" THEN 1 END) as manual_count,
-                        COUNT(CASE WHEN transactions.source = "api_sync" THEN 1 END) as api_count')
-            ->groupBy('projects.id', 'projects.name', 'projects.symbol', 'projects.image')
-            ->orderBy('transaction_count', 'desc')
-            ->limit($limit);
+        $query = self::with('project')
+            ->when($userId, function ($q) use ($userId) {
+                return $q->where('user_id', $userId);
+            });
 
-        if ($userId) {
-            $query->where('transactions.user_id', $userId);
-        }
-
-        return $query->get();
+        return $query->get()
+            ->groupBy('project_id')
+            ->map(function ($transactions) {
+                $project = $transactions->first()->project;
+                return (object) [
+                    'id' => $project->id,
+                    'name' => $project->name,
+                    'symbol' => $project->symbol,
+                    'image' => $project->image,
+                    'transaction_count' => $transactions->count(),
+                    'total_value' => $transactions->sum('total_value'),
+                    'manual_count' => $transactions->where('source', 'manual')->count(),
+                    'api_count' => $transactions->where('source', 'api_sync')->count(),
+                ];
+            })
+            ->sortByDesc('transaction_count')
+            ->take($limit)
+            ->values();
     }
 
     /**
@@ -512,8 +520,9 @@ class Transaction extends Model
         $query = self::where('created_at', '>=', now()->subDays($days))
             ->selectRaw('followed_recommendation, source, COUNT(*) as count,
                         SUM(total_value) as total_value,
-                        AVG(CASE WHEN transaction_type = "buy" THEN price ELSE NULL END) as avg_buy_price,
-                        AVG(CASE WHEN transaction_type = "sell" THEN price ELSE NULL END) as avg_sell_price');
+                        AVG(CASE WHEN transaction_type = ? THEN price ELSE NULL END) as avg_buy_price,
+                        AVG(CASE WHEN transaction_type = ? THEN price ELSE NULL END) as avg_sell_price',
+                        ['buy', 'sell']);
 
         if ($userId) {
             $query->where('user_id', $userId);
