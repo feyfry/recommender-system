@@ -43,26 +43,30 @@
     </div>
     @endif
 
-    <!-- ⚡ ENHANCED: Loading State with Skeleton -->
+    <!-- ⚡ ENHANCED: Loading State with Better Skeleton -->
     <div id="loading-state" class="mb-8">
         <div class="clay-card p-6">
             <div class="animate-pulse">
-                <div class="flex items-center justify-center py-8">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mr-3"></div>
-                    <span class="text-gray-600">Loading onchain portfolio data...</span>
+                <div class="flex items-center justify-center py-12">
+                    <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-primary mr-4"></div>
+                    <div>
+                        <div class="text-lg font-medium mb-2">Loading onchain portfolio data...</div>
+                        <div class="text-sm text-gray-500">Mengambil data dari blockchain API (mungkin butuh 1-2 menit)</div>
+                        <div class="text-xs text-gray-400 mt-1">Proses: Scanning multi-chain → Filtering spam → Calculating USD values</div>
+                    </div>
                 </div>
-                <!-- Skeleton content -->
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+                <!-- Enhanced Skeleton content -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
                     <div class="lg:col-span-2">
                         <div class="grid grid-cols-2 gap-4 mb-6">
-                            <div class="clay-card bg-gray-100 p-4 h-24"></div>
-                            <div class="clay-card bg-gray-100 p-4 h-24"></div>
+                            <div class="clay-card bg-gray-100 p-6 h-28 rounded-lg"></div>
+                            <div class="clay-card bg-gray-100 p-6 h-28 rounded-lg"></div>
                         </div>
-                        <div class="clay-card bg-gray-100 p-4 h-64"></div>
+                        <div class="clay-card bg-gray-100 p-6 h-80 rounded-lg"></div>
                     </div>
                     <div class="lg:col-span-1">
-                        <div class="clay-card bg-gray-100 p-4 h-32 mb-6"></div>
-                        <div class="clay-card bg-gray-100 p-4 h-32"></div>
+                        <div class="clay-card bg-gray-100 p-6 h-40 mb-6 rounded-lg"></div>
+                        <div class="clay-card bg-gray-100 p-6 h-40 rounded-lg"></div>
                     </div>
                 </div>
             </div>
@@ -78,6 +82,9 @@
                 </div>
                 Real Portfolio (Onchain Data)
                 <span class="ml-3 clay-badge clay-badge-success text-xs">LIVE</span>
+                <span id="spam-filter-badge" class="ml-2 clay-badge clay-badge-warning text-xs" style="display: none;">
+                    SPAM FILTERED
+                </span>
             </h2>
 
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -94,7 +101,7 @@
                             </div>
                         </div>
                         <div class="clay-card bg-success/10 p-4">
-                            <div class="text-gray-600 text-sm">Total Assets</div>
+                            <div class="text-gray-600 text-sm">Valid Assets</div>
                             <div class="text-2xl font-bold" id="onchain-asset-count">
                                 0
                             </div>
@@ -113,6 +120,7 @@
                                     <th class="py-2 px-4 text-left">Balance</th>
                                     <th class="py-2 px-4 text-left">Chain</th>
                                     <th class="py-2 px-4 text-left">USD Value</th>
+                                    <th class="py-2 px-4 text-left">Status</th>
                                     <th class="py-2 px-4 text-left">Actions</th>
                                 </tr>
                             </thead>
@@ -151,17 +159,34 @@
         </div>
     </div>
 
-    <!-- ⚡ ENHANCED: Error State dengan informasi lebih detail -->
+    <!-- ⚡ ENHANCED: Error State dengan troubleshooting info -->
     <div id="error-state" class="mb-8" style="display: none;">
         <div class="clay-card p-6">
             <div class="text-center py-8">
-                <i class="fas fa-exclamation-triangle text-4xl text-yellow-500 mb-3"></i>
-                <h3 class="text-lg font-bold mb-2">Gagal Memuat Data Onchain</h3>
+                <i class="fas fa-exclamation-triangle text-5xl text-yellow-500 mb-4"></i>
+                <h3 class="text-xl font-bold mb-3">Gagal Memuat Data Onchain</h3>
                 <p class="text-gray-600 mb-4" id="error-message">Tidak dapat terhubung ke blockchain API</p>
-                <div class="text-sm text-gray-500 mb-4" id="error-details"></div>
-                <button onclick="loadOnchainData()" class="clay-button clay-button-primary">
-                    <i class="fas fa-retry mr-2"></i> Coba Lagi
-                </button>
+                <div class="text-sm text-gray-500 mb-6" id="error-details"></div>
+
+                <!-- Troubleshooting Steps -->
+                <div class="clay-card bg-yellow-50 p-4 mb-4 text-left max-w-md mx-auto">
+                    <h4 class="font-bold mb-2 text-yellow-800">🔧 Troubleshooting:</h4>
+                    <ul class="text-sm text-yellow-700 space-y-1">
+                        <li>• API blockchain mungkin sedang lambat (1-2 menit normal)</li>
+                        <li>• Coba refresh setelah 30 detik</li>
+                        <li>• Pastikan koneksi internet stabil</li>
+                        <li>• Wallet dengan banyak token butuh waktu lebih lama</li>
+                    </ul>
+                </div>
+
+                <div class="flex justify-center space-x-3">
+                    <button onclick="loadOnchainData()" class="clay-button clay-button-primary">
+                        <i class="fas fa-retry mr-2"></i> Coba Lagi
+                    </button>
+                    <button onclick="checkApiStatus()" class="clay-button clay-button-info">
+                        <i class="fas fa-heartbeat mr-2"></i> Cek Status API
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -295,13 +320,15 @@
 @push('scripts')
 <script>
     let onchainData = null;
+    let retryCount = 0;
+    const maxRetries = 3;
 
     // ⚡ Load onchain data saat halaman ready
     document.addEventListener('DOMContentLoaded', function() {
         loadOnchainData();
     });
 
-    // ⚡ ENHANCED: Function untuk load onchain data secara async dengan error handling yang lebih baik
+    // ⚡ ENHANCED: Function untuk load onchain data dengan better error handling
     async function loadOnchainData() {
         const loadingState = document.getElementById('loading-state');
         const onchainSection = document.getElementById('onchain-portfolio-section');
@@ -331,6 +358,8 @@
                 loadingState.style.display = 'none';
                 onchainSection.style.display = 'block';
                 errorState.style.display = 'none';
+
+                retryCount = 0; // Reset retry count on success
             } else {
                 throw new Error(data.message || 'Failed to load portfolio data');
             }
@@ -343,25 +372,74 @@
             onchainSection.style.display = 'none';
             errorState.style.display = 'block';
 
-            document.getElementById('error-message').textContent = error.message;
-            document.getElementById('error-details').textContent =
-                'Pastikan Moralis API dan CoinGecko API key sudah dikonfigurasi dengan benar di .env file.';
+            // ⚡ ENHANCED: Better error categorization
+            let errorMessage = error.message;
+            let troubleshootingText = 'Pastikan API blockchain sedang berjalan dan koneksi internet stabil.';
+
+            if (error.message.includes('timeout') || error.message.includes('timed out')) {
+                errorMessage = 'Request timeout - API blockchain sedang lambat';
+                troubleshootingText = 'Wallet dengan banyak tokens membutuhkan waktu lebih lama. Coba lagi dalam 30 detik.';
+            } else if (error.message.includes('503') || error.message.includes('500')) {
+                errorMessage = 'API blockchain sedang tidak tersedia';
+                troubleshootingText = 'Service sedang maintenance atau overload. Coba lagi dalam beberapa menit.';
+            } else if (error.message.includes('network')) {
+                errorMessage = 'Masalah koneksi jaringan';
+                troubleshootingText = 'Periksa koneksi internet dan coba lagi.';
+            }
+
+            document.getElementById('error-message').textContent = errorMessage;
+            document.getElementById('error-details').textContent = troubleshootingText;
         }
     }
 
-    // ⚡ ENHANCED: Function untuk populate data ke UI dengan 8 decimal precision
+    // ⚡ Check API status
+    async function checkApiStatus() {
+        try {
+            showNotification('Mengecek status API...', 'info');
+
+            const apiUrl = '{{ $apiUrl ?? "http://localhost:8001" }}'; // ⚡ FIXED: Fallback untuk apiUrl
+            const response = await fetch(apiUrl + '/health', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                showNotification('API blockchain tersedia dan berjalan normal', 'success');
+            } else {
+                showNotification('API blockchain tidak merespons dengan benar', 'warning');
+            }
+        } catch (error) {
+            showNotification('Tidak dapat menghubungi API blockchain', 'error');
+        }
+    }
+
+    // ⚡ ENHANCED: Function untuk populate data dengan 8 decimal precision dan spam filtering
     function populateOnchainData(portfolio) {
         // Update summary cards dengan 8 decimal precision
         document.getElementById('onchain-total-value').textContent = `$${numberFormat(portfolio.total_usd_value || 0, 8)}`;
 
-        const totalAssets = (portfolio.native_balances?.length || 0) + (portfolio.token_balances?.length || 0);
-        document.getElementById('onchain-asset-count').textContent = totalAssets;
+        // Count only non-spam assets
+        const validNative = (portfolio.native_balances || []).length;
+        const validTokens = (portfolio.token_balances || []).filter(token => !token.is_spam).length;
+        const totalValidAssets = validNative + validTokens;
+
+        document.getElementById('onchain-asset-count').textContent = totalValidAssets;
 
         const chains = portfolio.chains_scanned?.join(', ') || 'Unknown';
         document.getElementById('onchain-chains').textContent = `Chains: ${chains}`;
 
         const lastUpdated = portfolio.last_updated ? new Date(portfolio.last_updated).toLocaleString('id-ID') : 'Never';
         document.getElementById('onchain-last-updated').textContent = `Last updated: ${lastUpdated}`;
+
+        // Show spam filter badge if any tokens were filtered
+        const spamBadge = document.getElementById('spam-filter-badge');
+        if (portfolio.filtered_tokens_count && portfolio.filtered_tokens_count > 0) {
+            spamBadge.textContent = `${portfolio.filtered_tokens_count} SPAM FILTERED`;
+            spamBadge.style.display = 'inline-block';
+        }
 
         // Populate holdings table
         populateHoldingsTable(portfolio);
@@ -371,7 +449,7 @@
         populateChainDistribution(portfolio);
     }
 
-    // ⚡ ENHANCED: Populate holdings table dengan 8 decimal precision
+    // ⚡ ENHANCED: Populate holdings table dengan spam detection dan 8 decimal precision
     function populateHoldingsTable(portfolio) {
         const tableBody = document.getElementById('onchain-holdings-table');
         let html = '';
@@ -379,7 +457,7 @@
         // Native balances
         if (portfolio.native_balances && portfolio.native_balances.length > 0) {
             portfolio.native_balances.forEach(balance => {
-                const usdValue = balance.usd_value ? `$${numberFormat(balance.usd_value, 8)}` : 'Estimating...';
+                const usdValue = balance.usd_value ? `$${numberFormat(balance.usd_value, 8)}` : 'Calculating...';
 
                 html += `
                     <tr class="border-l-4 border-blue-500">
@@ -400,6 +478,9 @@
                         </td>
                         <td class="py-3 px-4 font-medium">${usdValue}</td>
                         <td class="py-3 px-4">
+                            <span class="clay-badge clay-badge-success">Native</span>
+                        </td>
+                        <td class="py-3 px-4">
                             <button class="clay-badge clay-badge-primary py-1 px-2 text-xs" onclick="viewOnExplorer('${balance.chain}', '{{ $walletAddress }}')">
                                 <i class="fas fa-external-link-alt"></i>
                             </button>
@@ -409,43 +490,61 @@
             });
         }
 
-        // Token balances
+        // Token balances dengan spam filtering
         if (portfolio.token_balances && portfolio.token_balances.length > 0) {
-            portfolio.token_balances.forEach(token => {
-                const usdValue = token.usd_value ? `$${numberFormat(token.usd_value, 8)}` : 'N/A';
+            // Sort: Non-spam first, then by USD value
+            const sortedTokens = portfolio.token_balances.sort((a, b) => {
+                if (a.is_spam && !b.is_spam) return 1;
+                if (!a.is_spam && b.is_spam) return -1;
+                return (b.usd_value || 0) - (a.usd_value || 0);
+            });
 
-                html += `
-                    <tr>
-                        <td class="py-3 px-4">
-                            <div class="flex items-center">
-                                <div class="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center mr-3">
-                                    <i class="fas fa-coins text-gray-600 text-xs"></i>
+            sortedTokens.forEach(token => {
+                const usdValue = token.usd_value ? `$${numberFormat(token.usd_value, 8)}` : 'N/A';
+                const isSpam = token.is_spam || false;
+
+                // Skip spam tokens in main display, or show them grayed out
+                const rowClass = isSpam ? 'opacity-50 border-l-4 border-red-500' : '';
+                const statusBadge = isSpam
+                    ? '<span class="clay-badge clay-badge-danger">Spam</span>'
+                    : '<span class="clay-badge clay-badge-secondary">Token</span>';
+
+                // Only show non-spam tokens or first 5 spam tokens for reference
+                if (!isSpam || html.split('border-red-500').length <= 5) {
+                    html += `
+                        <tr class="${rowClass}">
+                            <td class="py-3 px-4">
+                                <div class="flex items-center">
+                                    <div class="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center mr-3">
+                                        <i class="fas fa-coins text-gray-600 text-xs"></i>
+                                    </div>
+                                    <div>
+                                        <div class="font-medium ${isSpam ? 'line-through' : ''}">${token.token_name || token.token_symbol}</div>
+                                        <div class="text-xs text-gray-500">${token.token_symbol}</div>
+                                    </div>
                                 </div>
-                                <div>
-                                    <div class="font-medium">${token.token_name || token.token_symbol}</div>
-                                    <div class="text-xs text-gray-500">${token.token_symbol}</div>
-                                </div>
-                            </div>
-                        </td>
-                        <td class="py-3 px-4 font-medium">${numberFormat(token.balance, 8)}</td>
-                        <td class="py-3 px-4">
-                            <span class="clay-badge clay-badge-secondary">${token.chain.toUpperCase()}</span>
-                        </td>
-                        <td class="py-3 px-4 font-medium">${usdValue}</td>
-                        <td class="py-3 px-4">
-                            <button class="clay-badge clay-badge-primary py-1 px-2 text-xs" onclick="viewOnExplorer('${token.chain}', '${token.token_address}')">
-                                <i class="fas fa-external-link-alt"></i>
-                            </button>
-                        </td>
-                    </tr>
-                `;
+                            </td>
+                            <td class="py-3 px-4 font-medium">${numberFormat(token.balance, 8)}</td>
+                            <td class="py-3 px-4">
+                                <span class="clay-badge clay-badge-secondary">${token.chain.toUpperCase()}</span>
+                            </td>
+                            <td class="py-3 px-4 font-medium">${usdValue}</td>
+                            <td class="py-3 px-4">${statusBadge}</td>
+                            <td class="py-3 px-4">
+                                <button class="clay-badge clay-badge-primary py-1 px-2 text-xs" onclick="viewOnExplorer('${token.chain}', '${token.token_address}')">
+                                    <i class="fas fa-external-link-alt"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }
             });
         }
 
         if (html === '') {
             html = `
                 <tr>
-                    <td colspan="5" class="py-6 px-4 text-center">
+                    <td colspan="6" class="py-6 px-4 text-center">
                         <div class="text-gray-500">
                             <i class="fas fa-wallet text-4xl mb-3"></i>
                             <p>Tidak ada token ditemukan di wallet ini</p>
@@ -459,19 +558,18 @@
         tableBody.innerHTML = html;
     }
 
-    // ⚡ ENHANCED: Populate category distribution dengan enriched project data
+    // ⚡ ENHANCED: Populate category distribution dengan filtering spam
     function populateCategoryDistribution(portfolio) {
         const container = document.getElementById('onchain-category-distribution');
         const totalValue = portfolio.total_usd_value || 0;
 
-        // Calculate category distribution dari enriched project data
+        // Calculate category distribution dari enriched project data (exclude spam)
         let categories = {};
 
-        // Process native balances dengan project data
+        // Process native balances
         if (portfolio.native_balances) {
             portfolio.native_balances.forEach(balance => {
                 if (balance.usd_value && balance.usd_value > 0) {
-                    // Use project_data yang sudah di-enrich dari backend
                     const category = balance.project_data?.primary_category || 'Layer-1';
 
                     if (!categories[category]) {
@@ -488,11 +586,10 @@
             });
         }
 
-        // Process token balances dengan project data
+        // Process token balances (exclude spam)
         if (portfolio.token_balances) {
             portfolio.token_balances.forEach(token => {
-                if (token.usd_value && token.usd_value > 0) {
-                    // Use project_data yang sudah di-enrich dari backend
+                if (!token.is_spam && token.usd_value && token.usd_value > 0) {
                     const category = token.project_data?.primary_category || 'Other';
 
                     if (!categories[category]) {
@@ -537,18 +634,18 @@
             container.innerHTML = `
                 <div class="text-center py-4">
                     <p class="text-gray-500 text-sm">Menunggu data dengan USD value</p>
-                    <p class="text-xs text-gray-400 mt-1">Auto-refresh akan mengupdate distribusi</p>
+                    <p class="text-xs text-gray-400 mt-1">Token akan muncul setelah harga berhasil diambil</p>
                 </div>
             `;
         }
     }
 
-    // ⚡ ENHANCED: Populate chain distribution dengan format yang benar
+    // ⚡ ENHANCED: Populate chain distribution dengan format yang benar dan 8 decimal
     function populateChainDistribution(portfolio) {
         const container = document.getElementById('onchain-chain-distribution');
         const totalValue = portfolio.total_usd_value || 0;
 
-        // Calculate chain distribution
+        // Calculate chain distribution (exclude spam)
         let chains = {};
 
         // Native balances
@@ -561,31 +658,37 @@
                     chains[chain] = {
                         chain: chain,
                         value: 0,
-                        project_count: 0
+                        project_count: 0,
+                        balance_display: 0
                     };
                 }
 
                 chains[chain].value += value;
                 chains[chain].project_count++;
+                chains[chain].balance_display += balance.balance; // For display purposes
             });
         }
 
-        // Token balances
+        // Token balances (exclude spam)
         if (portfolio.token_balances) {
             portfolio.token_balances.forEach(token => {
-                const chain = token.chain || 'Unknown';
-                const value = token.usd_value || 0;
+                if (!token.is_spam) {
+                    const chain = token.chain || 'Unknown';
+                    const value = token.usd_value || 0;
 
-                if (!chains[chain]) {
-                    chains[chain] = {
-                        chain: chain,
-                        value: 0,
-                        project_count: 0
-                    };
+                    if (!chains[chain]) {
+                        chains[chain] = {
+                            chain: chain,
+                            value: 0,
+                            project_count: 0,
+                            balance_display: 0
+                        };
+                    }
+
+                    chains[chain].value += value;
+                    chains[chain].project_count++;
+                    chains[chain].balance_display += token.balance;
                 }
-
-                chains[chain].value += value;
-                chains[chain].project_count++;
             });
         }
 
@@ -596,15 +699,16 @@
 
             chainArray.forEach(chain => {
                 const percentage = totalValue > 0 ? (chain.value / totalValue) * 100 : 0;
+                const chainName = chain.chain.charAt(0).toUpperCase() + chain.chain.slice(1);
 
                 html += `
                     <div class="clay-card bg-info/5 p-3">
                         <div class="flex justify-between mb-1">
-                            <span class="font-medium text-sm">${chain.chain.charAt(0).toUpperCase() + chain.chain.slice(1)}</span>
+                            <span class="font-medium text-sm">${chainName}</span>
                             <span class="text-sm">$${numberFormat(chain.value, 8)}</span>
                         </div>
                         <div class="clay-progress h-2">
-                            <div class="clay-progress-bar clay-progress-info" style="width: ${percentage}%"></div>
+                            <div class="clay-progress-bar clay-progress-info" style="width: ${Math.max(percentage, 1)}%"></div>
                         </div>
                         <div class="text-xs text-right mt-1">${chain.project_count} assets (${percentage.toFixed(1)}%)</div>
                     </div>
@@ -617,7 +721,7 @@
             container.innerHTML = `
                 <div class="text-center py-4">
                     <p class="text-gray-500 text-sm">Menunggu data dengan USD value</p>
-                    <p class="text-xs text-gray-400 mt-1">Auto-refresh akan mengupdate distribusi</p>
+                    <p class="text-xs text-gray-400 mt-1">Chain akan muncul setelah harga berhasil diambil</p>
                 </div>
             `;
         }
@@ -630,7 +734,7 @@
         });
     }
 
-    // Refresh onchain data
+    // ⚡ ENHANCED: Refresh onchain data dengan retry logic
     async function refreshOnchainData() {
         const btn = document.getElementById('refresh-btn');
         const originalText = btn.innerHTML;
@@ -641,9 +745,9 @@
 
         try {
             await loadOnchainData();
-            showNotification('Onchain data refreshed successfully!', 'success');
+            showNotification('Data onchain berhasil diperbarui!', 'success');
         } catch (error) {
-            showNotification('Error refreshing data', 'error');
+            showNotification('Gagal memperbarui data: ' + error.message, 'error');
         } finally {
             // Restore button
             btn.innerHTML = originalText;
@@ -658,7 +762,8 @@
             'ethereum': 'https://etherscan.io',
             'bsc': 'https://bscscan.com',
             'binance_smart_chain': 'https://bscscan.com',
-            'polygon': 'https://polygonscan.com'
+            'polygon': 'https://polygonscan.com',
+            'avalanche': 'https://snowtrace.io'
         };
 
         const explorerUrl = explorers[chain.toLowerCase()];
@@ -681,7 +786,7 @@
         }).format(number);
     }
 
-    // Simple notification system
+    // ⚡ ENHANCED: Notification system
     function showNotification(message, type = 'info') {
         const notification = document.createElement('div');
         notification.className = `fixed top-4 right-4 z-50 clay-alert clay-alert-${type} max-w-sm`;

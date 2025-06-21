@@ -68,6 +68,9 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         // Main portfolio overview (onchain + manual data)
         Route::get('/', [PortfolioController::class, 'index'])->name('panel.portfolio');
 
+        // BARU: Load analytics data for portfolio - AJAX endpoint
+        Route::get('/load-analytics', [PortfolioController::class, 'loadAnalyticsData'])->name('panel.portfolio.load-analytics');
+
         // BARU: Onchain Analytics
         Route::get('/onchain-analytics', [PortfolioController::class, 'onchainAnalytics'])->name('panel.portfolio.onchain-analytics');
 

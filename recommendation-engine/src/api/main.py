@@ -1,5 +1,6 @@
 import os
 import logging
+import sys
 from fastapi import FastAPI, Request, HTTPException, Query, Depends, Body
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,8 +8,28 @@ import time
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
+# ⚡ ENHANCED: Fix Unicode logging error with proper encoding
+import locale
+import codecs
+
+# Set proper encoding for Windows
+if sys.platform.startswith('win'):
+    # Force UTF-8 encoding for Windows console
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8')
+        
+    # Set locale to handle Unicode properly
+    try:
+        locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
+    except locale.Error:
+        try:
+            locale.setlocale(locale.LC_ALL, 'C.UTF-8')
+        except locale.Error:
+            pass  # Use default locale
+
 # Path handling
-import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from config import API_HOST, API_PORT
 
@@ -20,16 +41,71 @@ from src.api.recommend import router as recommend_router
 from src.api.analysis import router as analysis_router
 from src.api.blockchain import router as blockchain_router
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("logs/api.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+# ⚡ ENHANCED: Setup logging dengan Unicode support dan filter
+class UnicodeLoggingFilter(logging.Filter):
+    """Filter untuk menangani Unicode characters dalam logging"""
+    
+    def filter(self, record):
+        # Sanitize record message untuk menghindari Unicode encoding errors
+        if hasattr(record, 'msg') and isinstance(record.msg, str):
+            try:
+                # Try to encode/decode to catch problematic characters
+                record.msg.encode('ascii', 'ignore').decode('ascii')
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                # Replace problematic characters dengan safe alternatives
+                record.msg = record.msg.encode('ascii', 'ignore').decode('ascii')
+                record.msg += ' [Unicode chars filtered]'
+        
+        # Sanitize args juga
+        if hasattr(record, 'args') and record.args:
+            safe_args = []
+            for arg in record.args:
+                if isinstance(arg, str):
+                    try:
+                        safe_arg = arg.encode('ascii', 'ignore').decode('ascii')
+                        safe_args.append(safe_arg)
+                    except (UnicodeEncodeError, UnicodeDecodeError):
+                        safe_args.append('[Unicode filtered]')
+                else:
+                    safe_args.append(arg)
+            record.args = tuple(safe_args)
+        
+        return True
+
+# Setup logging dengan enhanced configuration
+def setup_logging():
+    """Setup logging configuration dengan Unicode support"""
+    
+    # Create logs directory if not exists
+    os.makedirs("logs", exist_ok=True)
+    
+    # Create formatter
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # Setup file handler dengan UTF-8 encoding
+    file_handler = logging.FileHandler("logs/api.log", encoding='utf-8')
+    file_handler.setFormatter(formatter)
+    file_handler.addFilter(UnicodeLoggingFilter())
+    
+    # Setup console handler dengan safe encoding
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.addFilter(UnicodeLoggingFilter())
+    
+    # Configure root logger
+    logging.basicConfig(
+        level=logging.INFO,
+        handlers=[file_handler, console_handler],
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    return logging.getLogger(__name__)
+
+# Initialize logging
+logger = setup_logging()
 
 # Create FastAPI app
 app = FastAPI(
@@ -47,7 +123,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ⚡ ENHANCED: Add request timing middleware dengan smart filtering
+# ⚡ ENHANCED: Add request timing middleware dengan smart filtering dan better thresholds
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
     start_time = time.time()
@@ -58,36 +134,69 @@ async def add_process_time_header(request: Request, call_next):
     # ⚡ SMART: Log query lambat dengan threshold yang disesuaikan berdasarkan endpoint
     path = request.url.path
     
-    # Blockchain endpoints memiliki threshold lebih tinggi karena melibatkan external API calls
+    # ⚡ ENHANCED: More realistic thresholds
     if path.startswith('/blockchain/'):
-        slow_threshold = 15.0  # 15 detik untuk blockchain endpoints
-        warning_threshold = 25.0  # 25 detik untuk warning
+        slow_threshold = 30.0     # 30 detik untuk blockchain endpoints (lebih realistis)
+        warning_threshold = 60.0  # 1 menit untuk warning
+        critical_threshold = 120.0 # 2 menit untuk critical
     elif path.startswith('/analysis/'):
-        slow_threshold = 8.0   # 8 detik untuk analysis endpoints
-        warning_threshold = 15.0
+        slow_threshold = 10.0     # 10 detik untuk analysis endpoints
+        warning_threshold = 20.0  # 20 detik untuk warning
+        critical_threshold = 30.0 # 30 detik untuk critical
     else:
-        slow_threshold = 2.0   # 2 detik untuk endpoints lainnya
-        warning_threshold = 5.0
+        slow_threshold = 3.0      # 3 detik untuk endpoints lainnya
+        warning_threshold = 5.0   # 5 detik untuk warning
+        critical_threshold = 10.0 # 10 detik untuk critical
     
-    # Log berdasarkan threshold yang sesuai
-    if process_time > warning_threshold:
-        logger.warning(f"Very slow request: {path} took {process_time:.2f}s")
-    elif process_time > slow_threshold:
-        logger.info(f"Slow request: {path} took {process_time:.2f}s")
-    
-    # ⚡ BARU: Log performance info untuk blockchain endpoints
-    if path.startswith('/blockchain/') and process_time > 3.0:
-        logger.info(f"Blockchain API call completed: {path} ({process_time:.2f}s) - External API latency included")
+    # Log berdasarkan threshold yang sesuai dengan safe string handling
+    try:
+        safe_path = path.encode('ascii', 'ignore').decode('ascii')
+        
+        if process_time > critical_threshold:
+            logger.error(f"Critical slow request: {safe_path} took {process_time:.2f}s")
+        elif process_time > warning_threshold:
+            logger.warning(f"Very slow request: {safe_path} took {process_time:.2f}s")
+        elif process_time > slow_threshold:
+            logger.info(f"Slow request: {safe_path} took {process_time:.2f}s")
+        
+        # ⚡ ENHANCED: Log performance info untuk blockchain endpoints
+        if path.startswith('/blockchain/') and process_time > 10.0:
+            logger.info(f"Blockchain API call completed: {safe_path} ({process_time:.2f}s) - External API latency included")
+            
+    except Exception as e:
+        # Fallback logging jika ada masalah dengan string handling
+        logger.info(f"Request completed in {process_time:.2f}s [path filtering error: {str(e)}]")
         
     return response
 
-# Exception handler
+# ⚡ ENHANCED: Exception handler dengan better error categorization
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled exception on {request.url.path}: {str(exc)}")
+    # Safe string handling untuk exception
+    try:
+        safe_path = request.url.path.encode('ascii', 'ignore').decode('ascii')
+        safe_error = str(exc).encode('ascii', 'ignore').decode('ascii')
+        logger.error(f"Unhandled exception on {safe_path}: {safe_error}")
+    except Exception:
+        logger.error(f"Unhandled exception occurred [path/error filtering failed]")
+    
+    # ⚡ ENHANCED: Better error categorization
+    error_message = "Internal server error"
+    status_code = 500
+    
+    if "timeout" in str(exc).lower():
+        error_message = "Request timeout - please try again"
+        status_code = 504
+    elif "connection" in str(exc).lower():
+        error_message = "Connection error - service may be temporarily unavailable"
+        status_code = 503
+    elif "rate limit" in str(exc).lower():
+        error_message = "Rate limit exceeded - please wait before retrying"
+        status_code = 429
+    
     return JSONResponse(
-        status_code=500,
-        content={"error": f"Internal server error: {str(exc)}"}
+        status_code=status_code,
+        content={"error": error_message, "details": str(exc)[:200]}  # Limit error details
     )
 
 # Include routers
@@ -140,8 +249,10 @@ async def record_interaction(interaction: InteractionRecord):
             'timestamp': interaction.timestamp or datetime.now().isoformat()
         }])
         
-        # Log untuk debugging
-        logger.info(f"Recording interaction: {interaction.user_id} -> {interaction.project_id} ({interaction.interaction_type})")
+        # Log untuk debugging dengan safe string handling
+        safe_user_id = interaction.user_id.encode('ascii', 'ignore').decode('ascii')
+        safe_project_id = interaction.project_id.encode('ascii', 'ignore').decode('ascii')
+        logger.info(f"Recording interaction: {safe_user_id} -> {safe_project_id} ({interaction.interaction_type})")
         
         # Jika file sudah ada, append tanpa header
         if os.path.exists(interactions_path):
@@ -150,13 +261,14 @@ async def record_interaction(interaction: InteractionRecord):
             # Jika file belum ada, buat dengan header
             new_interaction.to_csv(interactions_path, index=False)
         
-        logger.info(f"Recorded interaction for user {interaction.user_id} with project {interaction.project_id}")
+        logger.info(f"Recorded interaction for user {safe_user_id} with project {safe_project_id}")
         
         return {"status": "success", "message": "Interaction recorded successfully"}
     
     except Exception as e:
-        logger.error(f"Error recording interaction: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error recording interaction: {str(e)}")
+        safe_error = str(e).encode('ascii', 'ignore').decode('ascii')
+        logger.error(f"Error recording interaction: {safe_error}")
+        raise HTTPException(status_code=500, detail=f"Error recording interaction: {safe_error}")
 
 # Router untuk admin endpoints
 @app.post("/admin/train-models", tags=["admin"])
@@ -169,7 +281,7 @@ async def admin_train_models(request: TrainModelsRequest = Body(...)):
                 "message": "Test mode - Model training simulation successful"
             }
             
-        # Log request
+        # Log request dengan safe string handling
         logger.info(f"Training models: {request.models}, force: {request.force}")
         
         # Buat objek args untuk diteruskan ke train_models
@@ -208,8 +320,9 @@ async def admin_train_models(request: TrainModelsRequest = Body(...)):
             }
     
     except Exception as e:
-        logger.error(f"Error training models: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error training models: {str(e)}")
+        safe_error = str(e).encode('ascii', 'ignore').decode('ascii')
+        logger.error(f"Error training models: {safe_error}")
+        raise HTTPException(status_code=500, detail=f"Error training models: {safe_error}")
 
 # Model untuk sinkronisasi data
 class SyncDataRequest(BaseModel):
@@ -259,8 +372,9 @@ async def admin_sync_data(request: SyncDataRequest = Body(...)):
         }
     
     except Exception as e:
-        logger.error(f"Error syncing data: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error syncing data: {str(e)}")
+        safe_error = str(e).encode('ascii', 'ignore').decode('ascii')
+        logger.error(f"Error syncing data: {safe_error}")
+        raise HTTPException(status_code=500, detail=f"Error syncing data: {safe_error}")
 
 # Root endpoint
 @app.get("/")
@@ -268,6 +382,8 @@ async def root():
     return {
         "name": "Web3 Recommendation System API",
         "version": "1.0.0",
+        "status": "healthy",
+        "unicode_support": "enabled",
         "endpoints": {
             "recommendations": "/recommend/projects",
             "trending": "/recommend/trending",
@@ -289,12 +405,21 @@ async def root():
         }
     }
 
-# ⚡ ENHANCED: Health check endpoint dengan blockchain API status
+# ⚡ ENHANCED: Health check endpoint dengan better system info
 @app.get("/health")
 async def health_check():
     return {
         "status": "healthy",
         "timestamp": time.time(),
+        "system_info": {
+            "platform": sys.platform,
+            "python_version": sys.version_info[:3],
+            "encoding": {
+                "stdout": getattr(sys.stdout, 'encoding', 'unknown'),
+                "stderr": getattr(sys.stderr, 'encoding', 'unknown'),
+                "locale": locale.getlocale()
+            }
+        },
         "blockchain_apis": {
             "moralis": "configured" if os.environ.get("MORALIS_API_KEY") else "missing",
             "etherscan": "configured" if os.environ.get("ETHERSCAN_API_KEY") else "missing",
@@ -302,10 +427,16 @@ async def health_check():
             "polygonscan": "configured" if os.environ.get("POLYGONSCAN_API_KEY") else "missing",
             "coingecko": "configured" if os.environ.get("COINGECKO_API_KEY") else "missing"
         },
-        "performance_info": {
-            "blockchain_threshold": "15s (normal for external API calls)",
-            "analysis_threshold": "8s",
-            "default_threshold": "2s"
+        "performance_thresholds": {
+            "blockchain_endpoints": "30s (normal for multi-chain data)",
+            "analysis_endpoints": "10s",
+            "default_endpoints": "3s"
+        },
+        "features": {
+            "unicode_logging": "enabled",
+            "spam_filtering": "enabled", 
+            "smart_batching": "enabled",
+            "retry_logic": "enabled"
         }
     }
 
@@ -316,18 +447,25 @@ if __name__ == "__main__":
     # Create logs directory if it doesn't exist
     os.makedirs("logs", exist_ok=True)
     
-    # Log startup
+    # Log startup dengan safe string handling
     logger.info(f"Starting API server on {API_HOST}:{API_PORT}")
-    logger.info(f"Blockchain APIs configured:")
+    logger.info("Blockchain APIs configured:")
     logger.info(f"  - Moralis: {'✓' if os.environ.get('MORALIS_API_KEY') else '✗'}")
     logger.info(f"  - CoinGecko: {'✓' if os.environ.get('COINGECKO_API_KEY') else '✗'}")
     logger.info(f"  - Etherscan: {'✓' if os.environ.get('ETHERSCAN_API_KEY') else '✗'}")
+    logger.info("Unicode logging support: enabled")
+    logger.info("Spam filtering: enabled")
+    
+    # ⚡ ENHANCED: Uvicorn configuration
+    uvicorn_config = {
+        "app": "src.api.main:app",
+        "host": API_HOST,
+        "port": API_PORT,
+        "reload": True,  # Enable auto-reload during development
+        "log_level": "info",
+        "access_log": False,  # Disable access log to reduce noise
+        "use_colors": False,  # Disable colors untuk better file logging
+    }
     
     # Run server
-    uvicorn.run(
-        "src.api.main:app", 
-        host=API_HOST, 
-        port=API_PORT,
-        reload=True,  # Enable auto-reload during development
-        log_level="info"
-    )
+    uvicorn.run(**uvicorn_config)
