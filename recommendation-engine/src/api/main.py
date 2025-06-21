@@ -47,7 +47,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add request timing middleware
+# ⚡ ENHANCED: Add request timing middleware dengan smart filtering
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
     start_time = time.time()
@@ -55,25 +55,45 @@ async def add_process_time_header(request: Request, call_next):
     process_time = time.time() - start_time
     response.headers["X-Process-Time"] = str(process_time)
     
-    # Log requests that take longer than 1 second
-    if process_time > 1.0:
-        logger.warning(f"Slow request: {request.url.path} took {process_time:.2f}s")
+    # ⚡ SMART: Log query lambat dengan threshold yang disesuaikan berdasarkan endpoint
+    path = request.url.path
+    
+    # Blockchain endpoints memiliki threshold lebih tinggi karena melibatkan external API calls
+    if path.startswith('/blockchain/'):
+        slow_threshold = 15.0  # 15 detik untuk blockchain endpoints
+        warning_threshold = 25.0  # 25 detik untuk warning
+    elif path.startswith('/analysis/'):
+        slow_threshold = 8.0   # 8 detik untuk analysis endpoints
+        warning_threshold = 15.0
+    else:
+        slow_threshold = 2.0   # 2 detik untuk endpoints lainnya
+        warning_threshold = 5.0
+    
+    # Log berdasarkan threshold yang sesuai
+    if process_time > warning_threshold:
+        logger.warning(f"Very slow request: {path} took {process_time:.2f}s")
+    elif process_time > slow_threshold:
+        logger.info(f"Slow request: {path} took {process_time:.2f}s")
+    
+    # ⚡ BARU: Log performance info untuk blockchain endpoints
+    if path.startswith('/blockchain/') and process_time > 3.0:
+        logger.info(f"Blockchain API call completed: {path} ({process_time:.2f}s) - External API latency included")
         
     return response
 
 # Exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled exception: {str(exc)}")
+    logger.error(f"Unhandled exception on {request.url.path}: {str(exc)}")
     return JSONResponse(
         status_code=500,
         content={"error": f"Internal server error: {str(exc)}"}
     )
 
-# Include routers - PERBAIKAN: Tambahkan blockchain_router
+# Include routers
 app.include_router(recommend_router)
 app.include_router(analysis_router)
-app.include_router(blockchain_router)  # ⚡ PERBAIKAN: Router blockchain yang hilang!
+app.include_router(blockchain_router)
 
 # Model pengisian data interaksi
 class InteractionRecord(BaseModel):
@@ -258,9 +278,9 @@ async def root():
             "market_events": "/analysis/market-events/{project_id}",
             "alerts": "/analysis/alerts/{project_id}",
             "price_prediction": "/analysis/price-prediction/{project_id}",
-            "blockchain_portfolio": "/blockchain/portfolio/{wallet_address}",  # ⚡ BARU
-            "blockchain_transactions": "/blockchain/transactions/{wallet_address}",  # ⚡ BARU
-            "blockchain_analytics": "/blockchain/analytics/{wallet_address}",  # ⚡ BARU
+            "blockchain_portfolio": "/blockchain/portfolio/{wallet_address}",
+            "blockchain_transactions": "/blockchain/transactions/{wallet_address}",
+            "blockchain_analytics": "/blockchain/analytics/{wallet_address}",
             "interactions": "/interactions/record",
             "admin": {
                 "train_models": "/admin/train-models",
@@ -269,7 +289,7 @@ async def root():
         }
     }
 
-# Health check endpoint
+# ⚡ ENHANCED: Health check endpoint dengan blockchain API status
 @app.get("/health")
 async def health_check():
     return {
@@ -279,7 +299,13 @@ async def health_check():
             "moralis": "configured" if os.environ.get("MORALIS_API_KEY") else "missing",
             "etherscan": "configured" if os.environ.get("ETHERSCAN_API_KEY") else "missing",
             "bscscan": "configured" if os.environ.get("BSCSCAN_API_KEY") else "missing",
-            "polygonscan": "configured" if os.environ.get("POLYGONSCAN_API_KEY") else "missing"
+            "polygonscan": "configured" if os.environ.get("POLYGONSCAN_API_KEY") else "missing",
+            "coingecko": "configured" if os.environ.get("COINGECKO_API_KEY") else "missing"
+        },
+        "performance_info": {
+            "blockchain_threshold": "15s (normal for external API calls)",
+            "analysis_threshold": "8s",
+            "default_threshold": "2s"
         }
     }
 
@@ -292,7 +318,10 @@ if __name__ == "__main__":
     
     # Log startup
     logger.info(f"Starting API server on {API_HOST}:{API_PORT}")
-    logger.info(f"Blockchain APIs configured: Moralis={'✓' if os.environ.get('MORALIS_API_KEY') else '✗'}")
+    logger.info(f"Blockchain APIs configured:")
+    logger.info(f"  - Moralis: {'✓' if os.environ.get('MORALIS_API_KEY') else '✗'}")
+    logger.info(f"  - CoinGecko: {'✓' if os.environ.get('COINGECKO_API_KEY') else '✗'}")
+    logger.info(f"  - Etherscan: {'✓' if os.environ.get('ETHERSCAN_API_KEY') else '✗'}")
     
     # Run server
     uvicorn.run(

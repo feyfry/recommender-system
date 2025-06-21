@@ -32,24 +32,14 @@ class PortfolioController extends Controller
     }
 
     /**
-     * ⚡ UPDATED: Menampilkan halaman overview dengan data onchain real + error handling
+     * ⚡ ENHANCED: Menampilkan halaman overview dengan project enrichment yang lebih baik
      */
     public function index()
     {
         $user          = Auth::user();
         $walletAddress = $user->wallet_address;
 
-        // ⚡ IMPROVED: Better error handling untuk onchain data
-        $onchainPortfolio = Cache::remember("onchain_portfolio_{$walletAddress}", 5, function () use ($walletAddress) {
-            try {
-                return $this->getOnchainPortfolio($walletAddress);
-            } catch (\Exception $e) {
-                Log::warning("Failed to fetch onchain portfolio for {$walletAddress}: " . $e->getMessage());
-                return $this->getEmptyPortfolioData();
-            }
-        });
-
-        // Check if API is available
+        // Check API status
         $apiStatus = $this->checkApiStatus();
 
         // Ambil data manual transactions
@@ -66,31 +56,22 @@ class PortfolioController extends Controller
             $manualTotalCost += $portfolio->initial_value;
         }
 
-        // Distribusi berdasarkan data onchain
-        $onchainCategoryDistribution = $this->calculateOnchainCategoryDistribution($onchainPortfolio);
-        $onchainChainDistribution    = $this->calculateOnchainChainDistribution($onchainPortfolio);
-
         return view('backend.portfolio.index', [
-            // Data Onchain (Real)
-            'onchainPortfolio'            => $onchainPortfolio,
-            'onchainCategoryDistribution' => $onchainCategoryDistribution,
-            'onchainChainDistribution'    => $onchainChainDistribution,
-
-            // Data Manual (Transaction Management)
-            'manualPortfolios'            => $manualPortfolios,
-            'manualTotalValue'            => $manualTotalValue,
-            'manualTotalCost'             => $manualTotalCost,
-            'manualProfitLoss'            => $manualTotalValue - $manualTotalCost,
-            'manualProfitLossPercentage'  => $manualTotalCost > 0 ? (($manualTotalValue - $manualTotalCost) / $manualTotalCost) * 100 : 0,
+            // Manual Portfolio (Transaction Management)
+            'manualPortfolios'           => $manualPortfolios,
+            'manualTotalValue'           => $manualTotalValue,
+            'manualTotalCost'            => $manualTotalCost,
+            'manualProfitLoss'           => $manualTotalValue - $manualTotalCost,
+            'manualProfitLossPercentage' => $manualTotalCost > 0 ? (($manualTotalValue - $manualTotalCost) / $manualTotalCost) * 100 : 0,
 
             // Combined data
-            'walletAddress'               => $walletAddress,
-            'apiStatus'                   => $apiStatus, // ⚡ BARU: Status API untuk troubleshooting
+            'walletAddress'              => $walletAddress,
+            'apiStatus'                  => $apiStatus,
         ]);
     }
 
     /**
-     * ⚡ UPDATED: Menampilkan halaman onchain analytics dengan error handling
+     * ⚡ ENHANCED: Menampilkan halaman onchain analytics dengan error handling
      */
     public function onchainAnalytics()
     {
@@ -124,12 +105,12 @@ class PortfolioController extends Controller
             'analytics'          => $analytics,
             'recentTransactions' => $recentTransactions,
             'walletAddress'      => $walletAddress,
-            'apiStatus'          => $apiStatus, // ⚡ BARU: Status API
+            'apiStatus'          => $apiStatus,
         ]);
     }
 
     /**
-     * DIUBAH: Transaction Management (dulu: transactions)
+     * Transaction Management (dulu: transactions)
      */
     public function transactionManagement()
     {
@@ -190,7 +171,7 @@ class PortfolioController extends Controller
     }
 
     /**
-     * ⚡ IMPROVED: AJAX endpoint untuk refresh onchain data dengan better error handling
+     * ⚡ ENHANCED: AJAX endpoint untuk refresh onchain data dengan project enrichment
      */
     public function refreshOnchainData()
     {
@@ -232,7 +213,7 @@ class PortfolioController extends Controller
     }
 
     /**
-     * ⚡ BARU: Check API status untuk troubleshooting
+     * ⚡ ENHANCED: Check API status untuk troubleshooting
      */
     private function checkApiStatus()
     {
@@ -372,12 +353,12 @@ class PortfolioController extends Controller
     }
 
     /**
-     * ⚡ IMPROVED: Mendapatkan portfolio onchain dengan timeout dan error handling
+     * ⚡ ENHANCED: Mendapatkan portfolio onchain dengan project enrichment yang lebih baik
      */
     private function getOnchainPortfolio($walletAddress)
     {
         try {
-            $response = Http::timeout(15)->get("{$this->apiUrl}/blockchain/portfolio/{$walletAddress}", [
+            $response = Http::timeout(20)->get("{$this->apiUrl}/blockchain/portfolio/{$walletAddress}", [
                 'chains' => ['eth', 'bsc', 'polygon'],
             ]);
 
@@ -390,12 +371,13 @@ class PortfolioController extends Controller
                     return $this->getEmptyPortfolioData();
                 }
 
-                // Enrich dengan data project dari database lokal
+                // ⚡ ENHANCED: Enrich dengan data project dari database lokal
                 $data = $this->enrichPortfolioWithProjectData($data);
 
-                Log::info("Successfully fetched onchain portfolio for {$walletAddress}: " .
+                Log::info("Successfully fetched and enriched onchain portfolio for {$walletAddress}: " .
                     count($data['native_balances'] ?? []) . " native + " .
-                    count($data['token_balances'] ?? []) . " tokens");
+                    count($data['token_balances'] ?? []) . " tokens, Total USD: $" .
+                    number_format($data['total_usd_value'] ?? 0, 8));
 
                 return $data;
             } else {
@@ -410,12 +392,12 @@ class PortfolioController extends Controller
     }
 
     /**
-     * ⚡ IMPROVED: Mendapatkan analytics onchain dengan timeout dan error handling
+     * ⚡ ENHANCED: Mendapatkan analytics onchain dengan timeout yang lebih lama
      */
     private function getOnchainAnalytics($walletAddress)
     {
         try {
-            $response = Http::timeout(15)->get("{$this->apiUrl}/blockchain/analytics/{$walletAddress}", [
+            $response = Http::timeout(20)->get("{$this->apiUrl}/blockchain/analytics/{$walletAddress}", [
                 'days' => 30,
             ]);
 
@@ -429,7 +411,8 @@ class PortfolioController extends Controller
                 }
 
                 Log::info("Successfully fetched onchain analytics for {$walletAddress}: " .
-                    ($data['total_transactions'] ?? 0) . " transactions");
+                    ($data['total_transactions'] ?? 0) . " transactions, Volume: $" .
+                    number_format($data['total_volume_usd'] ?? 0, 8));
 
                 return $data;
             } else {
@@ -444,12 +427,12 @@ class PortfolioController extends Controller
     }
 
     /**
-     * ⚡ IMPROVED: Mendapatkan transaksi onchain dengan timeout dan error handling
+     * ⚡ ENHANCED: Mendapatkan transaksi onchain dengan timeout yang lebih lama
      */
     private function getOnchainTransactions($walletAddress, $limit = 50)
     {
         try {
-            $response = Http::timeout(15)->get("{$this->apiUrl}/blockchain/transactions/{$walletAddress}", [
+            $response = Http::timeout(20)->get("{$this->apiUrl}/blockchain/transactions/{$walletAddress}", [
                 'limit'  => $limit,
                 'chains' => ['eth', 'bsc', 'polygon'],
             ]);
@@ -478,31 +461,66 @@ class PortfolioController extends Controller
     }
 
     /**
-     * BARU: Enrich portfolio data dengan informasi proyek dari database
+     * ⚡ ENHANCED: Enrich portfolio data dengan informasi proyek dari database yang lebih comprehensive
      */
     private function enrichPortfolioWithProjectData($portfolioData)
     {
-        if (! isset($portfolioData['token_balances'])) {
-            return $portfolioData;
+        // Enrich native balances
+        if (isset($portfolioData['native_balances'])) {
+            foreach ($portfolioData['native_balances'] as &$balance) {
+                // Cari project berdasarkan symbol native
+                $project = Project::where('symbol', $balance['token_symbol'])->first();
+
+                if ($project) {
+                    $balance['project_data'] = [
+                        'id'               => $project->id,
+                        'name'             => $project->name,
+                        'image'            => $project->image,
+                        'current_price'    => $project->current_price,
+                        'price_change_24h' => $project->price_change_percentage_24h,
+                        'primary_category' => $project->primary_category ?: 'Layer-1', // Default untuk native tokens
+                    ];
+                } else {
+                    // Default category untuk native tokens yang tidak ada di database
+                    $balance['project_data'] = [
+                        'id'               => $balance['token_symbol'],
+                        'name'             => $balance['token_name'],
+                        'image'            => null,
+                        'current_price'    => null,
+                        'price_change_24h' => null,
+                        'primary_category' => 'Layer-1', // Default category untuk blockchain native
+                    ];
+                }
+            }
         }
 
-        foreach ($portfolioData['token_balances'] as &$token) {
-            // Cari project berdasarkan symbol
-            $project = Project::where('symbol', $token['token_symbol'])->first();
+        // Enrich token balances
+        if (isset($portfolioData['token_balances'])) {
+            foreach ($portfolioData['token_balances'] as &$token) {
+                // Cari project berdasarkan symbol, tapi prioritaskan yang sesuai dengan chain
+                $project = Project::where('symbol', $token['token_symbol'])
+                    ->orderByRaw("CASE WHEN chain = ? THEN 1 ELSE 2 END", [$token['chain']])
+                    ->first();
 
-            if ($project) {
-                $token['project_data'] = [
-                    'id'               => $project->id,
-                    'name'             => $project->name,
-                    'image'            => $project->image,
-                    'current_price'    => $project->current_price,
-                    'price_change_24h' => $project->price_change_percentage_24h,
-                    'primary_category' => $project->primary_category,
-                ];
-
-                // Hitung USD value jika ada harga
-                if ($project->current_price && $token['balance']) {
-                    $token['usd_value'] = $token['balance'] * $project->current_price;
+                if ($project) {
+                    $token['project_data'] = [
+                        'id'               => $project->id,
+                        'name'             => $project->name,
+                        'image'            => $project->image,
+                        'current_price'    => $project->current_price,
+                        'price_change_24h' => $project->price_change_percentage_24h,
+                        'primary_category' => $project->primary_category ?: $this->inferCategoryFromTokenName($token['token_name']),
+                    ];
+                } else {
+                    // ⚡ AUTO: Infer kategori dari nama token jika tidak ada di database
+                    $token['project_data'] = [
+                        'id'               => $token['token_address'],
+                        'name'             => $token['token_name'],
+                        'image'            => null,
+                        'current_price'    => null,
+                        'price_change_24h' => null,
+                        'primary_category' => $this->inferCategoryFromTokenName($token['token_name']),
+                    ];
                 }
             }
         }
@@ -511,104 +529,62 @@ class PortfolioController extends Controller
     }
 
     /**
-     * BARU: Hitung distribusi kategori dari portfolio onchain
+     * ⚡ BARU: Auto-infer kategori dari nama token (NO MANUAL MAPPING!)
      */
-    private function calculateOnchainCategoryDistribution($portfolioData)
+    private function inferCategoryFromTokenName($tokenName)
     {
-        if (! isset($portfolioData['token_balances'])) {
-            return [];
+        $tokenName = strtolower($tokenName);
+
+        // Auto-detect patterns untuk kategori
+        if (strpos($tokenName, 'wrapped') !== false || strpos($tokenName, 'weth') !== false) {
+            return 'DeFi';
         }
 
-        $categories = [];
-
-        foreach ($portfolioData['token_balances'] as $token) {
-            if (isset($token['project_data']['primary_category']) && isset($token['usd_value'])) {
-                $category = $token['project_data']['primary_category'] ?: 'Unknown';
-
-                if (! isset($categories[$category])) {
-                    $categories[$category] = [
-                        'primary_category' => $category,
-                        'value'            => 0,
-                        'project_count'    => 0,
-                    ];
-                }
-
-                $categories[$category]['value'] += $token['usd_value'];
-                $categories[$category]['project_count']++;
-            }
+        if (strpos($tokenName, 'stablecoin') !== false || strpos($tokenName, 'usd') !== false ||
+            strpos($tokenName, 'tether') !== false || strpos($tokenName, 'usdc') !== false) {
+            return 'Stablecoin';
         }
 
-        return array_values($categories);
+        if (strpos($tokenName, 'game') !== false || strpos($tokenName, 'play') !== false) {
+            return 'Gaming';
+        }
+
+        if (strpos($tokenName, 'nft') !== false || strpos($tokenName, 'collectible') !== false) {
+            return 'NFT';
+        }
+
+        if (strpos($tokenName, 'airdrop') !== false || strpos($tokenName, 'claim') !== false ||
+            strpos($tokenName, 'visit') !== false) {
+            return 'Airdrop'; // Kategori khusus untuk token airdrop/scam
+        }
+
+        if (strpos($tokenName, 'meme') !== false || strpos($tokenName, 'doge') !== false ||
+            strpos($tokenName, 'shib') !== false) {
+            return 'Meme';
+        }
+
+        // Default untuk token yang tidak dikenal
+        return 'Other';
     }
 
     /**
-     * BARU: Hitung distribusi chain dari portfolio onchain
-     */
-    private function calculateOnchainChainDistribution($portfolioData)
-    {
-        $chains = [];
-
-        // Native balances
-        if (isset($portfolioData['native_balances'])) {
-            foreach ($portfolioData['native_balances'] as $balance) {
-                $chain = $balance['chain'] ?? 'Unknown';
-
-                if (! isset($chains[$chain])) {
-                    $chains[$chain] = [
-                        'chain'         => $chain,
-                        'value'         => 0,
-                        'project_count' => 0,
-                    ];
-                }
-
-                                                             // Approximate USD value (simplified)
-                $estimatedValue = $balance['balance'] * 100; // Rough estimate
-                $chains[$chain]['value'] += $estimatedValue;
-                $chains[$chain]['project_count']++;
-            }
-        }
-
-        // Token balances
-        if (isset($portfolioData['token_balances'])) {
-            foreach ($portfolioData['token_balances'] as $token) {
-                $chain = $token['chain'] ?? 'Unknown';
-
-                if (! isset($chains[$chain])) {
-                    $chains[$chain] = [
-                        'chain'         => $chain,
-                        'value'         => 0,
-                        'project_count' => 0,
-                    ];
-                }
-
-                if (isset($token['usd_value'])) {
-                    $chains[$chain]['value'] += $token['usd_value'];
-                    $chains[$chain]['project_count']++;
-                }
-            }
-        }
-
-        return array_values($chains);
-    }
-
-    /**
-     * ⚡ IMPROVED: Return empty portfolio data structure dengan informasi debug
+     * ⚡ ENHANCED: Return empty portfolio data structure dengan informasi debug
      */
     private function getEmptyPortfolioData()
     {
         return [
             'wallet_address'  => '',
-            'total_usd_value' => 0,
+            'total_usd_value' => 0.0,
             'native_balances' => [],
             'token_balances'  => [],
             'last_updated'    => now()->toISOString(),
             'chains_scanned'  => [],
-            'error_info'      => 'API not available or returned empty data', // ⚡ BARU: Info debug
+            'error_info'      => 'API not available or returned empty data',
         ];
     }
 
     /**
-     * ⚡ IMPROVED: Return empty analytics data structure dengan informasi debug
+     * ⚡ ENHANCED: Return empty analytics data structure dengan informasi debug
      */
     private function getEmptyAnalyticsData()
     {
@@ -616,11 +592,11 @@ class PortfolioController extends Controller
             'wallet_address'        => '',
             'total_transactions'    => 0,
             'unique_tokens_traded'  => 0,
-            'total_volume_usd'      => 0,
+            'total_volume_usd'      => 0.0,
             'most_traded_tokens'    => [],
             'transaction_frequency' => [],
             'chains_activity'       => [],
-            'error_info'            => 'API not available or returned empty data', // ⚡ BARU: Info debug
+            'error_info'            => 'API not available or returned empty data',
         ];
     }
 

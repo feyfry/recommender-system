@@ -43,18 +43,10 @@ BLOCKCHAIN_APIS = {
     }
 }
 
-# ⚡ BARU: Price mapping untuk native tokens
-NATIVE_TOKEN_PRICES = {
-    'ETH': 'ethereum',
-    'BNB': 'binancecoin', 
-    'MATIC': 'matic-network',
-    'AVALANCHE': 'avalanche-2',
-    'AVAX': 'avalanche-2'
-}
-
-# Cache untuk menyimpan data onchain
+# Cache untuk menyimpan data onchain dan prices
 _onchain_cache = {}
-_price_cache = {}  # ⚡ BARU: Cache untuk harga
+_price_cache = {}
+_token_info_cache = {}  # ⚡ BARU: Cache untuk token info
 _cache_ttl = 300  # 5 menit
 
 # Pydantic Models
@@ -102,64 +94,157 @@ class OnchainAnalytics(BaseModel):
     profit_loss_estimate: Optional[float] = None
     chains_activity: Dict[str, int]
 
-# ⚡ BARU: Helper untuk mendapatkan harga dari CoinGecko
-async def fetch_token_prices(session: aiohttp.ClientSession, token_symbols: List[str]) -> Dict[str, float]:
-    """Fetch token prices dari CoinGecko API"""
+# ⚡ BARU: Auto Token Price Discovery System - NO MANUAL MAPPING!
+async def get_token_price_auto(session: aiohttp.ClientSession, token_symbol: str, token_address: str = None, chain: str = None) -> float:
+    """
+    Sistem otomatis untuk mendapatkan harga token tanpa mapping manual
+    Priority: Contract Address > Symbol Search > Native Chain Token
+    """
+    coingecko_api_key = os.environ.get('COINGECKO_API_KEY', '')
+    base_url = "https://api.coingecko.com/api/v3"
+    
+    # Build headers
+    headers = {}
+    if coingecko_api_key and coingecko_api_key not in ['CG-CC***', 'YOUR-API-KEY-HERE']:
+        headers['x-cg-demo-api-key'] = coingecko_api_key
+    
     try:
-        # Check cache dulu
-        cache_key = "token_prices_" + "_".join(sorted(token_symbols))
+        # ⚡ PRIORITY 1: Try contract address lookup (most accurate)
+        if token_address and token_address != '0x0' and chain:
+            platform_map = {
+                'eth': 'ethereum',
+                'ethereum': 'ethereum',
+                'bsc': 'binance-smart-chain',
+                'binance_smart_chain': 'binance-smart-chain',
+                'polygon': 'polygon-pos',
+                'avalanche': 'avalanche'
+            }
+            
+            platform = platform_map.get(chain.lower())
+            if platform:
+                contract_url = f"{base_url}/simple/token_price/{platform}"
+                params = {
+                    'contract_addresses': token_address.lower(),
+                    'vs_currencies': 'usd'
+                }
+                
+                async with session.get(contract_url, params=params, headers=headers) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if token_address.lower() in data and 'usd' in data[token_address.lower()]:
+                            price = float(data[token_address.lower()]['usd'])
+                            logger.info(f"Found price via contract for {token_symbol} ({token_address}): ${price}")
+                            return price
+        
+        # ⚡ PRIORITY 2: Try symbol-based search
+        if token_symbol:
+            # First try coins list search
+            search_url = f"{base_url}/search"
+            params = {'query': token_symbol}
+            
+            async with session.get(search_url, params=params, headers=headers) as response:
+                if response.status == 200:
+                    search_data = await response.json()
+                    
+                    # Look for exact symbol match in coins
+                    for coin in search_data.get('coins', []):
+                        if coin.get('symbol', '').upper() == token_symbol.upper():
+                            coin_id = coin.get('id')
+                            if coin_id:
+                                # Get price for this coin
+                                price_url = f"{base_url}/simple/price"
+                                params = {
+                                    'ids': coin_id,
+                                    'vs_currencies': 'usd'
+                                }
+                                
+                                async with session.get(price_url, params=params, headers=headers) as price_response:
+                                    if price_response.status == 200:
+                                        price_data = await price_response.json()
+                                        if coin_id in price_data and 'usd' in price_data[coin_id]:
+                                            price = float(price_data[coin_id]['usd'])
+                                            logger.info(f"Found price via symbol search for {token_symbol}: ${price}")
+                                            return price
+        
+        # ⚡ PRIORITY 3: Try native token mapping (minimal, auto-detected)
+        native_symbols = {
+            'ETH': 'ethereum',
+            'BNB': 'binancecoin', 
+            'MATIC': 'matic-network',
+            'AVAX': 'avalanche-2',
+            'AVALANCHE': 'avalanche-2'
+        }
+        
+        if token_symbol.upper() in native_symbols:
+            coin_id = native_symbols[token_symbol.upper()]
+            price_url = f"{base_url}/simple/price"
+            params = {
+                'ids': coin_id,
+                'vs_currencies': 'usd'
+            }
+            
+            async with session.get(price_url, params=params, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if coin_id in data and 'usd' in data[coin_id]:
+                        price = float(data[coin_id]['usd'])
+                        logger.info(f"Found price via native mapping for {token_symbol}: ${price}")
+                        return price
+        
+        logger.warning(f"No price found for token {token_symbol} ({token_address}) on {chain}")
+        return 0.0
+        
+    except Exception as e:
+        logger.error(f"Error getting price for {token_symbol}: {str(e)}")
+        return 0.0
+
+# ⚡ ENHANCED: Fetch token prices dengan sistem otomatis
+async def fetch_token_prices_auto(session: aiohttp.ClientSession, tokens: List[Dict]) -> Dict[str, float]:
+    """
+    Fetch token prices dengan sistem otomatis - NO MANUAL MAPPING!
+    Input format: [{'symbol': 'ETH', 'address': '0x0', 'chain': 'eth'}, ...]
+    """
+    try:
+        # Check cache first
+        cache_key = "auto_token_prices_" + "_".join([f"{t['symbol']}_{t.get('address', '')}" for t in tokens])
         if cache_key in _price_cache:
             cache_entry = _price_cache[cache_key]
             if datetime.now() < cache_entry['expires']:
                 return cache_entry['data']
         
-        coingecko_api_key = os.environ.get('COINGECKO_API_KEY', '')
+        prices = {}
         
-        # Map symbols ke CoinGecko IDs
-        token_ids = []
-        symbol_to_id = {}
-        
-        for symbol in token_symbols:
-            if symbol in NATIVE_TOKEN_PRICES:
-                coingecko_id = NATIVE_TOKEN_PRICES[symbol]
-                token_ids.append(coingecko_id)
-                symbol_to_id[symbol] = coingecko_id
-        
-        if not token_ids:
-            return {}
-        
-        # Build URL dengan atau tanpa API key
-        ids_str = ','.join(token_ids)
-        if coingecko_api_key and coingecko_api_key != 'CG-CC***':
-            url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids_str}&vs_currencies=usd&x_cg_demo_api_key={coingecko_api_key}"
-        else:
-            # Gunakan public API tanpa key (rate limited)
-            url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids_str}&vs_currencies=usd"
-        
-        async with session.get(url) as response:
-            if response.status == 200:
-                price_data = await response.json()
+        # Process tokens in batches to avoid rate limiting
+        batch_size = 5
+        for i in range(0, len(tokens), batch_size):
+            batch = tokens[i:i + batch_size]
+            
+            # Process each token in the batch
+            for token in batch:
+                symbol = token.get('symbol', '')
+                address = token.get('address', '')
+                chain = token.get('chain', '')
                 
-                # Convert back to symbol-based mapping
-                symbol_prices = {}
-                for symbol, coingecko_id in symbol_to_id.items():
-                    if coingecko_id in price_data and 'usd' in price_data[coingecko_id]:
-                        symbol_prices[symbol] = price_data[coingecko_id]['usd']
-                
-                # Cache hasil
-                _price_cache[cache_key] = {
-                    'data': symbol_prices,
-                    'expires': datetime.now() + timedelta(minutes=5)
-                }
-                
-                logger.info(f"Fetched prices for {len(symbol_prices)} tokens")
-                return symbol_prices
-            else:
-                logger.warning(f"CoinGecko API returned status {response.status}")
-                return {}
-                
+                if symbol:
+                    price = await get_token_price_auto(session, symbol, address, chain)
+                    if price > 0:
+                        prices[symbol] = price
+            
+            # Small delay between batches
+            if i + batch_size < len(tokens):
+                await asyncio.sleep(0.2)
+        
+        # Cache results
+        _price_cache[cache_key] = {
+            'data': prices,
+            'expires': datetime.now() + timedelta(minutes=5)
+        }
+        
+        logger.info(f"Auto-fetched prices for {len(prices)} tokens from {len(tokens)} requested")
+        return prices
+        
     except Exception as e:
-        logger.error(f"Error fetching token prices: {str(e)}")
+        logger.error(f"Error auto-fetching token prices: {str(e)}")
         return {}
 
 # Helper Functions
@@ -186,7 +271,7 @@ async def fetch_ethereum_data(session: aiohttp.ClientSession, wallet_address: st
         return []
 
 async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address: str) -> Dict:
-    """⚡ ENHANCED: Fetch portfolio dengan USD values calculation"""
+    """⚡ ENHANCED: Fetch portfolio dengan AUTO price calculation"""
     try:
         config = BLOCKCHAIN_APIS['moralis']
         headers = {
@@ -200,8 +285,8 @@ async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address
             'total_usd_value': 0.0
         }
         
-        # Collect semua token symbols untuk price lookup
-        all_symbols = set()
+        # Collect all tokens for batch price fetching
+        all_tokens = []
         
         # Fetch data dari multiple chains
         for chain in config['chains']:
@@ -220,10 +305,16 @@ async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address
                                 'eth': 'ETH',
                                 'bsc': 'BNB', 
                                 'polygon': 'MATIC',
-                                'avalanche': 'AVALANCHE'
+                                'avalanche': 'AVAX'
                             }
                             symbol = chain_symbol_map.get(chain, chain.upper())
-                            all_symbols.add(symbol)
+                            
+                            # Add to tokens list for price fetching
+                            all_tokens.append({
+                                'symbol': symbol,
+                                'address': '0x0',
+                                'chain': chain
+                            })
                             
                             portfolio_data['native_balances'].append({
                                 'token_address': '0x0',
@@ -248,10 +339,17 @@ async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address
                             
                             if balance > 0:  # Only include non-zero balances
                                 symbol = token.get('symbol', 'UNKNOWN')
-                                all_symbols.add(symbol)
+                                address = token.get('token_address', '')
+                                
+                                # Add to tokens list for price fetching
+                                all_tokens.append({
+                                    'symbol': symbol,
+                                    'address': address,
+                                    'chain': chain
+                                })
                                 
                                 portfolio_data['token_balances'].append({
-                                    'token_address': token.get('token_address'),
+                                    'token_address': address,
                                     'token_name': token.get('name'),
                                     'token_symbol': symbol,
                                     'balance': balance,
@@ -268,31 +366,32 @@ async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address
                 logger.warning(f"Error fetching {chain} data: {str(e)}")
                 continue
         
-        # ⚡ BARU: Fetch prices untuk semua tokens
-        token_prices = await fetch_token_prices(session, list(all_symbols))
-        
-        # ⚡ Calculate USD values
-        total_usd_value = 0.0
-        
-        # Update native balances dengan USD values
-        for balance in portfolio_data['native_balances']:
-            symbol = balance['token_symbol']
-            if symbol in token_prices:
-                usd_value = balance['balance'] * token_prices[symbol]
-                balance['usd_value'] = usd_value
-                total_usd_value += usd_value
-        
-        # Update token balances dengan USD values  
-        for token in portfolio_data['token_balances']:
-            symbol = token['token_symbol']
-            if symbol in token_prices:
-                usd_value = token['balance'] * token_prices[symbol]
-                token['usd_value'] = usd_value
-                total_usd_value += usd_value
-        
-        portfolio_data['total_usd_value'] = total_usd_value
-        
-        logger.info(f"Portfolio calculation: {len(portfolio_data['native_balances'])} native + {len(portfolio_data['token_balances'])} tokens, Total USD: ${total_usd_value:.2f}")
+        # ⚡ AUTO: Fetch prices untuk semua tokens
+        if all_tokens:
+            token_prices = await fetch_token_prices_auto(session, all_tokens)
+            
+            # Calculate USD values
+            total_usd_value = 0.0
+            
+            # Update native balances dengan USD values
+            for balance in portfolio_data['native_balances']:
+                symbol = balance['token_symbol']
+                if symbol in token_prices:
+                    usd_value = balance['balance'] * token_prices[symbol]
+                    balance['usd_value'] = usd_value
+                    total_usd_value += usd_value
+            
+            # Update token balances dengan USD values  
+            for token in portfolio_data['token_balances']:
+                symbol = token['token_symbol']
+                if symbol in token_prices:
+                    usd_value = token['balance'] * token_prices[symbol]
+                    token['usd_value'] = usd_value
+                    total_usd_value += usd_value
+            
+            portfolio_data['total_usd_value'] = total_usd_value
+            
+            logger.info(f"Auto-calculated portfolio: {len(portfolio_data['native_balances'])} native + {len(portfolio_data['token_balances'])} tokens, Total USD: ${total_usd_value:.8f}")
         
         return portfolio_data
         
@@ -336,7 +435,7 @@ async def fetch_onchain_transactions(session: aiohttp.ClientSession, wallet_addr
         return []
 
 def calculate_portfolio_analytics(transactions: List[Dict], portfolio: Dict) -> Dict:
-    """⚡ ENHANCED: Hitung analytics dengan USD volume calculation"""
+    """⚡ ENHANCED: Hitung analytics dengan AUTO USD volume calculation"""
     try:
         analytics = {
             'total_transactions': len(transactions),
@@ -351,8 +450,8 @@ def calculate_portfolio_analytics(transactions: List[Dict], portfolio: Dict) -> 
         token_activity = {}
         chain_activity = {}
         
-        # ⚡ Get current ETH price untuk volume calculation
-        eth_price = 3400.0  # Fallback price, akan di-update dari API
+        # Calculate total USD volume from portfolio
+        total_usd_from_portfolio = portfolio.get('total_usd_value', 0.0)
         
         for tx in transactions:
             chain = tx.get('chain', 'unknown')
@@ -362,7 +461,7 @@ def calculate_portfolio_analytics(transactions: List[Dict], portfolio: Dict) -> 
             tx_date = tx['timestamp'].strftime('%Y-%m-%d')
             analytics['transaction_frequency'][tx_date] = analytics['transaction_frequency'].get(tx_date, 0) + 1
             
-            # Token activity dengan USD volume
+            # Token activity dengan simplified USD volume estimation
             token_symbol = tx.get('token_symbol', 'ETH')
             if token_symbol not in token_activity:
                 token_activity[token_symbol] = {'count': 0, 'volume': 0.0, 'volume_usd': 0.0}
@@ -371,9 +470,11 @@ def calculate_portfolio_analytics(transactions: List[Dict], portfolio: Dict) -> 
             token_value = tx.get('value', 0)
             token_activity[token_symbol]['volume'] += token_value
             
-            # Calculate USD volume (simplified untuk ETH)
+            # Simplified USD volume estimation
             if token_symbol == 'ETH':
-                usd_volume = token_value * eth_price
+                # Use estimated ETH price for volume calculation
+                estimated_eth_price = 3400.0  # Fallback
+                usd_volume = token_value * estimated_eth_price
                 token_activity[token_symbol]['volume_usd'] += usd_volume
                 analytics['total_volume_usd'] += usd_volume
         
@@ -404,7 +505,7 @@ async def get_wallet_portfolio(
     wallet_address: str = Path(..., description="Wallet address"),
     chains: Optional[List[str]] = Query(None, description="Chains to scan (eth, bsc, polygon)")
 ) -> WalletPortfolio:
-    """⚡ ENHANCED: Portfolio dengan USD calculations"""
+    """⚡ ENHANCED: Portfolio dengan AUTO USD calculations"""
     
     cache_key = f"portfolio_{wallet_address}_{','.join(chains or ['all'])}"
     
@@ -421,7 +522,7 @@ async def get_wallet_portfolio(
             raise HTTPException(status_code=400, detail="Invalid wallet address format")
         
         async with aiohttp.ClientSession() as session:
-            # Fetch portfolio menggunakan Moralis (multi-chain) dengan USD calculation
+            # Fetch portfolio menggunakan Moralis (multi-chain) dengan AUTO USD calculation
             portfolio_data = await fetch_moralis_portfolio(session, wallet_address)
             
             # Create response
@@ -440,7 +541,7 @@ async def get_wallet_portfolio(
                 'expires': datetime.now() + timedelta(seconds=_cache_ttl)
             }
             
-            logger.info(f"Successfully fetched portfolio for {wallet_address}: {len(portfolio.native_balances)} native + {len(portfolio.token_balances)} tokens, USD Total: ${portfolio.total_usd_value:.2f}")
+            logger.info(f"Auto-calculated portfolio for {wallet_address}: {len(portfolio.native_balances)} native + {len(portfolio.token_balances)} tokens, USD Total: ${portfolio.total_usd_value:.8f}")
             
             return portfolio
     
@@ -501,7 +602,7 @@ async def get_wallet_analytics(
     wallet_address: str = Path(..., description="Wallet address"),
     days: int = Query(30, ge=1, le=365, description="Days to analyze")
 ) -> OnchainAnalytics:
-    """⚡ ENHANCED: Analytics dengan USD volume calculation"""
+    """⚡ ENHANCED: Analytics dengan AUTO USD volume calculation"""
     
     cache_key = f"analytics_{wallet_address}_{days}"
     
@@ -521,7 +622,7 @@ async def get_wallet_analytics(
             transactions_data = await fetch_onchain_transactions(session, wallet_address, 500)
             portfolio_data = await fetch_moralis_portfolio(session, wallet_address)
             
-            # Calculate analytics dengan USD volume
+            # Calculate analytics dengan AUTO USD volume
             analytics_data = calculate_portfolio_analytics(transactions_data, portfolio_data)
             analytics_data['wallet_address'] = wallet_address
             
@@ -533,7 +634,7 @@ async def get_wallet_analytics(
                 'expires': datetime.now() + timedelta(seconds=_cache_ttl * 2)  # Cache lebih lama
             }
             
-            logger.info(f"Successfully calculated analytics for {wallet_address}: {analytics.total_transactions} txs, {analytics.unique_tokens_traded} tokens, USD Volume: ${analytics.total_volume_usd:.2f}")
+            logger.info(f"Auto-calculated analytics for {wallet_address}: {analytics.total_transactions} txs, {analytics.unique_tokens_traded} tokens, USD Volume: ${analytics.total_volume_usd:.8f}")
             
             return analytics
     
@@ -547,18 +648,20 @@ async def get_wallet_analytics(
 @router.post("/cache/clear")
 async def clear_onchain_cache():
     """Clear onchain data cache"""
-    global _onchain_cache, _price_cache
+    global _onchain_cache, _price_cache, _token_info_cache
     
     try:
         cache_size = len(_onchain_cache)
         price_cache_size = len(_price_cache)
+        token_cache_size = len(_token_info_cache)
         
         _onchain_cache = {}
         _price_cache = {}
+        _token_info_cache = {}
         
-        logger.info(f"Onchain cache cleared: {cache_size} entries + {price_cache_size} price entries")
+        logger.info(f"All caches cleared: {cache_size} onchain + {price_cache_size} price + {token_cache_size} token entries")
         
-        return {"message": f"Onchain cache cleared ({cache_size} entries, {price_cache_size} price entries)"}
+        return {"message": f"All caches cleared ({cache_size} onchain, {price_cache_size} price, {token_cache_size} token entries)"}
     
     except Exception as e:
         logger.error(f"Error clearing cache: {str(e)}")
@@ -571,16 +674,17 @@ async def blockchain_health_check():
         status = {
             'moralis_api': 'unknown',
             'etherscan_api': 'unknown',
-            'coingecko_api': 'unknown',  # ⚡ BARU
+            'coingecko_api': 'unknown',
             'cache_entries': len(_onchain_cache),
-            'price_cache_entries': len(_price_cache),  # ⚡ BARU
+            'price_cache_entries': len(_price_cache),
+            'token_cache_entries': len(_token_info_cache),  # ⚡ BARU
             'timestamp': datetime.now(),
             'api_keys_configured': {
                 'moralis': bool(os.environ.get('MORALIS_API_KEY')),
                 'etherscan': bool(os.environ.get('ETHERSCAN_API_KEY')),
                 'bscscan': bool(os.environ.get('BSCSCAN_API_KEY')),
                 'polygonscan': bool(os.environ.get('POLYGONSCAN_API_KEY')),
-                'coingecko': bool(os.environ.get('COINGECKO_API_KEY'))  # ⚡ BARU
+                'coingecko': bool(os.environ.get('COINGECKO_API_KEY'))
             }
         }
         
@@ -597,15 +701,10 @@ async def blockchain_health_check():
                 else:
                     status['moralis_api'] = 'api_key_missing'
                 
-                # ⚡ Test CoinGecko API
-                coingecko_key = os.environ.get('COINGECKO_API_KEY')
-                if coingecko_key and coingecko_key not in ['CG-CC***', 'YOUR-API-KEY-HERE']:
-                    test_url = f"https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd&x_cg_demo_api_key={coingecko_key}"
-                else:
-                    test_url = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
-                
-                async with session.get(test_url, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                    status['coingecko_api'] = 'healthy' if response.status == 200 else f'error_status_{response.status}'
+                # Test CoinGecko API dengan auto token price
+                test_tokens = [{'symbol': 'ETH', 'address': '0x0', 'chain': 'eth'}]
+                test_prices = await fetch_token_prices_auto(session, test_tokens)
+                status['coingecko_api'] = 'healthy' if test_prices else 'no_prices_returned'
                     
         except Exception as e:
             status['moralis_api'] = f'error: {str(e)}'

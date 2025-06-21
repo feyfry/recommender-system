@@ -43,12 +43,28 @@
     </div>
     @endif
 
-    <!-- ⚡ BARU: Loading State -->
+    <!-- ⚡ ENHANCED: Loading State with Skeleton -->
     <div id="loading-state" class="mb-8">
         <div class="clay-card p-6">
-            <div class="flex items-center justify-center py-8">
-                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mr-3"></div>
-                <span class="text-gray-600">Loading onchain portfolio data...</span>
+            <div class="animate-pulse">
+                <div class="flex items-center justify-center py-8">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mr-3"></div>
+                    <span class="text-gray-600">Loading onchain portfolio data...</span>
+                </div>
+                <!-- Skeleton content -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+                    <div class="lg:col-span-2">
+                        <div class="grid grid-cols-2 gap-4 mb-6">
+                            <div class="clay-card bg-gray-100 p-4 h-24"></div>
+                            <div class="clay-card bg-gray-100 p-4 h-24"></div>
+                        </div>
+                        <div class="clay-card bg-gray-100 p-4 h-64"></div>
+                    </div>
+                    <div class="lg:col-span-1">
+                        <div class="clay-card bg-gray-100 p-4 h-32 mb-6"></div>
+                        <div class="clay-card bg-gray-100 p-4 h-32"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -71,7 +87,7 @@
                         <div class="clay-card bg-primary/10 p-4">
                             <div class="text-gray-600 text-sm">Total Value (Real)</div>
                             <div class="text-2xl font-bold" id="onchain-total-value">
-                                $0.00
+                                $0.00000000
                             </div>
                             <div class="text-xs text-gray-500 mt-1" id="onchain-last-updated">
                                 Loading...
@@ -135,13 +151,14 @@
         </div>
     </div>
 
-    <!-- ⚡ Error State -->
+    <!-- ⚡ ENHANCED: Error State dengan informasi lebih detail -->
     <div id="error-state" class="mb-8" style="display: none;">
         <div class="clay-card p-6">
             <div class="text-center py-8">
                 <i class="fas fa-exclamation-triangle text-4xl text-yellow-500 mb-3"></i>
                 <h3 class="text-lg font-bold mb-2">Gagal Memuat Data Onchain</h3>
                 <p class="text-gray-600 mb-4" id="error-message">Tidak dapat terhubung ke blockchain API</p>
+                <div class="text-sm text-gray-500 mb-4" id="error-details"></div>
                 <button onclick="loadOnchainData()" class="clay-button clay-button-primary">
                     <i class="fas fa-retry mr-2"></i> Coba Lagi
                 </button>
@@ -163,12 +180,12 @@
             <div class="grid grid-cols-2 gap-4 mb-6">
                 <div class="clay-card bg-primary/10 p-4">
                     <div class="text-gray-600 text-sm">Total Value (Manual)</div>
-                    <div class="text-2xl font-bold">${{ number_format($manualTotalValue, 2) }}</div>
+                    <div class="text-2xl font-bold">${{ number_format($manualTotalValue, 8) }}</div>
                 </div>
                 <div class="clay-card bg-{{ $manualProfitLoss >= 0 ? 'success' : 'danger' }}/10 p-4">
                     <div class="text-gray-600 text-sm">Profit/Loss (Manual)</div>
                     <div class="text-2xl font-bold {{ $manualProfitLoss >= 0 ? 'text-success' : 'text-danger' }}">
-                        {{ $manualProfitLoss >= 0 ? '+' : '' }}${{ number_format($manualProfitLoss, 2) }}
+                        {{ $manualProfitLoss >= 0 ? '+' : '' }}${{ number_format($manualProfitLoss, 8) }}
                         <span class="text-sm">({{ number_format($manualProfitLossPercentage, 2) }}%)</span>
                     </div>
                 </div>
@@ -201,12 +218,12 @@
                                     </div>
                                 </div>
                             </td>
-                            <td class="py-3 px-4 font-medium">{{ number_format($portfolio->amount, 6) }}</td>
-                            <td class="py-3 px-4">${{ number_format($portfolio->average_buy_price, 4) }}</td>
-                            <td class="py-3 px-4">${{ number_format($portfolio->project->current_price, 4) }}</td>
-                            <td class="py-3 px-4 font-medium">${{ number_format($portfolio->current_value, 2) }}</td>
+                            <td class="py-3 px-4 font-medium">{{ number_format($portfolio->amount, 8) }}</td>
+                            <td class="py-3 px-4">${{ number_format($portfolio->average_buy_price, 8) }}</td>
+                            <td class="py-3 px-4">${{ number_format($portfolio->project->current_price, 8) }}</td>
+                            <td class="py-3 px-4 font-medium">${{ number_format($portfolio->current_value, 8) }}</td>
                             <td class="py-3 px-4 {{ $portfolio->profit_loss_value >= 0 ? 'text-success' : 'text-danger' }}">
-                                {{ $portfolio->profit_loss_value >= 0 ? '+' : '' }}${{ number_format($portfolio->profit_loss_value, 2) }}
+                                {{ $portfolio->profit_loss_value >= 0 ? '+' : '' }}${{ number_format($portfolio->profit_loss_value, 8) }}
                                 <div class="text-xs">{{ number_format($portfolio->profit_loss_percentage, 2) }}%</div>
                             </td>
                         </tr>
@@ -284,7 +301,7 @@
         loadOnchainData();
     });
 
-    // ⚡ BARU: Function untuk load onchain data secara async
+    // ⚡ ENHANCED: Function untuk load onchain data secara async dengan error handling yang lebih baik
     async function loadOnchainData() {
         const loadingState = document.getElementById('loading-state');
         const onchainSection = document.getElementById('onchain-portfolio-section');
@@ -321,19 +338,21 @@
         } catch (error) {
             console.error('Error loading onchain data:', error);
 
-            // Show error state
+            // Show error state dengan detail yang lebih baik
             loadingState.style.display = 'none';
             onchainSection.style.display = 'none';
             errorState.style.display = 'block';
 
             document.getElementById('error-message').textContent = error.message;
+            document.getElementById('error-details').textContent =
+                'Pastikan Moralis API dan CoinGecko API key sudah dikonfigurasi dengan benar di .env file.';
         }
     }
 
-    // ⚡ BARU: Function untuk populate data ke UI
+    // ⚡ ENHANCED: Function untuk populate data ke UI dengan 8 decimal precision
     function populateOnchainData(portfolio) {
-        // Update summary cards
-        document.getElementById('onchain-total-value').textContent = `${numberFormat(portfolio.total_usd_value || 0, 2)}`;
+        // Update summary cards dengan 8 decimal precision
+        document.getElementById('onchain-total-value').textContent = `$${numberFormat(portfolio.total_usd_value || 0, 8)}`;
 
         const totalAssets = (portfolio.native_balances?.length || 0) + (portfolio.token_balances?.length || 0);
         document.getElementById('onchain-asset-count').textContent = totalAssets;
@@ -352,7 +371,7 @@
         populateChainDistribution(portfolio);
     }
 
-    // ⚡ BARU: Populate holdings table
+    // ⚡ ENHANCED: Populate holdings table dengan 8 decimal precision
     function populateHoldingsTable(portfolio) {
         const tableBody = document.getElementById('onchain-holdings-table');
         let html = '';
@@ -360,7 +379,7 @@
         // Native balances
         if (portfolio.native_balances && portfolio.native_balances.length > 0) {
             portfolio.native_balances.forEach(balance => {
-                const usdValue = balance.usd_value ? `${numberFormat(balance.usd_value, 2)}` : 'N/A';
+                const usdValue = balance.usd_value ? `$${numberFormat(balance.usd_value, 8)}` : 'Estimating...';
 
                 html += `
                     <tr class="border-l-4 border-blue-500">
@@ -375,7 +394,7 @@
                                 </div>
                             </div>
                         </td>
-                        <td class="py-3 px-4 font-medium">${numberFormat(balance.balance, 6)}</td>
+                        <td class="py-3 px-4 font-medium">${numberFormat(balance.balance, 8)}</td>
                         <td class="py-3 px-4">
                             <span class="clay-badge clay-badge-info">${balance.chain.toUpperCase()}</span>
                         </td>
@@ -393,7 +412,7 @@
         // Token balances
         if (portfolio.token_balances && portfolio.token_balances.length > 0) {
             portfolio.token_balances.forEach(token => {
-                const usdValue = token.usd_value ? `${numberFormat(token.usd_value, 2)}` : 'N/A';
+                const usdValue = token.usd_value ? `$${numberFormat(token.usd_value, 8)}` : 'N/A';
 
                 html += `
                     <tr>
@@ -408,7 +427,7 @@
                                 </div>
                             </div>
                         </td>
-                        <td class="py-3 px-4 font-medium">${numberFormat(token.balance, 6)}</td>
+                        <td class="py-3 px-4 font-medium">${numberFormat(token.balance, 8)}</td>
                         <td class="py-3 px-4">
                             <span class="clay-badge clay-badge-secondary">${token.chain.toUpperCase()}</span>
                         </td>
@@ -440,19 +459,41 @@
         tableBody.innerHTML = html;
     }
 
-    // ⚡ BARU: Populate category distribution dengan fix calculation
+    // ⚡ ENHANCED: Populate category distribution dengan enriched project data
     function populateCategoryDistribution(portfolio) {
         const container = document.getElementById('onchain-category-distribution');
         const totalValue = portfolio.total_usd_value || 0;
 
-        // Calculate category distribution from token balances
+        // Calculate category distribution dari enriched project data
         let categories = {};
 
+        // Process native balances dengan project data
+        if (portfolio.native_balances) {
+            portfolio.native_balances.forEach(balance => {
+                if (balance.usd_value && balance.usd_value > 0) {
+                    // Use project_data yang sudah di-enrich dari backend
+                    const category = balance.project_data?.primary_category || 'Layer-1';
+
+                    if (!categories[category]) {
+                        categories[category] = {
+                            primary_category: category,
+                            value: 0,
+                            project_count: 0
+                        };
+                    }
+
+                    categories[category].value += balance.usd_value;
+                    categories[category].project_count++;
+                }
+            });
+        }
+
+        // Process token balances dengan project data
         if (portfolio.token_balances) {
             portfolio.token_balances.forEach(token => {
                 if (token.usd_value && token.usd_value > 0) {
-                    // Use a simplified category mapping
-                    const category = getCategoryFromSymbol(token.token_symbol) || 'Other';
+                    // Use project_data yang sudah di-enrich dari backend
+                    const category = token.project_data?.primary_category || 'Other';
 
                     if (!categories[category]) {
                         categories[category] = {
@@ -480,12 +521,12 @@
                     <div class="clay-card bg-secondary/5 p-3">
                         <div class="flex justify-between mb-1">
                             <span class="font-medium text-sm">${category.primary_category}</span>
-                            <span class="text-sm">${numberFormat(category.value, 2)}</span>
+                            <span class="text-sm">$${numberFormat(category.value, 8)}</span>
                         </div>
                         <div class="clay-progress h-2">
                             <div class="clay-progress-bar clay-progress-secondary" style="width: ${percentage}%"></div>
                         </div>
-                        <div class="text-xs text-right mt-1">${category.project_count} assets</div>
+                        <div class="text-xs text-right mt-1">${category.project_count} assets (${percentage.toFixed(1)}%)</div>
                     </div>
                 `;
             });
@@ -495,13 +536,14 @@
         } else {
             container.innerHTML = `
                 <div class="text-center py-4">
-                    <p class="text-gray-500 text-sm">Tidak ada data kategori</p>
+                    <p class="text-gray-500 text-sm">Menunggu data dengan USD value</p>
+                    <p class="text-xs text-gray-400 mt-1">Auto-refresh akan mengupdate distribusi</p>
                 </div>
             `;
         }
     }
 
-    // ⚡ BARU: Populate chain distribution dengan fix calculation
+    // ⚡ ENHANCED: Populate chain distribution dengan format yang benar
     function populateChainDistribution(portfolio) {
         const container = document.getElementById('onchain-chain-distribution');
         const totalValue = portfolio.total_usd_value || 0;
@@ -559,12 +601,12 @@
                     <div class="clay-card bg-info/5 p-3">
                         <div class="flex justify-between mb-1">
                             <span class="font-medium text-sm">${chain.chain.charAt(0).toUpperCase() + chain.chain.slice(1)}</span>
-                            <span class="text-sm">${numberFormat(chain.value, 2)}</span>
+                            <span class="text-sm">$${numberFormat(chain.value, 8)}</span>
                         </div>
                         <div class="clay-progress h-2">
                             <div class="clay-progress-bar clay-progress-info" style="width: ${percentage}%"></div>
                         </div>
-                        <div class="text-xs text-right mt-1">${chain.project_count} assets</div>
+                        <div class="text-xs text-right mt-1">${chain.project_count} assets (${percentage.toFixed(1)}%)</div>
                     </div>
                 `;
             });
@@ -574,28 +616,11 @@
         } else {
             container.innerHTML = `
                 <div class="text-center py-4">
-                    <p class="text-gray-500 text-sm">Tidak ada data blockchain</p>
+                    <p class="text-gray-500 text-sm">Menunggu data dengan USD value</p>
+                    <p class="text-xs text-gray-400 mt-1">Auto-refresh akan mengupdate distribusi</p>
                 </div>
             `;
         }
-    }
-
-    // ⚡ Helper function untuk mapping symbol ke category
-    function getCategoryFromSymbol(symbol) {
-        const categoryMap = {
-            'ETH': 'Layer-1',
-            'BNB': 'Layer-1',
-            'MATIC': 'Layer-2',
-            'WETH': 'DeFi',
-            'USDT': 'Stablecoin',
-            'USDC': 'Stablecoin',
-            'DAI': 'Stablecoin',
-            'UNI': 'DeFi',
-            'AAVE': 'DeFi',
-            'COMP': 'DeFi'
-        };
-
-        return categoryMap[symbol] || 'Other';
     }
 
     // Copy wallet address to clipboard
@@ -644,8 +669,12 @@
         }
     }
 
-    // ⚡ Helper: Number formatting
-    function numberFormat(number, decimals = 2) {
+    // ⚡ ENHANCED: Number formatting dengan 8 decimal precision
+    function numberFormat(number, decimals = 8) {
+        if (number === null || number === undefined || isNaN(number)) {
+            return '0.' + '0'.repeat(decimals);
+        }
+
         return new Intl.NumberFormat('en-US', {
             minimumFractionDigits: decimals,
             maximumFractionDigits: decimals
