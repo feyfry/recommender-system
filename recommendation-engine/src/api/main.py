@@ -18,12 +18,22 @@ from main import train_models, process_data
 # Import routers
 from src.api.recommend import router as recommend_router
 from src.api.analysis import router as analysis_router
-# Try to import transactions router, fallback jika error
+
+# PERBAIKAN: Import transactions router dengan error handling yang lebih baik
+transactions_router = None
+transactions_available = False
+
 try:
     from src.api.transactions import router as transactions_router
     transactions_available = True
+    logging.info("SUCCESS: Transactions router imported successfully")
 except ImportError as e:
-    logging.warning(f"Transactions router not available: {e}")
+    logging.error(f"ERROR: Failed to import transactions router: {e}")
+    logging.error("💡 Tip: Install required dependencies: pip install pandas requests")
+    transactions_router = None
+    transactions_available = False
+except Exception as e:
+    logging.error(f"ERROR: Unexpected error importing transactions router: {e}")
     transactions_router = None
     transactions_available = False
 
@@ -77,9 +87,16 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"error": f"Internal server error: {str(exc)}"}
     )
 
-# Include routers
+# PERBAIKAN: Include routers dengan conditional check
 app.include_router(recommend_router)
 app.include_router(analysis_router)
+
+# PERBAIKAN: Include transactions router jika berhasil diimport
+if transactions_available and transactions_router:
+    app.include_router(transactions_router)
+    logger.info("SUCCESS: Transactions router included in FastAPI app")
+else:
+    logger.warning("WARNING: Transactions router not available - transactions endpoints will not work")
 
 # Model pengisian data interaksi
 class InteractionRecord(BaseModel):
@@ -248,10 +265,10 @@ async def admin_sync_data(request: SyncDataRequest = Body(...)):
         logger.error(f"Error syncing data: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error syncing data: {str(e)}")
 
-# Root endpoint
+# PERBAIKAN: Root endpoint dengan informasi transactions
 @app.get("/")
 async def root():
-    return {
+    base_endpoints = {
         "name": "Web3 Recommendation System API",
         "version": "1.0.0",
         "endpoints": {
@@ -271,14 +288,40 @@ async def root():
             }
         }
     }
+    
+    # PERBAIKAN: Add transactions endpoints jika tersedia
+    if transactions_available:
+        base_endpoints["endpoints"]["transactions"] = {
+            "sync": "/transactions/sync",
+            "sync_single": "/transactions/sync/single-wallet",
+            "prices_update": "/transactions/prices/update", 
+            "test_wallet": "/transactions/test/wallet/{wallet_address}",
+            "status": "/transactions/status"
+        }
+        base_endpoints["transactions_available"] = True
+    else:
+        base_endpoints["transactions_available"] = False
+        base_endpoints["note"] = "Transactions API not available - install required dependencies"
+    
+    return base_endpoints
 
 # Health check endpoint
 @app.get("/health")
 async def health_check():
-    return {
+    health_status = {
         "status": "healthy",
-        "timestamp": time.time()
+        "timestamp": time.time(),
+        "features": {
+            "recommendations": True,
+            "analysis": True,
+            "transactions": transactions_available
+        }
     }
+    
+    if not transactions_available:
+        health_status["warnings"] = ["Transactions API not available"]
+    
+    return health_status
 
 # Run the API server
 if __name__ == "__main__":
@@ -289,6 +332,11 @@ if __name__ == "__main__":
     
     # Log startup
     logger.info(f"Starting API server on {API_HOST}:{API_PORT}")
+    
+    if transactions_available:
+        logger.info("SUCCESS: All features available including transactions")
+    else:
+        logger.warning("WARNING: Transactions API not available - install dependencies")
     
     # Run server
     uvicorn.run(
