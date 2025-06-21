@@ -1,14 +1,14 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Admin\AdminController;
 use App\Http\Controllers\Auth\Web3AuthController;
-use App\Http\Controllers\Backend\ProfileController;
-use App\Http\Controllers\Backend\ProjectController;
 use App\Http\Controllers\Backend\DashboardController;
 use App\Http\Controllers\Backend\PortfolioController;
+use App\Http\Controllers\Backend\ProfileController;
+use App\Http\Controllers\Backend\ProjectController;
 use App\Http\Controllers\Backend\RecommendationController;
 use App\Http\Controllers\Backend\TechnicalAnalysisController;
+use Illuminate\Support\Facades\Route;
 
 // Halaman Utama
 Route::get('/', function () {
@@ -63,15 +63,32 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         Route::get('/price-prediction/{projectId}', [TechnicalAnalysisController::class, 'getPricePrediction'])->name('panel.technical-analysis.price-prediction');
     });
 
-    // Portfolio
+    // Portfolio - UPDATED STRUCTURE
     Route::prefix('portfolio')->group(function () {
+        // Main portfolio overview (onchain + manual data)
         Route::get('/', [PortfolioController::class, 'index'])->name('panel.portfolio');
-        Route::get('/transactions', [PortfolioController::class, 'transactions'])->name('panel.portfolio.transactions');
+
+        // BARU: Onchain Analytics
+        Route::get('/onchain-analytics', [PortfolioController::class, 'onchainAnalytics'])->name('panel.portfolio.onchain-analytics');
+
+        // RENAMED: Transaction Management (dulu: transactions)
+        Route::get('/transaction-management', [PortfolioController::class, 'transactionManagement'])->name('panel.portfolio.transaction-management');
+
+        // Price Alerts (existing)
         Route::get('/price-alerts', [PortfolioController::class, 'priceAlerts'])->name('panel.portfolio.price-alerts');
 
+        // BARU: AJAX endpoint untuk refresh onchain data
+        Route::post('/refresh-onchain', [PortfolioController::class, 'refreshOnchainData'])->name('panel.portfolio.refresh-onchain');
+
+        // Transaction operations (existing)
         Route::post('/transactions/add', [PortfolioController::class, 'addTransaction'])->name('panel.portfolio.add-transaction');
         Route::post('/price-alerts/add', [PortfolioController::class, 'addPriceAlert'])->name('panel.portfolio.add-price-alert');
         Route::delete('/price-alerts/{id}', [PortfolioController::class, 'deletePriceAlert'])->name('panel.portfolio.delete-price-alert');
+
+        // DEPRECATED ROUTES - For backward compatibility (redirects)
+        Route::get('/transactions', function () {
+            return redirect()->route('panel.portfolio.transaction-management');
+        })->name('panel.portfolio.transactions');
     });
 
     // Admin area (hanya untuk role admin)

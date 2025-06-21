@@ -167,13 +167,27 @@
                                     <i class="fas fa-chevron-right transition-transform" :class="{'rotate-90': open}"></i>
                                 </button>
                                 <div x-show="open" class="pl-9 space-y-1 mt-1">
-                                    <a href="{{ route('panel.portfolio') }}" class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('panel.portfolio') && !request()->routeIs('panel.portfolio.*') ? 'font-bold text-primary' : '' }}">
+                                    <a href="{{ route('panel.portfolio') }}"
+                                    class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('panel.portfolio') && !request()->routeIs('panel.portfolio.*') ? 'font-bold text-primary' : '' }}">
+                                        <i class="fas fa-chart-pie mr-2 text-xs"></i>
                                         Overview
+                                        <span class="text-xs text-gray-500 block">Real + Manual</span>
                                     </a>
-                                    <a href="{{ route('panel.portfolio.transactions') }}" class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('panel.portfolio.transactions') ? 'font-bold text-primary' : '' }}">
-                                        Transaksi
+                                    <a href="{{ route('panel.portfolio.onchain-analytics') }}"
+                                    class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('panel.portfolio.onchain-analytics') ? 'font-bold text-primary' : '' }}">
+                                        <i class="fas fa-link mr-2 text-xs"></i>
+                                        Onchain Analytics
+                                        <span class="clay-badge clay-badge-success text-xs ml-1">LIVE</span>
                                     </a>
-                                    <a href="{{ route('panel.portfolio.price-alerts') }}" class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('panel.portfolio.price-alerts') ? 'font-bold text-primary' : '' }}">
+                                    <a href="{{ route('panel.portfolio.transaction-management') }}"
+                                    class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('panel.portfolio.transaction-management') ? 'font-bold text-primary' : '' }}">
+                                        <i class="fas fa-cash-register mr-2 text-xs"></i>
+                                        Transaction Management
+                                        <span class="clay-badge clay-badge-warning text-xs ml-1">MANUAL</span>
+                                    </a>
+                                    <a href="{{ route('panel.portfolio.price-alerts') }}"
+                                    class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('panel.portfolio.price-alerts') ? 'font-bold text-primary' : '' }}">
+                                        <i class="fas fa-bell mr-2 text-xs"></i>
                                         Price Alerts
                                     </a>
                                 </div>
