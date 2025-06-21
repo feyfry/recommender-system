@@ -26,7 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ⚡ ENHANCED: Smart filtering untuk token spam dan dust
+# ⚡ ENHANCED: Smart filtering untuk token spam dan dust dengan deteksi yang lebih ketat
 SPAM_PATTERNS = [
     r'claim.*reward',
     r'visit.*site',
@@ -35,16 +35,26 @@ SPAM_PATTERNS = [
     r'\.com',
     r'\.net',
     r'\.org',
+    r'\.io',
+    r'www\.',
+    r'http',
     r'reward.*claim',
     r'СLАlМ',  # Cyrillic scam
     r'▷',      # Scam arrows
     r'🎁',      # Gift emoji
     r'\$\w+.*claim',
+    r'[!@#$%^&*()+={}[\]|\\:";\'<>?,./]',  # Special characters in names
+    r'^\d+USD',  # Starts with number+USD
+    r'refID',    # Referral ID
+    r'to claim', # Common scam phrase
+    r'access.*to',  # Access to something
+    r'bonus.*token', # Bonus tokens
+    r'reward.*token', # Reward tokens
 ]
 
 MIN_BALANCE_USD_THRESHOLD = 0.01  # $0.01 minimum untuk dihitung
-MAX_TOKENS_TO_PRICE = 50  # Maksimal 50 tokens yang dicek harganya
-BATCH_SIZE = 5  # Batch size untuk API calls
+MAX_TOKENS_TO_PRICE = 20  # ⚡ REDUCED: Maksimal 20 tokens yang dicek harganya (dari 50)
+BATCH_SIZE = 3  # ⚡ REDUCED: Batch size untuk API calls (dari 5)
 
 # Cache untuk menyimpan data onchain dan prices
 _onchain_cache = {}
@@ -99,30 +109,45 @@ class OnchainAnalytics(BaseModel):
     profit_loss_estimate: Optional[float] = None
     chains_activity: Dict[str, int]
 
-# ⚡ ENHANCED: Smart spam detection
+# ⚡ ENHANCED: Smart spam detection dengan deteksi domain dan karakter aneh
 def is_spam_token(token_name: str, token_symbol: str, balance: float = 0) -> bool:
-    """Detect spam/scam tokens dengan smart filtering"""
+    """Detect spam/scam tokens dengan smart filtering yang lebih ketat"""
     try:
         # Check for spam patterns
         combined_text = f"{token_name} {token_symbol}".lower()
         
+        # ⚡ ENHANCED: More strict pattern matching
         for pattern in SPAM_PATTERNS:
             if re.search(pattern, combined_text, re.IGNORECASE):
                 return True
         
-        # Check for suspicious characteristics
-        if len(token_symbol) > 50:  # Symbol terlalu panjang
+        # ⚡ NEW: Check for suspicious token names
+        if len(token_name) > 100:  # Token name terlalu panjang
             return True
             
-        if 'http' in combined_text or 'www.' in combined_text:
+        if len(token_symbol) > 20:  # Symbol terlalu panjang
             return True
             
-        # Check for typical scam patterns
-        if any(char in token_symbol for char in ['▷', '🎁', '→', '➤']):
+        # ⚡ NEW: Check for domain-like patterns
+        domain_patterns = ['.com', '.net', '.org', '.io', 'www.', 'http']
+        if any(domain in combined_text for domain in domain_patterns):
             return True
             
+        # ⚡ NEW: Check for weird characters in symbol
+        if re.search(r'[^a-zA-Z0-9]', token_symbol):
+            return True
+            
+        # ⚡ NEW: Check for numbers at start of name (common in scams)
+        if re.match(r'^\d+\s*(usd|btc|eth|bnb)', token_name.lower()):
+            return True
+            
+        # ⚡ NEW: Check for common scam words
+        scam_words = ['bonus', 'claim', 'reward', 'airdrop', 'free', 'gift']
+        if any(word in combined_text for word in scam_words):
+            return True
+        
         # Very large balances (likely fake tokens)
-        if balance > 1000000:  # 1M+ tokens
+        if balance > 10000000:  # 10M+ tokens
             return True
         
         return False
@@ -130,9 +155,9 @@ def is_spam_token(token_name: str, token_symbol: str, balance: float = 0) -> boo
     except Exception:
         return False
 
-# ⚡ ENHANCED: Prioritize tokens untuk price checking
-def prioritize_tokens(tokens: List[Dict]) -> List[Dict]:
-    """Prioritize tokens berdasarkan kemungkinan value"""
+# ⚡ OPTIMIZED: Prioritize tokens yang SUDAH ADA USD VALUE
+def prioritize_tokens_with_value(tokens: List[Dict]) -> List[Dict]:
+    """⚡ NEW: Prioritize tokens yang sudah ada usd_value dari Moralis"""
     
     # Known valuable tokens (akan diprioritaskan)
     valuable_symbols = {
@@ -141,8 +166,9 @@ def prioritize_tokens(tokens: List[Dict]) -> List[Dict]:
         'COMP', 'MKR', 'SNX', 'YFI', 'SUSHI', 'BAL', 'ENS'
     }
     
-    prioritized = []
-    others = []
+    # ⚡ STEP 1: Filter tokens yang sudah ada USD value atau valuable
+    tokens_with_value = []
+    valuable_tokens = []
     
     for token in tokens:
         symbol = token.get('symbol', '').upper()
@@ -153,192 +179,89 @@ def prioritize_tokens(tokens: List[Dict]) -> List[Dict]:
             continue
             
         # Skip very small balances
-        if balance < 0.000001:  # Very dust amount
+        if balance < 0.000001:
             continue
-            
-        if symbol in valuable_symbols:
-            prioritized.append(token)
-        else:
-            others.append(token)
+        
+        # ⚡ PRIORITY 1: Tokens yang sudah ada usd_value dari Moralis
+        if token.get('usd_value') is not None and token.get('usd_value') > 0:
+            tokens_with_value.append(token)
+        # ⚡ PRIORITY 2: Known valuable tokens (tapi limit)
+        elif symbol in valuable_symbols:
+            valuable_tokens.append(token)
     
-    # Sort by balance (descending)
-    others.sort(key=lambda x: x.get('balance', 0), reverse=True)
+    # Sort by USD value (descending) dan balance
+    tokens_with_value.sort(key=lambda x: x.get('usd_value', 0), reverse=True)
+    valuable_tokens.sort(key=lambda x: x.get('balance', 0), reverse=True)
     
-    # Return prioritized first, then others, limited to MAX_TOKENS_TO_PRICE
-    result = prioritized + others
+    # ⚡ RETURN: Tokens with value + limited valuable tokens
+    result = tokens_with_value + valuable_tokens[:5]  # Max 5 valuable tanpa USD value
+    
+    logger.info(f"SUCCESS: Filtered to {len(result)} tokens: {len(tokens_with_value)} with USD value + {len(valuable_tokens[:5])} valuable tokens")
+    
     return result[:MAX_TOKENS_TO_PRICE]
 
-# ⚡ OPTIMIZED: Auto Token Price Discovery dengan smart batching
-async def get_token_price_auto(session: aiohttp.ClientSession, token_symbol: str, token_address: str = None, chain: str = None) -> float:
+# ⚡ OPTIMIZED: Skip price fetching untuk tokens yang sudah ada USD value
+async def fetch_token_prices_smart(session: aiohttp.ClientSession, tokens: List[Dict]) -> Dict[str, float]:
     """
-    Sistem otomatis untuk mendapatkan harga token dengan error handling yang lebih baik
-    """
-    coingecko_api_key = os.environ.get('COINGECKO_API_KEY', '')
-    base_url = "https://api.coingecko.com/api/v3"
-    
-    # Build headers
-    headers = {}
-    if coingecko_api_key and coingecko_api_key not in ['CG-CC***', 'YOUR-API-KEY-HERE']:
-        headers['x-cg-demo-api-key'] = coingecko_api_key
-    
-    try:
-        # ⚡ PRIORITY 1: Try contract address lookup (most accurate)
-        if token_address and token_address != '0x0' and chain:
-            platform_map = {
-                'eth': 'ethereum',
-                'ethereum': 'ethereum',
-                'bsc': 'binance-smart-chain',
-                'binance_smart_chain': 'binance-smart-chain',
-                'polygon': 'polygon-pos',
-                'avalanche': 'avalanche'
-            }
-            
-            platform = platform_map.get(chain.lower())
-            if platform:
-                contract_url = f"{base_url}/simple/token_price/{platform}"
-                params = {
-                    'contract_addresses': token_address.lower(),
-                    'vs_currencies': 'usd'
-                }
-                
-                async with session.get(contract_url, params=params, headers=headers) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if token_address.lower() in data and 'usd' in data[token_address.lower()]:
-                            price = float(data[token_address.lower()]['usd'])
-                            logger.info(f"Found price via contract for {token_symbol} ({token_address[:10]}...): ${price:.8f}")
-                            return price
-        
-        # ⚡ PRIORITY 2: Try symbol-based search
-        if token_symbol and len(token_symbol) <= 10:  # Skip symbols yang terlalu panjang
-            # First try coins list search
-            search_url = f"{base_url}/search"
-            params = {'query': token_symbol}
-            
-            async with session.get(search_url, params=params, headers=headers) as response:
-                if response.status == 200:
-                    search_data = await response.json()
-                    
-                    # Look for exact symbol match in coins
-                    for coin in search_data.get('coins', []):
-                        if coin.get('symbol', '').upper() == token_symbol.upper():
-                            coin_id = coin.get('id')
-                            if coin_id:
-                                # Get price for this coin
-                                price_url = f"{base_url}/simple/price"
-                                params = {
-                                    'ids': coin_id,
-                                    'vs_currencies': 'usd'
-                                }
-                                
-                                async with session.get(price_url, params=params, headers=headers) as price_response:
-                                    if price_response.status == 200:
-                                        price_data = await price_response.json()
-                                        if coin_id in price_data and 'usd' in price_data[coin_id]:
-                                            price = float(price_data[coin_id]['usd'])
-                                            logger.info(f"Found price via symbol search for {token_symbol}: ${price:.8f}")
-                                            return price
-        
-        # ⚡ PRIORITY 3: Try native token mapping (minimal, auto-detected)
-        native_symbols = {
-            'ETH': 'ethereum',
-            'BNB': 'binancecoin', 
-            'MATIC': 'matic-network',
-            'AVAX': 'avalanche-2',
-            'AVALANCHE': 'avalanche-2'
-        }
-        
-        if token_symbol.upper() in native_symbols:
-            coin_id = native_symbols[token_symbol.upper()]
-            price_url = f"{base_url}/simple/price"
-            params = {
-                'ids': coin_id,
-                'vs_currencies': 'usd'
-            }
-            
-            async with session.get(price_url, params=params, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    if coin_id in data and 'usd' in data[coin_id]:
-                        price = float(data[coin_id]['usd'])
-                        logger.info(f"Found price via native mapping for {token_symbol}: ${price:.8f}")
-                        return price
-        
-        # ⚡ Safe logging untuk token yang tidak ditemukan
-        safe_symbol = token_symbol.encode('ascii', 'ignore').decode('ascii')
-        safe_address = token_address[:10] + '...' if token_address else 'N/A'
-        logger.warning(f"No price found for token {safe_symbol} ({safe_address}) on {chain}")
-        return 0.0
-        
-    except Exception as e:
-        safe_symbol = token_symbol.encode('ascii', 'ignore').decode('ascii') if token_symbol else 'Unknown'
-        logger.error(f"Error getting price for {safe_symbol}: {str(e)}")
-        return 0.0
-
-# ⚡ OPTIMIZED: Fetch token prices dengan batching dan smart filtering
-async def fetch_token_prices_auto(session: aiohttp.ClientSession, tokens: List[Dict]) -> Dict[str, float]:
-    """
-    Fetch token prices dengan sistem otomatis dan smart filtering
+    ⚡ SMART: Hanya fetch price untuk tokens yang belum ada USD value
     """
     try:
-        # Prioritize and filter tokens
-        prioritized_tokens = prioritize_tokens(tokens)
+        # ⚡ STEP 1: Prioritize dan filter tokens
+        prioritized_tokens = prioritize_tokens_with_value(tokens)
         
-        logger.info(f"Processing {len(prioritized_tokens)} prioritized tokens from {len(tokens)} total")
+        logger.info(f"SUCCESS: Processing {len(prioritized_tokens)} prioritized tokens (skipping tokens with existing USD value)")
         
-        # Check cache first
-        cache_key = "prioritized_token_prices_" + "_".join([f"{t['symbol']}_{t.get('address', '')}" for t in prioritized_tokens[:10]])
-        if cache_key in _price_cache:
-            cache_entry = _price_cache[cache_key]
-            if datetime.now() < cache_entry['expires']:
-                return cache_entry['data']
+        # ⚡ STEP 2: Separate tokens yang perlu fetch vs yang sudah ada USD value
+        tokens_need_price = []
+        existing_prices = {}
         
-        prices = {}
+        for token in prioritized_tokens:
+            symbol = token.get('symbol', '')
+            if symbol:
+                # ⚡ Skip if already has USD value
+                if token.get('usd_value') is not None and token.get('usd_value') > 0:
+                    # Calculate price from existing USD value
+                    balance = token.get('balance', 0)
+                    if balance > 0:
+                        existing_prices[symbol] = token['usd_value'] / balance
+                else:
+                    # Need to fetch price
+                    tokens_need_price.append(token)
         
-        # Process tokens in batches dengan delay
-        for i in range(0, len(prioritized_tokens), BATCH_SIZE):
-            batch = prioritized_tokens[i:i + BATCH_SIZE]
+        logger.info(f"CHECKED: {len(existing_prices)} tokens already have USD value, {len(tokens_need_price)} need price fetch")
+        
+        # ⚡ STEP 3: Fetch prices only for tokens that need it (VERY LIMITED)
+        if tokens_need_price:
+            # Limit to only top 5 tokens that need pricing
+            tokens_need_price = tokens_need_price[:5]
             
-            # Process each token in the batch
-            batch_tasks = []
-            for token in batch:
+            logger.info(f"FINDING: Fetching prices for only {len(tokens_need_price)} tokens")
+            
+            for token in tokens_need_price:
                 symbol = token.get('symbol', '')
                 address = token.get('address', '')
                 chain = token.get('chain', '')
                 
-                if symbol:
-                    task = get_token_price_auto(session, symbol, address, chain)
-                    batch_tasks.append((symbol, task))
-            
-            # Wait for batch completion
-            for symbol, task in batch_tasks:
-                try:
-                    price = await task
-                    if price > 0:
-                        prices[symbol] = price
-                except Exception as e:
-                    logger.error(f"Error processing {symbol}: {str(e)}")
-            
-            # Delay between batches untuk avoid rate limiting
-            if i + BATCH_SIZE < len(prioritized_tokens):
-                await asyncio.sleep(0.5)  # 500ms delay
+                if symbol and symbol not in existing_prices:
+                    try:
+                        price = await get_token_price_auto(session, symbol, address, chain)
+                        if price > 0:
+                            existing_prices[symbol] = price
+                        # ⚡ Add delay to respect rate limits
+                        await asyncio.sleep(0.8)  # 800ms delay between calls
+                    except Exception as e:
+                        logger.warning(f"Error fetching price for {symbol}: {str(e)}")
         
-        # Cache results
-        _price_cache[cache_key] = {
-            'data': prices,
-            'expires': datetime.now() + timedelta(minutes=5)
-        }
-        
-        logger.info(f"Auto-fetched prices for {len(prices)} tokens from {len(prioritized_tokens)} prioritized")
-        return prices
+        logger.info(f"SUCCESS: Final prices collected: {len(existing_prices)} tokens")
+        return existing_prices
         
     except Exception as e:
-        logger.error(f"Error auto-fetching token prices: {str(e)}")
+        logger.error(f"Error in smart token price fetching: {str(e)}")
         return {}
 
-# ⚡ ENHANCED: Fetch Moralis portfolio dengan smart filtering
+# ⚡ ENHANCED: Fetch Moralis portfolio dengan smart filtering dan skip price fetching
 async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address: str) -> Dict:
-    """Fetch portfolio dengan smart filtering dan validasi"""
+    """⚡ OPTIMIZED: Fetch portfolio dengan skip unnecessary price fetching"""
     try:
         config = BLOCKCHAIN_APIS['moralis']
         headers = {
@@ -353,7 +276,7 @@ async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address
             'filtered_tokens_count': 0
         }
         
-        # Collect all tokens for batch price fetching
+        # Collect all tokens for smart processing
         all_tokens = []
         total_tokens_found = 0
         
@@ -379,12 +302,13 @@ async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address
                             symbol = chain_symbol_map.get(chain, chain.upper())
                             
                             # Skip if balance too small
-                            if balance_eth > 0.000001:  # > 0.000001
+                            if balance_eth > 0.000001:
                                 all_tokens.append({
                                     'symbol': symbol,
                                     'address': '0x0',
                                     'chain': chain,
-                                    'balance': balance_eth
+                                    'balance': balance_eth,
+                                    'usd_value': None  # Will be fetched if needed
                                 })
                                 
                                 portfolio_data['native_balances'].append({
@@ -395,7 +319,7 @@ async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address
                                     'balance_raw': str(balance_wei),
                                     'decimals': 18,
                                     'chain': chain,
-                                    'usd_value': None,
+                                    'usd_value': None,  # Will be calculated
                                     'is_spam': False
                                 })
                 
@@ -415,17 +339,24 @@ async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address
                             name = token.get('name', symbol)
                             address = token.get('token_address', '')
                             
-                            # Check if spam
+                            # ⚡ Enhanced spam detection
                             is_spam = is_spam_token(name, symbol, balance)
                             
                             if balance > 0:  # Only include non-zero balances
                                 if not is_spam:
-                                    # Add to tokens list for price fetching
+                                    # ⚡ Check if token already has USD value from Moralis
+                                    existing_usd_value = token.get('usd_price')  # Moralis might provide this
+                                    calculated_usd_value = None
+                                    
+                                    if existing_usd_value and existing_usd_value > 0:
+                                        calculated_usd_value = balance * existing_usd_value
+                                    
                                     all_tokens.append({
                                         'symbol': symbol,
                                         'address': address,
                                         'chain': chain,
-                                        'balance': balance
+                                        'balance': balance,
+                                        'usd_value': calculated_usd_value
                                     })
                                 else:
                                     portfolio_data['filtered_tokens_count'] += 1
@@ -438,7 +369,7 @@ async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address
                                     'balance_raw': str(balance_raw),
                                     'decimals': decimals,
                                     'chain': chain,
-                                    'usd_value': None,
+                                    'usd_value': calculated_usd_value,
                                     'is_spam': is_spam
                                 })
                 
@@ -449,11 +380,11 @@ async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address
                 logger.warning(f"Error fetching {chain} data: {str(e)}")
                 continue
         
-        logger.info(f"Found {total_tokens_found} total tokens, filtering spam...")
+        logger.info(f"CHECKED: Found {total_tokens_found} total tokens, filtered {portfolio_data['filtered_tokens_count']} spam tokens")
         
-        # ⚡ Fetch prices untuk prioritized tokens
+        # ⚡ SMART: Only fetch prices for high-priority tokens without USD value
         if all_tokens:
-            token_prices = await fetch_token_prices_auto(session, all_tokens)
+            token_prices = await fetch_token_prices_smart(session, all_tokens)
             
             # Calculate USD values
             total_usd_value = 0.0
@@ -465,26 +396,35 @@ async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address
                     usd_value = balance['balance'] * token_prices[symbol]
                     
                     # ⚡ Validate USD value (prevent crazy numbers)
-                    if usd_value > 0 and usd_value < 1e12:  # Max $1T sanity check
+                    if usd_value > 0 and usd_value < 1e10:  # Max $10B sanity check (reduced from 1T)
                         balance['usd_value'] = usd_value
                         total_usd_value += usd_value
             
             # Update token balances dengan USD values  
+            valid_tokens_count = 0
             for token in portfolio_data['token_balances']:
                 if not token.get('is_spam', False):  # Skip spam tokens
-                    symbol = token['token_symbol']
-                    if symbol in token_prices:
-                        usd_value = token['balance'] * token_prices[symbol]
-                        
-                        # ⚡ Validate USD value
-                        if usd_value > 0 and usd_value < 1e12:  # Max $1T sanity check
-                            token['usd_value'] = usd_value
-                            total_usd_value += usd_value
+                    # Use existing USD value if available
+                    if token.get('usd_value') is not None and token['usd_value'] > 0:
+                        total_usd_value += token['usd_value']
+                        valid_tokens_count += 1
+                    else:
+                        # Try to get price from fetched prices
+                        symbol = token['token_symbol']
+                        if symbol in token_prices:
+                            usd_value = token['balance'] * token_prices[symbol]
+                            
+                            # ⚡ Validate USD value
+                            if usd_value > 0 and usd_value < 1e10:  # Max $10B sanity check
+                                token['usd_value'] = usd_value
+                                total_usd_value += usd_value
+                                valid_tokens_count += 1
             
             portfolio_data['total_usd_value'] = total_usd_value
             
-            logger.info(f"Auto-calculated portfolio: {len(portfolio_data['native_balances'])} native + {len([t for t in portfolio_data['token_balances'] if not t.get('is_spam')])} clean tokens, Total USD: ${total_usd_value:.8f}")
-            logger.info(f"Filtered {portfolio_data['filtered_tokens_count']} spam tokens")
+            logger.info(f"SUCCESS: Smart-calculated portfolio: {len(portfolio_data['native_balances'])} native + {valid_tokens_count} valued tokens")
+            logger.info(f"PRICE: Total USD: ${total_usd_value:.8f} (realistic calculation)")
+            logger.info(f"BANNED: Filtered {portfolio_data['filtered_tokens_count']} spam tokens")
         
         return portfolio_data
         
@@ -492,8 +432,81 @@ async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address
         logger.error(f"Error fetching Moralis portfolio: {str(e)}")
         return {'native_balances': [], 'token_balances': [], 'total_usd_value': 0.0, 'filtered_tokens_count': 0}
 
-# Rest of the file remains the same...
-# API Configuration
+# ⚡ Keep existing helper functions but optimize them
+async def get_token_price_auto(session: aiohttp.ClientSession, token_symbol: str, token_address: str = None, chain: str = None) -> float:
+    """
+    ⚡ OPTIMIZED: Sistem otomatis untuk mendapatkan harga token dengan timeout yang lebih ketat
+    """
+    coingecko_api_key = os.environ.get('COINGECKO_API_KEY', '')
+    base_url = "https://api.coingecko.com/api/v3"
+    
+    # Build headers
+    headers = {}
+    if coingecko_api_key and coingecko_api_key not in ['CG-CC***', 'YOUR-API-KEY-HERE']:
+        headers['x-cg-demo-api-key'] = coingecko_api_key
+    
+    try:
+        # ⚡ PRIORITY 1: Try native token mapping first (fastest)
+        native_symbols = {
+            'ETH': 'ethereum',
+            'BNB': 'binancecoin', 
+            'MATIC': 'matic-network',
+            'AVAX': 'avalanche-2',
+            'AVALANCHE': 'avalanche-2'
+        }
+        
+        if token_symbol.upper() in native_symbols:
+            coin_id = native_symbols[token_symbol.upper()]
+            price_url = f"{base_url}/simple/price"
+            params = {
+                'ids': coin_id,
+                'vs_currencies': 'usd'
+            }
+            
+            async with session.get(price_url, params=params, headers=headers, timeout=aiohttp.ClientTimeout(total=3)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if coin_id in data and 'usd' in data[coin_id]:
+                        price = float(data[coin_id]['usd'])
+                        logger.info(f"SUCCESS: Native price for {token_symbol}: ${price:.8f}")
+                        return price
+        
+        # ⚡ PRIORITY 2: Try contract address lookup (if available)
+        if token_address and token_address != '0x0' and chain:
+            platform_map = {
+                'eth': 'ethereum',
+                'ethereum': 'ethereum',
+                'bsc': 'binance-smart-chain',
+                'binance_smart_chain': 'binance-smart-chain',
+                'polygon': 'polygon-pos',
+                'avalanche': 'avalanche'
+            }
+            
+            platform = platform_map.get(chain.lower())
+            if platform:
+                contract_url = f"{base_url}/simple/token_price/{platform}"
+                params = {
+                    'contract_addresses': token_address.lower(),
+                    'vs_currencies': 'usd'
+                }
+                
+                async with session.get(contract_url, params=params, headers=headers, timeout=aiohttp.ClientTimeout(total=3)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if token_address.lower() in data and 'usd' in data[token_address.lower()]:
+                            price = float(data[token_address.lower()]['usd'])
+                            logger.info(f"SUCCESS: Contract price for {token_symbol}: ${price:.8f}")
+                            return price
+        
+        # ⚡ Skip symbol search for non-major tokens to save time
+        logger.info(f"SKIPPED: Skipped price fetch for {token_symbol} (not major token)")
+        return 0.0
+        
+    except Exception as e:
+        logger.warning(f"WARNING: Price fetch error for {token_symbol}: {str(e)}")
+        return 0.0
+
+# Rest of the code remains the same but with API Configuration
 BLOCKCHAIN_APIS = {
     'ethereum': {
         'api_url': 'https://api.etherscan.io/api',
@@ -517,9 +530,7 @@ BLOCKCHAIN_APIS = {
     }
 }
 
-# Rest of the helper functions and API endpoints remain the same...
-# (fetch_ethereum_data, fetch_onchain_transactions, calculate_portfolio_analytics, etc.)
-
+# Keep all the existing helper functions and API endpoints
 async def fetch_ethereum_data(session: aiohttp.ClientSession, wallet_address: str, api_type: str) -> Dict:
     """Fetch data dari Etherscan-like APIs"""
     try:
@@ -642,13 +653,13 @@ def calculate_portfolio_analytics(transactions: List[Dict], portfolio: Dict) -> 
         logger.error(f"Error calculating analytics: {str(e)}")
         return {}
 
-# API Endpoints
+# Keep all API endpoints the same as original but with improved error handling
 @router.get("/portfolio/{wallet_address}")
 async def get_wallet_portfolio(
     wallet_address: str = Path(..., description="Wallet address"),
     chains: Optional[List[str]] = Query(None, description="Chains to scan (eth, bsc, polygon)")
 ) -> WalletPortfolio:
-    """⚡ ENHANCED: Portfolio dengan AUTO USD calculations dan spam filtering"""
+    """⚡ OPTIMIZED: Portfolio dengan SMART USD calculations dan spam filtering yang ketat"""
     
     cache_key = f"portfolio_{wallet_address}_{','.join(chains or ['all'])}"
     
@@ -656,7 +667,7 @@ async def get_wallet_portfolio(
     if cache_key in _onchain_cache:
         cache_entry = _onchain_cache[cache_key]
         if datetime.now() < cache_entry['expires']:
-            logger.info(f"Returning cached portfolio for {wallet_address}")
+            logger.info(f"OPTIMIZED: Returning cached portfolio for {wallet_address}")
             return cache_entry['data']
     
     try:
@@ -665,7 +676,7 @@ async def get_wallet_portfolio(
             raise HTTPException(status_code=400, detail="Invalid wallet address format")
         
         async with aiohttp.ClientSession() as session:
-            # Fetch portfolio menggunakan Moralis (multi-chain) dengan AUTO USD calculation
+            # ⚡ Fetch portfolio menggunakan optimized method
             portfolio_data = await fetch_moralis_portfolio(session, wallet_address)
             
             # Create response
@@ -685,7 +696,7 @@ async def get_wallet_portfolio(
                 'expires': datetime.now() + timedelta(seconds=_cache_ttl)
             }
             
-            logger.info(f"Auto-calculated portfolio for {wallet_address}: {len(portfolio.native_balances)} native + {len(portfolio.token_balances)} tokens, USD Total: ${portfolio.total_usd_value:.8f}")
+            logger.info(f"OPTIMIZED: FAST portfolio for {wallet_address}: {len(portfolio.native_balances)} native + {len(portfolio.token_balances)} tokens, USD Total: ${portfolio.total_usd_value:.8f}")
             
             return portfolio
     
@@ -696,6 +707,7 @@ async def get_wallet_portfolio(
         logger.error(f"Error getting wallet portfolio: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
+# Keep all other API endpoints the same...
 @router.get("/transactions/{wallet_address}")
 async def get_wallet_transactions(
     wallet_address: str = Path(..., description="Wallet address"),
@@ -746,7 +758,7 @@ async def get_wallet_analytics(
     wallet_address: str = Path(..., description="Wallet address"),
     days: int = Query(30, ge=1, le=365, description="Days to analyze")
 ) -> OnchainAnalytics:
-    """⚡ ENHANCED: Analytics dengan AUTO USD volume calculation"""
+    """⚡ OPTIMIZED: Analytics dengan AUTO USD volume calculation"""
     
     cache_key = f"analytics_{wallet_address}_{days}"
     
@@ -778,7 +790,7 @@ async def get_wallet_analytics(
                 'expires': datetime.now() + timedelta(seconds=_cache_ttl * 2)  # Cache lebih lama
             }
             
-            logger.info(f"Auto-calculated analytics for {wallet_address}: {analytics.total_transactions} txs, {analytics.unique_tokens_traded} tokens, USD Volume: ${analytics.total_volume_usd:.8f}")
+            logger.info(f"SUCCESS: FAST analytics for {wallet_address}: {analytics.total_transactions} txs, {analytics.unique_tokens_traded} tokens, USD Volume: ${analytics.total_volume_usd:.8f}")
             
             return analytics
     
@@ -830,8 +842,10 @@ async def blockchain_health_check():
                 'polygonscan': bool(os.environ.get('POLYGONSCAN_API_KEY')),
                 'coingecko': bool(os.environ.get('COINGECKO_API_KEY'))
             },
-            'spam_filtering': {
-                'patterns_count': len(SPAM_PATTERNS),
+            'optimization_status': {
+                'smart_filtering': 'enabled',
+                'spam_detection': 'enhanced',
+                'price_fetching': 'minimal',
                 'max_tokens_to_price': MAX_TOKENS_TO_PRICE,
                 'batch_size': BATCH_SIZE
             }
@@ -850,16 +864,21 @@ async def blockchain_health_check():
                 else:
                     status['moralis_api'] = 'api_key_missing'
                 
-                # Test CoinGecko API dengan auto token price
-                test_tokens = [{'symbol': 'ETH', 'address': '0x0', 'chain': 'eth'}]
-                test_prices = await fetch_token_prices_auto(session, test_tokens)
-                status['coingecko_api'] = 'healthy' if test_prices else 'no_prices_returned'
+                # Test CoinGecko API dengan minimal test
+                coingecko_key = os.environ.get('COINGECKO_API_KEY')
+                if coingecko_key:
+                    headers = {'x-cg-demo-api-key': coingecko_key}
+                    test_url = f"https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+                    async with session.get(test_url, headers=headers, timeout=aiohttp.ClientTimeout(total=3)) as response:
+                        status['coingecko_api'] = 'healthy' if response.status == 200 else f'error_status_{response.status}'
+                else:
+                    status['coingecko_api'] = 'api_key_missing'
                     
         except Exception as e:
             status['moralis_api'] = f'error: {str(e)}'
             status['coingecko_api'] = f'error: {str(e)}'
         
-        logger.info(f"Blockchain health check: Moralis={status['moralis_api']}, CoinGecko={status['coingecko_api']}, Cache={status['cache_entries']} entries")
+        logger.info(f"Optimized blockchain health check: Moralis={status['moralis_api']}, CoinGecko={status['coingecko_api']}, Cache={status['cache_entries']} entries")
         
         return status
     

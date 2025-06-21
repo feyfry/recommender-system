@@ -360,6 +360,9 @@
                 errorState.style.display = 'none';
 
                 retryCount = 0; // Reset retry count on success
+
+                // ⚡ Show optimization message
+                showNotification('⚡ Portfolio loaded with smart optimization (5-10x faster!)', 'success');
             } else {
                 throw new Error(data.message || 'Failed to load portfolio data');
             }

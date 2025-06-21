@@ -47,9 +47,9 @@
                 <div class="flex items-center justify-center py-12">
                     <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-success mr-4"></div>
                     <div>
-                        <div class="text-lg font-medium mb-2">Loading onchain analytics...</div>
-                        <div class="text-sm text-gray-500">Menganalisis transaksi dan volume trading</div>
-                        <div class="text-xs text-gray-400 mt-1">Proses: Fetching transactions → Calculating volumes → Building charts</div>
+                        <div class="text-lg font-medium mb-2">⚡ Loading onchain analytics...</div>
+                        <div class="text-sm text-gray-500">Menganalisis transaksi dan volume trading (5-10 detik)</div>
+                        <div class="text-xs text-gray-400 mt-1">Proses: Fetching transactions → Filtering spam → Building charts</div>
                     </div>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mt-8">
@@ -117,28 +117,61 @@
         </div>
     </div>
 
+    <!-- ⚡ FIXED: 2 Columns Layout - Most Traded Tokens + Chain Activity -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8" id="analytics-content" style="display: none;">
-        <!-- Most Traded Tokens -->
+        <!-- Most Traded Tokens (Left Column) -->
         <div class="clay-card p-6">
-            <h2 class="text-xl font-bold mb-4 flex items-center">
-                <i class="fas fa-trophy mr-2 text-warning"></i>
-                Most Traded Tokens
+            <h2 class="text-xl font-bold mb-4 flex items-center justify-between">
+                <div class="flex items-center">
+                    <i class="fas fa-trophy mr-2 text-warning"></i>
+                    Most Traded Tokens
+                </div>
+                <span class="text-sm text-gray-500" id="most-traded-count">Loading...</span>
             </h2>
 
             <div id="most-traded-tokens">
                 <!-- ⚡ Data akan di-populate via JavaScript -->
             </div>
+
+            <!-- ⚡ Pagination for Most Traded Tokens -->
+            <div class="mt-4" id="most-traded-pagination" style="display: none;">
+                <div class="flex justify-center items-center space-x-2">
+                    <button onclick="changeMostTradedPage(-1)" class="clay-button clay-button-secondary py-1 px-2 text-xs" id="most-traded-prev">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <span class="text-sm text-gray-600" id="most-traded-page-info">Page 1</span>
+                    <button onclick="changeMostTradedPage(1)" class="clay-button clay-button-secondary py-1 px-2 text-xs" id="most-traded-next">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
         </div>
 
-        <!-- Chain Activity -->
+        <!-- Chain Activity (Right Column) -->
         <div class="clay-card p-6">
-            <h2 class="text-xl font-bold mb-4 flex items-center">
-                <i class="fas fa-network-wired mr-2 text-info"></i>
-                Chain Activity
+            <h2 class="text-xl font-bold mb-4 flex items-center justify-between">
+                <div class="flex items-center">
+                    <i class="fas fa-network-wired mr-2 text-info"></i>
+                    Chain Activity
+                </div>
+                <span class="text-sm text-gray-500" id="chain-activity-count">Loading...</span>
             </h2>
 
             <div id="chain-activity">
                 <!-- ⚡ Data akan di-populate via JavaScript -->
+            </div>
+
+            <!-- ⚡ Pagination for Chain Activity (if needed) -->
+            <div class="mt-4" id="chain-activity-pagination" style="display: none;">
+                <div class="flex justify-center items-center space-x-2">
+                    <button onclick="changeChainActivityPage(-1)" class="clay-button clay-button-secondary py-1 px-2 text-xs" id="chain-activity-prev">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <span class="text-sm text-gray-600" id="chain-activity-page-info">Page 1</span>
+                    <button onclick="changeChainActivityPage(1)" class="clay-button clay-button-secondary py-1 px-2 text-xs" id="chain-activity-next">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -163,15 +196,52 @@
         </div>
     </div>
 
-    <!-- Recent Transactions - Hidden initially -->
+    <!-- Recent Transactions with Pagination - Hidden initially -->
     <div class="clay-card p-6" id="recent-transactions-wrapper" style="display: none;">
-        <h2 class="text-xl font-bold mb-4 flex items-center">
-            <i class="fas fa-history mr-2 text-secondary"></i>
-            Recent Onchain Transactions
+        <h2 class="text-xl font-bold mb-4 flex items-center justify-between">
+            <div class="flex items-center">
+                <i class="fas fa-history mr-2 text-secondary"></i>
+                Recent Onchain Transactions
+            </div>
+            <span class="text-sm text-gray-500" id="transactions-count">Loading...</span>
         </h2>
 
         <div id="recent-transactions">
             <!-- ⚡ Data akan di-populate via JavaScript -->
+        </div>
+
+        <!-- ⚡ Pagination for Recent Transactions -->
+        <div class="mt-6" id="transactions-pagination" style="display: none;">
+            <div class="flex flex-col md:flex-row justify-between items-center">
+                <!-- Info pages -->
+                <div class="mb-4 md:mb-0">
+                    <span class="text-sm text-gray-600" id="transactions-page-info">
+                        Showing transactions...
+                    </span>
+                </div>
+
+                <!-- Pagination buttons -->
+                <div class="flex justify-center space-x-2">
+                    <!-- Previous -->
+                    <button onclick="changeTransactionsPage(-1)"
+                           class="clay-button clay-button-secondary py-1.5 px-3 text-sm"
+                           id="transactions-prev">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+
+                    <!-- Page Numbers -->
+                    <div id="transactions-page-numbers" class="flex space-x-1">
+                        <!-- Will be populated by JavaScript -->
+                    </div>
+
+                    <!-- Next -->
+                    <button onclick="changeTransactionsPage(1)"
+                           class="clay-button clay-button-secondary py-1.5 px-3 text-sm"
+                           id="transactions-next">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -211,8 +281,22 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
 <script>
     let transactionChart = null;
-    let chartInitialized = false;
     let analyticsData = null;
+
+    // ⚡ Pagination variables
+    let mostTradedTokens = [];
+    let chainActivityData = [];
+    let transactionsData = [];
+
+    let mostTradedPage = 1;
+    let chainActivityPage = 1;
+    let transactionsPage = 1;
+
+    const ITEMS_PER_PAGE = {
+        mostTraded: 5,
+        chainActivity: 5,
+        transactions: 10
+    };
 
     // ⚡ LAZY LOADING: Load analytics data saat halaman ready
     document.addEventListener('DOMContentLoaded', function() {
@@ -242,13 +326,18 @@
                 // Update analytics overview
                 updateAnalyticsOverview(data.analytics);
 
+                // Store data for pagination
+                mostTradedTokens = data.analytics.most_traded_tokens || [];
+                chainActivityData = Object.entries(data.analytics.chains_activity || {});
+                transactionsData = data.transactions || [];
+
                 // Update content sections
-                updateMostTradedTokens(data.analytics.most_traded_tokens || []);
-                updateChainActivity(data.analytics.chains_activity || {});
+                updateMostTradedTokensPaginated();
+                updateChainActivityPaginated();
                 updateTransactionChart(data.analytics.transaction_frequency || {});
 
-                // Populate transactions table
-                populateTransactionsTable(data.transactions || []);
+                // Populate transactions table with pagination
+                populateTransactionsTablePaginated();
 
                 // Populate insights
                 populateAnalyticsInsights(data.analytics);
@@ -256,14 +345,14 @@
                 // Show content
                 loadingDiv.style.display = 'none';
                 overviewDiv.style.display = 'grid';
-                contentDiv.style.display = 'block';
+                contentDiv.style.display = 'grid';
                 document.getElementById('chart-container-wrapper').style.display = 'block';
                 document.getElementById('recent-transactions-wrapper').style.display = 'block';
                 document.getElementById('analytics-insights').style.display = 'block';
 
                 // Show cache indicator if data came from cache
                 if (data.cached) {
-                    showNotification('Data loaded from cache (30 min)', 'info');
+                    showNotification('⚡ Data loaded from cache (fast!)', 'info');
                 }
 
             } else {
@@ -286,6 +375,296 @@
                     </div>
                 </div>
             `;
+        }
+    }
+
+    // ⚡ NEW: Paginated Most Traded Tokens
+    function updateMostTradedTokensPaginated() {
+        const container = document.getElementById('most-traded-tokens');
+        const totalItems = mostTradedTokens.length;
+        const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE.mostTraded);
+
+        // Update count
+        document.getElementById('most-traded-count').textContent = `${totalItems} tokens`;
+
+        if (totalItems > 0) {
+            const startIndex = (mostTradedPage - 1) * ITEMS_PER_PAGE.mostTraded;
+            const endIndex = Math.min(startIndex + ITEMS_PER_PAGE.mostTraded, totalItems);
+            const pageItems = mostTradedTokens.slice(startIndex, endIndex);
+
+            let html = '<div class="space-y-3">';
+
+            pageItems.forEach((token, index) => {
+                const globalIndex = startIndex + index + 1;
+                html += `
+                    <div class="flex items-center justify-between p-3 clay-card bg-gray-50">
+                        <div class="flex items-center">
+                            <div class="w-8 h-8 bg-warning/20 rounded-full flex items-center justify-center mr-3">
+                                <span class="text-warning font-bold text-sm">${globalIndex}</span>
+                            </div>
+                            <div>
+                                <div class="font-medium">${token.symbol || 'Unknown'}</div>
+                                <div class="text-xs text-gray-500">${token.trade_count || 0} transactions</div>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="font-medium">$${numberFormat(token.volume_usd || 0, 2)}</div>
+                            <div class="text-xs text-gray-500">${numberFormat(token.volume || 0, 8)} ${token.symbol || ''}</div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+
+            // Show pagination if needed
+            if (totalPages > 1) {
+                const paginationDiv = document.getElementById('most-traded-pagination');
+                paginationDiv.style.display = 'block';
+
+                document.getElementById('most-traded-prev').disabled = mostTradedPage <= 1;
+                document.getElementById('most-traded-next').disabled = mostTradedPage >= totalPages;
+                document.getElementById('most-traded-prev').style.opacity = mostTradedPage <= 1 ? '0.5' : '1';
+                document.getElementById('most-traded-next').style.opacity = mostTradedPage >= totalPages ? '0.5' : '1';
+            }
+        } else {
+            container.innerHTML = `
+                <div class="text-center py-8">
+                    <i class="fas fa-coins text-4xl text-gray-400 mb-3"></i>
+                    <p class="text-gray-500">Tidak ada data token trading</p>
+                </div>
+            `;
+        }
+    }
+
+    // ⚡ NEW: Paginated Chain Activity
+    function updateChainActivityPaginated() {
+        const container = document.getElementById('chain-activity');
+        const totalItems = chainActivityData.length;
+        const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE.chainActivity);
+
+        // Update count
+        document.getElementById('chain-activity-count').textContent = `${totalItems} chains`;
+
+        if (totalItems > 0) {
+            const totalChainTxs = chainActivityData.reduce((sum, [, count]) => sum + count, 0);
+            const startIndex = (chainActivityPage - 1) * ITEMS_PER_PAGE.chainActivity;
+            const endIndex = Math.min(startIndex + ITEMS_PER_PAGE.chainActivity, totalItems);
+            const pageItems = chainActivityData.slice(startIndex, endIndex);
+
+            let html = '<div class="space-y-3">';
+
+            pageItems.forEach(([chain, txCount]) => {
+                const percentage = totalChainTxs > 0 ? (txCount / totalChainTxs) * 100 : 0;
+
+                html += `
+                    <div class="clay-card bg-info/5 p-3">
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="font-medium">${chain.charAt(0).toUpperCase() + chain.slice(1)}</span>
+                            <span class="text-sm">${numberFormat(txCount, 0)} txs</span>
+                        </div>
+                        <div class="clay-progress h-3">
+                            <div class="clay-progress-bar clay-progress-info" style="width: ${Math.max(percentage, 1)}%"></div>
+                        </div>
+                        <div class="text-xs text-right mt-1">${percentage.toFixed(1)}%</div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+
+            // Show pagination if needed
+            if (totalPages > 1) {
+                const paginationDiv = document.getElementById('chain-activity-pagination');
+                paginationDiv.style.display = 'block';
+
+                document.getElementById('chain-activity-prev').disabled = chainActivityPage <= 1;
+                document.getElementById('chain-activity-next').disabled = chainActivityPage >= totalPages;
+                document.getElementById('chain-activity-prev').style.opacity = chainActivityPage <= 1 ? '0.5' : '1';
+                document.getElementById('chain-activity-next').style.opacity = chainActivityPage >= totalPages ? '0.5' : '1';
+            }
+        } else {
+            container.innerHTML = `
+                <div class="text-center py-8">
+                    <i class="fas fa-link text-4xl text-gray-400 mb-3"></i>
+                    <p class="text-gray-500">Tidak ada data aktivitas chain</p>
+                </div>
+            `;
+        }
+    }
+
+    // ⚡ NEW: Paginated Transactions Table
+    function populateTransactionsTablePaginated() {
+        const container = document.getElementById('recent-transactions');
+        const totalItems = transactionsData.length;
+        const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE.transactions);
+
+        // Update count
+        document.getElementById('transactions-count').textContent = `${totalItems} transactions`;
+
+        if (totalItems > 0) {
+            const startIndex = (transactionsPage - 1) * ITEMS_PER_PAGE.transactions;
+            const endIndex = Math.min(startIndex + ITEMS_PER_PAGE.transactions, totalItems);
+            const pageItems = transactionsData.slice(startIndex, endIndex);
+
+            let html = `
+                <div class="overflow-x-auto">
+                    <table class="clay-table min-w-full">
+                        <thead>
+                            <tr>
+                                <th class="py-2 px-4 text-left">Date</th>
+                                <th class="py-2 px-4 text-left">Hash</th>
+                                <th class="py-2 px-4 text-left">Type</th>
+                                <th class="py-2 px-4 text-left">Value</th>
+                                <th class="py-2 px-4 text-left">Gas</th>
+                                <th class="py-2 px-4 text-left">Chain</th>
+                                <th class="py-2 px-4 text-left">Status</th>
+                                <th class="py-2 px-4 text-left">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            pageItems.forEach(tx => {
+                const date = new Date(tx.timestamp).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+                const txHash = tx.tx_hash ? tx.tx_hash.substring(0, 16) + '...' : 'N/A';
+                const typeClass = tx.transaction_type === 'native' ? 'primary' :
+                                tx.transaction_type === 'token' ? 'secondary' : 'info';
+                const statusClass = tx.status === 'success' ? 'success' : 'danger';
+
+                html += `
+                    <tr>
+                        <td class="py-3 px-4 text-sm">${date}</td>
+                        <td class="py-3 px-4">
+                            <div class="font-mono text-sm">${txHash}</div>
+                        </td>
+                        <td class="py-3 px-4">
+                            <span class="clay-badge clay-badge-${typeClass}">${tx.transaction_type || 'Unknown'}</span>
+                        </td>
+                        <td class="py-3 px-4">
+                            <div class="font-medium">${numberFormat(tx.value || 0, 8)}</div>
+                            ${tx.token_symbol ? `<div class="text-xs text-gray-500">${tx.token_symbol}</div>` : ''}
+                        </td>
+                        <td class="py-3 px-4 text-sm">${numberFormat(tx.gas_used || 0, 0)}</td>
+                        <td class="py-3 px-4">
+                            <span class="clay-badge clay-badge-info">${(tx.chain || '').toUpperCase()}</span>
+                        </td>
+                        <td class="py-3 px-4">
+                            <span class="clay-badge clay-badge-${statusClass}">${tx.status || 'Unknown'}</span>
+                        </td>
+                        <td class="py-3 px-4">
+                            <button onclick="viewTransaction('${tx.chain || ''}', '${tx.tx_hash || ''}')"
+                                    class="clay-badge clay-badge-primary py-1 px-2 text-xs">
+                                <i class="fas fa-external-link-alt"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            container.innerHTML = html;
+
+            // Update pagination info and show pagination
+            if (totalPages > 1) {
+                updateTransactionsPagination(totalPages, startIndex + 1, endIndex);
+                document.getElementById('transactions-pagination').style.display = 'flex';
+            } else {
+                document.getElementById('transactions-page-info').textContent = `Showing all ${totalItems} transactions`;
+            }
+        } else {
+            container.innerHTML = `
+                <div class="text-center py-12">
+                    <i class="fas fa-history text-4xl text-gray-400 mb-3"></i>
+                    <p class="text-gray-500">Tidak ada transaksi onchain ditemukan</p>
+                    <p class="text-sm text-gray-400 mt-2">Pastikan wallet address sudah benar dan sudah melakukan transaksi</p>
+                </div>
+            `;
+        }
+    }
+
+    // ⚡ NEW: Update transactions pagination
+    function updateTransactionsPagination(totalPages, startItem, endItem) {
+        // Update info
+        document.getElementById('transactions-page-info').textContent =
+            `Showing ${startItem} to ${endItem} of ${transactionsData.length} transactions`;
+
+        // Update buttons
+        document.getElementById('transactions-prev').disabled = transactionsPage <= 1;
+        document.getElementById('transactions-next').disabled = transactionsPage >= totalPages;
+        document.getElementById('transactions-prev').style.opacity = transactionsPage <= 1 ? '0.5' : '1';
+        document.getElementById('transactions-next').style.opacity = transactionsPage >= totalPages ? '0.5' : '1';
+
+        // Update page numbers
+        const pageNumbersDiv = document.getElementById('transactions-page-numbers');
+        let html = '';
+
+        const startPage = Math.max(1, transactionsPage - 2);
+        const endPage = Math.min(totalPages, transactionsPage + 2);
+
+        for (let i = startPage; i <= endPage; i++) {
+            const isActive = i === transactionsPage;
+            html += `
+                <button onclick="goToTransactionsPage(${i})"
+                       class="clay-button ${isActive ? 'clay-button-primary' : 'clay-button-secondary'} py-1.5 px-3 text-sm">
+                    ${i}
+                </button>
+            `;
+        }
+
+        pageNumbersDiv.innerHTML = html;
+    }
+
+    // ⚡ NEW: Pagination functions
+    function changeMostTradedPage(direction) {
+        const totalPages = Math.ceil(mostTradedTokens.length / ITEMS_PER_PAGE.mostTraded);
+        const newPage = mostTradedPage + direction;
+
+        if (newPage >= 1 && newPage <= totalPages) {
+            mostTradedPage = newPage;
+            updateMostTradedTokensPaginated();
+        }
+    }
+
+    function changeChainActivityPage(direction) {
+        const totalPages = Math.ceil(chainActivityData.length / ITEMS_PER_PAGE.chainActivity);
+        const newPage = chainActivityPage + direction;
+
+        if (newPage >= 1 && newPage <= totalPages) {
+            chainActivityPage = newPage;
+            updateChainActivityPaginated();
+        }
+    }
+
+    function changeTransactionsPage(direction) {
+        const totalPages = Math.ceil(transactionsData.length / ITEMS_PER_PAGE.transactions);
+        const newPage = transactionsPage + direction;
+
+        if (newPage >= 1 && newPage <= totalPages) {
+            transactionsPage = newPage;
+            populateTransactionsTablePaginated();
+        }
+    }
+
+    function goToTransactionsPage(page) {
+        const totalPages = Math.ceil(transactionsData.length / ITEMS_PER_PAGE.transactions);
+
+        if (page >= 1 && page <= totalPages) {
+            transactionsPage = page;
+            populateTransactionsTablePaginated();
         }
     }
 
@@ -336,92 +715,6 @@
         document.getElementById('multichain-insight').textContent = multichainInsight;
     }
 
-    // ⚡ NEW: Populate transactions table
-    function populateTransactionsTable(transactions) {
-        const container = document.getElementById('recent-transactions');
-
-        if (transactions.length > 0) {
-            let html = `
-                <div class="overflow-x-auto">
-                    <table class="clay-table min-w-full">
-                        <thead>
-                            <tr>
-                                <th class="py-2 px-4 text-left">Date</th>
-                                <th class="py-2 px-4 text-left">Hash</th>
-                                <th class="py-2 px-4 text-left">Type</th>
-                                <th class="py-2 px-4 text-left">Value</th>
-                                <th class="py-2 px-4 text-left">Gas</th>
-                                <th class="py-2 px-4 text-left">Chain</th>
-                                <th class="py-2 px-4 text-left">Status</th>
-                                <th class="py-2 px-4 text-left">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-            `;
-
-            transactions.slice(0, 20).forEach(tx => {
-                const date = new Date(tx.timestamp).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
-
-                const txHash = tx.tx_hash ? tx.tx_hash.substring(0, 16) + '...' : 'N/A';
-                const typeClass = tx.transaction_type === 'native' ? 'primary' :
-                                tx.transaction_type === 'token' ? 'secondary' : 'info';
-                const statusClass = tx.status === 'success' ? 'success' : 'danger';
-
-                html += `
-                    <tr>
-                        <td class="py-3 px-4 text-sm">${date}</td>
-                        <td class="py-3 px-4">
-                            <div class="font-mono text-sm">${txHash}</div>
-                        </td>
-                        <td class="py-3 px-4">
-                            <span class="clay-badge clay-badge-${typeClass}">${tx.transaction_type || 'Unknown'}</span>
-                        </td>
-                        <td class="py-3 px-4">
-                            <div class="font-medium">${numberFormat(tx.value || 0, 8)}</div>
-                            ${tx.token_symbol ? `<div class="text-xs text-gray-500">${tx.token_symbol}</div>` : ''}
-                        </td>
-                        <td class="py-3 px-4 text-sm">${numberFormat(tx.gas_used || 0, 0)}</td>
-                        <td class="py-3 px-4">
-                            <span class="clay-badge clay-badge-info">${(tx.chain || '').toUpperCase()}</span>
-                        </td>
-                        <td class="py-3 px-4">
-                            <span class="clay-badge clay-badge-${statusClass}">${tx.status || 'Unknown'}</span>
-                        </td>
-                        <td class="py-3 px-4">
-                            <button onclick="viewTransaction('${tx.chain || ''}', '${tx.tx_hash || ''}')"
-                                    class="clay-badge clay-badge-primary py-1 px-2 text-xs">
-                                <i class="fas fa-external-link-alt"></i>
-                            </button>
-                        </td>
-                    </tr>
-                `;
-            });
-
-            html += `
-                        </tbody>
-                    </table>
-                </div>
-                <div class="mt-6 text-center">
-                    <p class="text-sm text-gray-500">Showing last 20 transactions</p>
-                </div>
-            `;
-
-            container.innerHTML = html;
-        } else {
-            container.innerHTML = `
-                <div class="text-center py-12">
-                    <i class="fas fa-history text-4xl text-gray-400 mb-3"></i>
-                    <p class="text-gray-500">Tidak ada transaksi onchain ditemukan</p>
-                    <p class="text-sm text-gray-400 mt-2">Pastikan wallet address sudah benar dan sudah melakukan transaksi</p>
-                </div>
-            `;
-        }
-    }
     async function refreshAnalytics() {
         const btn = document.getElementById('refresh-analytics-btn');
         const originalText = btn.innerHTML;
@@ -450,16 +743,21 @@
                 // Update analytics overview cards
                 updateAnalyticsOverview(data.analytics);
 
-                // Update most traded tokens
-                updateMostTradedTokens(data.analytics.most_traded_tokens || []);
+                // Refresh paginated data
+                mostTradedTokens = data.analytics.most_traded_tokens || [];
+                chainActivityData = Object.entries(data.analytics.chains_activity || {});
 
-                // Update chain activity
-                updateChainActivity(data.analytics.chains_activity || {});
+                // Reset pagination
+                mostTradedPage = 1;
+                chainActivityPage = 1;
+                transactionsPage = 1;
 
-                // Update transaction frequency chart
+                // Update paginated sections
+                updateMostTradedTokensPaginated();
+                updateChainActivityPaginated();
                 updateTransactionChart(data.analytics.transaction_frequency || {});
 
-                showNotification('Analytics data berhasil diperbarui!', 'success');
+                showNotification('⚡ Analytics data berhasil diperbarui dengan optimasi!', 'success');
             } else {
                 showNotification(data.message || 'Gagal memperbarui data', 'error');
             }
@@ -483,83 +781,6 @@
         document.getElementById('unique-tokens').textContent = numberFormat(analytics.unique_tokens_traded || 0, 0);
         document.getElementById('total-volume').textContent = '$' + numberFormat(analytics.total_volume_usd || 0, 2);
         document.getElementById('active-chains').textContent = Object.keys(analytics.chains_activity || {}).length;
-    }
-
-    // ⚡ Update most traded tokens section
-    function updateMostTradedTokens(tokens) {
-        const container = document.getElementById('most-traded-tokens');
-
-        if (tokens.length > 0) {
-            let html = '<div class="space-y-4">';
-
-            tokens.slice(0, 10).forEach((token, index) => {
-                html += `
-                    <div class="flex items-center justify-between p-3 clay-card bg-gray-50">
-                        <div class="flex items-center">
-                            <div class="w-8 h-8 bg-warning/20 rounded-full flex items-center justify-center mr-3">
-                                <span class="text-warning font-bold text-sm">${index + 1}</span>
-                            </div>
-                            <div>
-                                <div class="font-medium">${token.symbol || 'Unknown'}</div>
-                                <div class="text-xs text-gray-500">${token.trade_count || 0} transactions</div>
-                            </div>
-                        </div>
-                        <div class="text-right">
-                            <div class="font-medium">$${numberFormat(token.volume_usd || 0, 2)}</div>
-                            <div class="text-xs text-gray-500">${numberFormat(token.volume || 0, 8)} ${token.symbol || ''}</div>
-                        </div>
-                    </div>
-                `;
-            });
-
-            html += '</div>';
-            container.innerHTML = html;
-        } else {
-            container.innerHTML = `
-                <div class="text-center py-8">
-                    <i class="fas fa-coins text-4xl text-gray-400 mb-3"></i>
-                    <p class="text-gray-500">Tidak ada data token trading</p>
-                </div>
-            `;
-        }
-    }
-
-    // ⚡ Update chain activity section
-    function updateChainActivity(chainsActivity) {
-        const container = document.getElementById('chain-activity');
-        const chains = Object.entries(chainsActivity);
-
-        if (chains.length > 0) {
-            const totalChainTxs = Object.values(chainsActivity).reduce((a, b) => a + b, 0);
-            let html = '<div class="space-y-4">';
-
-            chains.forEach(([chain, txCount]) => {
-                const percentage = totalChainTxs > 0 ? (txCount / totalChainTxs) * 100 : 0;
-
-                html += `
-                    <div class="clay-card bg-info/5 p-3">
-                        <div class="flex justify-between items-center mb-2">
-                            <span class="font-medium">${chain.charAt(0).toUpperCase() + chain.slice(1)}</span>
-                            <span class="text-sm">${numberFormat(txCount, 0)} txs</span>
-                        </div>
-                        <div class="clay-progress h-3">
-                            <div class="clay-progress-bar clay-progress-info" style="width: ${Math.max(percentage, 1)}%"></div>
-                        </div>
-                        <div class="text-xs text-right mt-1">${percentage.toFixed(1)}%</div>
-                    </div>
-                `;
-            });
-
-            html += '</div>';
-            container.innerHTML = html;
-        } else {
-            container.innerHTML = `
-                <div class="text-center py-8">
-                    <i class="fas fa-link text-4xl text-gray-400 mb-3"></i>
-                    <p class="text-gray-500">Tidak ada data aktivitas chain</p>
-                </div>
-            `;
-        }
     }
 
     // ⚡ ENHANCED: Update transaction chart dengan better fallback
@@ -666,7 +887,6 @@
             const chartWrapper = document.getElementById('chart-wrapper');
             if (chartFallback) chartFallback.style.display = 'none';
             if (chartWrapper) chartWrapper.style.display = 'block';
-            chartInitialized = true;
 
         } catch (error) {
             console.error('Error initializing chart:', error);
@@ -777,11 +997,6 @@
             }
         }, 5000);
     }
-
-    // ⚡ ENHANCED: Initialize when page loads - no static data needed
-    document.addEventListener('DOMContentLoaded', function() {
-        loadAnalyticsData();
-    });
 </script>
 @endpush
 @endsection
