@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # Create FastAPI app
 app = FastAPI(
     title="Web3 Recommendation System API",
-    description="API for Web3 project recommendations and technical analysis",
+    description="API for Web3 project recommendations, technical analysis, and blockchain data",
     version="1.0.0"
 )
 
@@ -70,9 +70,10 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"error": f"Internal server error: {str(exc)}"}
     )
 
-# Include routers
+# Include routers - PERBAIKAN: Tambahkan blockchain_router
 app.include_router(recommend_router)
 app.include_router(analysis_router)
+app.include_router(blockchain_router)  # ⚡ PERBAIKAN: Router blockchain yang hilang!
 
 # Model pengisian data interaksi
 class InteractionRecord(BaseModel):
@@ -257,6 +258,9 @@ async def root():
             "market_events": "/analysis/market-events/{project_id}",
             "alerts": "/analysis/alerts/{project_id}",
             "price_prediction": "/analysis/price-prediction/{project_id}",
+            "blockchain_portfolio": "/blockchain/portfolio/{wallet_address}",  # ⚡ BARU
+            "blockchain_transactions": "/blockchain/transactions/{wallet_address}",  # ⚡ BARU
+            "blockchain_analytics": "/blockchain/analytics/{wallet_address}",  # ⚡ BARU
             "interactions": "/interactions/record",
             "admin": {
                 "train_models": "/admin/train-models",
@@ -270,7 +274,13 @@ async def root():
 async def health_check():
     return {
         "status": "healthy",
-        "timestamp": time.time()
+        "timestamp": time.time(),
+        "blockchain_apis": {
+            "moralis": "configured" if os.environ.get("MORALIS_API_KEY") else "missing",
+            "etherscan": "configured" if os.environ.get("ETHERSCAN_API_KEY") else "missing",
+            "bscscan": "configured" if os.environ.get("BSCSCAN_API_KEY") else "missing",
+            "polygonscan": "configured" if os.environ.get("POLYGONSCAN_API_KEY") else "missing"
+        }
     }
 
 # Run the API server
@@ -282,6 +292,7 @@ if __name__ == "__main__":
     
     # Log startup
     logger.info(f"Starting API server on {API_HOST}:{API_PORT}")
+    logger.info(f"Blockchain APIs configured: Moralis={'✓' if os.environ.get('MORALIS_API_KEY') else '✗'}")
     
     # Run server
     uvicorn.run(

@@ -43,8 +43,18 @@
     </div>
     @endif
 
-    <!-- Real Portfolio (Onchain Data) -->
-    <div class="mb-8">
+    <!-- ⚡ BARU: Loading State -->
+    <div id="loading-state" class="mb-8">
+        <div class="clay-card p-6">
+            <div class="flex items-center justify-center py-8">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mr-3"></div>
+                <span class="text-gray-600">Loading onchain portfolio data...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Real Portfolio (Onchain Data) - ⚡ LAZY LOADED -->
+    <div id="onchain-portfolio-section" class="mb-8" style="display: none;">
         <div class="clay-card p-6">
             <h2 class="text-2xl font-bold mb-4 flex items-center">
                 <div class="bg-primary/20 p-2 rounded-lg mr-3">
@@ -60,20 +70,20 @@
                     <div class="grid grid-cols-2 gap-4 mb-6">
                         <div class="clay-card bg-primary/10 p-4">
                             <div class="text-gray-600 text-sm">Total Value (Real)</div>
-                            <div class="text-2xl font-bold">
-                                ${{ number_format($onchainPortfolio['total_usd_value'] ?? 0, 2) }}
+                            <div class="text-2xl font-bold" id="onchain-total-value">
+                                $0.00
                             </div>
-                            <div class="text-xs text-gray-500 mt-1">
-                                Last updated: {{ isset($onchainPortfolio['last_updated']) ? \Carbon\Carbon::parse($onchainPortfolio['last_updated'])->diffForHumans() : 'Never' }}
+                            <div class="text-xs text-gray-500 mt-1" id="onchain-last-updated">
+                                Loading...
                             </div>
                         </div>
                         <div class="clay-card bg-success/10 p-4">
                             <div class="text-gray-600 text-sm">Total Assets</div>
-                            <div class="text-2xl font-bold">
-                                {{ count($onchainPortfolio['token_balances'] ?? []) + count($onchainPortfolio['native_balances'] ?? []) }}
+                            <div class="text-2xl font-bold" id="onchain-asset-count">
+                                0
                             </div>
-                            <div class="text-xs text-gray-500 mt-1">
-                                Chains: {{ implode(', ', $onchainPortfolio['chains_scanned'] ?? []) }}
+                            <div class="text-xs text-gray-500 mt-1" id="onchain-chains">
+                                Loading...
                             </div>
                         </div>
                     </div>
@@ -87,109 +97,11 @@
                                     <th class="py-2 px-4 text-left">Balance</th>
                                     <th class="py-2 px-4 text-left">Chain</th>
                                     <th class="py-2 px-4 text-left">USD Value</th>
-                                    <th class="py-2 px-4 text-left">24h Change</th>
                                     <th class="py-2 px-4 text-left">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody>
-                                {{-- Native Balances --}}
-                                @if(isset($onchainPortfolio['native_balances']))
-                                    @foreach($onchainPortfolio['native_balances'] as $balance)
-                                    <tr class="border-l-4 border-blue-500">
-                                        <td class="py-3 px-4">
-                                            <div class="flex items-center">
-                                                <div class="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center mr-3">
-                                                    <i class="fas fa-coins text-white text-xs"></i>
-                                                </div>
-                                                <div>
-                                                    <div class="font-medium">{{ $balance['token_name'] }}</div>
-                                                    <div class="text-xs text-gray-500">{{ $balance['token_symbol'] }}</div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td class="py-3 px-4 font-medium">{{ number_format($balance['balance'], 6) }}</td>
-                                        <td class="py-3 px-4">
-                                            <span class="clay-badge clay-badge-info">{{ strtoupper($balance['chain']) }}</span>
-                                        </td>
-                                        <td class="py-3 px-4">
-                                            <span class="text-gray-500">Estimating...</span>
-                                        </td>
-                                        <td class="py-3 px-4">
-                                            <span class="text-gray-500">-</span>
-                                        </td>
-                                        <td class="py-3 px-4">
-                                            <button class="clay-badge clay-badge-primary py-1 px-2 text-xs" onclick="viewOnExplorer('{{ $balance['chain'] }}', '{{ $walletAddress }}')">
-                                                <i class="fas fa-external-link-alt"></i>
-                                            </button>
-                                        </td>
-                                    </tr>
-                                    @endforeach
-                                @endif
-
-                                {{-- Token Balances --}}
-                                @if(isset($onchainPortfolio['token_balances']))
-                                    @foreach($onchainPortfolio['token_balances'] as $token)
-                                    <tr>
-                                        <td class="py-3 px-4">
-                                            <div class="flex items-center">
-                                                @if(isset($token['project_data']['image']))
-                                                    <img src="{{ $token['project_data']['image'] }}" alt="{{ $token['token_symbol'] }}" class="w-8 h-8 rounded-full mr-3">
-                                                @else
-                                                    <div class="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center mr-3">
-                                                        <i class="fas fa-coins text-gray-600 text-xs"></i>
-                                                    </div>
-                                                @endif
-                                                <div>
-                                                    <div class="font-medium">{{ $token['token_name'] }}</div>
-                                                    <div class="text-xs text-gray-500">{{ $token['token_symbol'] }}</div>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td class="py-3 px-4 font-medium">{{ number_format($token['balance'], 6) }}</td>
-                                        <td class="py-3 px-4">
-                                            <span class="clay-badge clay-badge-secondary">{{ strtoupper($token['chain']) }}</span>
-                                        </td>
-                                        <td class="py-3 px-4 font-medium">
-                                            @if(isset($token['usd_value']))
-                                                ${{ number_format($token['usd_value'], 2) }}
-                                            @else
-                                                <span class="text-gray-500">N/A</span>
-                                            @endif
-                                        </td>
-                                        <td class="py-3 px-4">
-                                            @if(isset($token['project_data']['price_change_24h']))
-                                                <span class="{{ $token['project_data']['price_change_24h'] >= 0 ? 'text-success' : 'text-danger' }}">
-                                                    {{ $token['project_data']['price_change_24h'] >= 0 ? '+' : '' }}{{ number_format($token['project_data']['price_change_24h'], 2) }}%
-                                                </span>
-                                            @else
-                                                <span class="text-gray-500">-</span>
-                                            @endif
-                                        </td>
-                                        <td class="py-3 px-4">
-                                            <div class="flex space-x-2">
-                                                @if(isset($token['project_data']['id']))
-                                                    <a href="{{ route('panel.recommendations.project', $token['project_data']['id']) }}" class="clay-badge clay-badge-info py-1 px-2 text-xs">
-                                                        <i class="fas fa-info-circle"></i>
-                                                    </a>
-                                                @endif
-                                                <button class="clay-badge clay-badge-primary py-1 px-2 text-xs" onclick="viewOnExplorer('{{ $token['chain'] }}', '{{ $token['token_address'] }}')">
-                                                    <i class="fas fa-external-link-alt"></i>
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                    @endforeach
-                                @else
-                                    <tr>
-                                        <td colspan="6" class="py-6 px-4 text-center">
-                                            <div class="text-gray-500">
-                                                <i class="fas fa-wallet text-4xl mb-3"></i>
-                                                <p>Tidak ada token ditemukan di wallet ini</p>
-                                                <p class="text-sm">Pastikan wallet address sudah benar dan memiliki balance</p>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                @endif
+                            <tbody id="onchain-holdings-table">
+                                <!-- ⚡ Data akan di-populate via JavaScript -->
                             </tbody>
                         </table>
                     </div>
@@ -203,27 +115,9 @@
                             <i class="fas fa-chart-pie mr-2 text-secondary"></i>
                             Distribusi Kategori (Onchain)
                         </h3>
-
-                        @if(count($onchainCategoryDistribution) > 0)
-                        <div class="space-y-3">
-                            @foreach($onchainCategoryDistribution as $category)
-                            <div class="clay-card bg-secondary/5 p-3">
-                                <div class="flex justify-between mb-1">
-                                    <span class="font-medium text-sm">{{ $category['primary_category'] ?: 'Unknown' }}</span>
-                                    <span class="text-sm">${{ number_format($category['value'], 2) }}</span>
-                                </div>
-                                <div class="clay-progress h-2">
-                                    <div class="clay-progress-bar clay-progress-secondary" style="width: {{ ($onchainPortfolio['total_usd_value'] > 0) ? ($category['value'] / $onchainPortfolio['total_usd_value']) * 100 : 0 }}%"></div>
-                                </div>
-                                <div class="text-xs text-right mt-1">{{ $category['project_count'] }} assets</div>
-                            </div>
-                            @endforeach
+                        <div id="onchain-category-distribution">
+                            <!-- ⚡ Data akan di-populate via JavaScript -->
                         </div>
-                        @else
-                        <div class="text-center py-4">
-                            <p class="text-gray-500 text-sm">Tidak ada data kategori</p>
-                        </div>
-                        @endif
                     </div>
 
                     <!-- Chain Distribution -->
@@ -232,29 +126,25 @@
                             <i class="fas fa-link mr-2 text-info"></i>
                             Distribusi Chain (Onchain)
                         </h3>
-
-                        @if(count($onchainChainDistribution) > 0)
-                        <div class="space-y-3">
-                            @foreach($onchainChainDistribution as $chain)
-                            <div class="clay-card bg-info/5 p-3">
-                                <div class="flex justify-between mb-1">
-                                    <span class="font-medium text-sm">{{ ucfirst($chain['chain']) }}</span>
-                                    <span class="text-sm">${{ number_format($chain['value'], 2) }}</span>
-                                </div>
-                                <div class="clay-progress h-2">
-                                    <div class="clay-progress-bar clay-progress-info" style="width: {{ ($onchainPortfolio['total_usd_value'] > 0) ? ($chain['value'] / $onchainPortfolio['total_usd_value']) * 100 : 0 }}%"></div>
-                                </div>
-                                <div class="text-xs text-right mt-1">{{ $chain['project_count'] }} assets</div>
-                            </div>
-                            @endforeach
+                        <div id="onchain-chain-distribution">
+                            <!-- ⚡ Data akan di-populate via JavaScript -->
                         </div>
-                        @else
-                        <div class="text-center py-4">
-                            <p class="text-gray-500 text-sm">Tidak ada data blockchain</p>
-                        </div>
-                        @endif
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ⚡ Error State -->
+    <div id="error-state" class="mb-8" style="display: none;">
+        <div class="clay-card p-6">
+            <div class="text-center py-8">
+                <i class="fas fa-exclamation-triangle text-4xl text-yellow-500 mb-3"></i>
+                <h3 class="text-lg font-bold mb-2">Gagal Memuat Data Onchain</h3>
+                <p class="text-gray-600 mb-4" id="error-message">Tidak dapat terhubung ke blockchain API</p>
+                <button onclick="loadOnchainData()" class="clay-button clay-button-primary">
+                    <i class="fas fa-retry mr-2"></i> Coba Lagi
+                </button>
             </div>
         </div>
     </div>
@@ -387,10 +277,330 @@
 
 @push('scripts')
 <script>
+    let onchainData = null;
+
+    // ⚡ Load onchain data saat halaman ready
+    document.addEventListener('DOMContentLoaded', function() {
+        loadOnchainData();
+    });
+
+    // ⚡ BARU: Function untuk load onchain data secara async
+    async function loadOnchainData() {
+        const loadingState = document.getElementById('loading-state');
+        const onchainSection = document.getElementById('onchain-portfolio-section');
+        const errorState = document.getElementById('error-state');
+
+        // Show loading
+        loadingState.style.display = 'block';
+        onchainSection.style.display = 'none';
+        errorState.style.display = 'none';
+
+        try {
+            const response = await fetch('{{ route('panel.portfolio.refresh-onchain') }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success && data.portfolio) {
+                onchainData = data.portfolio;
+                populateOnchainData(data.portfolio);
+
+                // Show section
+                loadingState.style.display = 'none';
+                onchainSection.style.display = 'block';
+                errorState.style.display = 'none';
+            } else {
+                throw new Error(data.message || 'Failed to load portfolio data');
+            }
+
+        } catch (error) {
+            console.error('Error loading onchain data:', error);
+
+            // Show error state
+            loadingState.style.display = 'none';
+            onchainSection.style.display = 'none';
+            errorState.style.display = 'block';
+
+            document.getElementById('error-message').textContent = error.message;
+        }
+    }
+
+    // ⚡ BARU: Function untuk populate data ke UI
+    function populateOnchainData(portfolio) {
+        // Update summary cards
+        document.getElementById('onchain-total-value').textContent = `${numberFormat(portfolio.total_usd_value || 0, 2)}`;
+
+        const totalAssets = (portfolio.native_balances?.length || 0) + (portfolio.token_balances?.length || 0);
+        document.getElementById('onchain-asset-count').textContent = totalAssets;
+
+        const chains = portfolio.chains_scanned?.join(', ') || 'Unknown';
+        document.getElementById('onchain-chains').textContent = `Chains: ${chains}`;
+
+        const lastUpdated = portfolio.last_updated ? new Date(portfolio.last_updated).toLocaleString('id-ID') : 'Never';
+        document.getElementById('onchain-last-updated').textContent = `Last updated: ${lastUpdated}`;
+
+        // Populate holdings table
+        populateHoldingsTable(portfolio);
+
+        // Populate distributions
+        populateCategoryDistribution(portfolio);
+        populateChainDistribution(portfolio);
+    }
+
+    // ⚡ BARU: Populate holdings table
+    function populateHoldingsTable(portfolio) {
+        const tableBody = document.getElementById('onchain-holdings-table');
+        let html = '';
+
+        // Native balances
+        if (portfolio.native_balances && portfolio.native_balances.length > 0) {
+            portfolio.native_balances.forEach(balance => {
+                const usdValue = balance.usd_value ? `${numberFormat(balance.usd_value, 2)}` : 'N/A';
+
+                html += `
+                    <tr class="border-l-4 border-blue-500">
+                        <td class="py-3 px-4">
+                            <div class="flex items-center">
+                                <div class="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center mr-3">
+                                    <i class="fas fa-coins text-white text-xs"></i>
+                                </div>
+                                <div>
+                                    <div class="font-medium">${balance.token_name}</div>
+                                    <div class="text-xs text-gray-500">${balance.token_symbol}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="py-3 px-4 font-medium">${numberFormat(balance.balance, 6)}</td>
+                        <td class="py-3 px-4">
+                            <span class="clay-badge clay-badge-info">${balance.chain.toUpperCase()}</span>
+                        </td>
+                        <td class="py-3 px-4 font-medium">${usdValue}</td>
+                        <td class="py-3 px-4">
+                            <button class="clay-badge clay-badge-primary py-1 px-2 text-xs" onclick="viewOnExplorer('${balance.chain}', '{{ $walletAddress }}')">
+                                <i class="fas fa-external-link-alt"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+
+        // Token balances
+        if (portfolio.token_balances && portfolio.token_balances.length > 0) {
+            portfolio.token_balances.forEach(token => {
+                const usdValue = token.usd_value ? `${numberFormat(token.usd_value, 2)}` : 'N/A';
+
+                html += `
+                    <tr>
+                        <td class="py-3 px-4">
+                            <div class="flex items-center">
+                                <div class="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center mr-3">
+                                    <i class="fas fa-coins text-gray-600 text-xs"></i>
+                                </div>
+                                <div>
+                                    <div class="font-medium">${token.token_name || token.token_symbol}</div>
+                                    <div class="text-xs text-gray-500">${token.token_symbol}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="py-3 px-4 font-medium">${numberFormat(token.balance, 6)}</td>
+                        <td class="py-3 px-4">
+                            <span class="clay-badge clay-badge-secondary">${token.chain.toUpperCase()}</span>
+                        </td>
+                        <td class="py-3 px-4 font-medium">${usdValue}</td>
+                        <td class="py-3 px-4">
+                            <button class="clay-badge clay-badge-primary py-1 px-2 text-xs" onclick="viewOnExplorer('${token.chain}', '${token.token_address}')">
+                                <i class="fas fa-external-link-alt"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+
+        if (html === '') {
+            html = `
+                <tr>
+                    <td colspan="5" class="py-6 px-4 text-center">
+                        <div class="text-gray-500">
+                            <i class="fas fa-wallet text-4xl mb-3"></i>
+                            <p>Tidak ada token ditemukan di wallet ini</p>
+                            <p class="text-sm">Pastikan wallet address sudah benar dan memiliki balance</p>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        tableBody.innerHTML = html;
+    }
+
+    // ⚡ BARU: Populate category distribution dengan fix calculation
+    function populateCategoryDistribution(portfolio) {
+        const container = document.getElementById('onchain-category-distribution');
+        const totalValue = portfolio.total_usd_value || 0;
+
+        // Calculate category distribution from token balances
+        let categories = {};
+
+        if (portfolio.token_balances) {
+            portfolio.token_balances.forEach(token => {
+                if (token.usd_value && token.usd_value > 0) {
+                    // Use a simplified category mapping
+                    const category = getCategoryFromSymbol(token.token_symbol) || 'Other';
+
+                    if (!categories[category]) {
+                        categories[category] = {
+                            primary_category: category,
+                            value: 0,
+                            project_count: 0
+                        };
+                    }
+
+                    categories[category].value += token.usd_value;
+                    categories[category].project_count++;
+                }
+            });
+        }
+
+        const categoryArray = Object.values(categories);
+
+        if (categoryArray.length > 0) {
+            let html = '<div class="space-y-3">';
+
+            categoryArray.forEach(category => {
+                const percentage = totalValue > 0 ? (category.value / totalValue) * 100 : 0;
+
+                html += `
+                    <div class="clay-card bg-secondary/5 p-3">
+                        <div class="flex justify-between mb-1">
+                            <span class="font-medium text-sm">${category.primary_category}</span>
+                            <span class="text-sm">${numberFormat(category.value, 2)}</span>
+                        </div>
+                        <div class="clay-progress h-2">
+                            <div class="clay-progress-bar clay-progress-secondary" style="width: ${percentage}%"></div>
+                        </div>
+                        <div class="text-xs text-right mt-1">${category.project_count} assets</div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+        } else {
+            container.innerHTML = `
+                <div class="text-center py-4">
+                    <p class="text-gray-500 text-sm">Tidak ada data kategori</p>
+                </div>
+            `;
+        }
+    }
+
+    // ⚡ BARU: Populate chain distribution dengan fix calculation
+    function populateChainDistribution(portfolio) {
+        const container = document.getElementById('onchain-chain-distribution');
+        const totalValue = portfolio.total_usd_value || 0;
+
+        // Calculate chain distribution
+        let chains = {};
+
+        // Native balances
+        if (portfolio.native_balances) {
+            portfolio.native_balances.forEach(balance => {
+                const chain = balance.chain || 'Unknown';
+                const value = balance.usd_value || 0;
+
+                if (!chains[chain]) {
+                    chains[chain] = {
+                        chain: chain,
+                        value: 0,
+                        project_count: 0
+                    };
+                }
+
+                chains[chain].value += value;
+                chains[chain].project_count++;
+            });
+        }
+
+        // Token balances
+        if (portfolio.token_balances) {
+            portfolio.token_balances.forEach(token => {
+                const chain = token.chain || 'Unknown';
+                const value = token.usd_value || 0;
+
+                if (!chains[chain]) {
+                    chains[chain] = {
+                        chain: chain,
+                        value: 0,
+                        project_count: 0
+                    };
+                }
+
+                chains[chain].value += value;
+                chains[chain].project_count++;
+            });
+        }
+
+        const chainArray = Object.values(chains);
+
+        if (chainArray.length > 0) {
+            let html = '<div class="space-y-3">';
+
+            chainArray.forEach(chain => {
+                const percentage = totalValue > 0 ? (chain.value / totalValue) * 100 : 0;
+
+                html += `
+                    <div class="clay-card bg-info/5 p-3">
+                        <div class="flex justify-between mb-1">
+                            <span class="font-medium text-sm">${chain.chain.charAt(0).toUpperCase() + chain.chain.slice(1)}</span>
+                            <span class="text-sm">${numberFormat(chain.value, 2)}</span>
+                        </div>
+                        <div class="clay-progress h-2">
+                            <div class="clay-progress-bar clay-progress-info" style="width: ${percentage}%"></div>
+                        </div>
+                        <div class="text-xs text-right mt-1">${chain.project_count} assets</div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+        } else {
+            container.innerHTML = `
+                <div class="text-center py-4">
+                    <p class="text-gray-500 text-sm">Tidak ada data blockchain</p>
+                </div>
+            `;
+        }
+    }
+
+    // ⚡ Helper function untuk mapping symbol ke category
+    function getCategoryFromSymbol(symbol) {
+        const categoryMap = {
+            'ETH': 'Layer-1',
+            'BNB': 'Layer-1',
+            'MATIC': 'Layer-2',
+            'WETH': 'DeFi',
+            'USDT': 'Stablecoin',
+            'USDC': 'Stablecoin',
+            'DAI': 'Stablecoin',
+            'UNI': 'DeFi',
+            'AAVE': 'DeFi',
+            'COMP': 'DeFi'
+        };
+
+        return categoryMap[symbol] || 'Other';
+    }
+
     // Copy wallet address to clipboard
     function copyToClipboard(text) {
         navigator.clipboard.writeText(text).then(function() {
-            // Show success notification
             showNotification('Wallet address copied to clipboard!', 'success');
         });
     }
@@ -405,26 +615,9 @@
         btn.disabled = true;
 
         try {
-            const response = await fetch('{{ route('panel.portfolio.refresh-onchain') }}', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-                }
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                showNotification('Onchain data refreshed successfully!', 'success');
-                // Reload page to show new data
-                setTimeout(() => window.location.reload(), 1000);
-            } else {
-                showNotification(data.message || 'Failed to refresh data', 'error');
-            }
-
+            await loadOnchainData();
+            showNotification('Onchain data refreshed successfully!', 'success');
         } catch (error) {
-            console.error('Error refreshing data:', error);
             showNotification('Error refreshing data', 'error');
         } finally {
             // Restore button
@@ -451,6 +644,14 @@
         }
     }
 
+    // ⚡ Helper: Number formatting
+    function numberFormat(number, decimals = 2) {
+        return new Intl.NumberFormat('en-US', {
+            minimumFractionDigits: decimals,
+            maximumFractionDigits: decimals
+        }).format(number);
+    }
+
     // Simple notification system
     function showNotification(message, type = 'info') {
         const notification = document.createElement('div');
@@ -473,9 +674,6 @@
             }
         }, 5000);
     }
-
-    // Auto refresh onchain data every 5 minutes (optional)
-    // setInterval(refreshOnchainData, 5 * 60 * 1000);
 </script>
 @endpush
 @endsection
