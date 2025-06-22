@@ -83,13 +83,6 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         // ⚡ ENHANCED: AJAX endpoint untuk refresh onchain data dengan native token focus
         Route::post('/refresh-onchain', [PortfolioController::class, 'refreshOnchainData'])->name('panel.portfolio.refresh-onchain');
 
-        // ⚡ NEW: Additional AJAX endpoints
-        Route::get('/summary', [PortfolioController::class, 'getPortfolioSummary'])->name('panel.portfolio.summary');
-        Route::get('/api-status', [PortfolioController::class, 'getApiStatus'])->name('panel.portfolio.api-status');
-        Route::get('/supported-chains', [PortfolioController::class, 'getSupportedChains'])->name('panel.portfolio.supported-chains');
-        Route::post('/force-refresh-cache', [PortfolioController::class, 'forceRefreshCache'])->name('panel.portfolio.force-refresh-cache');
-        Route::get('/export', [PortfolioController::class, 'exportPortfolioData'])->name('panel.portfolio.export');
-
         // Transaction operations (existing)
         Route::post('/transactions/add', [PortfolioController::class, 'addTransaction'])->name('panel.portfolio.add-transaction');
         Route::post('/price-alerts/add', [PortfolioController::class, 'addPriceAlert'])->name('panel.portfolio.add-price-alert');
