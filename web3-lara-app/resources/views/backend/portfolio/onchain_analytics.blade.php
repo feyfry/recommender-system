@@ -5,7 +5,7 @@
     <!-- Header -->
     <div class="clay-card p-6 mb-8">
         <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
-            <div>
+            <div class="flex-1">
                 <h1 class="text-3xl font-bold mb-2 flex items-center">
                     <div class="bg-success/20 p-2 clay-badge mr-3">
                         <i class="fas fa-chart-line text-success"></i>
@@ -20,11 +20,11 @@
                     </button>
                 </div>
             </div>
-            <div class="mt-4 md:mt-0 flex space-x-3">
-                <a href="{{ route('panel.portfolio') }}" class="clay-button clay-button-secondary">
+            <div class="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full md:w-auto mt-4 md:mt-0">
+                <a href="{{ route('panel.portfolio') }}" class="clay-button clay-button-secondary w-full sm:w-auto text-sm">
                     <i class="fas fa-arrow-left mr-2"></i> Back to Portfolio
                 </a>
-                <button type="button" onclick="refreshAnalytics()" class="clay-button clay-button-success" id="refresh-analytics-btn">
+                <button type="button" onclick="refreshAnalytics()" class="clay-button clay-button-success w-full sm:w-auto text-sm" id="refresh-analytics-btn">
                     <i class="fas fa-sync-alt mr-2"></i> Refresh Data
                 </button>
             </div>
@@ -224,7 +224,7 @@
                 <div class="flex justify-center space-x-2">
                     <!-- Previous -->
                     <button onclick="changeTransactionsPage(-1)"
-                           class="clay-button clay-button-secondary py-1.5 px-3 text-sm"
+                           class="clay-button clay-button-secondary py-1.5 px-3 text-sm ml-4"
                            id="transactions-prev">
                         <i class="fas fa-chevron-left"></i>
                     </button>
@@ -438,7 +438,7 @@
         }
     }
 
-    // ⚡ NEW: Paginated Chain Activity
+    // ⚡ FIXED: Update Chain Activity dengan progress bar yang robust
     function updateChainActivityPaginated() {
         const container = document.getElementById('chain-activity');
         const totalItems = chainActivityData.length;
@@ -457,23 +457,31 @@
 
             pageItems.forEach(([chain, txCount]) => {
                 const percentage = totalChainTxs > 0 ? (txCount / totalChainTxs) * 100 : 0;
+                const chainName = chain.charAt(0).toUpperCase() + chain.slice(1);
+
+                // ⚡ DEBUG: Console log untuk troubleshooting
+                console.log(`Chain Activity - ${chainName}: ${txCount} txs (${percentage.toFixed(1)}%)`);
 
                 html += `
                     <div class="clay-card bg-info/5 p-3">
                         <div class="flex justify-between items-center mb-2">
-                            <span class="font-medium">${chain.charAt(0).toUpperCase() + chain.slice(1)}</span>
+                            <span class="font-medium">${chainName}</span>
                             <span class="text-sm">${numberFormat(txCount, 0)} txs</span>
                         </div>
-                        <div class="clay-progress h-3">
-                            <div class="clay-progress-bar clay-progress-info" style="width: ${Math.max(percentage, 1)}%"></div>
+                        <!-- ⚡ GUARANTEED VISIBLE PROGRESS BAR - Same style as fixed portfolio -->
+                        <div style="width: 100%; height: 14px; background-color: #e0f2fe; border: 1px solid #81d4fa; border-radius: 7px; overflow: hidden; margin-bottom: 8px; box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);">
+                            <div style="height: 100%; background: linear-gradient(135deg, #0ea5e9, #0284c7); border-radius: 6px; width: ${percentage}%; transition: width 0.5s ease-in-out; min-width: ${percentage > 0 ? Math.max(percentage, 1.5) : 0}%; box-shadow: 0 1px 3px rgba(0,0,0,0.2);"></div>
                         </div>
-                        <div class="text-xs text-right mt-1">${percentage.toFixed(1)}%</div>
+                        <div class="text-xs text-right">${percentage.toFixed(1)}%</div>
                     </div>
                 `;
             });
 
             html += '</div>';
             container.innerHTML = html;
+
+            // ⚡ SUCCESS LOG
+            console.log(`✅ Chain Activity rendered: ${pageItems.length} chains with progress bars`);
 
             // Show pagination if needed
             if (totalPages > 1) {
@@ -492,6 +500,7 @@
                     <p class="text-gray-500">Tidak ada data aktivitas chain</p>
                 </div>
             `;
+            console.log('❌ No chain activity data found');
         }
     }
 
@@ -979,7 +988,7 @@
     // Simple notification system
     function showNotification(message, type = 'info') {
         const notification = document.createElement('div');
-        notification.className = `fixed top-4 right-4 z-50 clay-alert clay-alert-${type} max-w-sm`;
+        notification.className = `fixed top-20 right-4 z-50 clay-alert clay-alert-${type} max-w-sm`;
         notification.innerHTML = `
             <div class="flex items-center justify-between">
                 <span>${message}</span>

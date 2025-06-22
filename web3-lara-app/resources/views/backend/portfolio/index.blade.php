@@ -5,7 +5,7 @@
     <!-- Header -->
     <div class="clay-card p-6 mb-8">
         <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
-            <div>
+            <div class="flex-1">
                 <h1 class="text-3xl font-bold mb-2 flex items-center">
                     <div class="bg-success/20 p-2 clay-badge mr-3">
                         <i class="fas fa-wallet text-success"></i>
@@ -20,14 +20,14 @@
                     </button>
                 </div>
             </div>
-            <div class="mt-4 md:mt-0 flex space-x-3">
-                <button type="button" onclick="refreshOnchainData()" class="clay-button clay-button-info" id="refresh-btn">
+            <div class="mt-4 md:mt-0 flex flex-col sm:flex-row gap-2 sm:gap-3 w-full md:w-auto">
+                <button type="button" onclick="refreshOnchainData()" class="clay-button clay-button-info w-full sm:w-auto text-sm" id="refresh-btn">
                     <i class="fas fa-sync-alt mr-2"></i> Refresh Onchain
                 </button>
-                <a href="{{ route('panel.portfolio.transaction-management') }}" class="clay-button clay-button-primary">
+                <a href="{{ route('panel.portfolio.transaction-management') }}" class="clay-button clay-button-primary w-full sm:w-auto text-sm">
                     <i class="fas fa-exchange-alt mr-2"></i> Transaction Management
                 </a>
-                <a href="{{ route('panel.portfolio.onchain-analytics') }}" class="clay-button clay-button-secondary">
+                <a href="{{ route('panel.portfolio.onchain-analytics') }}" class="clay-button clay-button-secondary w-full sm:w-auto text-sm">
                     <i class="fas fa-chart-line mr-2"></i> Onchain Analytics
                 </a>
             </div>
@@ -76,21 +76,21 @@
     <!-- Real Portfolio (Onchain Data) - ⚡ LAZY LOADED -->
     <div id="onchain-portfolio-section" class="mb-8" style="display: none;">
         <div class="clay-card p-6">
-            <h2 class="text-2xl font-bold mb-4 flex items-center">
+            <h2 class="text-2xl font-bold mb-4 flex flex-wrap items-center">
                 <div class="bg-primary/20 p-2 rounded-lg mr-3">
                     <i class="fas fa-link text-primary"></i>
                 </div>
                 Real Portfolio (Onchain Data)
-                <span class="ml-3 clay-badge clay-badge-success text-xs">LIVE</span>
-                <span id="spam-filter-badge" class="ml-2 clay-badge clay-badge-warning text-xs" style="display: none;">
+                <span class="lg:ml-3 clay-badge clay-badge-success text-xs break-all">LIVE</span>
+                <span id="spam-filter-badge" class="ml-2 clay-badge clay-badge-warning text-xs break-all" style="display: none;">
                     SPAM FILTERED
                 </span>
             </h2>
 
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 <!-- Summary Cards -->
                 <div class="lg:col-span-2">
-                    <div class="grid grid-cols-2 gap-4 mb-6">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                         <div class="clay-card bg-primary/10 p-4">
                             <div class="text-gray-600 text-sm">Total Value (Real)</div>
                             <div class="text-2xl font-bold" id="onchain-total-value">
@@ -153,7 +153,7 @@
                                 <div class="flex justify-center space-x-2">
                                     <!-- Previous -->
                                     <button onclick="changeHoldingsPage(-1)"
-                                           class="clay-button clay-button-secondary py-1.5 px-3 text-sm"
+                                           class="clay-button clay-button-secondary py-1.5 px-3 text-sm ml-4"
                                            id="holdings-prev">
                                         <i class="fas fa-chevron-left"></i>
                                     </button>
@@ -238,22 +238,22 @@
     <!-- Manual Portfolio (Transaction Management) -->
     <div class="mb-8">
         <div class="clay-card p-6">
-            <h2 class="text-2xl font-bold mb-4 flex items-center">
+            <h2 class="text-2xl font-bold mb-4 flex flex-wrap items-center">
                 <div class="bg-warning/20 p-2 rounded-lg mr-3">
                     <i class="fas fa-edit text-warning"></i>
                 </div>
                 Manual Portfolio (Transaction Management)
-                <span class="ml-3 clay-badge clay-badge-warning text-xs">MANUAL</span>
+                <span class="lg:ml-3 clay-badge clay-badge-warning text-xs break-all">MANUAL</span>
             </h2>
 
-            <div class="grid grid-cols-2 gap-4 mb-6">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                 <div class="clay-card bg-primary/10 p-4">
                     <div class="text-gray-600 text-sm">Total Value (Manual)</div>
-                    <div class="text-2xl font-bold">${{ number_format($manualTotalValue, 8) }}</div>
+                    <div class="text-2xl font-bold break-all">${{ number_format($manualTotalValue, 8) }}</div>
                 </div>
                 <div class="clay-card bg-{{ $manualProfitLoss >= 0 ? 'success' : 'danger' }}/10 p-4">
                     <div class="text-gray-600 text-sm">Profit/Loss (Manual)</div>
-                    <div class="text-2xl font-bold {{ $manualProfitLoss >= 0 ? 'text-success' : 'text-danger' }}">
+                    <div class="text-2xl font-bold {{ $manualProfitLoss >= 0 ? 'text-success' : 'text-danger' }} break-all">
                         {{ $manualProfitLoss >= 0 ? '+' : '' }}${{ number_format($manualProfitLoss, 8) }}
                         <span class="text-sm">({{ number_format($manualProfitLossPercentage, 2) }}%)</span>
                     </div>
@@ -772,41 +772,45 @@
         }
     }
 
-    // ⚡ ENHANCED: Populate chain distribution dengan format yang benar dan 8 decimal
+    // ⚡ ROBUST FIX: Populate chain distribution dengan progress bar yang pasti terlihat
     function populateChainDistribution(portfolio) {
         const container = document.getElementById('onchain-chain-distribution');
         const totalValue = portfolio.total_usd_value || 0;
 
-        // Calculate chain distribution (exclude spam)
+        // Calculate chain distribution (exclude spam and zero USD values)
         let chains = {};
 
-        // Native balances
+        // Native balances - FIXED: Add USD value filter
         if (portfolio.native_balances) {
             portfolio.native_balances.forEach(balance => {
-                const chain = balance.chain || 'Unknown';
-                const value = balance.usd_value || 0;
+                // ⚡ FIXED: Only process balances with USD value > 0
+                if (balance.usd_value && balance.usd_value > 0) {
+                    const chain = balance.chain || 'Unknown';
+                    const value = balance.usd_value;
 
-                if (!chains[chain]) {
-                    chains[chain] = {
-                        chain: chain,
-                        value: 0,
-                        project_count: 0,
-                        balance_display: 0
-                    };
+                    if (!chains[chain]) {
+                        chains[chain] = {
+                            chain: chain,
+                            value: 0,
+                            project_count: 0,
+                            balance_display: 0
+                        };
+                    }
+
+                    chains[chain].value += value;
+                    chains[chain].project_count++;
+                    chains[chain].balance_display += balance.balance;
                 }
-
-                chains[chain].value += value;
-                chains[chain].project_count++;
-                chains[chain].balance_display += balance.balance;
             });
         }
 
-        // Token balances (exclude spam)
+        // Token balances - FIXED: Add USD value filter and spam filter
         if (portfolio.token_balances) {
             portfolio.token_balances.forEach(token => {
-                if (!token.is_spam) {
+                // ⚡ FIXED: Only process non-spam tokens with USD value > 0
+                if (!token.is_spam && token.usd_value && token.usd_value > 0) {
                     const chain = token.chain || 'Unknown';
-                    const value = token.usd_value || 0;
+                    const value = token.usd_value;
 
                     if (!chains[chain]) {
                         chains[chain] = {
@@ -835,14 +839,15 @@
 
                 html += `
                     <div class="clay-card bg-info/5 p-3">
-                        <div class="flex justify-between mb-1">
+                        <div class="flex justify-between mb-2">
                             <span class="font-medium text-sm">${chainName}</span>
                             <span class="text-sm">$${numberFormat(chain.value, 8)}</span>
                         </div>
-                        <div class="clay-progress h-2">
-                            <div class="clay-progress-bar clay-progress-info" style="width: ${Math.max(percentage, 1)}%"></div>
+                        <!-- ⚡ ROBUST PROGRESS BAR: Menggunakan inline styles dan height yang lebih besar -->
+                        <div style="width: 100%; height: 12px; background-color: #e5e7eb; border-radius: 6px; overflow: hidden; margin-bottom: 8px;">
+                            <div style="height: 100%; background: linear-gradient(135deg, #3b82f6, #1d4ed8); border-radius: 6px; width: ${percentage}%; transition: width 0.3s ease-in-out;"></div>
                         </div>
-                        <div class="text-xs text-right mt-1">${chain.project_count} assets (${percentage.toFixed(1)}%)</div>
+                        <div class="text-xs text-right">${chain.project_count} assets (${percentage.toFixed(1)}%)</div>
                     </div>
                 `;
             });
@@ -921,7 +926,7 @@
     // ⚡ ENHANCED: Notification system
     function showNotification(message, type = 'info') {
         const notification = document.createElement('div');
-        notification.className = `fixed top-4 right-4 z-50 clay-alert clay-alert-${type} max-w-sm`;
+        notification.className = `fixed top-20 right-4 z-50 clay-alert clay-alert-${type} max-w-sm`;
         notification.innerHTML = `
             <div class="flex items-center justify-between">
                 <span>${message}</span>
