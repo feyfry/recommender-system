@@ -63,15 +63,15 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         Route::get('/price-prediction/{projectId}', [TechnicalAnalysisController::class, 'getPricePrediction'])->name('panel.technical-analysis.price-prediction');
     });
 
-    // Portfolio - UPDATED STRUCTURE
+    // Portfolio - UPDATED STRUCTURE dengan native token focus
     Route::prefix('portfolio')->group(function () {
         // Main portfolio overview (onchain + manual data)
         Route::get('/', [PortfolioController::class, 'index'])->name('panel.portfolio');
 
-        // BARU: Load analytics data for portfolio - AJAX endpoint
+        // ⚡ NEW: Load analytics data for portfolio - AJAX endpoint
         Route::get('/load-analytics', [PortfolioController::class, 'loadAnalyticsData'])->name('panel.portfolio.load-analytics');
 
-        // BARU: Onchain Analytics
+        // ⚡ ENHANCED: Onchain Analytics dengan native token focus
         Route::get('/onchain-analytics', [PortfolioController::class, 'onchainAnalytics'])->name('panel.portfolio.onchain-analytics');
 
         // RENAMED: Transaction Management (dulu: transactions)
@@ -80,8 +80,15 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         // Price Alerts (existing)
         Route::get('/price-alerts', [PortfolioController::class, 'priceAlerts'])->name('panel.portfolio.price-alerts');
 
-        // BARU: AJAX endpoint untuk refresh onchain data
+        // ⚡ ENHANCED: AJAX endpoint untuk refresh onchain data dengan native token focus
         Route::post('/refresh-onchain', [PortfolioController::class, 'refreshOnchainData'])->name('panel.portfolio.refresh-onchain');
+
+        // ⚡ NEW: Additional AJAX endpoints
+        Route::get('/summary', [PortfolioController::class, 'getPortfolioSummary'])->name('panel.portfolio.summary');
+        Route::get('/api-status', [PortfolioController::class, 'getApiStatus'])->name('panel.portfolio.api-status');
+        Route::get('/supported-chains', [PortfolioController::class, 'getSupportedChains'])->name('panel.portfolio.supported-chains');
+        Route::post('/force-refresh-cache', [PortfolioController::class, 'forceRefreshCache'])->name('panel.portfolio.force-refresh-cache');
+        Route::get('/export', [PortfolioController::class, 'exportPortfolioData'])->name('panel.portfolio.export');
 
         // Transaction operations (existing)
         Route::post('/transactions/add', [PortfolioController::class, 'addTransaction'])->name('panel.portfolio.add-transaction');

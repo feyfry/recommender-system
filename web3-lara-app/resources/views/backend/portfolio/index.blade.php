@@ -51,8 +51,8 @@
                     <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-primary mr-4"></div>
                     <div>
                         <div class="text-lg font-medium mb-2">Loading onchain portfolio data...</div>
-                        <div class="text-sm text-gray-500">Mengambil data dari blockchain API (mungkin butuh 1-2 menit)</div>
-                        <div class="text-xs text-gray-400 mt-1">Proses: Scanning multi-chain → Filtering spam → Calculating USD values</div>
+                        <div class="text-sm text-gray-500">Mengambil data native tokens dari blockchain API (5-10 detik)</div>
+                        <div class="text-xs text-gray-400 mt-1">Proses: Scanning native tokens → Filtering spam → Calculating USD values</div>
                     </div>
                 </div>
                 <!-- Enhanced Skeleton content -->
@@ -111,23 +111,67 @@
                         </div>
                     </div>
 
-                    <!-- Onchain Holdings Table -->
-                    <div class="overflow-x-auto">
-                        <table class="clay-table min-w-full">
-                            <thead>
-                                <tr>
-                                    <th class="py-2 px-4 text-left">Asset</th>
-                                    <th class="py-2 px-4 text-left">Balance</th>
-                                    <th class="py-2 px-4 text-left">Chain</th>
-                                    <th class="py-2 px-4 text-left">USD Value</th>
-                                    <th class="py-2 px-4 text-left">Status</th>
-                                    <th class="py-2 px-4 text-left">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="onchain-holdings-table">
-                                <!-- ⚡ Data akan di-populate via JavaScript -->
-                            </tbody>
-                        </table>
+                    <!-- ⚡ ENHANCED: Onchain Holdings Table dengan Pagination -->
+                    <div class="mb-4">
+                        <h3 class="font-bold mb-3 flex items-center justify-between">
+                            <div class="flex items-center">
+                                <i class="fas fa-coins mr-2 text-primary"></i>
+                                Portfolio Assets
+                            </div>
+                            <span class="text-sm text-gray-500" id="assets-count">Loading...</span>
+                        </h3>
+
+                        <div class="overflow-x-auto">
+                            <table class="clay-table min-w-full">
+                                <thead>
+                                    <tr>
+                                        <th class="py-2 px-4 text-left">Asset</th>
+                                        <th class="py-2 px-4 text-left">Balance</th>
+                                        <th class="py-2 px-4 text-left">Chain</th>
+                                        <th class="py-2 px-4 text-left">USD Value</th>
+                                        <th class="py-2 px-4 text-left">Status</th>
+                                        <th class="py-2 px-4 text-left">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="onchain-holdings-table">
+                                    <!-- ⚡ Data akan di-populate via JavaScript -->
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- ⚡ NEW: Pagination untuk Holdings -->
+                        <div class="mt-6" id="holdings-pagination" style="display: none;">
+                            <div class="flex flex-col md:flex-row justify-between items-center">
+                                <!-- Info pages -->
+                                <div class="mb-4 md:mb-0">
+                                    <span class="text-sm text-gray-600" id="holdings-page-info">
+                                        Showing assets...
+                                    </span>
+                                </div>
+
+                                <!-- Pagination buttons -->
+                                <div class="flex justify-center space-x-2">
+                                    <!-- Previous -->
+                                    <button onclick="changeHoldingsPage(-1)"
+                                           class="clay-button clay-button-secondary py-1.5 px-3 text-sm"
+                                           id="holdings-prev">
+                                        <i class="fas fa-chevron-left"></i>
+                                    </button>
+
+                                    <!-- Page Numbers -->
+                                    <div id="holdings-page-numbers" class="flex space-x-1">
+                                        <!-- Will be populated by JavaScript -->
+                                    </div>
+
+                                    <!-- Next -->
+                                    <button onclick="changeHoldingsPage(1)"
+                                           class="clay-button clay-button-secondary py-1.5 px-3 text-sm"
+                                           id="holdings-next">
+                                        <i class="fas fa-chevron-right"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -172,10 +216,10 @@
                 <div class="clay-card bg-yellow-50 p-4 mb-4 text-left max-w-md mx-auto">
                     <h4 class="font-bold mb-2 text-yellow-800">🔧 Troubleshooting:</h4>
                     <ul class="text-sm text-yellow-700 space-y-1">
-                        <li>• API blockchain mungkin sedang lambat (1-2 menit normal)</li>
-                        <li>• Coba refresh setelah 30 detik</li>
+                        <li>• Sistem fokus pada native tokens untuk speed (ETH, BNB, MATIC, AVAX)</li>
+                        <li>• Coba refresh setelah 10 detik</li>
                         <li>• Pastikan koneksi internet stabil</li>
-                        <li>• Wallet dengan banyak token butuh waktu lebih lama</li>
+                        <li>• Wallet dengan banyak spam tokens butuh waktu filter</li>
                     </ul>
                 </div>
 
@@ -323,6 +367,11 @@
     let retryCount = 0;
     const maxRetries = 3;
 
+    // ⚡ NEW: Pagination variables untuk holdings
+    let holdingsData = [];
+    let holdingsPage = 1;
+    const HOLDINGS_PER_PAGE = 10;
+
     // ⚡ Load onchain data saat halaman ready
     document.addEventListener('DOMContentLoaded', function() {
         loadOnchainData();
@@ -362,7 +411,7 @@
                 retryCount = 0; // Reset retry count on success
 
                 // ⚡ Show optimization message
-                showNotification('⚡ Portfolio loaded with smart optimization (5-10x faster!)', 'success');
+                showNotification('⚡ Portfolio loaded with native token focus (faster!)', 'success');
             } else {
                 throw new Error(data.message || 'Failed to load portfolio data');
             }
@@ -381,7 +430,7 @@
 
             if (error.message.includes('timeout') || error.message.includes('timed out')) {
                 errorMessage = 'Request timeout - API blockchain sedang lambat';
-                troubleshootingText = 'Wallet dengan banyak tokens membutuhkan waktu lebih lama. Coba lagi dalam 30 detik.';
+                troubleshootingText = 'Sistem sedang memproses native tokens. Coba lagi dalam 10 detik.';
             } else if (error.message.includes('503') || error.message.includes('500')) {
                 errorMessage = 'API blockchain sedang tidak tersedia';
                 troubleshootingText = 'Service sedang maintenance atau overload. Coba lagi dalam beberapa menit.';
@@ -400,7 +449,7 @@
         try {
             showNotification('Mengecek status API...', 'info');
 
-            const apiUrl = '{{ $apiUrl ?? "http://localhost:8001" }}'; // ⚡ FIXED: Fallback untuk apiUrl
+            const apiUrl = '{{ $apiUrl ?? "http://localhost:8001" }}';
             const response = await fetch(apiUrl + '/health', {
                 method: 'GET',
                 headers: {
@@ -444,56 +493,35 @@
             spamBadge.style.display = 'inline-block';
         }
 
-        // Populate holdings table
-        populateHoldingsTable(portfolio);
+        // ⚡ NEW: Prepare holdings data for pagination
+        prepareHoldingsData(portfolio);
 
         // Populate distributions
         populateCategoryDistribution(portfolio);
         populateChainDistribution(portfolio);
     }
 
-    // ⚡ ENHANCED: Populate holdings table dengan spam detection dan 8 decimal precision
-    function populateHoldingsTable(portfolio) {
-        const tableBody = document.getElementById('onchain-holdings-table');
-        let html = '';
+    // ⚡ NEW: Prepare holdings data untuk pagination
+    function prepareHoldingsData(portfolio) {
+        holdingsData = [];
 
-        // Native balances
+        // Add native balances
         if (portfolio.native_balances && portfolio.native_balances.length > 0) {
             portfolio.native_balances.forEach(balance => {
-                const usdValue = balance.usd_value ? `$${numberFormat(balance.usd_value, 8)}` : 'Calculating...';
-
-                html += `
-                    <tr class="border-l-4 border-blue-500">
-                        <td class="py-3 px-4">
-                            <div class="flex items-center">
-                                <div class="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center mr-3">
-                                    <i class="fas fa-coins text-white text-xs"></i>
-                                </div>
-                                <div>
-                                    <div class="font-medium">${balance.token_name}</div>
-                                    <div class="text-xs text-gray-500">${balance.token_symbol}</div>
-                                </div>
-                            </div>
-                        </td>
-                        <td class="py-3 px-4 font-medium">${numberFormat(balance.balance, 8)}</td>
-                        <td class="py-3 px-4">
-                            <span class="clay-badge clay-badge-info">${balance.chain.toUpperCase()}</span>
-                        </td>
-                        <td class="py-3 px-4 font-medium">${usdValue}</td>
-                        <td class="py-3 px-4">
-                            <span class="clay-badge clay-badge-success">Native</span>
-                        </td>
-                        <td class="py-3 px-4">
-                            <button class="clay-badge clay-badge-primary py-1 px-2 text-xs" onclick="viewOnExplorer('${balance.chain}', '{{ $walletAddress }}')">
-                                <i class="fas fa-external-link-alt"></i>
-                            </button>
-                        </td>
-                    </tr>
-                `;
+                holdingsData.push({
+                    type: 'native',
+                    token_address: balance.token_address,
+                    token_name: balance.token_name,
+                    token_symbol: balance.token_symbol,
+                    balance: balance.balance,
+                    chain: balance.chain,
+                    usd_value: balance.usd_value,
+                    is_spam: false
+                });
             });
         }
 
-        // Token balances dengan spam filtering
+        // Add token balances (exclude spam for main display)
         if (portfolio.token_balances && portfolio.token_balances.length > 0) {
             // Sort: Non-spam first, then by USD value
             const sortedTokens = portfolio.token_balances.sort((a, b) => {
@@ -503,49 +531,100 @@
             });
 
             sortedTokens.forEach(token => {
-                const usdValue = token.usd_value ? `$${numberFormat(token.usd_value, 8)}` : 'N/A';
-                const isSpam = token.is_spam || false;
-
-                // Skip spam tokens in main display, or show them grayed out
-                const rowClass = isSpam ? 'opacity-50 border-l-4 border-red-500' : '';
-                const statusBadge = isSpam
-                    ? '<span class="clay-badge clay-badge-danger">Spam</span>'
-                    : '<span class="clay-badge clay-badge-secondary">Token</span>';
-
-                // Only show non-spam tokens or first 5 spam tokens for reference
-                if (!isSpam || html.split('border-red-500').length <= 5) {
-                    html += `
-                        <tr class="${rowClass}">
-                            <td class="py-3 px-4">
-                                <div class="flex items-center">
-                                    <div class="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center mr-3">
-                                        <i class="fas fa-coins text-gray-600 text-xs"></i>
-                                    </div>
-                                    <div>
-                                        <div class="font-medium ${isSpam ? 'line-through' : ''}">${token.token_name || token.token_symbol}</div>
-                                        <div class="text-xs text-gray-500">${token.token_symbol}</div>
-                                    </div>
-                                </div>
-                            </td>
-                            <td class="py-3 px-4 font-medium">${numberFormat(token.balance, 8)}</td>
-                            <td class="py-3 px-4">
-                                <span class="clay-badge clay-badge-secondary">${token.chain.toUpperCase()}</span>
-                            </td>
-                            <td class="py-3 px-4 font-medium">${usdValue}</td>
-                            <td class="py-3 px-4">${statusBadge}</td>
-                            <td class="py-3 px-4">
-                                <button class="clay-badge clay-badge-primary py-1 px-2 text-xs" onclick="viewOnExplorer('${token.chain}', '${token.token_address}')">
-                                    <i class="fas fa-external-link-alt"></i>
-                                </button>
-                            </td>
-                        </tr>
-                    `;
-                }
+                holdingsData.push({
+                    type: 'token',
+                    token_address: token.token_address,
+                    token_name: token.token_name,
+                    token_symbol: token.token_symbol,
+                    balance: token.balance,
+                    chain: token.chain,
+                    usd_value: token.usd_value,
+                    is_spam: token.is_spam || false
+                });
             });
         }
 
-        if (html === '') {
-            html = `
+        // Reset pagination
+        holdingsPage = 1;
+        populateHoldingsTablePaginated();
+    }
+
+    // ⚡ NEW: Populate holdings table dengan pagination
+    function populateHoldingsTablePaginated() {
+        const container = document.getElementById('onchain-holdings-table');
+        const totalItems = holdingsData.length;
+        const totalPages = Math.ceil(totalItems / HOLDINGS_PER_PAGE);
+
+        // Update count
+        document.getElementById('assets-count').textContent = `${totalItems} assets`;
+
+        if (totalItems > 0) {
+            const startIndex = (holdingsPage - 1) * HOLDINGS_PER_PAGE;
+            const endIndex = Math.min(startIndex + HOLDINGS_PER_PAGE, totalItems);
+            const pageItems = holdingsData.slice(startIndex, endIndex);
+
+            let html = '';
+
+            pageItems.forEach(item => {
+                // ⚡ FIXED: Handle null usd_value dengan lebih baik
+                let usdValue = 'N/A';  // Default value
+
+                if (item.usd_value !== null && item.usd_value !== undefined) {
+                    if (item.usd_value > 0) {
+                        usdValue = `${numberFormat(item.usd_value, 8)}`;
+                    } else if (item.usd_value === 0) {
+                        usdValue = '$0.00000000';
+                    }
+                }
+                // ⚡ FIXED: Tidak ada "Calculating..." lagi, langsung "N/A" untuk null values
+
+                const isSpam = item.is_spam || false;
+                const rowClass = isSpam ? 'opacity-50 border-l-4 border-red-500' :
+                                item.type === 'native' ? 'border-l-4 border-blue-500' : '';
+
+                const statusBadge = isSpam ? '<span class="clay-badge clay-badge-danger">Spam</span>' :
+                                   item.type === 'native' ? '<span class="clay-badge clay-badge-success">Native</span>' :
+                                   '<span class="clay-badge clay-badge-secondary">Token</span>';
+
+                html += `
+                    <tr class="${rowClass}">
+                        <td class="py-3 px-4">
+                            <div class="flex items-center">
+                                <div class="w-8 h-8 ${item.type === 'native' ? 'bg-blue-500' : 'bg-gray-300'} rounded-full flex items-center justify-center mr-3">
+                                    <i class="fas fa-coins ${item.type === 'native' ? 'text-white' : 'text-gray-600'} text-xs"></i>
+                                </div>
+                                <div>
+                                    <div class="font-medium ${isSpam ? 'line-through' : ''}">${item.token_name || item.token_symbol}</div>
+                                    <div class="text-xs text-gray-500">${item.token_symbol}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="py-3 px-4 font-medium">${numberFormat(item.balance, 8)}</td>
+                        <td class="py-3 px-4">
+                            <span class="clay-badge clay-badge-${item.type === 'native' ? 'info' : 'secondary'}">${item.chain.toUpperCase()}</span>
+                        </td>
+                        <td class="py-3 px-4 font-medium">${usdValue}</td>
+                        <td class="py-3 px-4">${statusBadge}</td>
+                        <td class="py-3 px-4">
+                            <button class="clay-badge clay-badge-primary py-1 px-2 text-xs" onclick="viewOnExplorer('${item.chain}', '${item.token_address}')">
+                                <i class="fas fa-external-link-alt"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            container.innerHTML = html;
+
+            // Update pagination
+            if (totalPages > 1) {
+                updateHoldingsPagination(totalPages, startIndex + 1, endIndex);
+                document.getElementById('holdings-pagination').style.display = 'flex';
+            } else {
+                document.getElementById('holdings-page-info').textContent = `Showing all ${totalItems} assets`;
+            }
+        } else {
+            container.innerHTML = `
                 <tr>
                     <td colspan="6" class="py-6 px-4 text-center">
                         <div class="text-gray-500">
@@ -557,8 +636,58 @@
                 </tr>
             `;
         }
+    }
 
-        tableBody.innerHTML = html;
+    // ⚡ NEW: Update holdings pagination
+    function updateHoldingsPagination(totalPages, startItem, endItem) {
+        // Update info
+        document.getElementById('holdings-page-info').textContent =
+            `Showing ${startItem} to ${endItem} of ${holdingsData.length} assets`;
+
+        // Update buttons
+        document.getElementById('holdings-prev').disabled = holdingsPage <= 1;
+        document.getElementById('holdings-next').disabled = holdingsPage >= totalPages;
+        document.getElementById('holdings-prev').style.opacity = holdingsPage <= 1 ? '0.5' : '1';
+        document.getElementById('holdings-next').style.opacity = holdingsPage >= totalPages ? '0.5' : '1';
+
+        // Update page numbers
+        const pageNumbersDiv = document.getElementById('holdings-page-numbers');
+        let html = '';
+
+        const startPage = Math.max(1, holdingsPage - 2);
+        const endPage = Math.min(totalPages, holdingsPage + 2);
+
+        for (let i = startPage; i <= endPage; i++) {
+            const isActive = i === holdingsPage;
+            html += `
+                <button onclick="goToHoldingsPage(${i})"
+                       class="clay-button ${isActive ? 'clay-button-primary' : 'clay-button-secondary'} py-1.5 px-3 text-sm">
+                    ${i}
+                </button>
+            `;
+        }
+
+        pageNumbersDiv.innerHTML = html;
+    }
+
+    // ⚡ NEW: Holdings pagination functions
+    function changeHoldingsPage(direction) {
+        const totalPages = Math.ceil(holdingsData.length / HOLDINGS_PER_PAGE);
+        const newPage = holdingsPage + direction;
+
+        if (newPage >= 1 && newPage <= totalPages) {
+            holdingsPage = newPage;
+            populateHoldingsTablePaginated();
+        }
+    }
+
+    function goToHoldingsPage(page) {
+        const totalPages = Math.ceil(holdingsData.length / HOLDINGS_PER_PAGE);
+
+        if (page >= 1 && page <= totalPages) {
+            holdingsPage = page;
+            populateHoldingsTablePaginated();
+        }
     }
 
     // ⚡ ENHANCED: Populate category distribution dengan filtering spam
@@ -668,7 +797,7 @@
 
                 chains[chain].value += value;
                 chains[chain].project_count++;
-                chains[chain].balance_display += balance.balance; // For display purposes
+                chains[chain].balance_display += balance.balance;
             });
         }
 
