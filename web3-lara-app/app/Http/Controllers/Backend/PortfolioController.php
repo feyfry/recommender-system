@@ -100,50 +100,70 @@ class PortfolioController extends Controller
     }
 
     /**
-     * ⚡ NEW: AJAX endpoint untuk load analytics data dengan strong caching
+     * ⚡ FIXED: AJAX endpoint untuk load analytics data dengan better error handling
      */
-    public function loadAnalyticsData()
+    public function loadAnalyticsData(Request $request)
     {
         $user          = Auth::user();
         $walletAddress = $user->wallet_address;
+        $selectedChain = $request->get('chain'); // Chain selection parameter
 
         try {
-            // ⚡ STRONG CACHING: 30 menit untuk analytics (lebih lama dari portfolio)
-            $analytics = Cache::remember("onchain_analytics_v3_{$walletAddress}", 30, function () use ($walletAddress) {
+            // ⚡ FIXED: Cache key dengan versioning baru
+            $cacheKey = "onchain_analytics_fixed_v5_{$walletAddress}" . ($selectedChain ? "_{$selectedChain}" : '');
+
+            $analytics = Cache::remember($cacheKey, 10, function () use ($walletAddress, $selectedChain) {
                 try {
-                    return $this->getOnchainAnalytics($walletAddress);
+                    return $this->getOnchainAnalytics($walletAddress, $selectedChain);
                 } catch (\Exception $e) {
-                    Log::warning("Failed to fetch onchain analytics for {$walletAddress}: " . $e->getMessage());
-                    return $this->getEmptyAnalyticsData();
+                    Log::warning("Failed to fetch analytics for {$walletAddress}: " . $e->getMessage());
+                    return $this->getEmptyAnalyticsData($selectedChain);
                 }
             });
 
-            // ⚡ STRONG CACHING: 15 menit untuk transactions
-            $recentTransactions = Cache::remember("onchain_transactions_v3_{$walletAddress}", 15, function () use ($walletAddress) {
+            // ⚡ FIXED: Cache key untuk transactions dengan chain filtering
+            $transactionsCacheKey = "onchain_transactions_fixed_v5_{$walletAddress}" . ($selectedChain ? "_{$selectedChain}" : '');
+
+            $recentTransactions = Cache::remember($transactionsCacheKey, 10, function () use ($walletAddress, $selectedChain) {
                 try {
-                    return $this->getOnchainTransactions($walletAddress, 50);
+                    return $this->getOnchainTransactions($walletAddress, 100, $selectedChain);
                 } catch (\Exception $e) {
-                    Log::warning("Failed to fetch onchain transactions for {$walletAddress}: " . $e->getMessage());
+                    Log::warning("Failed to fetch transactions for {$walletAddress}: " . $e->getMessage());
                     return [];
                 }
             });
 
+            // Available chains untuk dropdown
+            $availableChains = $this->getAvailableChains();
+
             return response()->json([
-                'success'      => true,
-                'analytics'    => $analytics,
-                'transactions' => $recentTransactions,
-                'cached'       => true,
-                'optimization' => 'native_token_focus',
+                'success'           => true,
+                'analytics'         => $analytics,
+                'transactions'      => $recentTransactions,
+                'available_chains'  => $availableChains,
+                'selected_chain'    => $selectedChain,
+                'cached'            => true,
+                'optimization'      => 'multi_chain_fixed_v5',
+                'debug_info'        => [
+                    'analytics_total_txs' => $analytics['total_transactions'] ?? 0,
+                    'transactions_count' => count($recentTransactions),
+                    'chains_activity' => $analytics['chains_activity'] ?? [],
+                    'cache_key_analytics' => $cacheKey,
+                    'cache_key_transactions' => $transactionsCacheKey
+                ]
             ]);
 
         } catch (\Exception $e) {
             Log::error("Error loading analytics data for {$walletAddress}: " . $e->getMessage());
 
             return response()->json([
-                'success'      => false,
-                'message'      => 'Gagal memuat data analytics: ' . $e->getMessage(),
-                'analytics'    => $this->getEmptyAnalyticsData(),
-                'transactions' => [],
+                'success'          => false,
+                'message'          => 'Gagal memuat data analytics: ' . $e->getMessage(),
+                'analytics'        => $this->getEmptyAnalyticsData($selectedChain),
+                'transactions'     => [],
+                'available_chains' => $this->getAvailableChains(),
+                'selected_chain'   => $selectedChain,
+                'error_details'    => $e->getMessage()
             ], 500);
         }
     }
@@ -379,41 +399,49 @@ class PortfolioController extends Controller
     }
 
     /**
-     * ⚡ ENHANCED: Mendapatkan analytics onchain dengan retry logic
+     * ⚡ FIXED: Mendapatkan analytics dengan better endpoint calls
      */
-    private function getOnchainAnalytics($walletAddress)
+    private function getOnchainAnalytics($walletAddress, $selectedChain = null)
     {
         $attempt   = 0;
         $lastError = null;
 
         while ($attempt < $this->maxRetries) {
             try {
-                $response = Http::timeout($this->apiTimeout)->get("{$this->apiUrl}/blockchain/analytics/{$walletAddress}", [
+                // ⚡ FIXED: Build request params dengan chain selection
+                $params = [
                     'days' => 30,
-                ]);
+                ];
+
+                if ($selectedChain) {
+                    $params['chain'] = $selectedChain;
+                }
+
+                Log::info("Fetching analytics for {$walletAddress} with params: " . json_encode($params));
+
+                $response = Http::timeout($this->apiTimeout)->get("{$this->apiUrl}/blockchain/analytics/{$walletAddress}", $params);
 
                 if ($response->successful()) {
                     $data = $response->json();
 
-                    // ⚡ Validasi structure response
-                    if (! isset($data['wallet_address'])) {
-                        Log::warning("Invalid analytics response structure for {$walletAddress}");
-                        return $this->getEmptyAnalyticsData();
-                    }
+                    // ⚡ FIXED: Log response untuk debugging
+                    Log::info("Analytics response for {$walletAddress}: " . json_encode([
+                        'total_transactions' => $data['total_transactions'] ?? 0,
+                        'chains_activity' => $data['chains_activity'] ?? [],
+                        'selected_chain' => $data['selected_chain'] ?? null,
+                        'errors' => $data['errors_encountered'] ?? []
+                    ]));
 
-                    Log::info("Successfully fetched onchain analytics for {$walletAddress}: " .
-                        ($data['total_transactions'] ?? 0) . " transactions, Volume: $" .
-                        number_format($data['total_volume_usd'] ?? 0, 8));
-
+                    // ⚡ SIMPLE: Return data as-is, don't validate structure
                     return $data;
                 } else {
-                    $lastError = "Blockchain API returned error {$response->status()}: " . $response->body();
+                    $lastError = "API returned error {$response->status()}: " . $response->body();
                     Log::warning($lastError . " for analytics {$walletAddress} (attempt " . ($attempt + 1) . ")");
                 }
 
             } catch (\Exception $e) {
                 $lastError = $e->getMessage();
-                Log::error("Exception fetching onchain analytics for {$walletAddress} (attempt " . ($attempt + 1) . "): " . $lastError);
+                Log::error("Exception fetching analytics for {$walletAddress} (attempt " . ($attempt + 1) . "): " . $lastError);
 
                 if ($attempt == $this->maxRetries - 1 || str_contains($lastError, 'timeout')) {
                     throw $e;
@@ -430,40 +458,61 @@ class PortfolioController extends Controller
     }
 
     /**
-     * ⚡ ENHANCED: Mendapatkan transaksi onchain dengan retry logic
+     * ⚡ FIXED: Mendapatkan transaksi dengan proper chain filtering
      */
-    private function getOnchainTransactions($walletAddress, $limit = 50)
+    private function getOnchainTransactions($walletAddress, $limit = 100, $selectedChain = null)
     {
         $attempt   = 0;
         $lastError = null;
 
         while ($attempt < $this->maxRetries) {
             try {
-                $response = Http::timeout($this->apiTimeout)->get("{$this->apiUrl}/blockchain/transactions/{$walletAddress}", [
+                // ⚡ FIXED: Build request params dengan chain filtering yang benar
+                $params = [
                     'limit'  => $limit,
-                    'chains' => ['eth', 'bsc', 'polygon'],
-                ]);
+                ];
+
+                if ($selectedChain) {
+                    // ⚡ FIXED: Send as single chain array untuk filtering
+                    $params['chains'] = [$selectedChain];
+                } else {
+                    // ⚡ All supported chains
+                    $params['chains'] = ['eth', 'bsc', 'polygon', 'avalanche'];
+                }
+
+                Log::info("Fetching transactions for {$walletAddress} with params: " . json_encode($params));
+
+                $response = Http::timeout($this->apiTimeout)->get("{$this->apiUrl}/blockchain/transactions/{$walletAddress}", $params);
 
                 if ($response->successful()) {
                     $data = $response->json();
 
-                    // ⚡ Validasi response adalah array
+                    // ⚡ FIXED: Validate dan filter response
                     if (! is_array($data)) {
                         Log::warning("Invalid transactions response format for {$walletAddress}");
                         return [];
                     }
 
-                    Log::info("Successfully fetched onchain transactions for {$walletAddress}: " . count($data) . " transactions");
+                    // ⚡ FIXED: Additional filtering untuk ensure correct chain
+                    if ($selectedChain) {
+                        $data = array_filter($data, function($tx) use ($selectedChain) {
+                            return isset($tx['chain']) && $tx['chain'] === $selectedChain;
+                        });
+                    }
 
-                    return $data;
+                    $chainInfo = $selectedChain ? " (chain: {$selectedChain})" : " (all chains)";
+                    Log::info("Successfully fetched " . count($data) . " transactions for {$walletAddress}{$chainInfo}");
+
+                    return array_values($data); // Re-index array after filtering
+
                 } else {
-                    $lastError = "Blockchain API returned error {$response->status()}: " . $response->body();
+                    $lastError = "API returned error {$response->status()}: " . $response->body();
                     Log::warning($lastError . " for transactions {$walletAddress} (attempt " . ($attempt + 1) . ")");
                 }
 
             } catch (\Exception $e) {
                 $lastError = $e->getMessage();
-                Log::error("Exception fetching onchain transactions for {$walletAddress} (attempt " . ($attempt + 1) . "): " . $lastError);
+                Log::error("Exception fetching transactions for {$walletAddress} (attempt " . ($attempt + 1) . "): " . $lastError);
 
                 if ($attempt == $this->maxRetries - 1 || str_contains($lastError, 'timeout')) {
                     throw $e;
@@ -477,6 +526,45 @@ class PortfolioController extends Controller
         }
 
         throw new \Exception($lastError ?: 'Unknown error after multiple attempts');
+    }
+
+    /**
+     * ⚡ NEW: Get available chains untuk dropdown selection
+     */
+    private function getAvailableChains()
+    {
+        return [
+            [
+                'value' => null,
+                'label' => 'All Chains (Multi-Chain)',
+                'icon'  => 'fas fa-globe',
+                'color' => 'primary'
+            ],
+            [
+                'value' => 'eth',
+                'label' => 'Ethereum (ETH)',
+                'icon'  => 'fab fa-ethereum',
+                'color' => 'blue'
+            ],
+            [
+                'value' => 'bsc',
+                'label' => 'Binance Smart Chain (BNB)',
+                'icon'  => 'fas fa-coins',
+                'color' => 'yellow'
+            ],
+            [
+                'value' => 'polygon',
+                'label' => 'Polygon (MATIC)',
+                'icon'  => 'fas fa-project-diagram',
+                'color' => 'purple'
+            ],
+            [
+                'value' => 'avalanche',
+                'label' => 'Avalanche (AVAX)',
+                'icon'  => 'fas fa-mountain',
+                'color' => 'red'
+            ]
+        ];
     }
 
     /**
@@ -621,9 +709,9 @@ class PortfolioController extends Controller
     }
 
     /**
-     * ⚡ ENHANCED: Return empty analytics data dengan spam filtering info
+     * ⚡ FIXED: Enhanced empty data dengan proper structure
      */
-    private function getEmptyAnalyticsData()
+    private function getEmptyAnalyticsData($selectedChain = null)
     {
         return [
             'wallet_address'        => '',
@@ -633,12 +721,100 @@ class PortfolioController extends Controller
             'most_traded_tokens'    => [],
             'transaction_frequency' => [],
             'chains_activity'       => [],
+            'selected_chain'        => $selectedChain,
+            'chain_specific_data'   => null,
+            'cross_chain_volume'    => 0.0,
+            'chain_dominance'       => [],
+            'diversification_score' => 0.0,
+            'chains_processed'      => [],
+            'errors_encountered'    => ['No data available'],
             'error_info'            => 'API not available or returned empty data',
-            'optimization'          => 'native_token_focus',
+            'optimization'          => 'multi_chain_fixed_v5',
         ];
     }
 
-    // ... Rest of the methods remain the same (addTransaction, addPriceAlert, etc.)
+    /**
+     * ⚡ FIXED: Enhanced refresh dengan better cache clearing
+     */
+    public function refreshAnalyticsData(Request $request)
+    {
+        $user          = Auth::user();
+        $walletAddress = $user->wallet_address;
+        $selectedChain = $request->get('chain');
+
+        try {
+            // ⚡ Check API status terlebih dahulu
+            $apiStatus = $this->checkApiStatus();
+            if (! $apiStatus['available']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Blockchain API tidak tersedia saat ini: ' . $apiStatus['error'],
+                ], 503);
+            }
+
+            // ⚡ FIXED: Clear all versions of cache keys
+            $cacheKeysToForget = [
+                // Old versions
+                "onchain_analytics_v4_{$walletAddress}",
+                "onchain_transactions_v4_{$walletAddress}",
+                // New versions
+                "onchain_analytics_fixed_v5_{$walletAddress}",
+                "onchain_transactions_fixed_v5_{$walletAddress}",
+            ];
+
+            // Add chain-specific cache keys if selected
+            if ($selectedChain) {
+                $cacheKeysToForget[] = "onchain_analytics_fixed_v5_{$walletAddress}_{$selectedChain}";
+                $cacheKeysToForget[] = "onchain_transactions_fixed_v5_{$walletAddress}_{$selectedChain}";
+            }
+
+            foreach ($cacheKeysToForget as $key) {
+                Cache::forget($key);
+            }
+
+            Log::info("Cleared cache keys for {$walletAddress}: " . implode(', ', $cacheKeysToForget));
+
+            // Fetch fresh data
+            $analytics = $this->getOnchainAnalytics($walletAddress, $selectedChain);
+            $transactions = $this->getOnchainTransactions($walletAddress, 100, $selectedChain);
+
+            // ⚡ Store fresh data in cache
+            $cacheKey = "onchain_analytics_fixed_v5_{$walletAddress}" . ($selectedChain ? "_{$selectedChain}" : '');
+            $transactionsCacheKey = "onchain_transactions_fixed_v5_{$walletAddress}" . ($selectedChain ? "_{$selectedChain}" : '');
+
+            Cache::put($cacheKey, $analytics, 10);
+            Cache::put($transactionsCacheKey, $transactions, 10);
+
+            $chainInfo = $selectedChain ? " untuk chain {$selectedChain}" : " untuk semua chains";
+
+            return response()->json([
+                'success'           => true,
+                'analytics'         => $analytics,
+                'transactions'      => $transactions,
+                'available_chains'  => $this->getAvailableChains(),
+                'selected_chain'    => $selectedChain,
+                'message'           => "Data analytics{$chainInfo} berhasil diperbarui",
+                'cached_for'        => '10 minutes',
+                'optimization'      => 'multi_chain_fixed_v5',
+                'debug_info'        => [
+                    'analytics_total_txs' => $analytics['total_transactions'] ?? 0,
+                    'transactions_count' => count($transactions),
+                    'chains_activity' => $analytics['chains_activity'] ?? [],
+                    'cache_keys_cleared' => count($cacheKeysToForget)
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("Error refreshing analytics data for {$walletAddress}: " . $e->getMessage());
+
+            return response()->json([
+                'success'       => false,
+                'message'       => 'Gagal memperbarui data analytics: ' . $e->getMessage(),
+                'error_details' => $e->getMessage(),
+                'cache_cleared' => true,
+            ], 500);
+        }
+    }
 
     /**
      * Menambahkan transaksi baru (existing - no change)

@@ -164,3 +164,160 @@ CRYPTO_DOMAIN_WEIGHTS = {
     "market_cap_influence": 0.45,    # Diturunkan sedikit bobot market cap dari 0.55
     "chain_importance": 0.45,        # Sedikit lebih rendah
 }
+
+# ⚡ NEW: Multi-Chain Analytics Configuration
+MULTI_CHAIN_CONFIG = {
+    "enabled": True,
+    "max_transactions_per_chain": 200,  # ⚡ Increased from 50
+    "max_total_transactions": 1000,     # ⚡ Total limit across all chains
+    "parallel_chain_requests": True,    # ⚡ Enable parallel fetching
+    "chain_request_timeout": 15,        # ⚡ Timeout per chain request
+    "analytics_cache_ttl": 900,         # ⚡ 15 minutes untuk multi-chain analytics
+    "single_chain_cache_ttl": 600,      # ⚡ 10 minutes untuk single chain
+}
+
+# ⚡ ENHANCED: Chain-specific configurations
+CHAIN_CONFIGS = {
+    "ethereum": {
+        "symbol": "ETH",
+        "decimals": 18,
+        "explorer": "https://etherscan.io",
+        "color": "#627eea",
+        "icon": "fab fa-ethereum",
+        "priority": 1,  # Highest priority
+        "max_transactions": 300,  # ETH gets more transactions due to activity
+    },
+    "bsc": {
+        "symbol": "BNB", 
+        "decimals": 18,
+        "explorer": "https://bscscan.com",
+        "color": "#f0b90b",
+        "icon": "fas fa-coins",
+        "priority": 2,
+        "max_transactions": 250,
+    },
+    "polygon": {
+        "symbol": "MATIC",
+        "decimals": 18, 
+        "explorer": "https://polygonscan.com",
+        "color": "#8247e5",
+        "icon": "fas fa-project-diagram",
+        "priority": 3,
+        "max_transactions": 200,
+    },
+    "avalanche": {
+        "symbol": "AVAX",
+        "decimals": 18,
+        "explorer": "https://snowtrace.io", 
+        "color": "#e84142",
+        "icon": "fas fa-mountain",
+        "priority": 4,
+        "max_transactions": 150,
+    }
+}
+
+# ⚡ ENHANCED: Native token mapping untuk multi-chain
+NATIVE_TOKEN_MAPPING = {
+    # Ethereum ecosystem
+    'ETH': {'coingecko_id': 'ethereum', 'chains': ['eth', 'ethereum']},
+    'WETH': {'coingecko_id': 'ethereum', 'chains': ['eth', 'ethereum', 'polygon', 'avalanche']},
+    
+    # Binance ecosystem  
+    'BNB': {'coingecko_id': 'binancecoin', 'chains': ['bsc']},
+    'WBNB': {'coingecko_id': 'binancecoin', 'chains': ['bsc']},
+    
+    # Polygon ecosystem
+    'MATIC': {'coingecko_id': 'matic-network', 'chains': ['polygon']},
+    'WMATIC': {'coingecko_id': 'matic-network', 'chains': ['polygon']},
+    
+    # Avalanche ecosystem
+    'AVAX': {'coingecko_id': 'avalanche-2', 'chains': ['avalanche']},
+    'WAVAX': {'coingecko_id': 'avalanche-2', 'chains': ['avalanche']},
+}
+
+# ⚡ ENHANCED: Analytics optimization settings
+ANALYTICS_OPTIMIZATION = {
+    "focus_native_tokens": True,
+    "native_token_weight": 0.8,        # 80% weight untuk native tokens
+    "alt_token_weight": 0.2,           # 20% weight untuk alt tokens
+    "spam_filter_strict": True,
+    "min_transaction_value_usd": 0.01, # Minimum $0.01 untuk dihitung
+    "max_tokens_per_analytics": 100,   # Max tokens untuk analytics
+    "enable_cross_chain_analytics": True,
+    "cross_chain_correlation": 0.3,    # Weight untuk cross-chain correlation
+}
+
+# ⚡ ENHANCED: Enhanced spam patterns untuk multi-chain
+ENHANCED_SPAM_PATTERNS = [
+    # Basic spam patterns (existing)
+    r'claim.*reward',
+    r'visit.*site', 
+    r'airdrop',
+    r'free.*token',
+    r'\.com',
+    r'\.net',
+    r'\.org',
+    r'\.io',
+    r'www\.',
+    r'http',
+    
+    # ⚡ NEW: Multi-chain specific spam patterns
+    r'bridge.*reward',      # Bridge scams
+    r'cross.*chain.*claim', # Cross-chain scams  
+    r'multi.*chain.*gift',  # Multi-chain gift scams
+    r'swap.*bonus',         # Swap bonus scams
+    r'yield.*farm.*fake',   # Fake yield farming
+    r'liquidity.*mine.*scam', # Fake liquidity mining
+    r'defi.*protocol.*fake',  # Fake DeFi protocols
+    
+    # Chain-specific scams
+    r'ethereum.*merge.*claim', # ETH merge scams
+    r'bnb.*chain.*upgrade',    # BSC upgrade scams  
+    r'polygon.*pos.*reward',   # Polygon PoS scams
+    r'avalanche.*subnet.*claim', # AVAX subnet scams
+    
+    # Cross-chain bridge scams
+    r'anyswap.*claim',
+    r'bridge.*protocol.*reward',
+    r'cross.*chain.*bridge.*bonus',
+]
+
+# ⚡ ENHANCED: Multi-chain rate limiting
+MULTI_CHAIN_RATE_LIMITS = {
+    "requests_per_second": 2,      # ⚡ Global rate limit
+    "requests_per_chain": 1,       # ⚡ Per-chain rate limit
+    "batch_delay": 0.5,            # ⚡ Delay between batches
+    "retry_backoff": [1, 2, 4, 8], # ⚡ Exponential backoff
+    "max_retries": 3,              # ⚡ Max retries per request
+    "timeout_escalation": [10, 20, 30], # ⚡ Escalating timeouts
+}
+
+# ⚡ NEW: Cross-chain analytics weights  
+CROSS_CHAIN_WEIGHTS = {
+    "ethereum_to_polygon": 0.7,    # High correlation (L2)
+    "ethereum_to_avalanche": 0.5,  # Medium correlation  
+    "ethereum_to_bsc": 0.4,        # Lower correlation
+    "polygon_to_avalanche": 0.3,   # Low correlation
+    "polygon_to_bsc": 0.2,         # Very low correlation
+    "avalanche_to_bsc": 0.2,       # Very low correlation
+}
+
+# ⚡ ENHANCED: Analytics aggregation settings
+ANALYTICS_AGGREGATION = {
+    "enable_chain_comparison": True,
+    "normalize_across_chains": True,
+    "weight_by_chain_activity": True,
+    "include_cross_chain_volume": True,
+    "chain_dominance_threshold": 0.6,  # 60% untuk considered dominant
+    "diversification_bonus": 0.2,      # 20% bonus untuk diversified portfolios
+}
+
+# ⚡ NEW: Performance monitoring untuk multi-chain
+PERFORMANCE_MONITORING = {
+    "log_chain_response_times": True,
+    "track_success_rates": True, 
+    "monitor_error_patterns": True,
+    "alert_slow_chains": True,
+    "slow_response_threshold": 30,  # 30 seconds
+    "error_rate_threshold": 0.1,    # 10% error rate
+}

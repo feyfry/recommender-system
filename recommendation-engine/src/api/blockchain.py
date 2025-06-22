@@ -99,6 +99,7 @@ class WalletPortfolio(BaseModel):
     chains_scanned: List[str]
     filtered_tokens_count: Optional[int] = 0
 
+# ⚡ ENHANCED: OnchainAnalytics model dengan multi-chain support
 class OnchainAnalytics(BaseModel):
     wallet_address: str
     total_transactions: int
@@ -106,8 +107,138 @@ class OnchainAnalytics(BaseModel):
     total_volume_usd: float
     most_traded_tokens: List[Dict[str, Any]]
     transaction_frequency: Dict[str, int]
-    profit_loss_estimate: Optional[float] = None
     chains_activity: Dict[str, int]
+    profit_loss_estimate: Optional[float] = None
+    
+    # ⚡ NEW: Multi-chain specific fields
+    selected_chain: Optional[str] = None
+    chain_specific_data: Optional[Dict[str, Any]] = None
+    cross_chain_volume: Optional[float] = 0.0
+    chain_dominance: Optional[Dict[str, float]] = {}
+    diversification_score: Optional[float] = 0.0
+    
+    # ⚡ NEW: Performance metrics
+    response_time_ms: Optional[int] = None
+    cache_hit: Optional[bool] = False
+    chains_processed: Optional[List[str]] = []
+    errors_encountered: Optional[List[str]] = []
+
+# ⚡ NEW: Chain-specific analytics model
+class ChainSpecificAnalytics(BaseModel):
+    chain: str
+    native_token: str
+    total_transactions: int
+    unique_tokens: int
+    volume_usd: float
+    latest_transaction_date: Optional[datetime] = None
+    top_tokens: List[Dict[str, Any]] = []
+    transaction_distribution: Dict[str, int] = {}
+    average_gas_used: Optional[float] = None
+    
+    # ⚡ Performance metrics per chain
+    fetch_time_ms: Optional[int] = None
+    success_rate: Optional[float] = None
+    data_quality_score: Optional[float] = None
+
+# ⚡ ENHANCED: Multi-chain token balance dengan cross-chain info
+class MultiChainTokenBalance(BaseModel):
+    token_address: str
+    token_name: str  
+    token_symbol: str
+    balance: float
+    balance_raw: str
+    decimals: int
+    usd_value: Optional[float] = None
+    chain: str
+    is_spam: Optional[bool] = False
+    
+    # ⚡ NEW: Cross-chain data
+    cross_chain_equivalent: Optional[List[Dict[str, Any]]] = []
+    total_cross_chain_balance: Optional[float] = None
+    is_native_token: Optional[bool] = False
+    bridge_addresses: Optional[List[str]] = []
+
+# ⚡ NEW: Multi-chain portfolio aggregation
+class MultiChainPortfolio(BaseModel):
+    wallet_address: str
+    total_usd_value: float
+    total_native_value: float
+    total_alt_token_value: float
+    
+    # Chain-specific breakdowns
+    chain_breakdowns: Dict[str, Dict[str, Any]]
+    native_balances: List[MultiChainTokenBalance]
+    token_balances: List[MultiChainTokenBalance]
+    
+    # Cross-chain analytics
+    cross_chain_exposure: Dict[str, float]
+    diversification_metrics: Dict[str, float]
+    chain_correlation_scores: Dict[str, float]
+    
+    # Metadata
+    last_updated: datetime
+    chains_scanned: List[str]
+    filtered_tokens_count: int = 0
+    processing_stats: Dict[str, Any] = {}
+
+# ⚡ NEW: Cross-chain transaction analysis
+class CrossChainTransaction(BaseModel):
+    primary_chain: str
+    related_chains: List[str]
+    transaction_group_id: str
+    total_value_usd: float
+    bridge_protocol: Optional[str] = None
+    estimated_fees_usd: Optional[float] = None
+    completion_time_minutes: Optional[int] = None
+    success_rate: Optional[float] = None
+
+# ⚡ NEW: Multi-chain analytics insights
+class MultiChainInsights(BaseModel):
+    wallet_address: str
+    
+    # Chain usage patterns
+    preferred_chains: List[str]
+    chain_usage_distribution: Dict[str, float]
+    cross_chain_activity_score: float
+    
+    # Trading patterns
+    multi_chain_arbitrage_opportunities: int
+    cross_chain_correlation_trades: int
+    chain_migration_patterns: Dict[str, Any]
+    
+    # Risk and diversification
+    chain_concentration_risk: float
+    diversification_recommendation: str
+    optimal_chain_allocation: Dict[str, float]
+    
+    # Performance insights
+    best_performing_chain: str
+    worst_performing_chain: str
+    cross_chain_efficiency_score: float
+    
+    # Recommendations
+    recommended_actions: List[str]
+    risk_warnings: List[str]
+    optimization_suggestions: List[str]
+
+# ⚡ ENHANCED: Error handling untuk multi-chain
+class MultiChainError(BaseModel):
+    error_type: str
+    chain: str
+    message: str
+    timestamp: datetime
+    retry_count: int = 0
+    recoverable: bool = True
+    
+class MultiChainResponse(BaseModel):
+    success: bool
+    data: Optional[Dict[str, Any]] = None
+    errors: List[MultiChainError] = []
+    partial_success: bool = False
+    chains_processed: List[str] = []
+    chains_failed: List[str] = []
+    processing_time_ms: int
+    cache_stats: Dict[str, Any] = {}
 
 # ⚡ ENHANCED: Smart spam detection dengan pattern yang lebih ketat
 def is_spam_token(token_name: str, token_symbol: str, balance: float = 0) -> bool:
@@ -154,6 +285,209 @@ def is_spam_token(token_name: str, token_symbol: str, balance: float = 0) -> boo
         
     except Exception:
         return False
+    
+async def get_onchain_analytics(session: aiohttp.ClientSession, wallet_address: str, selected_chain: str = None) -> Dict:
+    """⚡ FIXED: Analytics dengan proper multi-chain data processing"""
+    try:
+        config = BLOCKCHAIN_APIS['moralis']
+        headers = {
+            'X-API-Key': config['api_key'],
+            'Content-Type': 'application/json'
+        }
+        
+        analytics_data = {
+            'wallet_address': wallet_address,
+            'total_transactions': 0,
+            'unique_tokens_traded': 0,
+            'total_volume_usd': 0.0,
+            'most_traded_tokens': [],
+            'transaction_frequency': {},
+            'chains_activity': {},
+            'selected_chain': selected_chain,
+            'chain_specific_data': None,
+            'cross_chain_volume': 0.0,
+            'chain_dominance': {},
+            'diversification_score': 0.0,
+            'chains_processed': [],
+            'errors_encountered': []
+        }
+
+        # ⚡ FIXED: Use existing transaction fetching logic instead of new implementation
+        # Leverage the working fetch_onchain_transactions function
+        all_transactions = []
+        chain_transactions = {}
+        
+        # Determine which chains to process
+        target_chains = [selected_chain] if selected_chain else config['chains']
+        
+        logger.info(f"ANALYTICS: Processing {len(target_chains)} chains: {target_chains}")
+        
+        # ⚡ FIXED: Use the working transaction fetching approach
+        for chain in target_chains:
+            try:
+                # Get transactions for this chain using existing working method
+                transactions_url = f"{config['api_url']}/{wallet_address}"
+                
+                # ⚡ Use the transaction endpoint that we know works
+                if chain == 'eth' or chain == 'ethereum':
+                    # Use existing transaction fetch that works for ETH
+                    eth_txs = await fetch_ethereum_data(session, wallet_address, 'transactions')
+                    chain_txs = []
+                    
+                    for tx in eth_txs[:200]:  # Limit to 200
+                        try:
+                            processed_tx = {
+                                'hash': tx.get('hash', ''),
+                                'block_number': int(tx.get('blockNumber', 0)),
+                                'timestamp': datetime.fromtimestamp(int(tx.get('timeStamp', 0))).strftime('%Y-%m-%d'),
+                                'from_address': tx.get('from', ''),
+                                'to_address': tx.get('to', ''),
+                                'value': float(tx.get('value', 0)) / 1e18,
+                                'token_symbol': 'ETH',
+                                'token_address': '',
+                                'chain': 'ethereum',
+                                'transaction_type': 'native'
+                            }
+                            chain_txs.append(processed_tx)
+                            all_transactions.append(processed_tx)
+                        except Exception as e:
+                            logger.warning(f"Error processing ETH transaction: {e}")
+                            continue
+                    
+                    chain_transactions['ethereum'] = len(chain_txs)
+                    logger.info(f"SUCCESS: Processed {len(chain_txs)} ETH transactions")
+                
+                else:
+                    # For other chains, try Moralis API
+                    try:
+                        chain_url = f"{config['api_url']}/{wallet_address}/erc20/transfers"
+                        params = {
+                            'chain': chain,
+                            'limit': 100,
+                            'order': 'DESC'
+                        }
+                        
+                        async with session.get(chain_url, headers=headers, params=params, 
+                                             timeout=aiohttp.ClientTimeout(total=10)) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                raw_txs = data.get('result', []) if isinstance(data, dict) else data
+                                
+                                chain_txs = []
+                                for tx in raw_txs[:100]:
+                                    try:
+                                        processed_tx = {
+                                            'hash': tx.get('transaction_hash', ''),
+                                            'block_number': int(tx.get('block_number', 0)),
+                                            'timestamp': tx.get('block_timestamp', '')[:10] if tx.get('block_timestamp') else '',
+                                            'from_address': tx.get('from_address', ''),
+                                            'to_address': tx.get('to_address', ''),
+                                            'value': float(tx.get('value', 0)) / (10 ** int(tx.get('token_decimals', 18))),
+                                            'token_symbol': tx.get('token_symbol', get_native_token_for_chain(chain)),
+                                            'token_address': tx.get('address', ''),
+                                            'chain': chain,
+                                            'transaction_type': 'token' if tx.get('address') else 'native'
+                                        }
+                                        chain_txs.append(processed_tx)
+                                        all_transactions.append(processed_tx)
+                                    except Exception as e:
+                                        logger.warning(f"Error processing {chain} transaction: {e}")
+                                        continue
+                                
+                                chain_transactions[chain] = len(chain_txs)
+                                logger.info(f"SUCCESS: Processed {len(chain_txs)} {chain} transactions")
+                            else:
+                                logger.warning(f"WARNING: {chain} API returned {response.status}")
+                                chain_transactions[chain] = 0
+                    except Exception as e:
+                        logger.warning(f"WARNING: Failed to fetch {chain} data: {e}")
+                        chain_transactions[chain] = 0
+                
+                await asyncio.sleep(0.2)  # Rate limiting
+                
+            except Exception as e:
+                logger.error(f"ERROR: Error processing {chain}: {e}")
+                analytics_data['errors_encountered'].append(f"Chain {chain}: {str(e)}")
+                continue
+
+        # ⚡ FIXED: Process aggregated analytics data
+        if all_transactions:
+            analytics_data['total_transactions'] = len(all_transactions)
+            analytics_data['chains_activity'] = chain_transactions
+            analytics_data['chains_processed'] = list(chain_transactions.keys())
+            
+            # Calculate token trading stats
+            token_stats = {}
+            date_frequency = {}
+            
+            for tx in all_transactions:
+                # Token trading statistics
+                symbol = tx.get('token_symbol', 'UNKNOWN')
+                if symbol and symbol != 'UNKNOWN':
+                    if symbol not in token_stats:
+                        token_stats[symbol] = {
+                            'symbol': symbol,
+                            'trade_count': 0,
+                            'volume': 0.0,
+                            'volume_usd': 0.0,
+                            'chain': tx.get('chain', 'unknown')
+                        }
+                    
+                    token_stats[symbol]['trade_count'] += 1
+                    token_stats[symbol]['volume'] += tx.get('value', 0)
+                    
+                    # ⚡ SIMPLE: USD volume estimation for native tokens
+                    if symbol in ['ETH', 'BNB', 'MATIC', 'AVAX']:
+                        estimated_prices = {'ETH': 3400, 'BNB': 630, 'MATIC': 0.4, 'AVAX': 17}
+                        price = estimated_prices.get(symbol, 0)
+                        if price > 0:
+                            token_stats[symbol]['volume_usd'] += tx.get('value', 0) * price
+                
+                # Date frequency
+                if tx.get('timestamp'):
+                    date_str = tx['timestamp']
+                    if date_str:
+                        date_frequency[date_str] = date_frequency.get(date_str, 0) + 1
+            
+            analytics_data['unique_tokens_traded'] = len(token_stats)
+            analytics_data['total_volume_usd'] = sum(token.get('volume_usd', 0) for token in token_stats.values())
+            analytics_data['transaction_frequency'] = date_frequency
+            
+            # Sort most traded tokens
+            sorted_tokens = sorted(token_stats.values(), key=lambda x: x.get('trade_count', 0), reverse=True)
+            analytics_data['most_traded_tokens'] = sorted_tokens[:10]
+            
+            # ⚡ NEW: Chain-specific data if selected
+            if selected_chain:
+                chain_specific_txs = [tx for tx in all_transactions if tx.get('chain') == selected_chain]
+                if chain_specific_txs:
+                    analytics_data['chain_specific_data'] = {
+                        'chain': selected_chain,
+                        'total_transactions': len(chain_specific_txs),
+                        'transactions': chain_specific_txs[:50],  # Latest 50 for selected chain
+                        'native_token': get_native_token_for_chain(selected_chain)
+                    }
+        
+        logger.info(f"SUCCESS: Multi-chain analytics for {wallet_address}: {analytics_data['total_transactions']} total txs across {len(chain_transactions)} chains")
+        
+        return analytics_data
+        
+    except Exception as e:
+        logger.error(f"ERROR: Multi-chain analytics failed: {str(e)}")
+        analytics_data['errors_encountered'].append(f"General error: {str(e)}")
+        return analytics_data
+
+# ⚡ HELPER: Get native token for chain
+def get_native_token_for_chain(chain: str) -> str:
+    """Get native token symbol untuk chain tertentu"""
+    chain_native_map = {
+        'eth': 'ETH',
+        'ethereum': 'ETH', 
+        'bsc': 'BNB',
+        'polygon': 'MATIC',
+        'avalanche': 'AVAX'
+    }
+    return chain_native_map.get(chain.lower(), 'ETH')
 
 # ⚡ FIXED: Prioritize tokens yang SUDAH ADA USD VALUE dan native tokens
 def prioritize_native_tokens_only(tokens: List[Dict]) -> List[Dict]:
@@ -501,39 +835,153 @@ async def fetch_ethereum_data(session: aiohttp.ClientSession, wallet_address: st
         logger.error(f"Error fetching Ethereum data: {str(e)}")
         return []
 
-async def fetch_onchain_transactions(session: aiohttp.ClientSession, wallet_address: str, limit: int = 50) -> List[Dict]:
-    """Fetch transaksi onchain dari multiple chains"""
+# ⚡ FIXED: Transaction fetching dengan proper chain filtering
+async def fetch_onchain_transactions(session: aiohttp.ClientSession, wallet_address: str, limit: int = 50, selected_chains: List[str] = None) -> List[Dict]:
+    """⚡ FIXED: Fetch transaksi onchain dengan proper chain filtering"""
     try:
         all_transactions = []
+        target_chains = selected_chains or ['eth', 'bsc', 'polygon', 'avalanche']
         
-        # Fetch dari Ethereum via Etherscan
-        eth_txs = await fetch_ethereum_data(session, wallet_address, 'transactions')
-        for tx in eth_txs[:limit]:
+        logger.info(f"TRANSACTIONS: Fetching from chains: {target_chains}")
+        
+        for chain in target_chains:
             try:
-                all_transactions.append({
-                    'tx_hash': tx.get('hash'),
-                    'block_number': int(tx.get('blockNumber', 0)),
-                    'timestamp': datetime.fromtimestamp(int(tx.get('timeStamp', 0))),
-                    'from_address': tx.get('from'),
-                    'to_address': tx.get('to'),
-                    'value': float(tx.get('value', 0)) / 1e18,
-                    'value_raw': tx.get('value', '0'),
-                    'gas_used': int(tx.get('gasUsed', 0)),
-                    'gas_price': tx.get('gasPrice', '0'),
-                    'transaction_type': 'native',
-                    'chain': 'ethereum',
-                    'status': 'success' if tx.get('txreceipt_status') == '1' else 'failed'
-                })
+                chain_transactions = []
+                
+                if chain in ['eth', 'ethereum']:
+                    # ⚡ FIXED: Use working Etherscan approach for ETH
+                    eth_txs = await fetch_ethereum_data(session, wallet_address, 'transactions')
+                    
+                    for tx in eth_txs[:limit]:
+                        try:
+                            processed_tx = {
+                                'tx_hash': tx.get('hash', ''),
+                                'block_number': int(tx.get('blockNumber', 0)),
+                                'timestamp': datetime.fromtimestamp(int(tx.get('timeStamp', 0))),
+                                'from_address': tx.get('from', ''),
+                                'to_address': tx.get('to', ''),
+                                'value': float(tx.get('value', 0)) / 1e18,
+                                'value_raw': tx.get('value', '0'),
+                                'gas_used': int(tx.get('gasUsed', 0)),
+                                'gas_price': tx.get('gasPrice', '0'),
+                                'token_symbol': 'ETH',
+                                'token_address': '',
+                                'transaction_type': 'native',
+                                'chain': 'ethereum',
+                                'status': 'success' if tx.get('txreceipt_status') == '1' else 'failed'
+                            }
+                            chain_transactions.append(processed_tx)
+                        except Exception as e:
+                            logger.warning(f"WARNING: Error processing ETH transaction: {e}")
+                            continue
+                    
+                    logger.info(f"SUCCESS: Fetched {len(chain_transactions)} ETH transactions")
+                
+                else:
+                    # ⚡ FIXED: Use Moralis for other chains with proper error handling
+                    config = BLOCKCHAIN_APIS['moralis']
+                    headers = {
+                        'X-API-Key': config['api_key'],
+                        'Content-Type': 'application/json'
+                    }
+                    
+                    # Try ERC20 transfers first
+                    transfers_url = f"{config['api_url']}/{wallet_address}/erc20/transfers"
+                    params = {
+                        'chain': chain,
+                        'limit': limit,
+                        'order': 'DESC'
+                    }
+                    
+                    async with session.get(transfers_url, headers=headers, params=params,
+                                         timeout=aiohttp.ClientTimeout(total=15)) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            raw_transfers = data.get('result', []) if isinstance(data, dict) else data
+                            
+                            for transfer in raw_transfers:
+                                try:
+                                    processed_tx = {
+                                        'tx_hash': transfer.get('transaction_hash', ''),
+                                        'block_number': int(transfer.get('block_number', 0)),
+                                        'timestamp': datetime.fromisoformat(transfer.get('block_timestamp', '').replace('Z', '+00:00')) if transfer.get('block_timestamp') else datetime.now(),
+                                        'from_address': transfer.get('from_address', ''),
+                                        'to_address': transfer.get('to_address', ''),
+                                        'value': float(transfer.get('value', 0)) / (10 ** int(transfer.get('token_decimals', 18))),
+                                        'value_raw': transfer.get('value', '0'),
+                                        'gas_used': 0,  # Not available in transfers
+                                        'gas_price': '0',
+                                        'token_symbol': transfer.get('token_symbol', get_native_token_for_chain(chain)),
+                                        'token_address': transfer.get('address', ''),
+                                        'transaction_type': 'token',
+                                        'chain': chain,
+                                        'status': 'success'  # Transfers are generally successful
+                                    }
+                                    chain_transactions.append(processed_tx)
+                                except Exception as e:
+                                    logger.warning(f"WARNING: Error processing {chain} transfer: {e}")
+                                    continue
+                            
+                            logger.info(f"SUCCESS: Fetched {len(chain_transactions)} {chain} transfers")
+                        
+                        else:
+                            logger.warning(f"WARNING: {chain} transfers API returned {response.status}")
+                    
+                    # Also try to get native transactions untuk chain ini
+                    try:
+                        native_url = f"{config['api_url']}/{wallet_address}"
+                        native_params = {'chain': chain}
+                        
+                        async with session.get(native_url, headers=headers, params=native_params,
+                                             timeout=aiohttp.ClientTimeout(total=10)) as response:
+                            if response.status == 200:
+                                native_data = await response.json()
+                                native_balance = native_data.get('balance', '0')
+                                
+                                # If there's native balance, assume there are native transactions
+                                if int(native_balance) > 0:
+                                    # Add a dummy native transaction untuk display purposes
+                                    native_tx = {
+                                        'tx_hash': f'native_{chain}_latest',
+                                        'block_number': 0,
+                                        'timestamp': datetime.now(),
+                                        'from_address': '',
+                                        'to_address': wallet_address,
+                                        'value': float(native_balance) / 1e18,
+                                        'value_raw': native_balance,
+                                        'gas_used': 0,
+                                        'gas_price': '0',
+                                        'token_symbol': get_native_token_for_chain(chain),
+                                        'token_address': '',
+                                        'transaction_type': 'native',
+                                        'chain': chain,
+                                        'status': 'success'
+                                    }
+                                    chain_transactions.insert(0, native_tx)
+                                    logger.info(f"INFO: Added native {chain} transaction")
+                    except Exception as e:
+                        logger.warning(f"WARNING: Could not fetch native {chain} data: {e}")
+                
+                # Add chain transactions to overall list
+                all_transactions.extend(chain_transactions)
+                await asyncio.sleep(0.3)  # Rate limiting between chains
+                
             except Exception as e:
-                logger.warning(f"Error parsing transaction: {str(e)}")
+                logger.error(f"ERROR: Failed to fetch {chain} transactions: {e}")
                 continue
         
-        # Sort by timestamp descending
-        all_transactions.sort(key=lambda x: x['timestamp'], reverse=True)
-        return all_transactions[:limit]
+        # ⚡ Sort by timestamp descending
+        all_transactions.sort(key=lambda x: x.get('timestamp', datetime.min), reverse=True)
+        
+        # ⚡ Apply final limit
+        final_transactions = all_transactions[:limit]
+        
+        logger.info(f"SUCCESS: Total fetched {len(final_transactions)} transactions from {len(target_chains)} chains")
+        
+        return final_transactions
         
     except Exception as e:
-        logger.error(f"Error fetching onchain transactions: {str(e)}")
+        logger.error(f"ERROR: Transaction fetching failed: {str(e)}")
         return []
 
 def calculate_portfolio_analytics(transactions: List[Dict], portfolio: Dict) -> Dict:
@@ -679,21 +1127,24 @@ async def get_wallet_portfolio(
         logger.error(f"Error getting wallet portfolio: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
+# ⚡ FIXED: Update transactions endpoint dengan proper chain filtering
 @router.get("/transactions/{wallet_address}")
 async def get_wallet_transactions(
     wallet_address: str = Path(..., description="Wallet address"),
     limit: int = Query(50, ge=1, le=200, description="Number of transactions to fetch"),
     chains: Optional[List[str]] = Query(None, description="Chains to scan")
 ) -> List[OnchainTransaction]:
-    """Mendapatkan transaksi onchain dari wallet address"""
+    """⚡ FIXED: Get transactions dengan proper chain filtering"""
     
-    cache_key = f"transactions_{wallet_address}_{limit}_{','.join(chains or ['all'])}"
+    # ⚡ FIXED: Build cache key dengan proper chains
+    chains_str = ','.join(sorted(chains)) if chains else 'all'
+    cache_key = f"transactions_fixed_v5_{wallet_address}_{limit}_{chains_str}"
     
     # Check cache
     if cache_key in _onchain_cache:
         cache_entry = _onchain_cache[cache_key]
         if datetime.now() < cache_entry['expires']:
-            logger.info(f"Returning cached transactions for {wallet_address}")
+            logger.info(f"CACHE: Returning cached transactions for {wallet_address}")
             return cache_entry['data']
     
     try:
@@ -702,10 +1153,33 @@ async def get_wallet_transactions(
             raise HTTPException(status_code=400, detail="Invalid wallet address format")
         
         async with aiohttp.ClientSession() as session:
-            transactions_data = await fetch_onchain_transactions(session, wallet_address, limit)
+            # ⚡ FIXED: Use fixed transaction fetching
+            transactions_data = await fetch_onchain_transactions(session, wallet_address, limit, chains)
             
             # Convert to response model
-            transactions = [OnchainTransaction(**tx) for tx in transactions_data]
+            transactions = []
+            for tx_data in transactions_data:
+                try:
+                    tx = OnchainTransaction(
+                        tx_hash=tx_data.get('tx_hash', ''),
+                        block_number=tx_data.get('block_number', 0),
+                        timestamp=tx_data.get('timestamp', datetime.now()),
+                        from_address=tx_data.get('from_address', ''),
+                        to_address=tx_data.get('to_address', ''),
+                        value=tx_data.get('value', 0.0),
+                        value_raw=tx_data.get('value_raw', '0'),
+                        gas_used=tx_data.get('gas_used', 0),
+                        gas_price=tx_data.get('gas_price', '0'),
+                        token_symbol=tx_data.get('token_symbol'),
+                        token_address=tx_data.get('token_address'),
+                        transaction_type=tx_data.get('transaction_type', 'unknown'),
+                        chain=tx_data.get('chain', 'unknown'),
+                        status=tx_data.get('status', 'unknown')
+                    )
+                    transactions.append(tx)
+                except Exception as e:
+                    logger.warning(f"WARNING: Error creating transaction object: {e}")
+                    continue
             
             # Cache hasil
             _onchain_cache[cache_key] = {
@@ -713,7 +1187,8 @@ async def get_wallet_transactions(
                 'expires': datetime.now() + timedelta(seconds=_cache_ttl)
             }
             
-            logger.info(f"Successfully fetched {len(transactions)} transactions for {wallet_address}")
+            chains_info = f" dari {chains}" if chains else " dari semua chains"
+            logger.info(f"SUCCESS: Fetched {len(transactions)} transactions untuk {wallet_address}{chains_info}")
             
             return transactions
     
@@ -721,22 +1196,25 @@ async def get_wallet_transactions(
         # Re-raise HTTP exceptions
         raise he
     except Exception as e:
-        logger.error(f"Error getting wallet transactions: {str(e)}")
+        logger.error(f"ERROR: Transaction endpoint failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
+# ⚡ FIXED: Update the existing analytics endpoint
 @router.get("/analytics/{wallet_address}")
 async def get_wallet_analytics(
     wallet_address: str = Path(..., description="Wallet address"),
-    days: int = Query(30, ge=1, le=365, description="Days to analyze")
+    days: int = Query(30, ge=1, le=365, description="Days to analyze"),
+    chain: Optional[str] = Query(None, description="Specific chain to focus on")
 ) -> OnchainAnalytics:
-    """⚡ OPTIMIZED: Analytics dengan AUTO USD volume calculation"""
+    """⚡ FIXED: Analytics dengan proper multi-chain support"""
     
-    cache_key = f"analytics_{wallet_address}_{days}"
+    cache_key = f"analytics_fixed_v5_{wallet_address}_{days}_{chain or 'all'}"
     
     # Check cache
     if cache_key in _onchain_cache:
         cache_entry = _onchain_cache[cache_key]
         if datetime.now() < cache_entry['expires']:
+            logger.info(f"CACHE: Returning cached analytics for {wallet_address}")
             return cache_entry['data']
     
     try:
@@ -745,31 +1223,42 @@ async def get_wallet_analytics(
             raise HTTPException(status_code=400, detail="Invalid wallet address format")
         
         async with aiohttp.ClientSession() as session:
-            # Fetch transactions dan portfolio
-            transactions_data = await fetch_onchain_transactions(session, wallet_address, 500)
-            portfolio_data = await fetch_moralis_portfolio(session, wallet_address)
+            # ⚡ FIXED: Use fixed multi-chain analytics
+            analytics_data = await get_onchain_analytics(session, wallet_address, chain)
             
-            # Calculate analytics dengan AUTO USD volume
-            analytics_data = calculate_portfolio_analytics(transactions_data, portfolio_data)
-            analytics_data['wallet_address'] = wallet_address
+            # ⚡ FIXED: Create response object with proper data
+            analytics = OnchainAnalytics(
+                wallet_address=analytics_data['wallet_address'],
+                total_transactions=analytics_data['total_transactions'],
+                unique_tokens_traded=analytics_data['unique_tokens_traded'],
+                total_volume_usd=analytics_data['total_volume_usd'],
+                most_traded_tokens=analytics_data['most_traded_tokens'],
+                transaction_frequency=analytics_data['transaction_frequency'],
+                chains_activity=analytics_data['chains_activity'],
+                selected_chain=analytics_data.get('selected_chain'),
+                chain_specific_data=analytics_data.get('chain_specific_data'),
+                cross_chain_volume=analytics_data.get('cross_chain_volume', 0.0),
+                chain_dominance=analytics_data.get('chain_dominance', {}),
+                diversification_score=analytics_data.get('diversification_score', 0.0),
+                chains_processed=analytics_data.get('chains_processed', []),
+                errors_encountered=analytics_data.get('errors_encountered', [])
+            )
             
-            analytics = OnchainAnalytics(**analytics_data)
-            
-            # Cache hasil
+            # Cache hasil dengan TTL yang sesuai
+            cache_ttl_minutes = 10 if chain else 15  # Shorter cache for specific chain
             _onchain_cache[cache_key] = {
                 'data': analytics,
-                'expires': datetime.now() + timedelta(seconds=_cache_ttl * 2)  # Cache lebih lama
+                'expires': datetime.now() + timedelta(minutes=cache_ttl_minutes)
             }
             
-            logger.info(f"SUCCESS: FAST analytics for {wallet_address}: {analytics.total_transactions} txs, {analytics.unique_tokens_traded} tokens, USD Volume: ${analytics.total_volume_usd:.8f}")
+            logger.info(f"SUCCESS: Fixed analytics for {wallet_address} (chain: {chain or 'all'}): {analytics.total_transactions} txs, {analytics.unique_tokens_traded} tokens")
             
             return analytics
     
     except HTTPException as he:
-        # Re-raise HTTP exceptions
         raise he
     except Exception as e:
-        logger.error(f"Error getting wallet analytics: {str(e)}")
+        logger.error(f"ERROR: Analytics endpoint failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 @router.post("/cache/clear")

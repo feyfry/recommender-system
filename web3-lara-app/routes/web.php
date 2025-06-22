@@ -63,16 +63,19 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         Route::get('/price-prediction/{projectId}', [TechnicalAnalysisController::class, 'getPricePrediction'])->name('panel.technical-analysis.price-prediction');
     });
 
-    // Portfolio - UPDATED STRUCTURE dengan native token focus
+    // Portfolio - UPDATED STRUCTURE dengan multi-chain native token focus
     Route::prefix('portfolio')->group(function () {
         // Main portfolio overview (onchain + manual data)
         Route::get('/', [PortfolioController::class, 'index'])->name('panel.portfolio');
 
-        // ⚡ NEW: Load analytics data for portfolio - AJAX endpoint
+        // ⚡ ENHANCED: Load analytics data untuk portfolio - AJAX endpoint dengan chain selection
         Route::get('/load-analytics', [PortfolioController::class, 'loadAnalyticsData'])->name('panel.portfolio.load-analytics');
 
-        // ⚡ ENHANCED: Onchain Analytics dengan native token focus
+        // ⚡ ENHANCED: Onchain Analytics dengan multi-chain native token focus
         Route::get('/onchain-analytics', [PortfolioController::class, 'onchainAnalytics'])->name('panel.portfolio.onchain-analytics');
+
+        // ⚡ NEW: Refresh analytics data dengan chain selection support
+        Route::post('/refresh-analytics', [PortfolioController::class, 'refreshAnalyticsData'])->name('panel.portfolio.refresh-analytics');
 
         // RENAMED: Transaction Management (dulu: transactions)
         Route::get('/transaction-management', [PortfolioController::class, 'transactionManagement'])->name('panel.portfolio.transaction-management');
@@ -80,7 +83,7 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         // Price Alerts (existing)
         Route::get('/price-alerts', [PortfolioController::class, 'priceAlerts'])->name('panel.portfolio.price-alerts');
 
-        // ⚡ ENHANCED: AJAX endpoint untuk refresh onchain data dengan native token focus
+        // ⚡ ENHANCED: AJAX endpoint untuk refresh onchain data dengan multi-chain native token focus
         Route::post('/refresh-onchain', [PortfolioController::class, 'refreshOnchainData'])->name('panel.portfolio.refresh-onchain');
 
         // Transaction operations (existing)
