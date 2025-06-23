@@ -419,20 +419,12 @@
             Quick Actions
         </h2>
 
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
             <a href="{{ route('panel.portfolio.transaction-management') }}" class="clay-card bg-warning/10 p-4 hover:bg-warning/20 transition-colors">
                 <div class="text-center">
                     <i class="fas fa-plus-circle text-warning text-2xl mb-2"></i>
                     <div class="font-medium">Add Transaction</div>
                     <div class="text-xs text-gray-500">Manual entry</div>
-                </div>
-            </a>
-
-            <a href="{{ route('panel.portfolio.price-alerts') }}" class="clay-card bg-info/10 p-4 hover:bg-info/20 transition-colors">
-                <div class="text-center">
-                    <i class="fas fa-bell text-info text-2xl mb-2"></i>
-                    <div class="font-medium">Price Alerts</div>
-                    <div class="text-xs text-gray-500">Set notifications</div>
                 </div>
             </a>
 

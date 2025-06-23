@@ -89,22 +89,6 @@ class User extends Authenticatable
     }
 
     /**
-     * Mendapatkan relasi ke price alerts pengguna.
-     */
-    public function priceAlerts(): HasMany
-    {
-        return $this->hasMany(PriceAlert::class, 'user_id', 'user_id');
-    }
-
-    /**
-     * Mendapatkan relasi ke notifikasi pengguna.
-     */
-    public function notifications(): HasMany
-    {
-        return $this->hasMany(Notification::class, 'user_id', 'user_id');
-    }
-
-    /**
      * Mendapatkan aktivitas terbaru pengguna.
      */
     public function getRecentActivities($limit = 10)
@@ -156,26 +140,6 @@ class User extends Authenticatable
     public function isCommunity()
     {
         return $this->hasRole('community');
-    }
-
-    /**
-     * Periksa apakah pengguna memiliki notifikasi yang belum dibaca.
-     *
-     * @return bool
-     */
-    public function hasUnreadNotifications()
-    {
-        return $this->notifications()->unread()->exists();
-    }
-
-    /**
-     * Mendapatkan jumlah notifikasi yang belum dibaca.
-     *
-     * @return int
-     */
-    public function getUnreadNotificationsCountAttribute()
-    {
-        return $this->notifications()->unread()->count();
     }
 
     /**

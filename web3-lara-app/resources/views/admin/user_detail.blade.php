@@ -76,16 +76,6 @@
                     </div>
 
                     <div>
-                        <label for="risk-tolerance" class="block text-sm text-gray-600">Profil Risiko</label>
-                        <div class="font-medium">{{ $user->profile?->risk_tolerance_text ?? 'Belum diatur' }}</div>
-                    </div>
-
-                    <div>
-                        <label for="investment-style" class="block text-sm text-gray-600">Gaya Investasi</label>
-                        <div class="font-medium">{{ $user->profile?->investment_style_text ?? 'Belum diatur' }}</div>
-                    </div>
-
-                    <div>
                         <label for="created-at" class="block text-sm text-gray-600">Tanggal Registrasi</label>
                         <div class="font-medium">{{ $user->created_at->format('j F Y H:i') }}</div>
                     </div>
@@ -97,6 +87,7 @@
                 </div>
             </div>
 
+            <!-- PERBAIKAN: Bagian Statistik Interaksi dengan Progress Bar yang Robust -->
             <div class="clay-card p-6">
                 <h2 class="text-lg font-bold mb-4 flex items-center">
                     <i class="fas fa-chart-pie mr-2 text-secondary"></i>
@@ -132,44 +123,56 @@
                         </div>
                     </div>
 
+                    <!-- ⚡ ROBUST FIX: View Progress Bar dengan inline styles -->
                     <div class="clay-card bg-info/10 p-3">
-                        <div class="flex justify-between mb-1">
+                        <div class="flex justify-between mb-2">
                             <span>View</span>
                             <span class="font-bold">{{ $viewCount }}</span>
                         </div>
-                        <div class="clay-progress">
-                            <div class="clay-progress-bar clay-progress-info" style="width: {{ $totalInteractions > 0 ? ($viewCount / $totalInteractions) * 100 : 0 }}%"></div>
+                        <!-- Progress Bar dengan inline styles yang pasti terlihat -->
+                        <div style="width: 100%; height: 10px; background-color: #e5e7eb; border-radius: 5px; overflow: hidden;">
+                            <div style="height: 100%; background: linear-gradient(135deg, #3b82f6, #1e40af); border-radius: 5px; width: {{ $totalInteractions > 0 ? ($viewCount / $totalInteractions) * 100 : 0 }}%; transition: width 0.3s ease-in-out;"></div>
                         </div>
+                        <div class="text-xs text-right mt-1">{{ $totalInteractions > 0 ? number_format(($viewCount / $totalInteractions) * 100, 1) : 0 }}%</div>
                     </div>
 
+                    <!-- ⚡ ROBUST FIX: Liked Progress Bar dengan inline styles -->
                     <div class="clay-card bg-secondary/10 p-3">
-                        <div class="flex justify-between mb-1">
+                        <div class="flex justify-between mb-2">
                             <span>Liked</span>
                             <span class="font-bold">{{ $favoriteCount }}</span>
                         </div>
-                        <div class="clay-progress">
-                            <div class="clay-progress-bar clay-progress-secondary" style="width: {{ $totalInteractions > 0 ? ($favoriteCount / $totalInteractions) * 100 : 0 }}%"></div>
+                        <!-- Progress Bar dengan inline styles yang pasti terlihat -->
+                        <div style="width: 100%; height: 10px; background-color: #e5e7eb; border-radius: 5px; overflow: hidden;">
+                            <div style="height: 100%; background: linear-gradient(135deg, #6b7280, #374151); border-radius: 5px; width: {{ $totalInteractions > 0 ? ($favoriteCount / $totalInteractions) * 100 : 0 }}%; transition: width 0.3s ease-in-out;"></div>
                         </div>
+                        <div class="text-xs text-right mt-1">{{ $totalInteractions > 0 ? number_format(($favoriteCount / $totalInteractions) * 100, 1) : 0 }}%</div>
                     </div>
 
+                    <!-- ⚡ ROBUST FIX: Portfolio Add Progress Bar dengan inline styles -->
                     <div class="clay-card bg-success/10 p-3">
-                        <div class="flex justify-between mb-1">
+                        <div class="flex justify-between mb-2">
                             <span>Portfolio Add</span>
                             <span class="font-bold">{{ $portfolioCount }}</span>
                         </div>
-                        <div class="clay-progress">
-                            <div class="clay-progress-bar clay-progress-success" style="width: {{ $totalInteractions > 0 ? ($portfolioCount / $totalInteractions) * 100 : 0 }}%"></div>
+                        <!-- Progress Bar dengan inline styles yang pasti terlihat -->
+                        <div style="width: 100%; height: 10px; background-color: #e5e7eb; border-radius: 5px; overflow: hidden;">
+                            <div style="height: 100%; background: linear-gradient(135deg, #10b981, #047857); border-radius: 5px; width: {{ $totalInteractions > 0 ? ($portfolioCount / $totalInteractions) * 100 : 0 }}%; transition: width 0.3s ease-in-out;"></div>
                         </div>
+                        <div class="text-xs text-right mt-1">{{ $totalInteractions > 0 ? number_format(($portfolioCount / $totalInteractions) * 100, 1) : 0 }}%</div>
                     </div>
 
+                    <!-- ⚡ ROBUST FIX: Lainnya Progress Bar dengan inline styles -->
                     <div class="clay-card bg-warning/10 p-3">
-                        <div class="flex justify-between mb-1">
+                        <div class="flex justify-between mb-2">
                             <span>Lainnya</span>
                             <span class="font-bold">{{ $otherCount }}</span>
                         </div>
-                        <div class="clay-progress">
-                            <div class="clay-progress-bar clay-progress-warning" style="width: {{ $totalInteractions > 0 ? ($otherCount / $totalInteractions) * 100 : 0 }}%"></div>
+                        <!-- Progress Bar dengan inline styles yang pasti terlihat -->
+                        <div style="width: 100%; height: 10px; background-color: #e5e7eb; border-radius: 5px; overflow: hidden;">
+                            <div style="height: 100%; background: linear-gradient(135deg, #f59e0b, #d97706); border-radius: 5px; width: {{ $totalInteractions > 0 ? ($otherCount / $totalInteractions) * 100 : 0 }}%; transition: width 0.3s ease-in-out;"></div>
                         </div>
+                        <div class="text-xs text-right mt-1">{{ $totalInteractions > 0 ? number_format(($otherCount / $totalInteractions) * 100, 1) : 0 }}%</div>
                     </div>
                 </div>
             </div>

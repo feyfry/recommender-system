@@ -3,7 +3,6 @@ namespace App\Http\Controllers\Backend;
 
 use App\Http\Controllers\Controller;
 use App\Models\Portfolio;
-use App\Models\PriceAlert;
 use App\Models\Project;
 use App\Models\Transaction;
 use App\Models\User;
@@ -201,38 +200,6 @@ class PortfolioController extends Controller
             'mostTradedProjects'      => $mostTradedProjects,
             'recommendationInfluence' => $recommendationInfluence,
             'apiUrl'                  => $this->apiUrl,
-        ]);
-    }
-
-    /**
-     * Menampilkan halaman price alerts (existing)
-     */
-    public function priceAlerts()
-    {
-        $user = Auth::user();
-
-        // Ambil data alert harga
-        $activeAlerts = PriceAlert::forUser($user->user_id)
-            ->active()
-            ->with('project')
-            ->orderBy('created_at', 'desc')
-            ->get();
-
-        $triggeredAlerts = PriceAlert::forUser($user->user_id)
-            ->triggered()
-            ->with('project')
-            ->orderBy('triggered_at', 'desc')
-            ->limit(10)
-            ->get();
-
-        // Ambil statistik alert
-        $alertStats = PriceAlert::getAlertStats($user->user_id);
-
-        return view('backend.portfolio.price_alerts', [
-            'activeAlerts'    => $activeAlerts,
-            'triggeredAlerts' => $triggeredAlerts,
-            'alertStats'      => $alertStats,
-            'apiUrl'          => $this->apiUrl,
         ]);
     }
 
@@ -930,63 +897,6 @@ class PortfolioController extends Controller
 
         return redirect()->route('panel.portfolio.transaction-management')
             ->with('success', 'Transaksi berhasil ditambahkan.');
-    }
-
-    /**
-     * Menambahkan price alert baru (existing - no change)
-     */
-    public function addPriceAlert(Request $request)
-    {
-        $user = Auth::user();
-
-        // Validasi input
-        $validator = Validator::make($request->all(), [
-            'project_id'   => 'required|exists:projects,id',
-            'target_price' => 'required|numeric|min:0',
-            'alert_type'   => 'required|in:above,below',
-        ]);
-
-        if ($validator->fails()) {
-            return redirect()->back()
-                ->withErrors($validator)
-                ->withInput();
-        }
-
-        // Simpan price alert
-        PriceAlert::create([
-            'user_id'      => $user->user_id,
-            'project_id'   => $request->project_id,
-            'target_price' => $request->target_price,
-            'alert_type'   => $request->alert_type,
-            'is_triggered' => false,
-        ]);
-
-        return redirect()->route('panel.portfolio.price-alerts')
-            ->with('success', 'Alert harga berhasil ditambahkan.');
-    }
-
-    /**
-     * Menghapus price alert (existing - no change)
-     */
-    public function deletePriceAlert($id)
-    {
-        $user = Auth::user();
-
-        // Cari price alert
-        $priceAlert = PriceAlert::where('id', $id)
-            ->where('user_id', $user->user_id)
-            ->first();
-
-        if (! $priceAlert) {
-            return redirect()->route('panel.portfolio.price-alerts')
-                ->with('error', 'Alert harga tidak ditemukan.');
-        }
-
-        // Hapus price alert
-        $priceAlert->delete();
-
-        return redirect()->route('panel.portfolio.price-alerts')
-            ->with('success', 'Alert harga berhasil dihapus.');
     }
 
     /**

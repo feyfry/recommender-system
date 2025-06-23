@@ -80,16 +80,11 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         // RENAMED: Transaction Management (dulu: transactions)
         Route::get('/transaction-management', [PortfolioController::class, 'transactionManagement'])->name('panel.portfolio.transaction-management');
 
-        // Price Alerts (existing)
-        Route::get('/price-alerts', [PortfolioController::class, 'priceAlerts'])->name('panel.portfolio.price-alerts');
-
         // ⚡ ENHANCED: AJAX endpoint untuk refresh onchain data dengan multi-chain native token focus
         Route::post('/refresh-onchain', [PortfolioController::class, 'refreshOnchainData'])->name('panel.portfolio.refresh-onchain');
 
         // Transaction operations (existing)
         Route::post('/transactions/add', [PortfolioController::class, 'addTransaction'])->name('panel.portfolio.add-transaction');
-        Route::post('/price-alerts/add', [PortfolioController::class, 'addPriceAlert'])->name('panel.portfolio.add-price-alert');
-        Route::delete('/price-alerts/{id}', [PortfolioController::class, 'deletePriceAlert'])->name('panel.portfolio.delete-price-alert');
 
         // DEPRECATED ROUTES - For backward compatibility (redirects)
         Route::get('/transactions', function () {

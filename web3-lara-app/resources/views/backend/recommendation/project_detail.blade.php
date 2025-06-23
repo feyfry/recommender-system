@@ -337,39 +337,6 @@
                         </div>
                     </template>
                 </div>
-
-                <!-- Set Price Alert -->
-                <div class="mt-6">
-                    <div class="font-bold mb-3">Set Price Alert</div>
-                    <form action="{{ route('panel.portfolio.add-price-alert') }}" method="POST" class="space-y-3">
-                        @csrf
-                        <input type="hidden" name="project_id" value="{{ $project->id }}">
-
-                        <div>
-                            <label for="target_price" class="text-sm">Target Price ($)</label>
-                            <input type="number" name="target_price" id="target_price" step="0.000001" min="0"
-                                   x-model="priceAlertSettings.target_price"
-                                   class="clay-input mt-1"
-                                   :placeholder="'Current: $' + {{ $project->current_price ?? 0 }}">
-                        </div>
-
-                        <div>
-                            <label for="alert_type" class="text-sm">Alert Type</label>
-                            <select name="alert_type" id="alert_type" x-model="priceAlertSettings.alert_type" class="clay-select mt-1">
-                                <option value="above">Above Target</option>
-                                <option value="below">Below Target</option>
-                            </select>
-                        </div>
-
-                        <button type="submit" class="clay-button clay-button-warning w-full">
-                            <i class="fas fa-bell mr-1"></i> Set Alert
-                        </button>
-
-                        <a href="{{ route('panel.technical-analysis') }}" class="clay-button clay-button-secondary w-full mt-2 py-1.5 px-3 text-sm">
-                            Untuk Lebih Detail <i class="fas fa-arrow-right ml-1"></i>
-                        </a>
-                    </form>
-                </div>
             </div>
         </div>
     </div>

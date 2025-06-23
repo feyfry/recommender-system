@@ -139,14 +139,6 @@ class Project extends Model
     }
 
     /**
-     * Mendapatkan price alerts untuk proyek ini.
-     */
-    public function priceAlerts(): HasMany
-    {
-        return $this->hasMany(PriceAlert::class, 'project_id', 'id');
-    }
-
-    /**
      * Mendapatkan users yang memiliki interaksi dengan proyek ini.
      */
     public function users(): HasManyThrough

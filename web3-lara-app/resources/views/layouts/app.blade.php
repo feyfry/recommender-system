@@ -185,11 +185,6 @@
                                         Transaction Management
                                         <span class="clay-badge clay-badge-warning text-xs ml-1">MANUAL</span>
                                     </a>
-                                    <a href="{{ route('panel.portfolio.price-alerts') }}"
-                                    class="block py-1 px-3 text-sm rounded-md hover:bg-primary/10 {{ request()->routeIs('panel.portfolio.price-alerts') ? 'font-bold text-primary' : '' }}">
-                                        <i class="fas fa-bell mr-2 text-xs"></i>
-                                        Price Alerts
-                                    </a>
                                 </div>
                             </div>
 
