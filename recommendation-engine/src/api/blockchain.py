@@ -1,7 +1,7 @@
 import os
 import logging
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
 import aiohttp
 from fastapi import APIRouter, HTTPException, Query, Path
@@ -55,6 +55,9 @@ SPAM_PATTERNS = [
 MIN_BALANCE_USD_THRESHOLD = 0.01  # $0.01 minimum untuk dihitung
 MAX_TOKENS_TO_SHOW = 50  # ⚡ INCREASED: Show more tokens for pagination (from 20)
 BATCH_SIZE = 3  # ⚡ Keep batch size small untuk stability
+
+# ⚡ ENHANCED: Native token identification
+NATIVE_TOKEN_SYMBOLS = {'ETH', 'BNB', 'MATIC', 'AVAX', 'WETH', 'WBNB', 'WMATIC', 'WAVAX'}
 
 # Cache untuk menyimpan data onchain dan prices
 _onchain_cache = {}
@@ -286,8 +289,13 @@ def is_spam_token(token_name: str, token_symbol: str, balance: float = 0) -> boo
     except Exception:
         return False
     
+def is_native_token(symbol: str) -> bool:
+    """Check if token is native token"""
+    return symbol.upper() in NATIVE_TOKEN_SYMBOLS
+    
+# ⚡ FIXED: Enhanced analytics dengan native token separation
 async def get_onchain_analytics(session: aiohttp.ClientSession, wallet_address: str, selected_chain: str = None) -> Dict:
-    """⚡ FIXED: Analytics dengan proper multi-chain data processing"""
+    """⚡ FIXED: Analytics dengan proper native/alt token separation"""
     try:
         config = BLOCKCHAIN_APIS['moralis']
         headers = {
@@ -312,8 +320,7 @@ async def get_onchain_analytics(session: aiohttp.ClientSession, wallet_address: 
             'errors_encountered': []
         }
 
-        # ⚡ FIXED: Use existing transaction fetching logic instead of new implementation
-        # Leverage the working fetch_onchain_transactions function
+        # ⚡ FIXED: Use existing transaction fetching logic
         all_transactions = []
         chain_transactions = {}
         
@@ -336,10 +343,18 @@ async def get_onchain_analytics(session: aiohttp.ClientSession, wallet_address: 
                     
                     for tx in eth_txs[:200]:  # Limit to 200
                         try:
+                            # ⚡ FIXED: Timezone-aware processing
+                            timestamp_int = int(tx.get('timeStamp', 0))
+                            if timestamp_int > 0:
+                                timestamp = datetime.fromtimestamp(timestamp_int, tz=timezone.utc)
+                                timestamp_str = timestamp.strftime('%Y-%m-%d')
+                            else:
+                                timestamp_str = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d')
+                            
                             processed_tx = {
                                 'hash': tx.get('hash', ''),
                                 'block_number': int(tx.get('blockNumber', 0)),
-                                'timestamp': datetime.fromtimestamp(int(tx.get('timeStamp', 0))).strftime('%Y-%m-%d'),
+                                'timestamp': timestamp_str,
                                 'from_address': tx.get('from', ''),
                                 'to_address': tx.get('to', ''),
                                 'value': float(tx.get('value', 0)) / 1e18,
@@ -358,7 +373,7 @@ async def get_onchain_analytics(session: aiohttp.ClientSession, wallet_address: 
                     logger.info(f"SUCCESS: Processed {len(chain_txs)} ETH transactions")
                 
                 else:
-                    # For other chains, try Moralis API
+                    # For other chains, try Moralis API dengan value handling yang lebih baik
                     try:
                         chain_url = f"{config['api_url']}/{wallet_address}/erc20/transfers"
                         params = {
@@ -376,13 +391,39 @@ async def get_onchain_analytics(session: aiohttp.ClientSession, wallet_address: 
                                 chain_txs = []
                                 for tx in raw_txs[:100]:
                                     try:
+                                        # ⚡ FIXED: Better value handling untuk None values
+                                        raw_value = tx.get('value')
+                                        if raw_value is None or raw_value == '':
+                                            logger.warning(f"Warning: Null value for {chain} transaction, skipping")
+                                            continue
+                                            
+                                        try:
+                                            value_int = int(raw_value)
+                                            decimals = int(tx.get('token_decimals', 18))
+                                            processed_value = float(value_int) / (10 ** decimals)
+                                        except (ValueError, TypeError):
+                                            logger.warning(f"Warning: Invalid value format for {chain}: {raw_value}")
+                                            continue
+                                        
+                                        # ⚡ FIXED: Timezone handling untuk timestamp
+                                        timestamp_str = tx.get('block_timestamp', '')
+                                        if timestamp_str:
+                                            try:
+                                                # Parse ISO format
+                                                timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                                                formatted_timestamp = timestamp.strftime('%Y-%m-%d')
+                                            except:
+                                                formatted_timestamp = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d')
+                                        else:
+                                            formatted_timestamp = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d')
+                                        
                                         processed_tx = {
                                             'hash': tx.get('transaction_hash', ''),
                                             'block_number': int(tx.get('block_number', 0)),
-                                            'timestamp': tx.get('block_timestamp', '')[:10] if tx.get('block_timestamp') else '',
+                                            'timestamp': formatted_timestamp,
                                             'from_address': tx.get('from_address', ''),
                                             'to_address': tx.get('to_address', ''),
-                                            'value': float(tx.get('value', 0)) / (10 ** int(tx.get('token_decimals', 18))),
+                                            'value': processed_value,
                                             'token_symbol': tx.get('token_symbol', get_native_token_for_chain(chain)),
                                             'token_address': tx.get('address', ''),
                                             'chain': chain,
@@ -391,7 +432,7 @@ async def get_onchain_analytics(session: aiohttp.ClientSession, wallet_address: 
                                         chain_txs.append(processed_tx)
                                         all_transactions.append(processed_tx)
                                     except Exception as e:
-                                        logger.warning(f"Error processing {chain} transaction: {e}")
+                                        logger.warning(f"WARNING: Error processing {chain} transaction: {e}")
                                         continue
                                 
                                 chain_transactions[chain] = len(chain_txs)
@@ -410,38 +451,56 @@ async def get_onchain_analytics(session: aiohttp.ClientSession, wallet_address: 
                 analytics_data['errors_encountered'].append(f"Chain {chain}: {str(e)}")
                 continue
 
-        # ⚡ FIXED: Process aggregated analytics data
+        # ⚡ FIXED: Process aggregated analytics data dengan native token separation
         if all_transactions:
             analytics_data['total_transactions'] = len(all_transactions)
             analytics_data['chains_activity'] = chain_transactions
             analytics_data['chains_processed'] = list(chain_transactions.keys())
             
-            # Calculate token trading stats
-            token_stats = {}
+            # ⚡ ENHANCED: Separate native tokens dari alt tokens
+            native_token_stats = {}
+            alt_token_stats = {}
             date_frequency = {}
             
             for tx in all_transactions:
-                # Token trading statistics
+                # Token trading statistics dengan native separation
                 symbol = tx.get('token_symbol', 'UNKNOWN')
                 if symbol and symbol != 'UNKNOWN':
-                    if symbol not in token_stats:
-                        token_stats[symbol] = {
-                            'symbol': symbol,
-                            'trade_count': 0,
-                            'volume': 0.0,
-                            'volume_usd': 0.0,
-                            'chain': tx.get('chain', 'unknown')
-                        }
+                    # ⚡ ENHANCED: Separate berdasarkan native/alt
+                    if is_native_token(symbol):
+                        # Native tokens - track separately but don't include in "most traded"
+                        if symbol not in native_token_stats:
+                            native_token_stats[symbol] = {
+                                'symbol': symbol,
+                                'trade_count': 0,
+                                'volume': 0.0,
+                                'volume_usd': 0.0,
+                                'chain': tx.get('chain', 'unknown'),
+                                'is_native': True
+                            }
+                        native_token_stats[symbol]['trade_count'] += 1
+                        native_token_stats[symbol]['volume'] += tx.get('value', 0)
+                    else:
+                        # Alt tokens - include dalam "most traded"
+                        if symbol not in alt_token_stats:
+                            alt_token_stats[symbol] = {
+                                'symbol': symbol,
+                                'trade_count': 0,
+                                'volume': 0.0,
+                                'volume_usd': 0.0,
+                                'chain': tx.get('chain', 'unknown'),
+                                'is_native': False
+                            }
+                        alt_token_stats[symbol]['trade_count'] += 1
+                        alt_token_stats[symbol]['volume'] += tx.get('value', 0)
                     
-                    token_stats[symbol]['trade_count'] += 1
-                    token_stats[symbol]['volume'] += tx.get('value', 0)
-                    
-                    # ⚡ SIMPLE: USD volume estimation for native tokens
-                    if symbol in ['ETH', 'BNB', 'MATIC', 'AVAX']:
+                    # ⚡ SIMPLE: USD volume estimation for native tokens only
+                    if is_native_token(symbol):
                         estimated_prices = {'ETH': 3400, 'BNB': 630, 'MATIC': 0.4, 'AVAX': 17}
                         price = estimated_prices.get(symbol, 0)
                         if price > 0:
-                            token_stats[symbol]['volume_usd'] += tx.get('value', 0) * price
+                            if symbol in native_token_stats:
+                                native_token_stats[symbol]['volume_usd'] += tx.get('value', 0) * price
                 
                 # Date frequency
                 if tx.get('timestamp'):
@@ -449,13 +508,17 @@ async def get_onchain_analytics(session: aiohttp.ClientSession, wallet_address: 
                     if date_str:
                         date_frequency[date_str] = date_frequency.get(date_str, 0) + 1
             
-            analytics_data['unique_tokens_traded'] = len(token_stats)
-            analytics_data['total_volume_usd'] = sum(token.get('volume_usd', 0) for token in token_stats.values())
+            # ⚡ FIXED: Only count alt tokens untuk unique_tokens_traded
+            analytics_data['unique_tokens_traded'] = len(alt_token_stats)
+            analytics_data['total_volume_usd'] = sum(token.get('volume_usd', 0) for token in native_token_stats.values())
             analytics_data['transaction_frequency'] = date_frequency
             
-            # Sort most traded tokens
-            sorted_tokens = sorted(token_stats.values(), key=lambda x: x.get('trade_count', 0), reverse=True)
-            analytics_data['most_traded_tokens'] = sorted_tokens[:10]
+            # ⚡ ENHANCED: Sort alt tokens only untuk most_traded_tokens
+            sorted_alt_tokens = sorted(alt_token_stats.values(), key=lambda x: x.get('trade_count', 0), reverse=True)
+            analytics_data['most_traded_tokens'] = sorted_alt_tokens[:10]
+            
+            # ⚡ NEW: Add native token summary separately
+            analytics_data['native_token_summary'] = list(native_token_stats.values())
             
             # ⚡ NEW: Chain-specific data if selected
             if selected_chain:
@@ -469,6 +532,7 @@ async def get_onchain_analytics(session: aiohttp.ClientSession, wallet_address: 
                     }
         
         logger.info(f"SUCCESS: Multi-chain analytics for {wallet_address}: {analytics_data['total_transactions']} total txs across {len(chain_transactions)} chains")
+        logger.info(f"SEPARATION: {len(analytics_data.get('native_token_summary', []))} native tokens, {analytics_data['unique_tokens_traded']} alt tokens")
         
         return analytics_data
         
@@ -835,9 +899,9 @@ async def fetch_ethereum_data(session: aiohttp.ClientSession, wallet_address: st
         logger.error(f"Error fetching Ethereum data: {str(e)}")
         return []
 
-# ⚡ FIXED: Transaction fetching dengan proper chain filtering
+# ⚡ FIXED: Transaction fetching dengan timezone handling
 async def fetch_onchain_transactions(session: aiohttp.ClientSession, wallet_address: str, limit: int = 50, selected_chains: List[str] = None) -> List[Dict]:
-    """⚡ FIXED: Fetch transaksi onchain dengan proper chain filtering"""
+    """⚡ FIXED: Fetch transaksi onchain dengan proper timezone dan chain filtering"""
     try:
         all_transactions = []
         target_chains = selected_chains or ['eth', 'bsc', 'polygon', 'avalanche']
@@ -849,15 +913,24 @@ async def fetch_onchain_transactions(session: aiohttp.ClientSession, wallet_addr
                 chain_transactions = []
                 
                 if chain in ['eth', 'ethereum']:
-                    # ⚡ FIXED: Use working Etherscan approach for ETH
+                    # ⚡ FIXED: Use working Etherscan approach for ETH dengan timezone fix
                     eth_txs = await fetch_ethereum_data(session, wallet_address, 'transactions')
                     
                     for tx in eth_txs[:limit]:
                         try:
+                            # ⚡ FIXED: Proper timezone handling
+                            timestamp_int = int(tx.get('timeStamp', 0))
+                            if timestamp_int > 0:
+                                # Create timezone-aware datetime
+                                from datetime import timezone
+                                timestamp = datetime.fromtimestamp(timestamp_int, tz=timezone.utc)
+                            else:
+                                timestamp = datetime.now(tz=timezone.utc)
+                            
                             processed_tx = {
                                 'tx_hash': tx.get('hash', ''),
                                 'block_number': int(tx.get('blockNumber', 0)),
-                                'timestamp': datetime.fromtimestamp(int(tx.get('timeStamp', 0))),
+                                'timestamp': timestamp,
                                 'from_address': tx.get('from', ''),
                                 'to_address': tx.get('to', ''),
                                 'value': float(tx.get('value', 0)) / 1e18,
@@ -878,7 +951,7 @@ async def fetch_onchain_transactions(session: aiohttp.ClientSession, wallet_addr
                     logger.info(f"SUCCESS: Fetched {len(chain_transactions)} ETH transactions")
                 
                 else:
-                    # ⚡ FIXED: Use Moralis for other chains with proper error handling
+                    # ⚡ FIXED: Use Moralis for other chains dengan timezone fix
                     config = BLOCKCHAIN_APIS['moralis']
                     headers = {
                         'X-API-Key': config['api_key'],
@@ -901,10 +974,22 @@ async def fetch_onchain_transactions(session: aiohttp.ClientSession, wallet_addr
                             
                             for transfer in raw_transfers:
                                 try:
+                                    # ⚡ FIXED: Proper timezone handling untuk Moralis
+                                    timestamp_str = transfer.get('block_timestamp', '')
+                                    if timestamp_str:
+                                        try:
+                                            # Parse ISO format dengan timezone
+                                            timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                                        except:
+                                            # Fallback to current time with UTC
+                                            timestamp = datetime.now(tz=timezone.utc)
+                                    else:
+                                        timestamp = datetime.now(tz=timezone.utc)
+                                    
                                     processed_tx = {
                                         'tx_hash': transfer.get('transaction_hash', ''),
                                         'block_number': int(transfer.get('block_number', 0)),
-                                        'timestamp': datetime.fromisoformat(transfer.get('block_timestamp', '').replace('Z', '+00:00')) if transfer.get('block_timestamp') else datetime.now(),
+                                        'timestamp': timestamp,
                                         'from_address': transfer.get('from_address', ''),
                                         'to_address': transfer.get('to_address', ''),
                                         'value': float(transfer.get('value', 0)) / (10 ** int(transfer.get('token_decimals', 18))),
@@ -926,41 +1011,6 @@ async def fetch_onchain_transactions(session: aiohttp.ClientSession, wallet_addr
                         
                         else:
                             logger.warning(f"WARNING: {chain} transfers API returned {response.status}")
-                    
-                    # Also try to get native transactions untuk chain ini
-                    try:
-                        native_url = f"{config['api_url']}/{wallet_address}"
-                        native_params = {'chain': chain}
-                        
-                        async with session.get(native_url, headers=headers, params=native_params,
-                                             timeout=aiohttp.ClientTimeout(total=10)) as response:
-                            if response.status == 200:
-                                native_data = await response.json()
-                                native_balance = native_data.get('balance', '0')
-                                
-                                # If there's native balance, assume there are native transactions
-                                if int(native_balance) > 0:
-                                    # Add a dummy native transaction untuk display purposes
-                                    native_tx = {
-                                        'tx_hash': f'native_{chain}_latest',
-                                        'block_number': 0,
-                                        'timestamp': datetime.now(),
-                                        'from_address': '',
-                                        'to_address': wallet_address,
-                                        'value': float(native_balance) / 1e18,
-                                        'value_raw': native_balance,
-                                        'gas_used': 0,
-                                        'gas_price': '0',
-                                        'token_symbol': get_native_token_for_chain(chain),
-                                        'token_address': '',
-                                        'transaction_type': 'native',
-                                        'chain': chain,
-                                        'status': 'success'
-                                    }
-                                    chain_transactions.insert(0, native_tx)
-                                    logger.info(f"INFO: Added native {chain} transaction")
-                    except Exception as e:
-                        logger.warning(f"WARNING: Could not fetch native {chain} data: {e}")
                 
                 # Add chain transactions to overall list
                 all_transactions.extend(chain_transactions)
@@ -970,8 +1020,8 @@ async def fetch_onchain_transactions(session: aiohttp.ClientSession, wallet_addr
                 logger.error(f"ERROR: Failed to fetch {chain} transactions: {e}")
                 continue
         
-        # ⚡ Sort by timestamp descending
-        all_transactions.sort(key=lambda x: x.get('timestamp', datetime.min), reverse=True)
+        # ⚡ FIXED: Sort by timestamp descending dengan timezone-aware comparison
+        all_transactions.sort(key=lambda x: x.get('timestamp', datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
         
         # ⚡ Apply final limit
         final_transactions = all_transactions[:limit]
