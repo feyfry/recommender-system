@@ -12,6 +12,7 @@ Sistem ini menggunakan data dari CoinGecko API untuk menyediakan rekomendasi pro
 - **Fitur Proyek** (DeFi, GameFi, Layer-1, dll)
 - **Analisis Teknikal** (RSI, MACD, Bollinger Bands, dll) dengan periode yang dapat dikonfigurasi penuh
 - **Maturitas Proyek** (usia, aktivitas developer, engagement sosial)
+- **⚡ Multi-Chain Analytics** (Ethereum, BSC, Polygon, Avalanche) dengan support comprehensive USD volume calculation
 
 Sistem ini mengimplementasikan beberapa pendekatan rekomendasi:
 1. **Feature-Enhanced Collaborative Filtering** menggunakan scikit-learn SVD
@@ -36,7 +37,7 @@ Sistem ini mengimplementasikan beberapa pendekatan rekomendasi:
 3. **Penanganan Cold-Start yang Ditingkatkan:**
    - Rekomendasi untuk pengguna baru berdasarkan minat
    - Penanganan multi-kategori yang lebih baik
-   - Normalisasi skor untuk cold-start pengguna dengan validasi ketat
+   - Normalizasi skor untuk cold-start pengguna dengan validasi ketat
    - Strategi adaptive weighting berdasarkan jumlah interaksi
 
 4. **Filtering Rekomendasi yang Disempurnakan:**
@@ -52,18 +53,151 @@ Sistem ini mengimplementasikan beberapa pendekatan rekomendasi:
      - `fallback` - Item yang ditambahkan sebagai cadangan karena kurangnya hasil
    - **Penghitungan Exact Match** untuk mengukur ketepatan filter
 
-5. **API Service dengan Konfigurasi Fleksibel:**
+5. **⚡ Enhanced Multi-Chain Blockchain Analytics:**
+   - **Native-Focused Portfolio Analysis** dengan prioritas pada native tokens (ETH, BNB, MATIC, AVAX)
+   - **Comprehensive USD Volume Calculation** dengan real-time price fetching dan fallback estimation
+   - **Smart Spam Detection** dengan pattern recognition yang ketat untuk filter scam tokens
+   - **Cross-Chain Transaction Analytics** dengan parallel data fetching dari multiple chains
+   - **Chain Dominance Analysis** dan diversification scoring
+   - **Enhanced Caching System** dengan diferensiasi cache key untuk single vs multi-chain requests
+
+6. **API Service dengan Konfigurasi Fleksibel:**
    - Endpoint REST API untuk integrasi dengan aplikasi backend Laravel
    - Dukungan parameter periode indikator kustom melalui API
-   - Caching untuk performa yang lebih baik
+   - **Enhanced Error Handling** dengan Unicode logging support dan smart error categorization
+   - **Performance Monitoring** dengan threshold yang disesuaikan per endpoint type
    - Dokumentasi komprehensif
 
-6. **Pipeline Data Otomatis:**
+7. **Pipeline Data Otomatis:**
    - Pengumpulan data reguler dari CoinGecko
    - Pipeline pemrosesan untuk ekstraksi fitur
    - Pelatihan dan evaluasi model otomatis
 
 ## 🔄 Pembaruan Terbaru (Juni 2025)
+
+### ⚡ Enhanced Multi-Chain Blockchain Analytics - MAJOR UPDATE
+
+Sistem blockchain analytics telah mengalami peningkatan signifikan dengan fokus pada native tokens dan USD volume calculation yang comprehensive:
+
+#### 🛠️ Perbaikan Variable Scope & Cache Key Management
+
+**Masalah yang Diperbaiki:**
+- **Variable Scope Error**: `calculated_usd_value` tidak di-initialize dengan benar di blockchain.py
+- **Cache Key Collision**: Cache key sama untuk single-chain dan multi-chain requests
+- **USD Volume Calculation**: Hanya ETH yang punya USD estimation, chains lain kosong
+- **Native Token Separation**: Native tokens tidak ditampilkan di "Most Traded Tokens"
+
+**Solusi yang Diimplementasikan:**
+
+**blockchain.py - Enhanced Variable Scope & USD Calculation:**
+```python
+# ⚡ FIXED: Proper USD value initialization
+calculated_usd_value = None  # ⚡ INITIALIZE variable dengan None
+
+if token.get('usd_value') is not None and token.get('usd_value') > 0:
+    balance = token.get('balance', 0)
+    if balance > 0:
+        calculated_usd_value = token['usd_value'] / balance
+        existing_prices[symbol] = calculated_usd_value
+elif token.get('usd_price') is not None and token.get('usd_price') > 0:
+    calculated_usd_value = token['usd_price']
+    existing_prices[symbol] = calculated_usd_value
+```
+
+**Enhanced Cache Key Differentiation:**
+```python
+# ⚡ FIXED: Build unique cache key untuk single vs multi chain
+chains_str = ','.join(sorted(chains)) if chains else 'all'
+cache_key = f"transactions_fixed_v7_{wallet_address}_{limit}_{chains_str}_{len(chains or [])}"
+```
+
+#### 🚀 Native-Focused Portfolio Analytics
+
+**Prioritas Native Tokens:**
+- ETH, BNB, MATIC, AVAX mendapat prioritas tinggi dalam price fetching
+- Comprehensive USD volume calculation dengan real-time prices
+- Fallback estimation untuk chains yang tidak memiliki real-time price
+
+**Enhanced Spam Detection:**
+```python
+ENHANCED_SPAM_PATTERNS = [
+    # Multi-chain specific spam patterns
+    r'bridge.*reward',      # Bridge scams
+    r'cross.*chain.*claim', # Cross-chain scams  
+    r'multi.*chain.*gift',  # Multi-chain gift scams
+    r'swap.*bonus',         # Swap bonus scams
+    r'yield.*farm.*fake',   # Fake yield farming
+    # ... dan pattern lainnya
+]
+```
+
+#### 📊 Advanced Transaction Analytics
+
+**Comprehensive USD Volume Tracking:**
+- Real-time price fetching untuk native tokens
+- Enhanced transaction processing dengan timezone-aware handling
+- Cross-chain volume aggregation dengan proper chain dominance calculation
+
+**Multi-Chain Helper Integration:**
+```python
+# ⚡ NEW: multichain_helpers.py
+class MultiChainAnalyticsHelper:
+    async def fetch_parallel_chain_data(self, session, wallet_address, chains, selected_chain=None)
+    def aggregate_multi_chain_data(self, chain_results)
+    def calculate_diversification_score(self, chains_activity)
+    def get_cross_chain_insights(self, aggregated_data, selected_chain=None)
+```
+
+### Enhanced API Error Handling & Logging
+
+**Unicode Logging Support:**
+```python
+class UnicodeLoggingFilter(logging.Filter):
+    """Filter untuk menangani Unicode characters dalam logging"""
+    def filter(self, record):
+        # Sanitize record message untuk menghindari Unicode encoding errors
+        if hasattr(record, 'msg') and isinstance(record.msg, str):
+            try:
+                record.msg.encode('ascii', 'ignore').decode('ascii')
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                record.msg = record.msg.encode('ascii', 'ignore').decode('ascii')
+                record.msg += ' [Unicode chars filtered]'
+        return True
+```
+
+**Smart Performance Thresholds:**
+```python
+# ⚡ ENHANCED: More realistic thresholds
+if path.startswith('/blockchain/'):
+    slow_threshold = 30.0     # 30 detik untuk blockchain endpoints
+    warning_threshold = 60.0  # 1 menit untuk warning
+    critical_threshold = 120.0 # 2 menit untuk critical
+elif path.startswith('/analysis/'):
+    slow_threshold = 10.0     # 10 detik untuk analysis endpoints
+    warning_threshold = 20.0  # 20 detik untuk warning
+    critical_threshold = 30.0 # 30 detik untuk critical
+```
+
+### Enhanced Recommendation Caching & Data Sanitization
+
+**Improved Caching Strategy:**
+```python
+_cache_ttl = {
+    "cold_start": 1800,  # 30 menit untuk cold-start user
+    "low_activity": 1500,  # 25 menit untuk pengguna dengan aktivitas rendah
+    "normal": 1200,     # 20 menit untuk pengguna normal
+    "active": 900      # 15 menit untuk pengguna sangat aktif
+}
+```
+
+**Enhanced Data Sanitization:**
+```python
+def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """PERBAIKAN: Sanitize project data dengan validasi score yang ketat"""
+    # Handle NumPy arrays, pandas NA values, dan JSON strings
+    # Validasi score fields dalam range 0-100 atau 0-1 sesuai context
+    # Enhanced error handling untuk setiap field
+```
 
 ### Critical Score Validation & Normalization - MAJOR UPDATE
 
@@ -420,6 +554,10 @@ source venv/Scripts/activate
    - Tambahkan CoinGecko API key Anda:
 ```
 COINGECKO_API_KEY="your-api-key"
+MORALIS_API_KEY="your-moralis-api-key"
+ETHERSCAN_API_KEY="your-etherscan-api-key"
+BSCSCAN_API_KEY="your-bscscan-api-key"
+POLYGONSCAN_API_KEY="your-polygonscan-api-key"
 ```
 
 5. Setup database:
@@ -1074,6 +1212,149 @@ Secara default, API akan berjalan di `http://0.0.0.0:8001`.
 }
 ```
 
+### ⚡ Enhanced Multi-Chain Blockchain Analytics Endpoints
+
+#### 1. Portfolio Analysis dengan Native Token Focus
+
+**Endpoint:** `GET /blockchain/portfolio/{wallet_address}`
+
+**Parameters:**
+- `wallet_address` (string): Alamat wallet
+- `chains` (array, optional): Chains untuk di-scan (eth, bsc, polygon, avalanche)
+
+**Response:**
+```json
+{
+  "wallet_address": "0x123...",
+  "total_usd_value": 12500.45,
+  "native_balances": [
+    {
+      "token_address": "0x0",
+      "token_name": "ETH",
+      "token_symbol": "ETH",
+      "balance": 3.5,
+      "balance_raw": "3500000000000000000",
+      "decimals": 18,
+      "chain": "ethereum",
+      "usd_value": 11900.00,
+      "is_spam": false
+    }
+  ],
+  "token_balances": [
+    {
+      "token_address": "0xa0b86a33e6776...",
+      "token_name": "ChainLink Token",
+      "token_symbol": "LINK",
+      "balance": 150.0,
+      "balance_raw": "150000000000000000000",
+      "decimals": 18,
+      "chain": "ethereum",
+      "usd_value": 600.45,
+      "is_spam": false
+    }
+  ],
+  "last_updated": "2025-06-23T10:30:00Z",
+  "chains_scanned": ["ethereum", "bsc", "polygon"],
+  "filtered_tokens_count": 25
+}
+```
+
+#### 2. Multi-Chain Transaction Analytics
+
+**Endpoint:** `GET /blockchain/transactions/{wallet_address}`
+
+**Parameters:**
+- `wallet_address` (string): Alamat wallet
+- `limit` (int, optional): Jumlah transaksi (default: 50, max: 200)
+- `chains` (array, optional): Specific chains untuk di-fetch
+
+**Response:**
+```json
+[
+  {
+    "tx_hash": "0xabc123...",
+    "block_number": 18500000,
+    "timestamp": "2025-06-23T09:45:00Z",
+    "from_address": "0x123...",
+    "to_address": "0x456...",
+    "value": 0.5,
+    "value_raw": "500000000000000000",
+    "gas_used": 21000,
+    "gas_price": "20000000000",
+    "token_symbol": "ETH",
+    "token_address": "",
+    "transaction_type": "native",
+    "chain": "ethereum",
+    "status": "success"
+  }
+]
+```
+
+#### 3. Comprehensive Multi-Chain Analytics dengan USD Volume
+
+**Endpoint:** `GET /blockchain/analytics/{wallet_address}`
+
+**Parameters:**
+- `wallet_address` (string): Alamat wallet
+- `days` (int, optional): Periode analisis (default: 30)
+- `chain` (string, optional): Fokus ke chain tertentu
+
+**Response dengan Enhanced Multi-Chain Data:**
+```json
+{
+  "wallet_address": "0x123...",
+  "total_transactions": 1250,
+  "unique_tokens_traded": 45,
+  "total_volume_usd": 125000.50,
+  "most_traded_tokens": [
+    {
+      "symbol": "ETH",
+      "trade_count": 120,
+      "volume": 15.5,
+      "volume_usd": 52700.00,
+      "chain": "ethereum",
+      "is_native": true
+    },
+    {
+      "symbol": "USDC",
+      "trade_count": 85,
+      "volume": 25000.0,
+      "volume_usd": 25000.00,
+      "chain": "ethereum",
+      "is_native": false
+    }
+  ],
+  "transaction_frequency": {
+    "2025-06-22": 15,
+    "2025-06-21": 8,
+    "2025-06-20": 12
+  },
+  "chains_activity": {
+    "ethereum": 800,
+    "bsc": 300,
+    "polygon": 150
+  },
+  "selected_chain": "ethereum",
+  "chain_specific_data": {
+    "chain": "ethereum",
+    "total_transactions": 800,
+    "transactions": [...],
+    "native_token": "ETH"
+  },
+  "cross_chain_volume": 125000.50,
+  "chain_dominance": {
+    "ethereum": 64.0,
+    "bsc": 24.0,
+    "polygon": 12.0
+  },
+  "diversification_score": 75.5,
+  "response_time_ms": 2500,
+  "cache_hit": false,
+  "chains_processed": ["ethereum", "bsc", "polygon"],
+  "errors_encountered": []
+}
+```
+
 ### Endpoint Interaksi Pengguna
 
 #### 1. Catat Interaksi Pengguna
@@ -1147,7 +1428,7 @@ Secara default, API akan berjalan di `http://0.0.0.0:8001`.
 
 #### 3. Hapus Cache
 
-**Endpoint:** `POST /recommend/cache/clear` dan `POST /analysis/cache/clear`
+**Endpoint:** `POST /recommend/cache/clear` dan `POST /analysis/cache/clear` dan `POST /blockchain/cache/clear`
 
 **Response:**
 ```json
@@ -1164,7 +1445,7 @@ Secara default, API akan berjalan di `http://0.0.0.0:8001`.
 
 **Response:** Informasi tentang endpoint yang tersedia dan versi API
 
-#### 2. Health Check
+#### 2. Health Check dengan Enhanced System Info
 
 **Endpoint:** `GET /health`
 
@@ -1172,7 +1453,67 @@ Secara default, API akan berjalan di `http://0.0.0.0:8001`.
 ```json
 {
   "status": "healthy",
-  "timestamp": 1713617400.123
+  "timestamp": 1713617400.123,
+  "system_info": {
+    "platform": "win32",
+    "python_version": [3, 12, 0],
+    "encoding": {
+      "stdout": "utf-8",
+      "stderr": "utf-8",
+      "locale": ["English_United States", "1252"]
+    }
+  },
+  "blockchain_apis": {
+    "moralis": "configured",
+    "etherscan": "configured",
+    "bscscan": "configured",
+    "polygonscan": "configured",
+    "coingecko": "configured"
+  },
+  "performance_thresholds": {
+    "blockchain_endpoints": "30s (normal for multi-chain data)",
+    "analysis_endpoints": "10s",
+    "default_endpoints": "3s"
+  },
+  "features": {
+    "unicode_logging": "enabled",
+    "spam_filtering": "enabled",
+    "smart_batching": "enabled",
+    "retry_logic": "enabled"
+  }
+}
+```
+
+#### 3. Blockchain Health Check
+
+**Endpoint:** `GET /blockchain/health`
+
+**Response dengan Enhanced Status:**
+```json
+{
+  "moralis_api": "healthy",
+  "etherscan_api": "healthy",
+  "coingecko_api": "healthy",
+  "cache_entries": 150,
+  "price_cache_entries": 45,
+  "token_cache_entries": 200,
+  "timestamp": "2025-06-23T10:30:00Z",
+  "api_keys_configured": {
+    "moralis": true,
+    "etherscan": true,
+    "bscscan": true,
+    "polygonscan": true,
+    "coingecko": true
+  },
+  "optimization_status": {
+    "native_token_focus": "enabled",
+    "spam_detection": "enhanced",
+    "price_fetching": "native_only",
+    "usd_volume_calculation": "comprehensive",
+    "cache_key_differentiation": "improved",
+    "max_tokens_to_show": 50,
+    "batch_size": 3
+  }
 }
 ```
 
@@ -1208,10 +1549,12 @@ web3-recommender-system/
 │	│   │   ├── indicators.py # Indikator teknikal dengan periode kustom
 │	│   │   └── signals.py    # Interpretasi sinyal dengan periode kustom
 │	│   │
-│	│   └── api/              # Endpoint API dengan dukungan parameter periode dinamis
-│	│       ├── main.py       # Entrypoint API
-│	│       ├── recommend.py  # Endpoint rekomendasi
-│	│       └── analysis.py   # Endpoint analisis dengan dukungan periode kustom
+│	│   └── api/              # ⚡ Enhanced API dengan Multi-Chain & Analytics
+│	│       ├── main.py       # Enhanced entrypoint dengan Unicode logging & error handling
+│	│       ├── recommend.py  # Enhanced recommendation dengan improved caching & sanitization
+│	│       ├── analysis.py   # Enhanced technical analysis dengan periode dinamis
+│	│       ├── blockchain.py # ⚡ Multi-chain blockchain analytics dengan USD volume calculation
+│	│       └── multichain_helpers.py  # ⚡ NEW: Helper functions untuk multi-chain analytics
 │	│
 │	├── logs/                 # File log
 │	├── config.py             # Konfigurasi sistem
@@ -1276,6 +1619,36 @@ web3-recommender-system/
    - Sistem secara otomatis menyesuaikan parameter untuk data terbatas
    - Kurangi periode MA jangka panjang atau gunakan preset short_term untuk data terbatas
 
+### ⚡ Troubleshooting Multi-Chain Blockchain Analytics
+
+10. **Variable Scope Error (calculated_usd_value)**
+   - **Fixed**: Variable initialization dengan proper None handling
+   - **Solusi**: Gunakan pattern `calculated_usd_value = None` sebelum conditional logic
+
+11. **Cache Key Collision untuk Multi-Chain**
+   - **Fixed**: Enhanced cache key differentiation dengan chain count
+   - **Solusi**: Cache key format `{endpoint}_fixed_v7_{wallet}_{limit}_{chains_str}_{chain_count}`
+
+12. **USD Volume Calculation Incomplete**
+   - **Fixed**: Comprehensive USD volume calculation dengan real-time price fetching
+   - **Solusi**: Native tokens prioritized dengan fallback estimation untuk alt tokens
+
+13. **Spam Token Tidak Terfilter**
+   - **Solusi**: Enhanced spam detection patterns termasuk multi-chain specific scams
+   - **Setting**: Adjust `MIN_BALANCE_USD_THRESHOLD` untuk filter minimal value
+
+14. **Native Token Tidak Muncul di Most Traded**
+   - **Fixed**: Separation logic antara native dan alt tokens dengan proper labeling
+   - **Solusi**: Native tokens di-track terpisah tapi tetap included dalam analytics
+
+15. **Unicode Logging Errors**
+   - **Fixed**: Unicode logging filter dengan ASCII fallback
+   - **Solusi**: Enhanced error handling untuk character encoding di Windows/Linux
+
+16. **Blockchain API Timeout**
+   - **Solusi**: Adjust timeout values di `multichain_helpers.py`
+   - **Setting**: Gunakan `chain_request_timeout` dan retry logic
+
 ## 📬 Kontak
 
 - Email: feyfeifry@gmail.com
@@ -1284,6 +1657,10 @@ web3-recommender-system/
 ## 🙏 Pengakuan
 
 - [CoinGecko API](https://www.coingecko.com/en/api) untuk data cryptocurrency
+- [Moralis API](https://moralis.io/) untuk multi-chain blockchain data
+- [Etherscan API](https://etherscan.io/apis) untuk Ethereum transaction data
+- [BSCScan API](https://bscscan.com/apis) untuk BSC transaction data
+- [PolygonScan API](https://polygonscan.com/apis) untuk Polygon transaction data
 - [scikit-learn](https://scikit-learn.org/) untuk implementasi SVD
 - [PyTorch](https://pytorch.org/) untuk implementasi Neural CF
 - [TensorFlow](https://www.tensorflow.org/) untuk model prediksi harga LSTM
@@ -1294,4 +1671,4 @@ web3-recommender-system/
 ---
 
 **Last Updated:** Juni 2025  
-**Version:** 3.0 - Enhanced Score Validation & Robust Normalization
+**Version:** 3.1 - Enhanced Multi-Chain Analytics & Comprehensive USD Volume Calculation
