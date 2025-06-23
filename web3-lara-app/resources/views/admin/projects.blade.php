@@ -25,9 +25,16 @@
         </h2>
 
         <form action="{{ route('admin.projects') }}" method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-4" id="filterForm">
-            <!-- Preserve sort and direction -->
-            <input type="hidden" name="sort" value="{{ $filters['sort'] ?? 'popularity_score' }}">
-            <input type="hidden" name="direction" value="{{ $filters['direction'] ?? 'desc' }}">
+            <!-- PERBAIKAN: Preserve sort and direction saat filtering -->
+            @if(request()->has('page') && request()->page > 1)
+                <input type="hidden" name="page" value="1">
+            @endif
+            @if(request()->has('sort'))
+                <input type="hidden" name="sort" value="{{ request()->sort }}">
+            @endif
+            @if(request()->has('direction'))
+                <input type="hidden" name="direction" value="{{ request()->direction }}">
+            @endif
 
             <div>
                 <label for="category" class="block mb-2 font-medium">Kategori</label>
@@ -73,40 +80,62 @@
         </form>
     </div>
 
-    <!-- Projects Stats -->
+    <!-- PERBAIKAN: Projects Stats dengan statistik yang akurat -->
     <div class="clay-card p-6 mb-8">
         <h2 class="text-xl font-bold mb-4 flex items-center">
             <i class="fas fa-chart-pie mr-2 text-warning"></i>
             Statistik Proyek
+            @if(!empty($filters['category']) || !empty($filters['chain']) || !empty($filters['search']))
+                <span class="clay-badge clay-badge-info ml-2 text-xs">Berdasarkan Filter</span>
+            @else
+                <span class="clay-badge clay-badge-primary ml-2 text-xs">Total Keseluruhan</span>
+            @endif
         </h2>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <div class="clay-card bg-primary/10 p-4 text-center">
                 <div class="text-3xl font-bold mb-2">
-                    {{ $projects->total() }}
+                    {{ number_format($projectStats['total']) }}
                 </div>
                 <div class="text-sm">Total Proyek</div>
+                @if(!empty($filters['category']) || !empty($filters['chain']) || !empty($filters['search']))
+                    <div class="text-xs text-gray-500 mt-1">Hasil Filter</div>
+                @endif
             </div>
 
             <div class="clay-card bg-success/10 p-4 text-center">
                 <div class="text-3xl font-bold mb-2">
-                    {{ $categories->count() }}
+                    {{ number_format($projectStats['categories']) }}
                 </div>
                 <div class="text-sm">Kategori</div>
             </div>
 
             <div class="clay-card bg-info/10 p-4 text-center">
                 <div class="text-3xl font-bold mb-2">
-                    {{ $chains->count() }}
+                    {{ number_format($projectStats['chains']) }}
                 </div>
                 <div class="text-sm">Chain</div>
             </div>
 
+            <!-- PERBAIKAN: Statistik Trending yang akurat dari query keseluruhan -->
             <div class="clay-card bg-warning/10 p-4 text-center">
                 <div class="text-3xl font-bold mb-2">
-                    {{ $projects->where('trend_score', '>', 70)->count() }}
+                    {{ number_format($projectStats['trending']) }}
                 </div>
                 <div class="text-sm">Trending (Score > 70)</div>
+                @if(!empty($filters['category']) || !empty($filters['chain']) || !empty($filters['search']))
+                    <div class="text-xs text-gray-500 mt-1">Dalam Filter</div>
+                @endif
+            </div>
+
+            <div class="clay-card bg-secondary/10 p-4 text-center">
+                <div class="text-3xl font-bold mb-2">
+                    {{ number_format($projectStats['popular']) }}
+                </div>
+                <div class="text-sm">Popular (Score > 70)</div>
+                @if(!empty($filters['category']) || !empty($filters['chain']) || !empty($filters['search']))
+                    <div class="text-xs text-gray-500 mt-1">Dalam Filter</div>
+                @endif
             </div>
         </div>
     </div>
@@ -129,6 +158,7 @@
                         <th class="py-3 px-4 text-left">Kategori</th>
                         <th class="py-3 px-4 text-left">Chain</th>
                         <th class="py-3 px-4 text-left">
+                            <!-- PERBAIKAN: Preserve filter parameters in sorting links -->
                             <a href="{{ route('admin.projects', array_merge($filters ?? [], ['sort' => 'popularity_score', 'direction' => (($filters['sort'] ?? '') == 'popularity_score' && ($filters['direction'] ?? '') == 'desc') ? 'asc' : 'desc'])) }}" class="flex items-center">
                                 Popularitas
                                 @if(($filters['sort'] ?? '') == 'popularity_score')
@@ -140,6 +170,14 @@
                             <a href="{{ route('admin.projects', array_merge($filters ?? [], ['sort' => 'trend_score', 'direction' => (($filters['sort'] ?? '') == 'trend_score' && ($filters['direction'] ?? '') == 'desc') ? 'asc' : 'desc'])) }}" class="flex items-center">
                                 Trend
                                 @if(($filters['sort'] ?? '') == 'trend_score')
+                                    <i class="fas fa-sort-{{ ($filters['direction'] ?? '') == 'asc' ? 'up' : 'down' }} ml-1"></i>
+                                @endif
+                            </a>
+                        </th>
+                        <th class="py-3 px-4 text-left">
+                            <a href="{{ route('admin.projects', array_merge($filters ?? [], ['sort' => 'interactions', 'direction' => (($filters['sort'] ?? '') == 'interactions' && ($filters['direction'] ?? '') == 'desc') ? 'asc' : 'desc'])) }}" class="flex items-center">
+                                Interaksi
+                                @if(($filters['sort'] ?? '') == 'interactions')
                                     <i class="fas fa-sort-{{ ($filters['direction'] ?? '') == 'asc' ? 'up' : 'down' }} ml-1"></i>
                                 @endif
                             </a>
@@ -166,7 +204,7 @@
                         <td class="py-3 px-4 {{ $project->price_change_percentage_24h > 0 ? 'text-success' : 'text-danger' }}">
                             {{ $project->price_change_percentage_24h > 0 ? '+' : '' }}{{ number_format($project->price_change_percentage_24h, 2) }}%
                         </td>
-                        <td class="py-3 px-4">{{ $project->clean_primary_category }} ...</td>
+                        <td class="py-3 px-4">{{ $project->clean_primary_category }}</td>
                         <td class="py-3 px-4">{{ $project->clean_chain }}</td>
                         <td class="py-3 px-4">
                             <div class="flex items-center">
@@ -185,6 +223,13 @@
                             </div>
                         </td>
                         <td class="py-3 px-4">
+                            @if(isset($project->interaction_count))
+                                <span class="clay-badge clay-badge-info text-xs">{{ $project->interaction_count }}</span>
+                            @else
+                                <span class="clay-badge clay-badge-secondary text-xs">0</span>
+                            @endif
+                        </td>
+                        <td class="py-3 px-4">
                             <div class="flex space-x-2">
                                 <a href="{{ route('admin.projects.detail', $project->id) }}" class="clay-badge clay-badge-info py-1 px-2 text-xs">
                                     <i class="fas fa-info-circle"></i> Detail
@@ -197,8 +242,15 @@
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="9" class="py-6 px-4 text-center">
-                            <p class="text-gray-500">Tidak ada proyek yang ditemukan.</p>
+                        <td colspan="10" class="py-6 px-4 text-center">
+                            @if(!empty($filters['category']) || !empty($filters['chain']) || !empty($filters['search']))
+                                <p class="text-gray-500">Tidak ada proyek yang sesuai dengan filter yang dipilih.</p>
+                                <a href="{{ route('admin.projects') }}" class="clay-button clay-button-secondary mt-2 py-1 px-3 text-sm">
+                                    <i class="fas fa-times mr-1"></i> Hapus Filter
+                                </a>
+                            @else
+                                <p class="text-gray-500">Tidak ada proyek yang ditemukan.</p>
+                            @endif
                         </td>
                     </tr>
                     @endforelse
@@ -206,14 +258,17 @@
             </table>
         </div>
 
-        <!-- Pagination -->
+        <!-- PERBAIKAN: Pagination dengan preserved query parameters -->
         @if($projects->hasPages())
             <div class="mt-6">
                 <div class="flex flex-col md:flex-row justify-between items-center">
                     <div class="mb-4 md:mb-0">
                         <p class="text-sm text-gray-600">
                             Menampilkan {{ $projects->firstItem() }} sampai {{ $projects->lastItem() }}
-                            dari {{ $projects->total() }} proyek
+                            dari {{ number_format($projects->total()) }} proyek
+                            @if(!empty($filters['category']) || !empty($filters['chain']) || !empty($filters['search']))
+                                <span class="clay-badge clay-badge-info text-xs ml-1">Hasil Filter</span>
+                            @endif
                         </p>
                     </div>
 
@@ -254,6 +309,37 @@
         @endif
     </div>
 
+    <!-- PERBAIKAN: Filter Status Info -->
+    @if(!empty($filters['category']) || !empty($filters['chain']) || !empty($filters['search']))
+    <div class="clay-card p-4 mb-8 bg-blue-50 border-l-4 border-blue-400">
+        <div class="flex justify-between items-center">
+            <div>
+                <h3 class="text-sm font-medium text-blue-800">Filter Aktif:</h3>
+                <div class="flex flex-wrap gap-2 mt-1">
+                    @if(!empty($filters['category']))
+                        <span class="clay-badge clay-badge-info text-xs">
+                            Kategori: {{ ucfirst($filters['category']) }}
+                        </span>
+                    @endif
+                    @if(!empty($filters['chain']))
+                        <span class="clay-badge clay-badge-info text-xs">
+                            Chain: {{ ucfirst($filters['chain']) }}
+                        </span>
+                    @endif
+                    @if(!empty($filters['search']))
+                        <span class="clay-badge clay-badge-info text-xs">
+                            Pencarian: "{{ $filters['search'] }}"
+                        </span>
+                    @endif
+                </div>
+            </div>
+            <a href="{{ route('admin.projects') }}" class="clay-button clay-button-secondary py-1 px-3 text-sm">
+                <i class="fas fa-times mr-1"></i> Hapus Semua Filter
+            </a>
+        </div>
+    </div>
+    @endif
+
     <!-- Quick Action -->
     <div class="clay-card p-6">
         <h2 class="text-xl font-bold mb-6 flex items-center">
@@ -281,18 +367,51 @@
 @push('scripts')
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+        // PERBAIKAN: Auto-submit form untuk UX yang lebih baik
+        const categorySelect = document.getElementById('category');
+        const chainSelect = document.getElementById('chain');
+        const searchInput = document.getElementById('search');
+
+        function autoSubmitForm() {
+            // Submit form setelah delay kecil
+            setTimeout(() => {
+                document.getElementById('filterForm').submit();
+            }, 100);
+        }
+
+        // Auto-submit untuk select category
+        if (categorySelect) {
+            categorySelect.addEventListener('change', autoSubmitForm);
+        }
+
+        // Auto-submit untuk select chain
+        if (chainSelect) {
+            chainSelect.addEventListener('change', autoSubmitForm);
+        }
+
+        // Auto-submit untuk search dengan debounce
+        if (searchInput) {
+            let searchTimeout;
+            searchInput.addEventListener('input', function() {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    if (searchInput.value.length >= 3 || searchInput.value.length === 0) {
+                        autoSubmitForm();
+                    }
+                }, 500); // 500ms debounce
+            });
+        }
+
         // Preserve form state pada page load
         const urlParams = new URLSearchParams(window.location.search);
 
         // Set selected value untuk kategori
-        const categorySelect = document.getElementById('category');
         const categoryParam = urlParams.get('category');
         if (categoryParam && categorySelect) {
             categorySelect.value = categoryParam;
         }
 
         // Set selected value untuk chain
-        const chainSelect = document.getElementById('chain');
         const chainParam = urlParams.get('chain');
         if (chainParam && chainSelect) {
             chainSelect.value = chainParam;

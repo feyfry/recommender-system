@@ -195,6 +195,12 @@ class AdminController extends Controller
             });
         }
 
+        // PERBAIKAN: Clone query untuk menghitung statistik role SEBELUM pagination
+        $roleStatsQuery = clone $query;
+        $roleStats = $roleStatsQuery->selectRaw('role, COUNT(*) as count')
+            ->groupBy('role')
+            ->get();
+
         // PERBAIKAN: Handle sorting berdasarkan jumlah interactions
         if ($request->get('sort') === 'interactions') {
             $direction = $request->get('direction', 'desc');
@@ -209,15 +215,8 @@ class AdminController extends Controller
             $query->orderBy($request->get('sort', 'created_at'), $request->get('direction', 'desc'));
         }
 
-        // Pagination
-        $users = $query->paginate(10);
-
-        // DIOPTIMALKAN: Menyimpan statistik role
-        $roleStats = Cache::remember('admin_role_stats', 60, function () {
-            return User::selectRaw('role, COUNT(*) as count')
-                ->groupBy('role')
-                ->get();
-        });
+        // PERBAIKAN: Pagination dengan withQueryString untuk preserve filter parameters
+        $users = $query->paginate(10)->withQueryString();
 
         return view('admin.users', [
             'users'     => $users,
@@ -310,7 +309,7 @@ class AdminController extends Controller
     }
 
     /**
-     * PERBAIKAN: Menampilkan halaman pengelolaan proyek dengan fix sorting interactions
+     * PERBAIKAN: Menampilkan halaman pengelolaan proyek dengan fix sorting interactions dan statistik trending
      */
     public function projects(Request $request)
     {
@@ -339,6 +338,22 @@ class AdminController extends Controller
                     ->orWhere('id', 'like', "%{$request->search}%");
             });
         }
+
+        // PERBAIKAN: Clone query untuk statistik SEBELUM sorting dan pagination
+        $statsQuery = clone $query;
+        $projectStats = [
+            'total' => $statsQuery->count(),
+            'trending' => (clone $statsQuery)->where('trend_score', '>', 70)->count(),
+            'popular' => (clone $statsQuery)->where('popularity_score', '>', 70)->count(),
+            'categories' => (clone $statsQuery)->select('primary_category')
+                ->distinct()
+                ->whereNotNull('primary_category')
+                ->count(),
+            'chains' => (clone $statsQuery)->select('chain')
+                ->distinct()
+                ->whereNotNull('chain')
+                ->count(),
+        ];
 
         // PERBAIKAN: Handle sorting berdasarkan interactions
         $sortField = $request->get('sort', 'popularity_score');
@@ -374,8 +389,8 @@ class AdminController extends Controller
             $query->orderBy($sortField, $direction);
         }
 
-        // Pagination dikurangi dari 20 ke 10
-        $projects = $query->paginate(10);
+        // PERBAIKAN: Pagination dengan withQueryString untuk preserve filter parameters
+        $projects = $query->paginate(10)->withQueryString();
 
         // DIOPTIMALKAN: Cache daftar kategori dan blockchain yang sudah dibersihkan
         // dan unique tanpa filter "Unknown" atau kosong
@@ -433,10 +448,11 @@ class AdminController extends Controller
         });
 
         return view('admin.projects', [
-            'projects'   => $projects,
-            'categories' => $categories,
-            'chains'     => $chains,
-            'filters'    => $request->only(['category', 'chain', 'search', 'sort', 'direction']),
+            'projects'     => $projects,
+            'projectStats' => $projectStats, // PERBAIKAN: Kirim statistik yang sudah diperbaiki
+            'categories'   => $categories,
+            'chains'       => $chains,
+            'filters'      => $request->only(['category', 'chain', 'search', 'sort', 'direction']),
         ]);
     }
 

@@ -22,7 +22,18 @@
             Filter Pengguna
         </h2>
 
-        <form action="{{ route('admin.users') }}" method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <form action="{{ route('admin.users') }}" method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-4" id="filterForm">
+            <!-- PERBAIKAN: Preserve pagination dan sorting dalam form -->
+            @if(request()->has('page') && request()->page > 1)
+                <input type="hidden" name="page" value="1">
+            @endif
+            @if(request()->has('sort'))
+                <input type="hidden" name="sort" value="{{ request()->sort }}">
+            @endif
+            @if(request()->has('direction'))
+                <input type="hidden" name="direction" value="{{ request()->direction }}">
+            @endif
+
             <div>
                 <label for="role" class="block mb-2 font-medium">Peran</label>
                 <select name="role" id="role" class="clay-select w-full">
@@ -73,6 +84,11 @@
         <h2 class="text-xl font-bold mb-4 flex items-center">
             <i class="fas fa-chart-pie mr-2 text-warning"></i>
             Statistik Peran
+            @if(!empty($filters['role']) || !empty($filters['search']))
+                <span class="clay-badge clay-badge-info ml-2 text-xs">Berdasarkan Filter</span>
+            @else
+                <span class="clay-badge clay-badge-primary ml-2 text-xs">Total Keseluruhan</span>
+            @endif
         </h2>
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -81,9 +97,16 @@
                     {{ $users->total() }}
                 </div>
                 <div class="text-sm">Total Pengguna</div>
+                @if(!empty($filters['role']) || !empty($filters['search']))
+                    <div class="text-xs text-gray-500 mt-1">Hasil Filter</div>
+                @endif
             </div>
 
-            @php $adminCount = 0; $communityCount = 0; $otherCount = 0; @endphp
+            @php
+                $adminCount = 0;
+                $communityCount = 0;
+                $otherCount = 0;
+            @endphp
             @foreach($roleStats ?? [] as $roleStat)
                 @if($roleStat->role == 'admin')
                     @php $adminCount = $roleStat->count; @endphp
@@ -132,7 +155,7 @@
                         <th class="py-3 px-4 text-left">Wallet Address</th>
                         <th class="py-3 px-4 text-left">Username</th>
                         <th class="py-3 px-4 text-left">Peran</th>
-                        <!-- TAMBAHAN: Kolom Interaksi dengan link sortable -->
+                        <!-- PERBAIKAN: Kolom Interaksi dengan link sortable yang preserve filter -->
                         <th class="py-3 px-4 text-left">
                             <a href="{{ route('admin.users', array_merge($filters ?? [], ['sort' => 'interactions', 'direction' => (($filters['sort'] ?? '') == 'interactions' && ($filters['direction'] ?? 'desc') == 'desc') ? 'asc' : 'desc'])) }}"
                                class="flex items-center hover:text-primary">
@@ -142,8 +165,22 @@
                                 @endif
                             </a>
                         </th>
-                        <th class="py-3 px-4 text-left">Bergabung</th>
-                        <th class="py-3 px-4 text-left">Login Terakhir</th>
+                        <th class="py-3 px-4 text-left">
+                            <a href="{{ route('admin.users', array_merge($filters ?? [], ['sort' => 'created_at', 'direction' => (($filters['sort'] ?? '') == 'created_at' && ($filters['direction'] ?? 'desc') == 'desc') ? 'asc' : 'desc'])) }}" class="flex items-center">
+                                Bergabung
+                                @if(($filters['sort'] ?? '') == 'created_at')
+                                    <i class="fas fa-sort-{{ ($filters['direction'] ?? 'desc') == 'asc' ? 'up' : 'down' }} ml-1"></i>
+                                @endif
+                            </a>
+                        </th>
+                        <th class="py-3 px-4 text-left">
+                            <a href="{{ route('admin.users', array_merge($filters ?? [], ['sort' => 'last_login', 'direction' => (($filters['sort'] ?? '') == 'last_login' && ($filters['direction'] ?? 'desc') == 'desc') ? 'asc' : 'desc'])) }}" class="flex items-center">
+                                Login Terakhir
+                                @if(($filters['sort'] ?? '') == 'last_login')
+                                    <i class="fas fa-sort-{{ ($filters['direction'] ?? 'desc') == 'asc' ? 'up' : 'down' }} ml-1"></i>
+                                @endif
+                            </a>
+                        </th>
                         <th class="py-3 px-4 text-left">Aksi</th>
                     </tr>
                 </thead>
@@ -162,7 +199,7 @@
                                 <span class="clay-badge clay-badge-secondary">{{ $user->role }}</span>
                             @endif
                         </td>
-                        <!-- TAMBAHAN: Tampilkan jumlah interaksi -->
+                        <!-- PERBAIKAN: Tampilkan jumlah interaksi -->
                         <td class="py-3 px-4">
                             <span class="clay-badge clay-badge-info">
                                 {{ isset($user->interaction_count) ? $user->interaction_count : $user->interactions->count() }} interaksi
@@ -184,7 +221,14 @@
                     @empty
                     <tr>
                         <td colspan="8" class="py-6 px-4 text-center">
-                            <p class="text-gray-500">Tidak ada pengguna yang ditemukan.</p>
+                            @if(!empty($filters['role']) || !empty($filters['search']))
+                                <p class="text-gray-500">Tidak ada pengguna yang sesuai dengan filter yang dipilih.</p>
+                                <a href="{{ route('admin.users') }}" class="clay-button clay-button-secondary mt-2 py-1 px-3 text-sm">
+                                    <i class="fas fa-times mr-1"></i> Hapus Filter
+                                </a>
+                            @else
+                                <p class="text-gray-500">Tidak ada pengguna yang ditemukan.</p>
+                            @endif
                         </td>
                     </tr>
                     @endforelse
@@ -192,14 +236,17 @@
             </table>
         </div>
 
-        <!-- Pagination -->
+        <!-- PERBAIKAN: Pagination dengan preserved query parameters -->
         @if($users->hasPages())
             <div class="mt-6">
                 <div class="flex flex-col md:flex-row justify-between items-center">
                     <div class="mb-4 md:mb-0">
                         <p class="text-sm text-gray-600">
                             Menampilkan {{ $users->firstItem() }} sampai {{ $users->lastItem() }}
-                            dari {{ $users->total() }} pengguna
+                            dari {{ number_format($users->total()) }} pengguna
+                            @if(!empty($filters['role']) || !empty($filters['search']))
+                                <span class="clay-badge clay-badge-info text-xs ml-1">Hasil Filter</span>
+                            @endif
                         </p>
                     </div>
 
@@ -239,6 +286,32 @@
             </div>
         @endif
     </div>
+
+    <!-- PERBAIKAN: Filter Status Info -->
+    @if(!empty($filters['role']) || !empty($filters['search']))
+    <div class="clay-card p-4 mb-8 bg-blue-50 border-l-4 border-blue-400">
+        <div class="flex justify-between items-center">
+            <div>
+                <h3 class="text-sm font-medium text-blue-800">Filter Aktif:</h3>
+                <div class="flex flex-wrap gap-2 mt-1">
+                    @if(!empty($filters['role']))
+                        <span class="clay-badge clay-badge-info text-xs">
+                            Role: {{ ucfirst($filters['role']) }}
+                        </span>
+                    @endif
+                    @if(!empty($filters['search']))
+                        <span class="clay-badge clay-badge-info text-xs">
+                            Pencarian: "{{ $filters['search'] }}"
+                        </span>
+                    @endif
+                </div>
+            </div>
+            <a href="{{ route('admin.users') }}" class="clay-button clay-button-secondary py-1 px-3 text-sm">
+                <i class="fas fa-times mr-1"></i> Hapus Semua Filter
+            </a>
+        </div>
+    </div>
+    @endif
 </div>
 
 <!-- Edit Role Modal -->
@@ -294,6 +367,48 @@
         // Show modal
         document.getElementById('edit-role-modal').classList.remove('hidden');
     }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        // PERBAIKAN: Auto-submit form untuk UX yang lebih baik
+        const roleSelect = document.getElementById('role');
+        const searchInput = document.getElementById('search');
+        const sortSelect = document.getElementById('sort');
+        const directionSelect = document.getElementById('direction');
+
+        function autoSubmitForm() {
+            // Submit form setelah delay kecil
+            setTimeout(() => {
+                document.getElementById('filterForm').submit();
+            }, 100);
+        }
+
+        // Auto-submit untuk select role
+        if (roleSelect) {
+            roleSelect.addEventListener('change', autoSubmitForm);
+        }
+
+        // Auto-submit untuk sorting options
+        if (sortSelect) {
+            sortSelect.addEventListener('change', autoSubmitForm);
+        }
+
+        if (directionSelect) {
+            directionSelect.addEventListener('change', autoSubmitForm);
+        }
+
+        // Auto-submit untuk search dengan debounce
+        if (searchInput) {
+            let searchTimeout;
+            searchInput.addEventListener('input', function() {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    if (searchInput.value.length >= 3 || searchInput.value.length === 0) {
+                        autoSubmitForm();
+                    }
+                }, 500); // 500ms debounce
+            });
+        }
+    });
 </script>
 @endpush
 
