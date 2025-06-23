@@ -204,7 +204,7 @@
                                 <div class="flex justify-center space-x-2">
                                     <!-- Previous -->
                                     <button onclick="changeHoldingsPage(-1)"
-                                           class="clay-button clay-button-secondary py-1.5 px-3 text-sm"
+                                           class="clay-button clay-button-secondary py-1.5 px-3 text-sm ml-4"
                                            id="holdings-prev">
                                         <i class="fas fa-chevron-left"></i>
                                     </button>
