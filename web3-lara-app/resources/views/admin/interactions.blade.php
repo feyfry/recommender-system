@@ -23,13 +23,24 @@
         </h2>
 
         <form action="{{ route('admin.interactions') }}" method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <!-- PERBAIKAN: Preserve pagination dan sorting dalam form -->
+            @if(request()->has('page') && request()->page > 1)
+                <input type="hidden" name="page" value="1">
+            @endif
+            @if(request()->has('sort'))
+                <input type="hidden" name="sort" value="{{ request()->sort }}">
+            @endif
+            @if(request()->has('direction'))
+                <input type="hidden" name="direction" value="{{ request()->direction }}">
+            @endif
+
             <div>
                 <label for="type" class="block mb-2 font-medium">Tipe Interaksi</label>
                 <select name="type" id="type" class="clay-select w-full">
                     <option value="">-- Semua Tipe --</option>
-                    @foreach($interactionTypes as $type)
-                        <option value="{{ $type }}" {{ ($filters['type'] ?? '') == $type ? 'selected' : '' }}>
-                            {{ ucfirst(str_replace('_', ' ', $type)) }}
+                    @foreach($interactionTypes as $value => $label)
+                        <option value="{{ $value }}" {{ ($filters['type'] ?? '') == $value ? 'selected' : '' }}>
+                            {{ $label }}
                         </option>
                     @endforeach
                 </select>
@@ -58,41 +69,39 @@
         </form>
     </div>
 
-    <!-- Interactions Stats -->
+    <!-- PERBAIKAN: Interactions Stats berdasarkan total filtered data -->
     <div class="clay-card p-6 mb-8">
         <h2 class="text-xl font-bold mb-4 flex items-center">
             <i class="fas fa-chart-pie mr-2 text-warning"></i>
             Statistik Interaksi
+            @if(!empty($filters['type']) || !empty($filters['from_date']) || !empty($filters['to_date']))
+                <span class="clay-badge clay-badge-info ml-2 text-xs">Berdasarkan Filter</span>
+            @else
+                <span class="clay-badge clay-badge-primary ml-2 text-xs">Total Keseluruhan</span>
+            @endif
         </h2>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            @php
-                $typeStats = [
-                    'view' => 0,
-                    'favorite' => 0,
-                    'portfolio_add' => 0
-                ];
-
-                // Hitung statistik dari data yang sudah di-filter
-                foreach($interactions as $interaction) {
-                    if(isset($typeStats[$interaction->interaction_type])) {
-                        $typeStats[$interaction->interaction_type]++;
-                    }
-                }
-            @endphp
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="clay-card bg-primary/10 p-4 text-center">
+                <div class="text-3xl font-bold mb-2">{{ number_format($totalStats['total']) }}</div>
+                <div class="text-sm">Total Interaksi</div>
+                @if(!empty($filters['type']) || !empty($filters['from_date']) || !empty($filters['to_date']))
+                    <div class="text-xs text-gray-500 mt-1">Hasil Filter</div>
+                @endif
+            </div>
 
             <div class="clay-card bg-info/10 p-4 text-center">
-                <div class="text-3xl font-bold mb-2">{{ $typeStats['view'] }}</div>
+                <div class="text-3xl font-bold mb-2">{{ number_format($totalStats['view']) }}</div>
                 <div class="text-sm">View</div>
             </div>
 
             <div class="clay-card bg-secondary/10 p-4 text-center">
-                <div class="text-3xl font-bold mb-2">{{ $typeStats['favorite'] }}</div>
+                <div class="text-3xl font-bold mb-2">{{ number_format($totalStats['favorite']) }}</div>
                 <div class="text-sm">Liked</div>
             </div>
 
             <div class="clay-card bg-success/10 p-4 text-center">
-                <div class="text-3xl font-bold mb-2">{{ $typeStats['portfolio_add'] }}</div>
+                <div class="text-3xl font-bold mb-2">{{ number_format($totalStats['portfolio_add']) }}</div>
                 <div class="text-sm">Portfolio Add</div>
             </div>
         </div>
@@ -115,6 +124,7 @@
                         <th class="py-3 px-4 text-left">Tipe</th>
                         <th class="py-3 px-4 text-left">Weight</th>
                         <th class="py-3 px-4 text-left">
+                            <!-- PERBAIKAN: Preserve filter parameters in sorting links -->
                             <a href="{{ route('admin.interactions', array_merge($filters ?? [], ['sort' => 'created_at', 'direction' => (($filters['sort'] ?? '') == 'created_at' && ($filters['direction'] ?? '') == 'desc') ? 'asc' : 'desc'])) }}" class="flex items-center">
                                 Waktu
                                 @if(($filters['sort'] ?? '') == 'created_at')
@@ -184,7 +194,14 @@
                     @empty
                     <tr>
                         <td colspan="8" class="py-6 px-4 text-center">
-                            <p class="text-gray-500">Tidak ada interaksi yang ditemukan.</p>
+                            @if(!empty($filters['type']) || !empty($filters['from_date']) || !empty($filters['to_date']))
+                                <p class="text-gray-500">Tidak ada interaksi yang sesuai dengan filter yang dipilih.</p>
+                                <a href="{{ route('admin.interactions') }}" class="clay-button clay-button-secondary mt-2 py-1 px-3 text-sm">
+                                    <i class="fas fa-times mr-1"></i> Hapus Filter
+                                </a>
+                            @else
+                                <p class="text-gray-500">Tidak ada interaksi yang ditemukan.</p>
+                            @endif
                         </td>
                     </tr>
                     @endforelse
@@ -192,14 +209,17 @@
             </table>
         </div>
 
-        <!-- Pagination -->
+        <!-- PERBAIKAN: Pagination dengan preserved query parameters -->
         @if($interactions->hasPages())
         <div class="mt-6">
             <div class="flex flex-col md:flex-row justify-between items-center">
                 <div class="mb-4 md:mb-0">
                     <p class="text-sm text-gray-600">
                         Menampilkan {{ $interactions->firstItem() }} sampai {{ $interactions->lastItem() }}
-                        dari {{ $interactions->total() }} interaksi
+                        dari {{ number_format($interactions->total()) }} interaksi
+                        @if(!empty($filters['type']) || !empty($filters['from_date']) || !empty($filters['to_date']))
+                            <span class="clay-badge clay-badge-info text-xs ml-1">Hasil Filter</span>
+                        @endif
                     </p>
                 </div>
 
@@ -239,5 +259,74 @@
         </div>
         @endif
     </div>
+
+    <!-- PERBAIKAN: Filter Status Info -->
+    @if(!empty($filters['type']) || !empty($filters['from_date']) || !empty($filters['to_date']))
+    <div class="clay-card p-4 mb-8 bg-blue-50 border-l-4 border-blue-400">
+        <div class="flex justify-between items-center">
+            <div>
+                <h3 class="text-sm font-medium text-blue-800">Filter Aktif:</h3>
+                <div class="flex flex-wrap gap-2 mt-1">
+                    @if(!empty($filters['type']))
+                        <span class="clay-badge clay-badge-info text-xs">
+                            Tipe: {{ $interactionTypes[$filters['type']] ?? $filters['type'] }}
+                        </span>
+                    @endif
+                    @if(!empty($filters['from_date']))
+                        <span class="clay-badge clay-badge-info text-xs">
+                            Dari: {{ \Carbon\Carbon::parse($filters['from_date'])->format('j M Y') }}
+                        </span>
+                    @endif
+                    @if(!empty($filters['to_date']))
+                        <span class="clay-badge clay-badge-info text-xs">
+                            Sampai: {{ \Carbon\Carbon::parse($filters['to_date'])->format('j M Y') }}
+                        </span>
+                    @endif
+                </div>
+            </div>
+            <a href="{{ route('admin.interactions') }}" class="clay-button clay-button-secondary py-1 px-3 text-sm">
+                <i class="fas fa-times mr-1"></i> Hapus Semua Filter
+            </a>
+        </div>
+    </div>
+    @endif
 </div>
 @endsection
+
+@push('scripts')
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // PERBAIKAN: Automatically submit form when filter changes untuk UX yang lebih baik
+    const typeSelect = document.getElementById('type');
+    const fromDateInput = document.getElementById('from_date');
+    const toDateInput = document.getElementById('to_date');
+
+    function autoSubmitForm() {
+        // Submit form setelah delay kecil untuk memberikan feedback visual
+        setTimeout(() => {
+            typeSelect.closest('form').submit();
+        }, 100);
+    }
+
+    // Auto-submit untuk select type
+    if (typeSelect) {
+        typeSelect.addEventListener('change', autoSubmitForm);
+    }
+
+    // Auto-submit untuk date inputs (hanya ketika both date tersedia atau clear)
+    if (fromDateInput && toDateInput) {
+        [fromDateInput, toDateInput].forEach(input => {
+            input.addEventListener('change', function() {
+                // Submit jika both dates diisi atau both kosong
+                const fromDate = fromDateInput.value;
+                const toDate = toDateInput.value;
+
+                if ((fromDate && toDate) || (!fromDate && !toDate)) {
+                    autoSubmitForm();
+                }
+            });
+        });
+    }
+});
+</script>
+@endpush

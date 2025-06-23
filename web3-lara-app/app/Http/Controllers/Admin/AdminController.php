@@ -145,17 +145,32 @@ class AdminController extends Controller
             $query->where('created_at', '<=', $request->to_date);
         }
 
+        // PERBAIKAN: Hitung statistik dari query yang sudah difilter SEBELUM pagination
+        $statsQuery = clone $query; // Clone query untuk statistik
+        $totalStats = [
+            'total' => $statsQuery->count(),
+            'view' => (clone $statsQuery)->where('interaction_type', 'view')->count(),
+            'favorite' => (clone $statsQuery)->where('interaction_type', 'favorite')->count(),
+            'portfolio_add' => (clone $statsQuery)->where('interaction_type', 'portfolio_add')->count(),
+        ];
+
         // Urutkan
         $query->orderBy($request->get('sort', 'created_at'), $request->get('direction', 'desc'));
 
-        // Pagination 10 per halaman
-        $interactions = $query->paginate(10);
+        // PERBAIKAN: Pagination dengan query parameters yang preserved
+        $interactions = $query->paginate(10)->withQueryString();
 
-        $interactionTypes = Interaction::$validTypes;
+        // PERBAIKAN: Buat mapping alias untuk tipe interaksi
+        $interactionTypes = [
+            'view' => 'View',
+            'favorite' => 'Liked',
+            'portfolio_add' => 'Portfolio Add'
+        ];
 
         return view('admin.interactions', [
             'interactions' => $interactions,
             'interactionTypes' => $interactionTypes,
+            'totalStats' => $totalStats, // PERBAIKAN: Kirim statistik total
             'filters' => $request->only(['type', 'from_date', 'to_date', 'sort', 'direction']),
         ]);
     }
@@ -295,7 +310,7 @@ class AdminController extends Controller
     }
 
     /**
-     * Menampilkan halaman pengelolaan proyek
+     * PERBAIKAN: Menampilkan halaman pengelolaan proyek dengan fix sorting interactions
      */
     public function projects(Request $request)
     {
@@ -325,10 +340,39 @@ class AdminController extends Controller
             });
         }
 
-        // Urutkan
+        // PERBAIKAN: Handle sorting berdasarkan interactions
         $sortField = $request->get('sort', 'popularity_score');
         $direction = $request->get('direction', 'desc');
-        $query->orderBy($sortField, $direction);
+
+        if ($sortField === 'interactions') {
+            // Join dengan tabel interactions dan hitung jumlahnya
+            $query->leftJoin('interactions', 'projects.id', '=', 'interactions.project_id')
+                ->select('projects.*', DB::raw('COUNT(interactions.id) as interaction_count'))
+                ->groupBy(
+                    'projects.id', 'projects.symbol', 'projects.name', 'projects.image',
+                    'projects.current_price', 'projects.market_cap', 'projects.market_cap_rank',
+                    'projects.fully_diluted_valuation', 'projects.total_volume', 'projects.high_24h',
+                    'projects.low_24h', 'projects.price_change_24h', 'projects.price_change_percentage_24h',
+                    'projects.market_cap_change_24h', 'projects.market_cap_change_percentage_24h',
+                    'projects.circulating_supply', 'projects.total_supply', 'projects.max_supply',
+                    'projects.ath', 'projects.ath_change_percentage', 'projects.ath_date',
+                    'projects.atl', 'projects.atl_change_percentage', 'projects.atl_date',
+                    'projects.roi', 'projects.last_updated', 'projects.price_change_percentage_1h_in_currency',
+                    'projects.price_change_percentage_24h_in_currency', 'projects.price_change_percentage_30d_in_currency',
+                    'projects.price_change_percentage_7d_in_currency', 'projects.query_category',
+                    'projects.platforms', 'projects.categories', 'projects.twitter_followers',
+                    'projects.github_stars', 'projects.github_subscribers', 'projects.github_forks',
+                    'projects.description', 'projects.genesis_date', 'projects.sentiment_votes_up_percentage',
+                    'projects.telegram_channel_user_count', 'projects.primary_category', 'projects.chain',
+                    'projects.popularity_score', 'projects.trend_score', 'projects.developer_activity_score',
+                    'projects.social_engagement_score', 'projects.description_length', 'projects.age_days',
+                    'projects.maturity_score', 'projects.is_trending', 'projects.created_at', 'projects.updated_at'
+                )
+                ->orderBy('interaction_count', $direction);
+        } else {
+            // Urutkan berdasarkan field biasa
+            $query->orderBy($sortField, $direction);
+        }
 
         // Pagination dikurangi dari 20 ke 10
         $projects = $query->paginate(10);

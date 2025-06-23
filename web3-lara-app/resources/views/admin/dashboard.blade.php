@@ -257,7 +257,7 @@
                 @endif
             </div>
 
-            <!-- Popular Projects -->
+            <!-- PERBAIKAN: Popular Projects dengan link yang benar -->
             <div class="clay-card p-6">
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-lg font-bold flex items-center">
