@@ -100,7 +100,7 @@ class PortfolioController extends Controller
     }
 
     /**
-     * ⚡ FIXED: AJAX endpoint untuk load analytics data dengan better chain handling
+     * ⚡ FIXED: AJAX endpoint untuk load analytics data dengan better chain handling dan cache differentiation
      */
     public function loadAnalyticsData(Request $request)
     {
@@ -109,8 +109,9 @@ class PortfolioController extends Controller
         $selectedChain = $request->get('chain'); // Chain selection parameter
 
         try {
-            // ⚡ FIXED: Cache key dengan versioning baru dan proper chain handling
-            $cacheKey = "onchain_analytics_fixed_v6_{$walletAddress}" . ($selectedChain ? "_{$selectedChain}" : '');
+            // ⚡ FIXED: Enhanced cache key dengan differentiation yang lebih baik
+            $chainIdentifier = $selectedChain ?: 'all_chains';
+            $cacheKey = "onchain_analytics_fixed_v8_{$walletAddress}_{$chainIdentifier}_" . md5($selectedChain ?: 'all');
 
             $analytics = Cache::remember($cacheKey, 10, function () use ($walletAddress, $selectedChain) {
                 try {
@@ -121,8 +122,8 @@ class PortfolioController extends Controller
                 }
             });
 
-            // ⚡ FIXED: Cache key untuk transactions dengan proper chain filtering
-            $transactionsCacheKey = "onchain_transactions_fixed_v6_{$walletAddress}" . ($selectedChain ? "_{$selectedChain}" : '');
+            // ⚡ FIXED: Enhanced cache key untuk transactions dengan proper differentiation
+            $transactionsCacheKey = "onchain_transactions_fixed_v8_{$walletAddress}_{$chainIdentifier}_" . md5(($selectedChain ?: 'all') . '_trans');
 
             $recentTransactions = Cache::remember($transactionsCacheKey, 10, function () use ($walletAddress, $selectedChain) {
                 try {
@@ -143,13 +144,14 @@ class PortfolioController extends Controller
                 'available_chains'  => $availableChains,
                 'selected_chain'    => $selectedChain,
                 'cached'            => true,
-                'optimization'      => 'multi_chain_fixed_v6',
+                'optimization'      => 'multi_chain_fixed_v8',
                 'debug_info'        => [
                     'analytics_total_txs' => $analytics['total_transactions'] ?? 0,
                     'transactions_count' => count($recentTransactions),
                     'chains_activity' => $analytics['chains_activity'] ?? [],
                     'most_traded_count' => count($analytics['most_traded_tokens'] ?? []),
                     'native_tokens_count' => count($analytics['native_token_summary'] ?? []),
+                    'total_volume_usd' => $analytics['total_volume_usd'] ?? 0,
                     'selected_chain' => $selectedChain,
                     'cache_key_analytics' => $cacheKey,
                     'cache_key_transactions' => $transactionsCacheKey
@@ -252,7 +254,7 @@ class PortfolioController extends Controller
                 ], 503);
             }
 
-            // ⚡ SMART CACHE MANAGEMENT: Clear dengan versioning
+            // ⚡ ENHANCED: Clear dengan versioning yang lebih comprehensive
             $cacheKeys = [
                 "onchain_portfolio_{$walletAddress}",
                 "onchain_portfolio_v2_{$walletAddress}",
@@ -260,9 +262,13 @@ class PortfolioController extends Controller
                 "onchain_analytics_{$walletAddress}",
                 "onchain_analytics_v2_{$walletAddress}",
                 "onchain_analytics_v3_{$walletAddress}",
+                "onchain_analytics_fixed_v7_{$walletAddress}",
+                "onchain_analytics_fixed_v8_{$walletAddress}_all_chains",
                 "onchain_transactions_{$walletAddress}",
                 "onchain_transactions_v2_{$walletAddress}",
                 "onchain_transactions_v3_{$walletAddress}",
+                "onchain_transactions_fixed_v7_{$walletAddress}",
+                "onchain_transactions_fixed_v8_{$walletAddress}_all_chains",
             ];
 
             foreach ($cacheKeys as $key) {
@@ -274,7 +280,7 @@ class PortfolioController extends Controller
 
             // ⚡ IMMEDIATE CACHE: Store fresh data untuk subsequent requests
             Cache::put("onchain_portfolio_v3_{$walletAddress}", $onchainPortfolio, 30); // 30 minutes
-            Cache::put("onchain_analytics_v3_{$walletAddress}", $analytics, 30);        // 30 minutes
+            Cache::put("onchain_analytics_fixed_v8_{$walletAddress}_all_chains_" . md5('all'), $analytics, 30);        // 30 minutes
 
             return response()->json([
                 'success'      => true,
@@ -282,7 +288,7 @@ class PortfolioController extends Controller
                 'analytics'    => $analytics,
                 'message'      => 'Data onchain berhasil diperbarui dengan fokus native token',
                 'cached_for'   => '30 minutes',
-                'optimization' => 'native_token_focus_enabled',
+                'optimization' => 'native_token_focus_enabled_v8',
             ]);
 
         } catch (\Exception $e) {
@@ -402,7 +408,7 @@ class PortfolioController extends Controller
     }
 
     /**
-     * ⚡ FIXED: Mendapatkan analytics dengan better endpoint calls
+     * ⚡ FIXED: Enhanced analytics dengan better endpoint calls dan comprehensive logging
      */
     private function getOnchainAnalytics($walletAddress, $selectedChain = null)
     {
@@ -427,15 +433,24 @@ class PortfolioController extends Controller
                 if ($response->successful()) {
                     $data = $response->json();
 
-                    // ⚡ FIXED: Log response untuk debugging
+                    // ⚡ ENHANCED: Log response untuk debugging dengan lebih detail
                     Log::info("Analytics response for {$walletAddress}: " . json_encode([
                         'total_transactions' => $data['total_transactions'] ?? 0,
+                        'unique_tokens_traded' => $data['unique_tokens_traded'] ?? 0,
+                        'total_volume_usd' => $data['total_volume_usd'] ?? 0,
                         'chains_activity' => $data['chains_activity'] ?? [],
+                        'most_traded_count' => count($data['most_traded_tokens'] ?? []),
+                        'native_tokens_count' => count($data['native_token_summary'] ?? []),
                         'selected_chain' => $data['selected_chain'] ?? null,
                         'errors' => $data['errors_encountered'] ?? []
                     ]));
 
-                    // ⚡ SIMPLE: Return data as-is, don't validate structure
+                    // ⚡ ENHANCED: Return data dengan validation
+                    if (!isset($data['total_transactions'])) {
+                        Log::warning("Analytics response missing required fields for {$walletAddress}");
+                        return $this->getEmptyAnalyticsData($selectedChain);
+                    }
+
                     return $data;
                 } else {
                     $lastError = "API returned error {$response->status()}: " . $response->body();
@@ -461,7 +476,7 @@ class PortfolioController extends Controller
     }
 
     /**
-     * ⚡ FIXED: Mendapatkan transaksi dengan proper chain filtering dan timezone handling
+     * ⚡ FIXED: Enhanced transactions dengan proper chain filtering dan unique cache keys
      */
     private function getOnchainTransactions($walletAddress, $limit = 100, $selectedChain = null)
     {
@@ -470,7 +485,7 @@ class PortfolioController extends Controller
 
         while ($attempt < $this->maxRetries) {
             try {
-                // ⚡ FIXED: Build request params dengan proper chain filtering
+                // ⚡ FIXED: Build request params dengan enhanced chain filtering
                 $params = [
                     'limit'  => $limit,
                 ];
@@ -504,9 +519,19 @@ class PortfolioController extends Controller
                             continue;
                         }
 
-                        // ⚡ FIXED: Chain filtering
-                        if ($selectedChain && isset($tx['chain']) && $tx['chain'] !== $selectedChain) {
-                            continue;
+                        // ⚡ FIXED: Chain filtering - more strict
+                        if ($selectedChain && isset($tx['chain'])) {
+                            // Normalize chain names untuk comparison
+                            $txChain = strtolower($tx['chain']);
+                            $filterChain = strtolower($selectedChain);
+
+                            // Handle ethereum/eth variations
+                            if ($filterChain === 'eth') $filterChain = 'ethereum';
+                            if ($txChain === 'eth') $txChain = 'ethereum';
+
+                            if ($txChain !== $filterChain) {
+                                continue;
+                            }
                         }
 
                         // ⚡ FIXED: Format timestamp properly
@@ -527,7 +552,7 @@ class PortfolioController extends Controller
                     }
 
                     $chainInfo = $selectedChain ? " (chain: {$selectedChain})" : " (all chains)";
-                    Log::info("Successfully fetched " . count($filteredData) . " transactions for {$walletAddress}{$chainInfo}");
+                    Log::info("Successfully fetched " . count($filteredData) . " transactions for {$walletAddress}{$chainInfo} (filtered from " . count($data) . " total)");
 
                     return $filteredData;
 
@@ -756,7 +781,7 @@ class PortfolioController extends Controller
             'chains_processed'      => [],
             'errors_encountered'    => ['No data available'],
             'error_info'            => 'API not available or returned empty data',
-            'optimization'          => 'multi_chain_fixed_v6',
+            'optimization'          => 'multi_chain_fixed_v8',
         ];
     }
 
@@ -779,22 +804,27 @@ class PortfolioController extends Controller
                 ], 503);
             }
 
-            // ⚡ FIXED: Clear all versions of cache keys dengan v6
+            // ⚡ FIXED: Enhanced cache clearing dengan v8 versioning
+            $chainIdentifier = $selectedChain ?: 'all_chains';
             $cacheKeysToForget = [
                 // Old versions
                 "onchain_analytics_v4_{$walletAddress}",
                 "onchain_transactions_v4_{$walletAddress}",
                 "onchain_analytics_fixed_v5_{$walletAddress}",
                 "onchain_transactions_fixed_v5_{$walletAddress}",
-                // New versions
-                "onchain_analytics_fixed_v6_{$walletAddress}",
-                "onchain_transactions_fixed_v6_{$walletAddress}",
+                "onchain_analytics_fixed_v7_{$walletAddress}",
+                "onchain_transactions_fixed_v7_{$walletAddress}",
+                // New versions v8 dengan berbagai chain combinations
+                "onchain_analytics_fixed_v8_{$walletAddress}_{$chainIdentifier}_" . md5($selectedChain ?: 'all'),
+                "onchain_transactions_fixed_v8_{$walletAddress}_{$chainIdentifier}_" . md5(($selectedChain ?: 'all') . '_trans'),
+                "onchain_analytics_fixed_v8_{$walletAddress}_all_chains_" . md5('all'),
+                "onchain_transactions_fixed_v8_{$walletAddress}_all_chains_" . md5('all_trans'),
             ];
 
             // Add chain-specific cache keys if selected
             if ($selectedChain) {
-                $cacheKeysToForget[] = "onchain_analytics_fixed_v6_{$walletAddress}_{$selectedChain}";
-                $cacheKeysToForget[] = "onchain_transactions_fixed_v6_{$walletAddress}_{$selectedChain}";
+                $cacheKeysToForget[] = "onchain_analytics_fixed_v8_{$walletAddress}_{$selectedChain}_" . md5($selectedChain);
+                $cacheKeysToForget[] = "onchain_transactions_fixed_v8_{$walletAddress}_{$selectedChain}_" . md5($selectedChain . '_trans');
             }
 
             foreach ($cacheKeysToForget as $key) {
@@ -807,11 +837,11 @@ class PortfolioController extends Controller
             $analytics = $this->getOnchainAnalytics($walletAddress, $selectedChain);
             $transactions = $this->getOnchainTransactions($walletAddress, 100, $selectedChain);
 
-            // ⚡ Store fresh data in cache
-            $cacheKey = "onchain_analytics_fixed_v6_{$walletAddress}" . ($selectedChain ? "_{$selectedChain}" : '');
-            $transactionsCacheKey = "onchain_transactions_fixed_v6_{$walletAddress}" . ($selectedChain ? "_{$selectedChain}" : '');
+            // ⚡ Store fresh data in cache dengan proper keys
+            $analyticsCacheKey = "onchain_analytics_fixed_v8_{$walletAddress}_{$chainIdentifier}_" . md5($selectedChain ?: 'all');
+            $transactionsCacheKey = "onchain_transactions_fixed_v8_{$walletAddress}_{$chainIdentifier}_" . md5(($selectedChain ?: 'all') . '_trans');
 
-            Cache::put($cacheKey, $analytics, 10);
+            Cache::put($analyticsCacheKey, $analytics, 10);
             Cache::put($transactionsCacheKey, $transactions, 10);
 
             $chainInfo = $selectedChain ? " untuk chain {$selectedChain}" : " untuk semua chains";
@@ -824,15 +854,18 @@ class PortfolioController extends Controller
                 'selected_chain'    => $selectedChain,
                 'message'           => "Data analytics{$chainInfo} berhasil diperbarui",
                 'cached_for'        => '10 minutes',
-                'optimization'      => 'multi_chain_fixed_v6',
+                'optimization'      => 'multi_chain_fixed_v8',
                 'debug_info'        => [
                     'analytics_total_txs' => $analytics['total_transactions'] ?? 0,
                     'transactions_count' => count($transactions),
                     'chains_activity' => $analytics['chains_activity'] ?? [],
                     'most_traded_count' => count($analytics['most_traded_tokens'] ?? []),
                     'native_tokens_count' => count($analytics['native_token_summary'] ?? []),
+                    'total_volume_usd' => $analytics['total_volume_usd'] ?? 0,
                     'cache_keys_cleared' => count($cacheKeysToForget),
-                    'selected_chain' => $selectedChain
+                    'selected_chain' => $selectedChain,
+                    'cache_key_analytics' => $analyticsCacheKey,
+                    'cache_key_transactions' => $transactionsCacheKey
                 ]
             ]);
 

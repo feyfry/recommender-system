@@ -126,123 +126,6 @@ class OnchainAnalytics(BaseModel):
     chains_processed: Optional[List[str]] = []
     errors_encountered: Optional[List[str]] = []
 
-# ⚡ NEW: Chain-specific analytics model
-class ChainSpecificAnalytics(BaseModel):
-    chain: str
-    native_token: str
-    total_transactions: int
-    unique_tokens: int
-    volume_usd: float
-    latest_transaction_date: Optional[datetime] = None
-    top_tokens: List[Dict[str, Any]] = []
-    transaction_distribution: Dict[str, int] = {}
-    average_gas_used: Optional[float] = None
-    
-    # ⚡ Performance metrics per chain
-    fetch_time_ms: Optional[int] = None
-    success_rate: Optional[float] = None
-    data_quality_score: Optional[float] = None
-
-# ⚡ ENHANCED: Multi-chain token balance dengan cross-chain info
-class MultiChainTokenBalance(BaseModel):
-    token_address: str
-    token_name: str  
-    token_symbol: str
-    balance: float
-    balance_raw: str
-    decimals: int
-    usd_value: Optional[float] = None
-    chain: str
-    is_spam: Optional[bool] = False
-    
-    # ⚡ NEW: Cross-chain data
-    cross_chain_equivalent: Optional[List[Dict[str, Any]]] = []
-    total_cross_chain_balance: Optional[float] = None
-    is_native_token: Optional[bool] = False
-    bridge_addresses: Optional[List[str]] = []
-
-# ⚡ NEW: Multi-chain portfolio aggregation
-class MultiChainPortfolio(BaseModel):
-    wallet_address: str
-    total_usd_value: float
-    total_native_value: float
-    total_alt_token_value: float
-    
-    # Chain-specific breakdowns
-    chain_breakdowns: Dict[str, Dict[str, Any]]
-    native_balances: List[MultiChainTokenBalance]
-    token_balances: List[MultiChainTokenBalance]
-    
-    # Cross-chain analytics
-    cross_chain_exposure: Dict[str, float]
-    diversification_metrics: Dict[str, float]
-    chain_correlation_scores: Dict[str, float]
-    
-    # Metadata
-    last_updated: datetime
-    chains_scanned: List[str]
-    filtered_tokens_count: int = 0
-    processing_stats: Dict[str, Any] = {}
-
-# ⚡ NEW: Cross-chain transaction analysis
-class CrossChainTransaction(BaseModel):
-    primary_chain: str
-    related_chains: List[str]
-    transaction_group_id: str
-    total_value_usd: float
-    bridge_protocol: Optional[str] = None
-    estimated_fees_usd: Optional[float] = None
-    completion_time_minutes: Optional[int] = None
-    success_rate: Optional[float] = None
-
-# ⚡ NEW: Multi-chain analytics insights
-class MultiChainInsights(BaseModel):
-    wallet_address: str
-    
-    # Chain usage patterns
-    preferred_chains: List[str]
-    chain_usage_distribution: Dict[str, float]
-    cross_chain_activity_score: float
-    
-    # Trading patterns
-    multi_chain_arbitrage_opportunities: int
-    cross_chain_correlation_trades: int
-    chain_migration_patterns: Dict[str, Any]
-    
-    # Risk and diversification
-    chain_concentration_risk: float
-    diversification_recommendation: str
-    optimal_chain_allocation: Dict[str, float]
-    
-    # Performance insights
-    best_performing_chain: str
-    worst_performing_chain: str
-    cross_chain_efficiency_score: float
-    
-    # Recommendations
-    recommended_actions: List[str]
-    risk_warnings: List[str]
-    optimization_suggestions: List[str]
-
-# ⚡ ENHANCED: Error handling untuk multi-chain
-class MultiChainError(BaseModel):
-    error_type: str
-    chain: str
-    message: str
-    timestamp: datetime
-    retry_count: int = 0
-    recoverable: bool = True
-    
-class MultiChainResponse(BaseModel):
-    success: bool
-    data: Optional[Dict[str, Any]] = None
-    errors: List[MultiChainError] = []
-    partial_success: bool = False
-    chains_processed: List[str] = []
-    chains_failed: List[str] = []
-    processing_time_ms: int
-    cache_stats: Dict[str, Any] = {}
-
 # ⚡ ENHANCED: Smart spam detection dengan pattern yang lebih ketat
 def is_spam_token(token_name: str, token_symbol: str, balance: float = 0) -> bool:
     """Detect spam/scam tokens dengan smart filtering yang lebih ketat"""
@@ -292,317 +175,11 @@ def is_spam_token(token_name: str, token_symbol: str, balance: float = 0) -> boo
 def is_native_token(symbol: str) -> bool:
     """Check if token is native token"""
     return symbol.upper() in NATIVE_TOKEN_SYMBOLS
-    
-# ⚡ FIXED: Enhanced analytics dengan native token separation
-async def get_onchain_analytics(session: aiohttp.ClientSession, wallet_address: str, selected_chain: str = None) -> Dict:
-    """⚡ FIXED: Analytics dengan proper native/alt token separation"""
-    try:
-        config = BLOCKCHAIN_APIS['moralis']
-        headers = {
-            'X-API-Key': config['api_key'],
-            'Content-Type': 'application/json'
-        }
-        
-        analytics_data = {
-            'wallet_address': wallet_address,
-            'total_transactions': 0,
-            'unique_tokens_traded': 0,
-            'total_volume_usd': 0.0,
-            'most_traded_tokens': [],
-            'transaction_frequency': {},
-            'chains_activity': {},
-            'selected_chain': selected_chain,
-            'chain_specific_data': None,
-            'cross_chain_volume': 0.0,
-            'chain_dominance': {},
-            'diversification_score': 0.0,
-            'chains_processed': [],
-            'errors_encountered': []
-        }
 
-        # ⚡ FIXED: Use existing transaction fetching logic
-        all_transactions = []
-        chain_transactions = {}
-        
-        # Determine which chains to process
-        target_chains = [selected_chain] if selected_chain else config['chains']
-        
-        logger.info(f"ANALYTICS: Processing {len(target_chains)} chains: {target_chains}")
-        
-        # ⚡ FIXED: Use the working transaction fetching approach
-        for chain in target_chains:
-            try:
-                # Get transactions for this chain using existing working method
-                transactions_url = f"{config['api_url']}/{wallet_address}"
-                
-                # ⚡ Use the transaction endpoint that we know works
-                if chain == 'eth' or chain == 'ethereum':
-                    # Use existing transaction fetch that works for ETH
-                    eth_txs = await fetch_ethereum_data(session, wallet_address, 'transactions')
-                    chain_txs = []
-                    
-                    for tx in eth_txs[:200]:  # Limit to 200
-                        try:
-                            # ⚡ FIXED: Timezone-aware processing
-                            timestamp_int = int(tx.get('timeStamp', 0))
-                            if timestamp_int > 0:
-                                timestamp = datetime.fromtimestamp(timestamp_int, tz=timezone.utc)
-                                timestamp_str = timestamp.strftime('%Y-%m-%d')
-                            else:
-                                timestamp_str = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d')
-                            
-                            processed_tx = {
-                                'hash': tx.get('hash', ''),
-                                'block_number': int(tx.get('blockNumber', 0)),
-                                'timestamp': timestamp_str,
-                                'from_address': tx.get('from', ''),
-                                'to_address': tx.get('to', ''),
-                                'value': float(tx.get('value', 0)) / 1e18,
-                                'token_symbol': 'ETH',
-                                'token_address': '',
-                                'chain': 'ethereum',
-                                'transaction_type': 'native'
-                            }
-                            chain_txs.append(processed_tx)
-                            all_transactions.append(processed_tx)
-                        except Exception as e:
-                            logger.warning(f"Error processing ETH transaction: {e}")
-                            continue
-                    
-                    chain_transactions['ethereum'] = len(chain_txs)
-                    logger.info(f"SUCCESS: Processed {len(chain_txs)} ETH transactions")
-                
-                else:
-                    # For other chains, try Moralis API dengan value handling yang lebih baik
-                    try:
-                        chain_url = f"{config['api_url']}/{wallet_address}/erc20/transfers"
-                        params = {
-                            'chain': chain,
-                            'limit': 100,
-                            'order': 'DESC'
-                        }
-                        
-                        async with session.get(chain_url, headers=headers, params=params, 
-                                             timeout=aiohttp.ClientTimeout(total=10)) as response:
-                            if response.status == 200:
-                                data = await response.json()
-                                raw_txs = data.get('result', []) if isinstance(data, dict) else data
-                                
-                                chain_txs = []
-                                for tx in raw_txs[:100]:
-                                    try:
-                                        # ⚡ FIXED: Better value handling untuk None values
-                                        raw_value = tx.get('value')
-                                        if raw_value is None or raw_value == '':
-                                            logger.warning(f"Warning: Null value for {chain} transaction, skipping")
-                                            continue
-                                            
-                                        try:
-                                            value_int = int(raw_value)
-                                            decimals = int(tx.get('token_decimals', 18))
-                                            processed_value = float(value_int) / (10 ** decimals)
-                                        except (ValueError, TypeError):
-                                            logger.warning(f"Warning: Invalid value format for {chain}: {raw_value}")
-                                            continue
-                                        
-                                        # ⚡ FIXED: Timezone handling untuk timestamp
-                                        timestamp_str = tx.get('block_timestamp', '')
-                                        if timestamp_str:
-                                            try:
-                                                # Parse ISO format
-                                                timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                                                formatted_timestamp = timestamp.strftime('%Y-%m-%d')
-                                            except:
-                                                formatted_timestamp = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d')
-                                        else:
-                                            formatted_timestamp = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d')
-                                        
-                                        processed_tx = {
-                                            'hash': tx.get('transaction_hash', ''),
-                                            'block_number': int(tx.get('block_number', 0)),
-                                            'timestamp': formatted_timestamp,
-                                            'from_address': tx.get('from_address', ''),
-                                            'to_address': tx.get('to_address', ''),
-                                            'value': processed_value,
-                                            'token_symbol': tx.get('token_symbol', get_native_token_for_chain(chain)),
-                                            'token_address': tx.get('address', ''),
-                                            'chain': chain,
-                                            'transaction_type': 'token' if tx.get('address') else 'native'
-                                        }
-                                        chain_txs.append(processed_tx)
-                                        all_transactions.append(processed_tx)
-                                    except Exception as e:
-                                        logger.warning(f"WARNING: Error processing {chain} transaction: {e}")
-                                        continue
-                                
-                                chain_transactions[chain] = len(chain_txs)
-                                logger.info(f"SUCCESS: Processed {len(chain_txs)} {chain} transactions")
-                            else:
-                                logger.warning(f"WARNING: {chain} API returned {response.status}")
-                                chain_transactions[chain] = 0
-                    except Exception as e:
-                        logger.warning(f"WARNING: Failed to fetch {chain} data: {e}")
-                        chain_transactions[chain] = 0
-                
-                await asyncio.sleep(0.2)  # Rate limiting
-                
-            except Exception as e:
-                logger.error(f"ERROR: Error processing {chain}: {e}")
-                analytics_data['errors_encountered'].append(f"Chain {chain}: {str(e)}")
-                continue
-
-        # ⚡ FIXED: Process aggregated analytics data dengan native token separation
-        if all_transactions:
-            analytics_data['total_transactions'] = len(all_transactions)
-            analytics_data['chains_activity'] = chain_transactions
-            analytics_data['chains_processed'] = list(chain_transactions.keys())
-            
-            # ⚡ ENHANCED: Separate native tokens dari alt tokens
-            native_token_stats = {}
-            alt_token_stats = {}
-            date_frequency = {}
-            
-            for tx in all_transactions:
-                # Token trading statistics dengan native separation
-                symbol = tx.get('token_symbol', 'UNKNOWN')
-                if symbol and symbol != 'UNKNOWN':
-                    # ⚡ ENHANCED: Separate berdasarkan native/alt
-                    if is_native_token(symbol):
-                        # Native tokens - track separately but don't include in "most traded"
-                        if symbol not in native_token_stats:
-                            native_token_stats[symbol] = {
-                                'symbol': symbol,
-                                'trade_count': 0,
-                                'volume': 0.0,
-                                'volume_usd': 0.0,
-                                'chain': tx.get('chain', 'unknown'),
-                                'is_native': True
-                            }
-                        native_token_stats[symbol]['trade_count'] += 1
-                        native_token_stats[symbol]['volume'] += tx.get('value', 0)
-                    else:
-                        # Alt tokens - include dalam "most traded"
-                        if symbol not in alt_token_stats:
-                            alt_token_stats[symbol] = {
-                                'symbol': symbol,
-                                'trade_count': 0,
-                                'volume': 0.0,
-                                'volume_usd': 0.0,
-                                'chain': tx.get('chain', 'unknown'),
-                                'is_native': False
-                            }
-                        alt_token_stats[symbol]['trade_count'] += 1
-                        alt_token_stats[symbol]['volume'] += tx.get('value', 0)
-                    
-                    # ⚡ SIMPLE: USD volume estimation for native tokens only
-                    if is_native_token(symbol):
-                        estimated_prices = {'ETH': 3400, 'BNB': 630, 'MATIC': 0.4, 'AVAX': 17}
-                        price = estimated_prices.get(symbol, 0)
-                        if price > 0:
-                            if symbol in native_token_stats:
-                                native_token_stats[symbol]['volume_usd'] += tx.get('value', 0) * price
-                
-                # Date frequency
-                if tx.get('timestamp'):
-                    date_str = tx['timestamp']
-                    if date_str:
-                        date_frequency[date_str] = date_frequency.get(date_str, 0) + 1
-            
-            # ⚡ FIXED: Only count alt tokens untuk unique_tokens_traded
-            analytics_data['unique_tokens_traded'] = len(alt_token_stats)
-            analytics_data['total_volume_usd'] = sum(token.get('volume_usd', 0) for token in native_token_stats.values())
-            analytics_data['transaction_frequency'] = date_frequency
-            
-            # ⚡ ENHANCED: Sort alt tokens only untuk most_traded_tokens
-            sorted_alt_tokens = sorted(alt_token_stats.values(), key=lambda x: x.get('trade_count', 0), reverse=True)
-            analytics_data['most_traded_tokens'] = sorted_alt_tokens[:10]
-            
-            # ⚡ NEW: Add native token summary separately
-            analytics_data['native_token_summary'] = list(native_token_stats.values())
-            
-            # ⚡ NEW: Chain-specific data if selected
-            if selected_chain:
-                chain_specific_txs = [tx for tx in all_transactions if tx.get('chain') == selected_chain]
-                if chain_specific_txs:
-                    analytics_data['chain_specific_data'] = {
-                        'chain': selected_chain,
-                        'total_transactions': len(chain_specific_txs),
-                        'transactions': chain_specific_txs[:50],  # Latest 50 for selected chain
-                        'native_token': get_native_token_for_chain(selected_chain)
-                    }
-        
-        logger.info(f"SUCCESS: Multi-chain analytics for {wallet_address}: {analytics_data['total_transactions']} total txs across {len(chain_transactions)} chains")
-        logger.info(f"SEPARATION: {len(analytics_data.get('native_token_summary', []))} native tokens, {analytics_data['unique_tokens_traded']} alt tokens")
-        
-        return analytics_data
-        
-    except Exception as e:
-        logger.error(f"ERROR: Multi-chain analytics failed: {str(e)}")
-        analytics_data['errors_encountered'].append(f"General error: {str(e)}")
-        return analytics_data
-
-# ⚡ HELPER: Get native token for chain
-def get_native_token_for_chain(chain: str) -> str:
-    """Get native token symbol untuk chain tertentu"""
-    chain_native_map = {
-        'eth': 'ETH',
-        'ethereum': 'ETH', 
-        'bsc': 'BNB',
-        'polygon': 'MATIC',
-        'avalanche': 'AVAX'
-    }
-    return chain_native_map.get(chain.lower(), 'ETH')
-
-# ⚡ FIXED: Prioritize tokens yang SUDAH ADA USD VALUE dan native tokens
-def prioritize_native_tokens_only(tokens: List[Dict]) -> List[Dict]:
-    """⚡ ENHANCED: Prioritize native tokens only untuk speed dan reliability"""
-    
-    # Known native tokens (prioritas utama)
-    native_symbols = {
-        'ETH', 'BNB', 'MATIC', 'AVAX', 'AVALANCHE',
-        'WETH'  # Wrapped ETH juga penting
-    }
-    
-    # ⚡ STEP 1: Filter hanya native tokens dan tokens dengan USD value
-    native_tokens = []
-    valued_tokens = []
-    
-    for token in tokens:
-        symbol = token.get('symbol', '').upper()
-        balance = token.get('balance', 0)
-        
-        # Skip spam tokens
-        if is_spam_token(token.get('name', ''), symbol, balance):
-            continue
-            
-        # Skip very small balances
-        if balance < 0.000001:
-            continue
-        
-        # ⚡ PRIORITY 1: Native tokens (always include)
-        if symbol in native_symbols:
-            native_tokens.append(token)
-        # ⚡ PRIORITY 2: Tokens yang sudah ada usd_value dari Moralis
-        elif token.get('usd_value') is not None and token.get('usd_value') > 0:
-            valued_tokens.append(token)
-    
-    # Sort native tokens by balance (descending)
-    native_tokens.sort(key=lambda x: x.get('balance', 0), reverse=True)
-    
-    # Sort valued tokens by USD value (descending)  
-    valued_tokens.sort(key=lambda x: x.get('usd_value', 0), reverse=True)
-    
-    # ⚡ RETURN: Native tokens first, then valued tokens (up to limit)
-    result = native_tokens + valued_tokens[:10]  # Max 10 additional valued tokens
-    
-    logger.info(f"SUCCESS: Prioritized {len(result)} tokens: {len(native_tokens)} native + {len(valued_tokens[:10])} valued tokens")
-    
-    return result[:MAX_TOKENS_TO_SHOW]
-
-# ⚡ ENHANCED: Native token price fetching dengan BNB support
+# ⚡ FIXED: Enhanced get_native_token_price dengan proper USD value calculation
 async def get_native_token_price(session: aiohttp.ClientSession, token_symbol: str, token_address: str = None, chain: str = None) -> float:
     """
-    ⚡ FIXED: Native token price fetching dengan BNB mapping yang benar
+    ⚡ FIXED: Native token price fetching dengan BNB mapping yang benar dan USD calculation
     """
     coingecko_api_key = os.environ.get('COINGECKO_API_KEY', '')
     base_url = "https://api.coingecko.com/api/v3"
@@ -649,10 +226,10 @@ async def get_native_token_price(session: aiohttp.ClientSession, token_symbol: s
         logger.warning(f"WARNING: Price fetch error for {token_symbol}: {str(e)}")
         return 0.0
 
-# ⚡ ENHANCED: Fetch prices only for native tokens untuk speed
+# ⚡ FIXED: Enhanced fetch prices dengan proper USD value initialization
 async def fetch_native_token_prices_only(session: aiohttp.ClientSession, tokens: List[Dict]) -> Dict[str, float]:
     """
-    ⚡ OPTIMIZED: Hanya fetch price untuk native tokens untuk speed maksimal
+    ⚡ FIXED: Hanya fetch price untuk native tokens dengan proper USD calculation
     """
     try:
         # ⚡ STEP 1: Filter hanya native tokens
@@ -667,13 +244,21 @@ async def fetch_native_token_prices_only(session: aiohttp.ClientSession, tokens:
         for token in native_tokens:
             symbol = token.get('symbol', '')
             if symbol:
-                # ⚡ Use existing USD value if available
+                # ⚡ FIXED: Proper USD value calculation dari existing data
+                calculated_usd_value = None  # ⚡ INITIALIZE variable dengan None
+                
                 if token.get('usd_value') is not None and token.get('usd_value') > 0:
                     balance = token.get('balance', 0)
                     if balance > 0:
-                        existing_prices[symbol] = token['usd_value'] / balance
-                else:
-                    # Need to fetch price (focus on native tokens only)
+                        calculated_usd_value = token['usd_value'] / balance
+                        existing_prices[symbol] = calculated_usd_value
+                elif token.get('usd_price') is not None and token.get('usd_price') > 0:
+                    # ⚡ FIXED: Handle usd_price dari Moralis response
+                    calculated_usd_value = token['usd_price']
+                    existing_prices[symbol] = calculated_usd_value
+                
+                # ⚡ FIXED: Add to price fetch queue jika belum ada USD value
+                if calculated_usd_value is None or calculated_usd_value <= 0:
                     tokens_need_price.append(token)
         
         logger.info(f"CHECKED: {len(existing_prices)} tokens already have USD value, {len(tokens_need_price)} native tokens need price fetch")
@@ -704,9 +289,9 @@ async def fetch_native_token_prices_only(session: aiohttp.ClientSession, tokens:
         logger.error(f"Error in native token price fetching: {str(e)}")
         return {}
 
-# ⚡ ENHANCED: Fetch Moralis portfolio dengan native token focus
+# ⚡ FIXED: Enhanced Moralis portfolio dengan proper USD calculation
 async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address: str) -> Dict:
-    """⚡ OPTIMIZED: Fetch portfolio dengan focus pada native tokens untuk speed"""
+    """⚡ FIXED: Fetch portfolio dengan native focus dan proper USD calculation"""
     try:
         config = BLOCKCHAIN_APIS['moralis']
         headers = {
@@ -789,22 +374,29 @@ async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address
                             
                             if balance > 0:
                                 if not is_spam:
-                                    # Check existing USD value from Moralis
-                                    existing_usd_value = token.get('usd_price')
-                                    calculated_usd_value = None
+                                    # ⚡ FIXED: Check existing USD value from Moralis dengan proper variable
+                                    existing_usd_price = token.get('usd_price')
+                                    calculated_usd_value = None  # ⚡ INITIALIZE variable dengan None
                                     
-                                    if existing_usd_value and existing_usd_value > 0:
-                                        calculated_usd_value = balance * existing_usd_value
+                                    if existing_usd_price and existing_usd_price > 0:
+                                        calculated_usd_value = balance * existing_usd_price
                                     
                                     all_tokens.append({
                                         'symbol': symbol,
                                         'address': address,
                                         'chain': chain,
                                         'balance': balance,
-                                        'usd_value': calculated_usd_value
+                                        'usd_value': calculated_usd_value,
+                                        'usd_price': existing_usd_price  # ⚡ Store raw price juga
                                     })
                                 else:
                                     portfolio_data['filtered_tokens_count'] += 1
+                                
+                                # ⚡ FIXED: Calculate USD value dengan proper initialization
+                                final_usd_value = None
+                                existing_usd_price = token.get('usd_price')
+                                if existing_usd_price and existing_usd_price > 0:
+                                    final_usd_value = balance * existing_usd_price
                                 
                                 portfolio_data['token_balances'].append({
                                     'token_address': address,
@@ -814,7 +406,7 @@ async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address
                                     'balance_raw': str(balance_raw),
                                     'decimals': decimals,
                                     'chain': chain,
-                                    'usd_value': calculated_usd_value,
+                                    'usd_value': final_usd_value,
                                     'is_spam': is_spam
                                 })
                 
@@ -876,6 +468,297 @@ async def fetch_moralis_portfolio(session: aiohttp.ClientSession, wallet_address
         logger.error(f"Error fetching Moralis portfolio: {str(e)}")
         return {'native_balances': [], 'token_balances': [], 'total_usd_value': 0.0, 'filtered_tokens_count': 0}
 
+# ⚡ FIXED: Enhanced analytics dengan comprehensive USD volume calculation
+async def get_onchain_analytics(session: aiohttp.ClientSession, wallet_address: str, selected_chain: str = None) -> Dict:
+    """⚡ FIXED: Analytics dengan comprehensive USD volume calculation dan native token handling"""
+    try:
+        config = BLOCKCHAIN_APIS['moralis']
+        headers = {
+            'X-API-Key': config['api_key'],
+            'Content-Type': 'application/json'
+        }
+        
+        analytics_data = {
+            'wallet_address': wallet_address,
+            'total_transactions': 0,
+            'unique_tokens_traded': 0,
+            'total_volume_usd': 0.0,
+            'most_traded_tokens': [],
+            'transaction_frequency': {},
+            'chains_activity': {},
+            'selected_chain': selected_chain,
+            'chain_specific_data': None,
+            'cross_chain_volume': 0.0,
+            'chain_dominance': {},
+            'diversification_score': 0.0,
+            'chains_processed': [],
+            'errors_encountered': []
+        }
+
+        # ⚡ FIXED: Use existing transaction fetching logic
+        all_transactions = []
+        chain_transactions = {}
+        
+        # Determine which chains to process
+        target_chains = [selected_chain] if selected_chain else config['chains']
+        
+        logger.info(f"ANALYTICS: Processing {len(target_chains)} chains: {target_chains}")
+        
+        # ⚡ FIXED: Enhanced USD volume calculation dengan multiple price sources
+        estimated_prices = {
+            'ETH': 3400.0,
+            'BNB': 630.0,
+            'MATIC': 0.4,
+            'AVAX': 17.0,
+            'WETH': 3400.0,
+            'WBNB': 630.0,
+            'WMATIC': 0.4,
+            'WAVAX': 17.0
+        }
+        
+        # ⚡ Try to get real-time prices jika memungkinkan
+        try:
+            real_time_prices = await fetch_native_token_prices_only(session, [
+                {'symbol': 'ETH', 'address': '0x0', 'chain': 'eth'},
+                {'symbol': 'BNB', 'address': '0x0', 'chain': 'bsc'},
+                {'symbol': 'MATIC', 'address': '0x0', 'chain': 'polygon'},
+                {'symbol': 'AVAX', 'address': '0x0', 'chain': 'avalanche'}
+            ])
+            # Update dengan real-time prices jika available
+            estimated_prices.update(real_time_prices)
+            logger.info(f"SUCCESS: Updated prices with real-time data: {len(real_time_prices)} tokens")
+        except Exception as e:
+            logger.warning(f"WARNING: Using fallback prices: {str(e)}")
+        
+        # ⚡ FIXED: Use the working transaction fetching approach
+        for chain in target_chains:
+            try:
+                if chain == 'eth' or chain == 'ethereum':
+                    # Use existing transaction fetch that works for ETH
+                    eth_txs = await fetch_ethereum_data(session, wallet_address, 'transactions')
+                    chain_txs = []
+                    
+                    for tx in eth_txs[:200]:  # Limit to 200
+                        try:
+                            # ⚡ FIXED: Timezone-aware processing
+                            timestamp_int = int(tx.get('timeStamp', 0))
+                            if timestamp_int > 0:
+                                timestamp = datetime.fromtimestamp(timestamp_int, tz=timezone.utc)
+                                timestamp_str = timestamp.strftime('%Y-%m-%d')
+                            else:
+                                timestamp_str = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d')
+                            
+                            # ⚡ FIXED: Enhanced USD volume calculation untuk ETH
+                            value_eth = float(tx.get('value', 0)) / 1e18
+                            value_usd = value_eth * estimated_prices.get('ETH', 3400.0)
+                            
+                            processed_tx = {
+                                'hash': tx.get('hash', ''),
+                                'block_number': int(tx.get('blockNumber', 0)),
+                                'timestamp': timestamp_str,
+                                'from_address': tx.get('from', ''),
+                                'to_address': tx.get('to', ''),
+                                'value': value_eth,
+                                'value_usd': value_usd,  # ⚡ ADD USD value
+                                'token_symbol': 'ETH',
+                                'token_address': '',
+                                'chain': 'ethereum',
+                                'transaction_type': 'native'
+                            }
+                            chain_txs.append(processed_tx)
+                            all_transactions.append(processed_tx)
+                        except Exception as e:
+                            logger.warning(f"Error processing ETH transaction: {e}")
+                            continue
+                    
+                    chain_transactions['ethereum'] = len(chain_txs)
+                    logger.info(f"SUCCESS: Processed {len(chain_txs)} ETH transactions")
+                
+                else:
+                    # For other chains, try Moralis API dengan enhanced USD calculation
+                    try:
+                        chain_url = f"{config['api_url']}/{wallet_address}/erc20/transfers"
+                        params = {
+                            'chain': chain,
+                            'limit': 100,
+                            'order': 'DESC'
+                        }
+                        
+                        async with session.get(chain_url, headers=headers, params=params, 
+                                             timeout=aiohttp.ClientTimeout(total=10)) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                raw_txs = data.get('result', []) if isinstance(data, dict) else data
+                                
+                                chain_txs = []
+                                for tx in raw_txs[:100]:
+                                    try:
+                                        # ⚡ FIXED: Better value handling untuk None values
+                                        raw_value = tx.get('value')
+                                        if raw_value is None or raw_value == '':
+                                            logger.warning(f"Warning: Null value for {chain} transaction, skipping")
+                                            continue
+                                            
+                                        try:
+                                            value_int = int(raw_value)
+                                            decimals = int(tx.get('token_decimals', 18))
+                                            processed_value = float(value_int) / (10 ** decimals)
+                                        except (ValueError, TypeError):
+                                            logger.warning(f"Warning: Invalid value format for {chain}: {raw_value}")
+                                            continue
+                                        
+                                        # ⚡ FIXED: Timezone handling untuk timestamp
+                                        timestamp_str = tx.get('block_timestamp', '')
+                                        if timestamp_str:
+                                            try:
+                                                # Parse ISO format
+                                                timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                                                formatted_timestamp = timestamp.strftime('%Y-%m-%d')
+                                            except:
+                                                formatted_timestamp = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d')
+                                        else:
+                                            formatted_timestamp = datetime.now(tz=timezone.utc).strftime('%Y-%m-%d')
+                                        
+                                        # ⚡ FIXED: Enhanced USD value calculation berdasarkan token symbol
+                                        token_symbol = tx.get('token_symbol', get_native_token_for_chain(chain))
+                                        value_usd = 0.0
+                                        
+                                        if token_symbol and token_symbol.upper() in estimated_prices:
+                                            value_usd = processed_value * estimated_prices[token_symbol.upper()]
+                                        
+                                        processed_tx = {
+                                            'hash': tx.get('transaction_hash', ''),
+                                            'block_number': int(tx.get('block_number', 0)),
+                                            'timestamp': formatted_timestamp,
+                                            'from_address': tx.get('from_address', ''),
+                                            'to_address': tx.get('to_address', ''),
+                                            'value': processed_value,
+                                            'value_usd': value_usd,  # ⚡ ADD USD value
+                                            'token_symbol': token_symbol,
+                                            'token_address': tx.get('address', ''),
+                                            'chain': chain,
+                                            'transaction_type': 'token' if tx.get('address') else 'native'
+                                        }
+                                        chain_txs.append(processed_tx)
+                                        all_transactions.append(processed_tx)
+                                    except Exception as e:
+                                        logger.warning(f"WARNING: Error processing {chain} transaction: {e}")
+                                        continue
+                                
+                                chain_transactions[chain] = len(chain_txs)
+                                logger.info(f"SUCCESS: Processed {len(chain_txs)} {chain} transactions")
+                            else:
+                                logger.warning(f"WARNING: {chain} API returned {response.status}")
+                                chain_transactions[chain] = 0
+                    except Exception as e:
+                        logger.warning(f"WARNING: Failed to fetch {chain} data: {e}")
+                        chain_transactions[chain] = 0
+                
+                await asyncio.sleep(0.2)  # Rate limiting
+                
+            except Exception as e:
+                logger.error(f"ERROR: Error processing {chain}: {e}")
+                analytics_data['errors_encountered'].append(f"Chain {chain}: {str(e)}")
+                continue
+
+        # ⚡ FIXED: Process aggregated analytics data dengan comprehensive USD volume
+        if all_transactions:
+            analytics_data['total_transactions'] = len(all_transactions)
+            analytics_data['chains_activity'] = chain_transactions
+            analytics_data['chains_processed'] = list(chain_transactions.keys())
+            
+            # ⚡ ENHANCED: Separate native tokens dari alt tokens dengan USD volume
+            native_token_stats = {}
+            alt_token_stats = {}
+            date_frequency = {}
+            total_volume_usd = 0.0
+            
+            for tx in all_transactions:
+                # ⚡ FIXED: Enhanced USD volume calculation
+                tx_volume_usd = tx.get('value_usd', 0.0)
+                total_volume_usd += tx_volume_usd
+                
+                # Token trading statistics dengan native separation
+                symbol = tx.get('token_symbol', 'UNKNOWN')
+                if symbol and symbol != 'UNKNOWN':
+                    # ⚡ ENHANCED: Separate berdasarkan native/alt
+                    if is_native_token(symbol):
+                        # Native tokens - track separately untuk Most Traded Tokens
+                        if symbol not in native_token_stats:
+                            native_token_stats[symbol] = {
+                                'symbol': symbol,
+                                'trade_count': 0,
+                                'volume': 0.0,
+                                'volume_usd': 0.0,
+                                'chain': tx.get('chain', 'unknown'),
+                                'is_native': True
+                            }
+                        native_token_stats[symbol]['trade_count'] += 1
+                        native_token_stats[symbol]['volume'] += tx.get('value', 0)
+                        native_token_stats[symbol]['volume_usd'] += tx_volume_usd
+                    else:
+                        # Alt tokens - include dalam "most traded"
+                        if symbol not in alt_token_stats:
+                            alt_token_stats[symbol] = {
+                                'symbol': symbol,
+                                'trade_count': 0,
+                                'volume': 0.0,
+                                'volume_usd': 0.0,
+                                'chain': tx.get('chain', 'unknown'),
+                                'is_native': False
+                            }
+                        alt_token_stats[symbol]['trade_count'] += 1
+                        alt_token_stats[symbol]['volume'] += tx.get('value', 0)
+                        alt_token_stats[symbol]['volume_usd'] += tx_volume_usd
+                
+                # Date frequency
+                if tx.get('timestamp'):
+                    date_str = tx['timestamp']
+                    if date_str:
+                        date_frequency[date_str] = date_frequency.get(date_str, 0) + 1
+            
+            # ⚡ FIXED: Enhanced token counting dan volume calculation
+            analytics_data['unique_tokens_traded'] = len(alt_token_stats)
+            analytics_data['total_volume_usd'] = total_volume_usd
+            analytics_data['transaction_frequency'] = date_frequency
+            
+            # ⚡ ENHANCED: Most traded tokens dengan comprehensive logic
+            # Combine native dan alt tokens untuk complete picture
+            all_token_stats = {**native_token_stats, **alt_token_stats}
+            
+            # ⚡ FIXED: Sort by trade count untuk most traded, tapi prioritize yang punya USD volume
+            sorted_all_tokens = sorted(all_token_stats.values(), 
+                                     key=lambda x: (x.get('trade_count', 0), x.get('volume_usd', 0)), 
+                                     reverse=True)
+            
+            # ⚡ ENHANCED: Include both native dan alt tokens di most traded, tapi mark native
+            analytics_data['most_traded_tokens'] = sorted_all_tokens[:10]
+            
+            # ⚡ NEW: Separate native token summary untuk frontend
+            analytics_data['native_token_summary'] = list(native_token_stats.values())
+            
+            # ⚡ NEW: Chain-specific data if selected
+            if selected_chain:
+                chain_specific_txs = [tx for tx in all_transactions if tx.get('chain') == selected_chain]
+                if chain_specific_txs:
+                    analytics_data['chain_specific_data'] = {
+                        'chain': selected_chain,
+                        'total_transactions': len(chain_specific_txs),
+                        'transactions': chain_specific_txs[:50],  # Latest 50 for selected chain
+                        'native_token': get_native_token_for_chain(selected_chain)
+                    }
+        
+        logger.info(f"SUCCESS: Multi-chain analytics for {wallet_address}: {analytics_data['total_transactions']} total txs across {len(chain_transactions)} chains")
+        logger.info(f"SEPARATION: {len(analytics_data.get('native_token_summary', []))} native tokens, {analytics_data['unique_tokens_traded']} alt tokens")
+        logger.info(f"VOLUME: Total USD volume: ${analytics_data['total_volume_usd']:.2f}")
+        
+        return analytics_data
+        
+    except Exception as e:
+        logger.error(f"ERROR: Multi-chain analytics failed: {str(e)}")
+        analytics_data['errors_encountered'].append(f"General error: {str(e)}")
+        return analytics_data
+
 # Keep existing helper functions
 async def fetch_ethereum_data(session: aiohttp.ClientSession, wallet_address: str, api_type: str) -> Dict:
     """Fetch data dari Etherscan-like APIs"""
@@ -899,9 +782,9 @@ async def fetch_ethereum_data(session: aiohttp.ClientSession, wallet_address: st
         logger.error(f"Error fetching Ethereum data: {str(e)}")
         return []
 
-# ⚡ FIXED: Transaction fetching dengan timezone handling
+# ⚡ FIXED: Enhanced transaction fetching dengan proper cache key differentiation
 async def fetch_onchain_transactions(session: aiohttp.ClientSession, wallet_address: str, limit: int = 50, selected_chains: List[str] = None) -> List[Dict]:
-    """⚡ FIXED: Fetch transaksi onchain dengan proper timezone dan chain filtering"""
+    """⚡ FIXED: Fetch transaksi onchain dengan proper timezone dan cache key differentiation"""
     try:
         all_transactions = []
         target_chains = selected_chains or ['eth', 'bsc', 'polygon', 'avalanche']
@@ -1034,70 +917,63 @@ async def fetch_onchain_transactions(session: aiohttp.ClientSession, wallet_addr
         logger.error(f"ERROR: Transaction fetching failed: {str(e)}")
         return []
 
-def calculate_portfolio_analytics(transactions: List[Dict], portfolio: Dict) -> Dict:
-    """Hitung analytics dengan AUTO USD volume calculation"""
-    try:
-        analytics = {
-            'total_transactions': len(transactions),
-            'unique_tokens_traded': 0,
-            'total_volume_usd': 0.0,
-            'most_traded_tokens': [],
-            'transaction_frequency': {},
-            'chains_activity': {}
-        }
+# ⚡ HELPER: Get native token for chain
+def get_native_token_for_chain(chain: str) -> str:
+    """Get native token symbol untuk chain tertentu"""
+    chain_native_map = {
+        'eth': 'ETH',
+        'ethereum': 'ETH', 
+        'bsc': 'BNB',
+        'polygon': 'MATIC',
+        'avalanche': 'AVAX'
+    }
+    return chain_native_map.get(chain.lower(), 'ETH')
+
+# ⚡ FIXED: Prioritize tokens yang SUDAH ADA USD VALUE dan native tokens
+def prioritize_native_tokens_only(tokens: List[Dict]) -> List[Dict]:
+    """⚡ ENHANCED: Prioritize native tokens only untuk speed dan reliability"""
+    
+    # Known native tokens (prioritas utama)
+    native_symbols = {
+        'ETH', 'BNB', 'MATIC', 'AVAX', 'AVALANCHE',
+        'WETH'  # Wrapped ETH juga penting
+    }
+    
+    # ⚡ STEP 1: Filter hanya native tokens dan tokens dengan USD value
+    native_tokens = []
+    valued_tokens = []
+    
+    for token in tokens:
+        symbol = token.get('symbol', '').upper()
+        balance = token.get('balance', 0)
         
-        # Analisis token yang diperdagangkan
-        token_activity = {}
-        chain_activity = {}
-        
-        # Calculate total USD volume from portfolio
-        total_usd_from_portfolio = portfolio.get('total_usd_value', 0.0)
-        
-        for tx in transactions:
-            chain = tx.get('chain', 'unknown')
-            chain_activity[chain] = chain_activity.get(chain, 0) + 1
+        # Skip spam tokens
+        if is_spam_token(token.get('name', ''), symbol, balance):
+            continue
             
-            # Frequency by date
-            tx_date = tx['timestamp'].strftime('%Y-%m-%d')
-            analytics['transaction_frequency'][tx_date] = analytics['transaction_frequency'].get(tx_date, 0) + 1
-            
-            # Token activity dengan simplified USD volume estimation
-            token_symbol = tx.get('token_symbol', 'ETH')
-            if token_symbol not in token_activity:
-                token_activity[token_symbol] = {'count': 0, 'volume': 0.0, 'volume_usd': 0.0}
-            
-            token_activity[token_symbol]['count'] += 1
-            token_value = tx.get('value', 0)
-            token_activity[token_symbol]['volume'] += token_value
-            
-            # Simplified USD volume estimation
-            if token_symbol == 'ETH':
-                # Use estimated ETH price for volume calculation
-                estimated_eth_price = 3400.0  # Fallback
-                usd_volume = token_value * estimated_eth_price
-                token_activity[token_symbol]['volume_usd'] += usd_volume
-                analytics['total_volume_usd'] += usd_volume
+        # Skip very small balances
+        if balance < 0.000001:
+            continue
         
-        analytics['unique_tokens_traded'] = len(token_activity)
-        analytics['chains_activity'] = chain_activity
-        
-        # Most traded tokens dengan USD volume
-        sorted_tokens = sorted(token_activity.items(), key=lambda x: x[1]['count'], reverse=True)
-        analytics['most_traded_tokens'] = [
-            {
-                'symbol': symbol, 
-                'trade_count': data['count'], 
-                'volume': data['volume'],
-                'volume_usd': data.get('volume_usd', 0.0)
-            }
-            for symbol, data in sorted_tokens[:10]
-        ]
-        
-        return analytics
-        
-    except Exception as e:
-        logger.error(f"Error calculating analytics: {str(e)}")
-        return {}
+        # ⚡ PRIORITY 1: Native tokens (always include)
+        if symbol in native_symbols:
+            native_tokens.append(token)
+        # ⚡ PRIORITY 2: Tokens yang sudah ada usd_value dari Moralis
+        elif token.get('usd_value') is not None and token.get('usd_value') > 0:
+            valued_tokens.append(token)
+    
+    # Sort native tokens by balance (descending)
+    native_tokens.sort(key=lambda x: x.get('balance', 0), reverse=True)
+    
+    # Sort valued tokens by USD value (descending)  
+    valued_tokens.sort(key=lambda x: x.get('usd_value', 0), reverse=True)
+    
+    # ⚡ RETURN: Native tokens first, then valued tokens (up to limit)
+    result = native_tokens + valued_tokens[:10]  # Max 10 additional valued tokens
+    
+    logger.info(f"SUCCESS: Prioritized {len(result)} tokens: {len(native_tokens)} native + {len(valued_tokens[:10])} valued tokens")
+    
+    return result[:MAX_TOKENS_TO_SHOW]
 
 # API Configuration
 BLOCKCHAIN_APIS = {
@@ -1177,24 +1053,24 @@ async def get_wallet_portfolio(
         logger.error(f"Error getting wallet portfolio: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
-# ⚡ FIXED: Update transactions endpoint dengan proper chain filtering
+# ⚡ FIXED: Update transactions endpoint dengan better cache key differentiation
 @router.get("/transactions/{wallet_address}")
 async def get_wallet_transactions(
     wallet_address: str = Path(..., description="Wallet address"),
     limit: int = Query(50, ge=1, le=200, description="Number of transactions to fetch"),
     chains: Optional[List[str]] = Query(None, description="Chains to scan")
 ) -> List[OnchainTransaction]:
-    """⚡ FIXED: Get transactions dengan proper chain filtering"""
+    """⚡ FIXED: Get transactions dengan proper cache key differentiation"""
     
-    # ⚡ FIXED: Build cache key dengan proper chains
+    # ⚡ FIXED: Build unique cache key untuk single vs multi chain
     chains_str = ','.join(sorted(chains)) if chains else 'all'
-    cache_key = f"transactions_fixed_v5_{wallet_address}_{limit}_{chains_str}"
+    cache_key = f"transactions_fixed_v7_{wallet_address}_{limit}_{chains_str}_{len(chains or [])}"
     
     # Check cache
     if cache_key in _onchain_cache:
         cache_entry = _onchain_cache[cache_key]
         if datetime.now() < cache_entry['expires']:
-            logger.info(f"CACHE: Returning cached transactions for {wallet_address}")
+            logger.info(f"CACHE: Returning cached transactions for {wallet_address} (key: {cache_key})")
             return cache_entry['data']
     
     try:
@@ -1203,7 +1079,7 @@ async def get_wallet_transactions(
             raise HTTPException(status_code=400, detail="Invalid wallet address format")
         
         async with aiohttp.ClientSession() as session:
-            # ⚡ FIXED: Use fixed transaction fetching
+            # ⚡ FIXED: Use fixed transaction fetching dengan proper chain filtering
             transactions_data = await fetch_onchain_transactions(session, wallet_address, limit, chains)
             
             # Convert to response model
@@ -1231,14 +1107,14 @@ async def get_wallet_transactions(
                     logger.warning(f"WARNING: Error creating transaction object: {e}")
                     continue
             
-            # Cache hasil
+            # Cache hasil dengan unique key
             _onchain_cache[cache_key] = {
                 'data': transactions,
                 'expires': datetime.now() + timedelta(seconds=_cache_ttl)
             }
             
             chains_info = f" dari {chains}" if chains else " dari semua chains"
-            logger.info(f"SUCCESS: Fetched {len(transactions)} transactions untuk {wallet_address}{chains_info}")
+            logger.info(f"SUCCESS: Fetched {len(transactions)} transactions untuk {wallet_address}{chains_info} (cached with key: {cache_key})")
             
             return transactions
     
@@ -1256,9 +1132,9 @@ async def get_wallet_analytics(
     days: int = Query(30, ge=1, le=365, description="Days to analyze"),
     chain: Optional[str] = Query(None, description="Specific chain to focus on")
 ) -> OnchainAnalytics:
-    """⚡ FIXED: Analytics dengan proper multi-chain support"""
+    """⚡ FIXED: Analytics dengan comprehensive USD volume calculation"""
     
-    cache_key = f"analytics_fixed_v5_{wallet_address}_{days}_{chain or 'all'}"
+    cache_key = f"analytics_fixed_v7_{wallet_address}_{days}_{chain or 'all'}"
     
     # Check cache
     if cache_key in _onchain_cache:
@@ -1273,7 +1149,7 @@ async def get_wallet_analytics(
             raise HTTPException(status_code=400, detail="Invalid wallet address format")
         
         async with aiohttp.ClientSession() as session:
-            # ⚡ FIXED: Use fixed multi-chain analytics
+            # ⚡ FIXED: Use fixed multi-chain analytics dengan comprehensive USD calculation
             analytics_data = await get_onchain_analytics(session, wallet_address, chain)
             
             # ⚡ FIXED: Create response object with proper data
@@ -1301,7 +1177,7 @@ async def get_wallet_analytics(
                 'expires': datetime.now() + timedelta(minutes=cache_ttl_minutes)
             }
             
-            logger.info(f"SUCCESS: Fixed analytics for {wallet_address} (chain: {chain or 'all'}): {analytics.total_transactions} txs, {analytics.unique_tokens_traded} tokens")
+            logger.info(f"SUCCESS: Fixed analytics for {wallet_address} (chain: {chain or 'all'}): {analytics.total_transactions} txs, {analytics.unique_tokens_traded} tokens, ${analytics.total_volume_usd:.2f} volume")
             
             return analytics
     
@@ -1356,6 +1232,8 @@ async def blockchain_health_check():
                 'native_token_focus': 'enabled',
                 'spam_detection': 'enhanced',
                 'price_fetching': 'native_only',
+                'usd_volume_calculation': 'comprehensive',
+                'cache_key_differentiation': 'improved',
                 'max_tokens_to_show': MAX_TOKENS_TO_SHOW,
                 'batch_size': BATCH_SIZE
             }
@@ -1388,7 +1266,7 @@ async def blockchain_health_check():
             status['moralis_api'] = f'error: {str(e)}'
             status['coingecko_api'] = f'error: {str(e)}'
         
-        logger.info(f"Native-focused blockchain health check: Moralis={status['moralis_api']}, CoinGecko={status['coingecko_api']}, Cache={status['cache_entries']} entries")
+        logger.info(f"Enhanced blockchain health check: Moralis={status['moralis_api']}, CoinGecko={status['coingecko_api']}, Cache={status['cache_entries']} entries")
         
         return status
     

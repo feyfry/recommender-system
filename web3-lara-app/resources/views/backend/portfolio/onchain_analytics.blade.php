@@ -31,7 +31,7 @@
         </div>
     </div>
 
-    <!-- ⚡ NEW: Native Chain Selector -->
+    <!-- ⚡ ENHANCED: Chain Selector -->
     <div class="clay-card p-6 mb-8">
         <div class="flex flex-col md:flex-row items-start md:items-center justify-between">
             <div class="mb-4 md:mb-0">
@@ -144,7 +144,7 @@
         </div>
     </div>
 
-    <!-- ⚡ ADD: Native Token Summary Section (tambahkan setelah analytics overview) -->
+    <!-- ⚡ ADD: Native Token Summary Section -->
     <div class="clay-card p-6 mb-6" id="native-tokens-section" style="display: none;">
         <h2 class="text-xl font-bold mb-4 flex items-center justify-between">
             <div class="flex items-center">
@@ -160,15 +160,15 @@
         </div>
     </div>
 
-    <!-- ⚡ ENHANCED: 2 Columns Layout dengan Chain-aware Content -->
+    <!-- ⚡ FIXED: 2 Columns Layout dengan Better Logic -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8" id="analytics-content" style="display: none;">
-        <!-- Most Traded Tokens (Left Column) - Always Multi-Chain -->
+        <!-- Most Traded Tokens (Left Column) -->
         <div class="clay-card p-6">
             <h2 class="text-xl font-bold mb-4 flex items-center justify-between">
                 <div class="flex items-center">
                     <i class="fas fa-trophy mr-2 text-warning"></i>
                     Most Traded Tokens
-                    <span class="ml-2 clay-badge clay-badge-info text-xs">ALL CHAINS</span>
+                    <span class="ml-2 clay-badge clay-badge-info text-xs" id="most-traded-badge">ALL CHAINS</span>
                 </div>
                 <span class="text-sm text-gray-500" id="most-traded-count">Loading...</span>
             </h2>
@@ -191,7 +191,7 @@
             </div>
         </div>
 
-        <!-- Chain Activity (Right Column) - Always Multi-Chain -->
+        <!-- Chain Activity (Right Column) -->
         <div class="clay-card p-6">
             <h2 class="text-xl font-bold mb-4 flex items-center justify-between">
                 <div class="flex items-center">
@@ -205,23 +205,10 @@
             <div id="chain-activity">
                 <!-- ⚡ Data akan di-populate via JavaScript -->
             </div>
-
-            <!-- ⚡ Pagination for Chain Activity (if needed) -->
-            <div class="mt-4" id="chain-activity-pagination" style="display: none;">
-                <div class="flex justify-center items-center space-x-2">
-                    <button onclick="changeChainActivityPage(-1)" class="clay-button clay-button-secondary py-1 px-2 text-xs" id="chain-activity-prev">
-                        <i class="fas fa-chevron-left"></i>
-                    </button>
-                    <span class="text-sm text-gray-600" id="chain-activity-page-info">Page 1</span>
-                    <button onclick="changeChainActivityPage(1)" class="clay-button clay-button-secondary py-1 px-2 text-xs" id="chain-activity-next">
-                        <i class="fas fa-chevron-right"></i>
-                    </button>
-                </div>
-            </div>
         </div>
     </div>
 
-    <!-- ⚡ ENHANCED: Transaction Frequency Chart dengan Chain Context -->
+    <!-- ⚡ ENHANCED: Transaction Frequency Chart -->
     <div class="clay-card p-6 mb-8" id="chart-container-wrapper" style="display: none;">
         <h2 class="text-xl font-bold mb-4 flex items-center justify-between">
             <div class="flex items-center">
@@ -244,7 +231,7 @@
         </div>
     </div>
 
-    <!-- ⚡ NEW: Chain-Specific Analytics Section (hanya tampil jika ada chain selection) -->
+    <!-- ⚡ SIMPLIFIED: Chain-Specific Analytics Section (hanya info, tanpa redundant transactions) -->
     <div class="clay-card p-6 mb-8" id="chain-specific-section" style="display: none;">
         <h2 class="text-xl font-bold mb-4 flex items-center">
             <i class="fas fa-focus mr-2 text-secondary"></i>
@@ -252,7 +239,7 @@
             <span class="ml-2 clay-badge clay-badge-secondary text-xs" id="chain-specific-badge">SELECTED</span>
         </h2>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div class="clay-card bg-secondary/10 p-4">
                 <div class="text-gray-600 text-sm">Chain Transactions</div>
                 <div class="text-2xl font-bold" id="chain-specific-transactions">0</div>
@@ -269,18 +256,9 @@
                 <div class="text-xs text-gray-500 mt-1">Last transaction</div>
             </div>
         </div>
-
-        <!-- Chain-specific recent transactions -->
-        <h3 class="font-bold mb-3 flex items-center">
-            <i class="fas fa-list mr-2 text-secondary"></i>
-            Recent Transactions on Selected Chain
-        </h3>
-        <div id="chain-specific-transactions-table">
-            <!-- Data akan di-populate via JavaScript -->
-        </div>
     </div>
 
-    <!-- Recent Transactions with Pagination - Tetap Multi-Chain atau Chain-Specific -->
+    <!-- ⚡ FIXED: Recent Transactions (Unified, dengan proper filtering) -->
     <div class="clay-card p-6" id="recent-transactions-wrapper" style="display: none;">
         <h2 class="text-xl font-bold mb-4 flex items-center justify-between">
             <div class="flex items-center">
@@ -376,16 +354,14 @@
     let transactionsData = [];
 
     let mostTradedPage = 1;
-    let chainActivityPage = 1;
     let transactionsPage = 1;
 
     const ITEMS_PER_PAGE = {
         mostTraded: 5,
-        chainActivity: 5,
-        transactions: 15  // ⚡ Increased untuk multi-chain
+        transactions: 15
     };
 
-    // ⚡ ENHANCED: Load analytics data saat halaman ready
+    // ⚡ Load analytics data saat halaman ready
     document.addEventListener('DOMContentLoaded', function() {
         loadAnalyticsData();
     });
@@ -404,65 +380,221 @@
 
         // Reset pagination
         mostTradedPage = 1;
-        chainActivityPage = 1;
         transactionsPage = 1;
 
         // Reload analytics with selected chain
         loadAnalyticsData();
     }
 
-    // ⚡ NEW: Update chain info display
+    // ⚡ Update chain info display
     function updateChainInfoDisplay() {
         const infoText = document.getElementById('chain-info-text');
         const selectedChainData = availableChains.find(chain => chain.value === selectedChain);
 
         if (selectedChain && selectedChainData) {
-            infoText.innerHTML = `<i class="${selectedChainData.icon} mr-2"></i>Analyzing ${selectedChainData.label} specifically. Overall stats tetap menampilkan semua chains.`;
+            infoText.innerHTML = `<i class="${selectedChainData.icon} mr-2"></i>Analyzing ${selectedChainData.label} specifically. Volume calculations include all detected transactions.`;
         } else {
-            infoText.innerHTML = `<i class="fas fa-globe mr-2"></i>Analyzing all chains simultaneously. Use selector above untuk focus pada chain tertentu.`;
+            infoText.innerHTML = `<i class="fas fa-globe mr-2"></i>Analyzing all chains simultaneously. Comprehensive USD volume calculation enabled.`;
         }
     }
 
-    // ⚡ ENHANCED: Prepare most traded tokens dengan native token exclusion
+    // ⚡ FIXED: Enhanced analytics data loading dengan better error handling
+    async function loadAnalyticsData() {
+        const loadingDiv = document.getElementById('analytics-loading');
+        const overviewDiv = document.getElementById('analytics-overview');
+        const contentDiv = document.getElementById('analytics-content');
+
+        // Show loading
+        loadingDiv.style.display = 'block';
+        overviewDiv.style.display = 'none';
+        contentDiv.style.display = 'none';
+
+        try {
+            // ⚡ FIXED: Build request URL dengan chain parameter
+            let requestUrl = '{{ route('panel.portfolio.load-analytics') }}';
+            if (selectedChain) {
+                requestUrl += `?chain=${selectedChain}`;
+            }
+
+            console.log('⚡ LOADING: Fetching analytics from:', requestUrl);
+
+            const response = await fetch(requestUrl, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                }
+            });
+
+            const data = await response.json();
+            console.log('⚡ RESPONSE:', data);
+
+            if (data.success) {
+                analyticsData = data;
+                availableChains = data.available_chains || [];
+
+                // ⚡ Enhanced debug info logging
+                if (data.debug_info) {
+                    console.log('⚡ DEBUG INFO:', data.debug_info);
+                    console.log('⚡ TOTAL VOLUME USD:', data.debug_info.total_volume_usd);
+                }
+
+                // ⚡ Populate chain selector jika belum ada
+                populateChainSelector();
+
+                // Update analytics overview
+                updateAnalyticsOverview(data.analytics);
+
+                // Populate native tokens
+                populateNativeTokensSection(data.analytics);
+
+                // ⚡ FIXED: Prepare data dengan comprehensive logic
+                prepareMostTradedData(data.analytics);
+                chainActivityData = Object.entries(data.analytics.chains_activity || {});
+
+                // ⚡ FIXED: Store transactions data
+                transactionsData = data.transactions || [];
+                console.log(`⚡ TRANSACTIONS: Received ${transactionsData.length} transactions`);
+
+                // Update content sections
+                updateChainActivityPaginated();
+                updateTransactionChart(data.analytics.transaction_frequency || {});
+
+                // Populate transactions table with pagination
+                populateTransactionsTablePaginated();
+
+                // Handle chain-specific data
+                handleChainSpecificData(data.analytics);
+
+                // Populate insights
+                populateAnalyticsInsights(data.analytics);
+
+                // Show content
+                loadingDiv.style.display = 'none';
+                overviewDiv.style.display = 'grid';
+                contentDiv.style.display = 'grid';
+                document.getElementById('chart-container-wrapper').style.display = 'block';
+                document.getElementById('recent-transactions-wrapper').style.display = 'block';
+                document.getElementById('analytics-insights').style.display = 'block';
+
+                // Update scope indicators
+                updateScopeIndicators();
+
+                // Show appropriate notification
+                if (data.cached) {
+                    const cacheType = selectedChain ? `cached (${selectedChain})` : 'cached (multi-chain)';
+                    showNotification(`⚡ Data loaded from ${cacheType}`, 'info');
+                }
+
+                if (data.analytics.total_transactions === 0) {
+                    showNotification('⚠️ No analytics data found. Check API configuration.', 'warning');
+                }
+
+            } else {
+                throw new Error(data.message || 'Failed to load analytics data');
+            }
+
+        } catch (error) {
+            console.error('⚡ ERROR: Loading analytics data:', error);
+
+            // Enhanced error state
+            loadingDiv.innerHTML = `
+                <div class="clay-card p-6">
+                    <div class="text-center py-8">
+                        <i class="fas fa-exclamation-triangle text-5xl text-yellow-500 mb-4"></i>
+                        <h3 class="text-xl font-bold mb-3">Gagal Memuat Multi-Chain Analytics</h3>
+                        <p class="text-gray-600 mb-4">${error.message}</p>
+                        <div class="text-sm text-gray-500 mb-6">
+                            <p>Possible issues:</p>
+                            <ul class="list-disc list-inside text-left max-w-md mx-auto">
+                                <li>API endpoint not responding</li>
+                                <li>Analytics processing error</li>
+                                <li>Chain data not available</li>
+                                <li>USD volume calculation issues</li>
+                                <li>Native token separation problems</li>
+                            </ul>
+                        </div>
+                        <div class="space-x-3">
+                            <button onclick="loadAnalyticsData()" class="clay-button clay-button-primary">
+                                <i class="fas fa-retry mr-2"></i> Coba Lagi
+                            </button>
+                            <button onclick="checkApiStatus()" class="clay-button clay-button-info">
+                                <i class="fas fa-heartbeat mr-2"></i> Check API
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    // ⚡ FIXED: Enhanced populate chain selector
+    function populateChainSelector() {
+        const selector = document.getElementById('chain-selector');
+        if (!selector || availableChains.length === 0) return;
+
+        let html = '';
+        availableChains.forEach(chain => {
+            const selected = chain.value === selectedChain ? 'selected' : '';
+            html += `<option value="${chain.value || ''}" ${selected}>${chain.label}</option>`;
+        });
+
+        selector.innerHTML = html;
+        updateChainInfoDisplay();
+
+        console.log('⚡ SELECTOR: Populated chain selector with', availableChains.length, 'options');
+    }
+
+    // ⚡ FIXED: Enhanced prepare most traded data dengan comprehensive logic
     function prepareMostTradedData(analytics) {
         mostTradedTokens = [];
 
-        // ⚡ FIXED: Use only alt tokens untuk most traded (exclude native tokens)
+        // ⚡ FIXED: Use comprehensive token list (native + alt) dengan smart filtering
         if (analytics.most_traded_tokens && analytics.most_traded_tokens.length > 0) {
+            // ⚡ ENHANCED: Include both native dan alt tokens, tapi prioritize based on context
             mostTradedTokens = analytics.most_traded_tokens.filter(token => {
-                // ⚡ ENHANCED: Filter out native tokens dari most traded list
-                const nativeTokens = ['ETH', 'BNB', 'MATIC', 'AVAX', 'WETH', 'WBNB', 'WMATIC', 'WAVAX'];
-                return !nativeTokens.includes(token.symbol?.toUpperCase());
+                // Skip tokens dengan 0 trade count
+                return token.trade_count && token.trade_count > 0;
             });
+
+            // ⚡ ENHANCED: If ETH chain selected dan no alt tokens, show native ETH
+            if (selectedChain === 'eth' && mostTradedTokens.length === 0) {
+                // Add native ETH dari native_token_summary jika ada
+                if (analytics.native_token_summary) {
+                    const ethNative = analytics.native_token_summary.find(token =>
+                        token.symbol === 'ETH' || token.symbol === 'WETH'
+                    );
+                    if (ethNative) {
+                        mostTradedTokens = [ethNative];
+                    }
+                }
+            }
         }
 
-        console.log('⚡ MOST TRADED: Prepared', mostTradedTokens.length, 'alt tokens (native tokens excluded)');
+        console.log('⚡ MOST TRADED: Prepared', mostTradedTokens.length, 'tokens for chain:', selectedChain || 'all');
 
         // Reset pagination
         mostTradedPage = 1;
         updateMostTradedTokensPaginated();
     }
 
-    // ⚡ FIXED: Enhanced update most traded tokens dengan proper chain context
+    // ⚡ FIXED: Enhanced update most traded tokens dengan comprehensive logic
     function updateMostTradedTokensPaginated() {
         const container = document.getElementById('most-traded-tokens');
         const totalItems = mostTradedTokens.length;
         const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE.mostTraded);
 
-        // ⚡ FIXED: Update badge dan count berdasarkan selected chain
+        // ⚡ FIXED: Update badge berdasarkan context
         const selectedChainInfo = availableChains.find(c => c.value === selectedChain);
         const chainLabel = selectedChain && selectedChainInfo ? selectedChainInfo.label.toUpperCase() : 'ALL CHAINS';
 
         // ⚡ FIXED: Update badge pada section title
-        const mostTradedSection = document.querySelector('h2:has(+ * #most-traded-tokens)');
-        if (mostTradedSection) {
-            const badge = mostTradedSection.querySelector('.clay-badge');
-            if (badge) {
-                badge.textContent = chainLabel;
-            }
+        const mostTradedBadge = document.getElementById('most-traded-badge');
+        if (mostTradedBadge) {
+            mostTradedBadge.textContent = chainLabel;
         }
 
-        document.getElementById('most-traded-count').textContent = `${totalItems} alt tokens (${chainLabel.toLowerCase()})`;
+        document.getElementById('most-traded-count').textContent = `${totalItems} tokens (${chainLabel.toLowerCase()})`;
 
         if (totalItems > 0) {
             const startIndex = (mostTradedPage - 1) * ITEMS_PER_PAGE.mostTraded;
@@ -474,10 +606,15 @@
             pageItems.forEach((token, index) => {
                 const globalIndex = startIndex + index + 1;
 
-                // ⚡ ENHANCED: Chain indicator untuk each token dengan native token detection
+                // ⚡ ENHANCED: Comprehensive token display dengan native detection
                 const isNativeToken = ['ETH', 'BNB', 'MATIC', 'AVAX'].includes(token.symbol?.toUpperCase());
                 const chainBadge = token.chain ?
                     `<span class="clay-badge clay-badge-${isNativeToken ? 'warning' : 'info'} text-xs ml-2">${token.chain.toUpperCase()}</span>` : '';
+
+                // ⚡ ENHANCED: Volume display dengan USD prioritization
+                const volumeDisplay = token.volume_usd && token.volume_usd > 0 ?
+                    `$${numberFormat(token.volume_usd, 2)}` :
+                    `${numberFormat(token.volume || 0, 8)} ${token.symbol || ''}`;
 
                 html += `
                     <div class="flex items-center justify-between p-3 clay-card bg-gray-50">
@@ -495,8 +632,11 @@
                             </div>
                         </div>
                         <div class="text-right">
-                            <div class="font-medium">$${numberFormat(token.volume_usd || 0, 2)}</div>
-                            <div class="text-xs text-gray-500">${numberFormat(token.volume || 0, 8)} ${token.symbol || ''}</div>
+                            <div class="font-medium">${volumeDisplay}</div>
+                            ${token.volume_usd && token.volume_usd > 0 ?
+                                `<div class="text-xs text-gray-500">${numberFormat(token.volume || 0, 6)} ${token.symbol || ''}</div>` :
+                                '<div class="text-xs text-gray-500">Volume tracked</div>'
+                            }
                         </div>
                     </div>
                 `;
@@ -518,13 +658,21 @@
                 document.getElementById('most-traded-page-info').textContent = `Page ${mostTradedPage} of ${totalPages}`;
             }
         } else {
-            // ⚡ ENHANCED: Better empty state dengan chain context
+            // ⚡ ENHANCED: Better empty state dengan context-aware messaging
             const chainContext = selectedChain ? ` untuk ${chainLabel}` : ' multi-chain';
+            let emptyMessage = `Tidak ada token trading${chainContext}`;
+            let subMessage = 'Transaksi akan muncul setelah ada aktivitas trading';
+
+            if (selectedChain === 'eth') {
+                emptyMessage = 'ETH trading activity belum terdeteksi';
+                subMessage = 'Periksa apakah ada transaksi ETH di wallet ini atau coba refresh data';
+            }
+
             container.innerHTML = `
                 <div class="text-center py-8">
                     <i class="fas fa-coins text-4xl text-gray-400 mb-3"></i>
-                    <p class="text-gray-500">Tidak ada alt tokens trading${chainContext}</p>
-                    <p class="text-sm text-gray-400 mt-2">Native tokens (ETH, BNB, MATIC, AVAX) ditampilkan terpisah</p>
+                    <p class="text-gray-500">${emptyMessage}</p>
+                    <p class="text-sm text-gray-400 mt-2">${subMessage}</p>
                     ${selectedChain ? `
                         <button onclick="resetToAllChains()" class="clay-button clay-button-info mt-4">
                             <i class="fas fa-globe mr-2"></i> View All Chains
@@ -535,42 +683,26 @@
         }
     }
 
-    // ⚡ FIXED: Enhanced update chain activity dengan proper badge updates
+    // ⚡ FIXED: Update chain activity paginated
     function updateChainActivityPaginated() {
         const container = document.getElementById('chain-activity');
         const totalItems = chainActivityData.length;
-        const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE.chainActivity);
-
-        // ⚡ FIXED: Update badge pada section title untuk chain activity
-        const selectedChainInfo = availableChains.find(c => c.value === selectedChain);
-        const chainLabel = 'ALL CHAINS'; // Chain activity always shows all chains untuk context
-
-        const chainActivitySection = document.querySelector('h2:has(+ * #chain-activity)');
-        if (chainActivitySection) {
-            const badge = chainActivitySection.querySelector('.clay-badge');
-            if (badge) {
-                badge.textContent = chainLabel;
-            }
-        }
 
         // Update count
         document.getElementById('chain-activity-count').textContent = `${totalItems} chains (distribution across all)`;
 
         if (totalItems > 0) {
             const totalChainTxs = chainActivityData.reduce((sum, [, count]) => sum + count, 0);
-            const startIndex = (chainActivityPage - 1) * ITEMS_PER_PAGE.chainActivity;
-            const endIndex = Math.min(startIndex + ITEMS_PER_PAGE.chainActivity, totalItems);
-            const pageItems = chainActivityData.slice(startIndex, endIndex);
 
             let html = '<div class="space-y-3">';
 
-            pageItems.forEach(([chain, txCount]) => {
+            chainActivityData.forEach(([chain, txCount]) => {
                 const percentage = totalChainTxs > 0 ? (txCount / totalChainTxs) * 100 : 0;
 
-                // ⚡ ENHANCED: Chain-specific styling dan icons
+                // ⚡ ENHANCED: Chain-specific styling
                 const chainInfo = getChainDisplayInfo(chain);
 
-                // ⚡ ENHANCED: Highlight selected chain if any
+                // ⚡ ENHANCED: Highlight selected chain
                 const isSelectedChain = selectedChain === chain;
                 const highlightClass = isSelectedChain ? 'ring-2 ring-primary ring-opacity-50 bg-primary/5' : 'bg-info/5';
 
@@ -584,7 +716,6 @@
                             </div>
                             <span class="text-sm">${numberFormat(txCount, 0)} txs</span>
                         </div>
-                        <!-- ⚡ GUARANTEED VISIBLE PROGRESS BAR dengan chain-specific colors -->
                         <div style="width: 100%; height: 14px; background-color: #e0f2fe; border: 1px solid #81d4fa; border-radius: 7px; overflow: hidden; margin-bottom: 8px; box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);">
                             <div style="height: 100%; background: ${chainInfo.gradient}; border-radius: 6px; width: ${percentage}%; transition: width 0.5s ease-in-out; min-width: ${percentage > 0 ? Math.max(percentage, 1.5) : 0}%; box-shadow: 0 1px 3px rgba(0,0,0,0.2);"></div>
                         </div>
@@ -595,19 +726,6 @@
 
             html += '</div>';
             container.innerHTML = html;
-
-            // Show pagination if needed
-            if (totalPages > 1) {
-                const paginationDiv = document.getElementById('chain-activity-pagination');
-                paginationDiv.style.display = 'block';
-
-                document.getElementById('chain-activity-prev').disabled = chainActivityPage <= 1;
-                document.getElementById('chain-activity-next').disabled = chainActivityPage >= totalPages;
-                document.getElementById('chain-activity-prev').style.opacity = chainActivityPage <= 1 ? '0.5' : '1';
-                document.getElementById('chain-activity-next').style.opacity = chainActivityPage >= totalPages ? '0.5' : '1';
-
-                document.getElementById('chain-activity-page-info').textContent = `Page ${chainActivityPage} of ${totalPages}`;
-            }
         } else {
             container.innerHTML = `
                 <div class="text-center py-8">
@@ -618,7 +736,7 @@
         }
     }
 
-    // ⚡ NEW: Get chain display info dengan icons dan colors
+    // ⚡ Get chain display info dengan icons dan colors
     function getChainDisplayInfo(chain) {
         const chainMap = {
             'ethereum': {
@@ -661,45 +779,39 @@
         };
     }
 
-    // ⚡ FIXED: Enhanced populate transactions table dengan proper filtering dan debug
+    // ⚡ FIXED: Enhanced populate transactions table dengan proper filtering
     function populateTransactionsTablePaginated() {
         const container = document.getElementById('recent-transactions');
 
         // ⚡ FIXED: Filter transactions berdasarkan selected chain
         let filteredTransactions = transactionsData;
         if (selectedChain && transactionsData.length > 0) {
-            filteredTransactions = transactionsData.filter(tx => tx.chain === selectedChain);
+            filteredTransactions = transactionsData.filter(tx => {
+                const txChain = tx.chain ? tx.chain.toLowerCase() : '';
+                const filterChain = selectedChain.toLowerCase();
+
+                // Handle ethereum/eth variations
+                const normalizedTxChain = txChain === 'eth' ? 'ethereum' : txChain;
+                const normalizedFilterChain = filterChain === 'eth' ? 'ethereum' : filterChain;
+
+                return normalizedTxChain === normalizedFilterChain;
+            });
             console.log(`⚡ FILTERED TRANSACTIONS: ${filteredTransactions.length} dari ${transactionsData.length} untuk chain ${selectedChain}`);
         }
 
         const totalItems = filteredTransactions.length;
         const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE.transactions);
 
-        // ⚡ FIXED: Update count dengan chain context dan debug info
+        // ⚡ FIXED: Update count dengan chain context
         const selectedChainInfo = availableChains.find(c => c.value === selectedChain);
         const chainLabel = selectedChain && selectedChainInfo ? selectedChainInfo.label.toUpperCase() : 'ALL CHAINS';
         document.getElementById('transactions-count').textContent = `${totalItems} transactions (${chainLabel.toLowerCase()})`;
 
         // ⚡ FIXED: Update badge pada section title
-        const transactionsSection = document.querySelector('h2:has(+ * #recent-transactions)');
-        if (transactionsSection) {
-            const badge = transactionsSection.querySelector('.clay-badge');
-            if (badge) {
-                badge.textContent = chainLabel;
-            }
+        const transactionsBadge = document.getElementById('transactions-scope-badge');
+        if (transactionsBadge) {
+            transactionsBadge.textContent = chainLabel;
         }
-
-        console.log('⚡ TRANSACTIONS TABLE:', {
-            totalOriginal: transactionsData.length,
-            totalFiltered: totalItems,
-            selectedChain,
-            chainLabel,
-            firstFewTransactions: filteredTransactions.slice(0, 3).map(tx => ({
-                chain: tx.chain,
-                symbol: tx.token_symbol,
-                hash: tx.tx_hash?.substring(0, 10)
-            }))
-        });
 
         if (totalItems > 0) {
             const startIndex = (transactionsPage - 1) * ITEMS_PER_PAGE.transactions;
@@ -822,7 +934,7 @@
         }
     }
 
-    // ⚡ NEW: Reset to all chains
+    // ⚡ Reset to all chains
     function resetToAllChains() {
         selectedChain = null;
         const selector = document.getElementById('chain-selector');
@@ -832,7 +944,7 @@
         changeAnalyticsChain();
     }
 
-    // ⚡ FIXED: Update transactions pagination dengan filtered data
+    // ⚡ Update transactions pagination
     function updateTransactionsPagination(totalPages, startItem, endItem, totalFilteredItems) {
         // Update info dengan filtered data count
         document.getElementById('transactions-page-info').textContent =
@@ -875,18 +987,21 @@
         }
     }
 
-    function changeChainActivityPage(direction) {
-        const totalPages = Math.ceil(chainActivityData.length / ITEMS_PER_PAGE.chainActivity);
-        const newPage = chainActivityPage + direction;
-
-        if (newPage >= 1 && newPage <= totalPages) {
-            chainActivityPage = newPage;
-            updateChainActivityPaginated();
-        }
-    }
-
     function changeTransactionsPage(direction) {
-        const totalPages = Math.ceil(transactionsData.length / ITEMS_PER_PAGE.transactions);
+        // ⚡ FIXED: Calculate total pages berdasarkan filtered data
+        let filteredCount = transactionsData.length;
+        if (selectedChain && transactionsData.length > 0) {
+            const filtered = transactionsData.filter(tx => {
+                const txChain = tx.chain ? tx.chain.toLowerCase() : '';
+                const filterChain = selectedChain.toLowerCase();
+                const normalizedTxChain = txChain === 'eth' ? 'ethereum' : txChain;
+                const normalizedFilterChain = filterChain === 'eth' ? 'ethereum' : filterChain;
+                return normalizedTxChain === normalizedFilterChain;
+            });
+            filteredCount = filtered.length;
+        }
+
+        const totalPages = Math.ceil(filteredCount / ITEMS_PER_PAGE.transactions);
         const newPage = transactionsPage + direction;
 
         if (newPage >= 1 && newPage <= totalPages) {
@@ -896,7 +1011,20 @@
     }
 
     function goToTransactionsPage(page) {
-        const totalPages = Math.ceil(transactionsData.length / ITEMS_PER_PAGE.transactions);
+        // ⚡ FIXED: Calculate total pages berdasarkan filtered data
+        let filteredCount = transactionsData.length;
+        if (selectedChain && transactionsData.length > 0) {
+            const filtered = transactionsData.filter(tx => {
+                const txChain = tx.chain ? tx.chain.toLowerCase() : '';
+                const filterChain = selectedChain.toLowerCase();
+                const normalizedTxChain = txChain === 'eth' ? 'ethereum' : txChain;
+                const normalizedFilterChain = filterChain === 'eth' ? 'ethereum' : filterChain;
+                return normalizedTxChain === normalizedFilterChain;
+            });
+            filteredCount = filtered.length;
+        }
+
+        const totalPages = Math.ceil(filteredCount / ITEMS_PER_PAGE.transactions);
 
         if (page >= 1 && page <= totalPages) {
             transactionsPage = page;
@@ -904,344 +1032,7 @@
         }
     }
 
-    // ⚡ ENHANCED: Update transaction chart dengan multi-chain context
-    function updateTransactionChart(transactionFrequency) {
-        const entries = Object.entries(transactionFrequency);
-        if (entries.length === 0) {
-            showChartFallback(transactionFrequency);
-            return;
-        }
-
-        // Try to initialize Chart.js
-        try {
-            if (transactionChart) {
-                transactionChart.destroy();
-            }
-
-            // Sort by date
-            entries.sort((a, b) => new Date(a[0]) - new Date(b[0]));
-
-            const labels = entries.map(([date]) => {
-                const d = new Date(date);
-                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            });
-            const data = entries.map(([, count]) => count);
-
-            const ctx = document.getElementById('transactionChart');
-            if (!ctx) {
-                showChartFallback(transactionFrequency);
-                return;
-            }
-
-            // Check if Chart.js is available
-            if (typeof Chart === 'undefined') {
-                console.warn('Chart.js not loaded, showing fallback');
-                showChartFallback(transactionFrequency);
-                return;
-            }
-
-            // ⚡ ENHANCED: Multi-chain aware chart styling
-            const chartColor = selectedChain ? getChainDisplayInfo(selectedChain).gradient.split(',')[0].replace('linear-gradient(135deg, ', '') : 'rgb(59, 130, 246)';
-
-            transactionChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Transactions',
-                        data: data,
-                        borderColor: chartColor,
-                        backgroundColor: chartColor.replace('rgb', 'rgba').replace(')', ', 0.1)'),
-                        borderWidth: 3,
-                        fill: true,
-                        tension: 0.2,
-                        pointBackgroundColor: chartColor,
-                        pointBorderColor: '#fff',
-                        pointBorderWidth: 2,
-                        pointRadius: 4,
-                        pointHoverRadius: 6
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                stepSize: 1,
-                                callback: function(value) {
-                                    return Math.floor(value) === value ? value : '';
-                                }
-                            },
-                            grid: {
-                                color: 'rgba(0, 0, 0, 0.1)'
-                            }
-                        },
-                        x: {
-                            grid: {
-                                color: 'rgba(0, 0, 0, 0.1)'
-                            }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        tooltip: {
-                            mode: 'index',
-                            intersect: false,
-                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                            titleColor: '#fff',
-                            bodyColor: '#fff',
-                            borderColor: chartColor,
-                            borderWidth: 1
-                        }
-                    },
-                    interaction: {
-                        mode: 'nearest',
-                        axis: 'x',
-                        intersect: false
-                    }
-                }
-            });
-
-            // Hide fallback and show chart
-            const chartFallback = document.getElementById('chart-fallback');
-            const chartWrapper = document.getElementById('chart-wrapper');
-            if (chartFallback) chartFallback.style.display = 'none';
-            if (chartWrapper) chartWrapper.style.display = 'block';
-
-        } catch (error) {
-            console.error('Error initializing chart:', error);
-            showChartFallback(transactionFrequency);
-        }
-    }
-
-    // ⚡ Enhanced fallback chart dengan data dan multi-chain context
-    function showChartFallback(transactionFrequency = {}) {
-        const chartWrapper = document.getElementById('chart-wrapper');
-        const chartFallback = document.getElementById('chart-fallback');
-
-        if (chartWrapper) chartWrapper.style.display = 'none';
-        if (chartFallback) {
-            const entries = Object.entries(transactionFrequency);
-
-            if (entries.length > 0) {
-                // Sort by date
-                entries.sort((a, b) => new Date(a[0]) - new Date(b[0]));
-
-                const maxCount = Math.max(...entries.map(([, count]) => count));
-                let html = '';
-
-                entries.forEach(([date, count]) => {
-                    const formattedDate = new Date(date).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric'
-                    });
-                    const percentage = maxCount > 0 ? (count / maxCount) * 100 : 0;
-
-                    html += `
-                        <div class="flex items-center">
-                            <div class="w-20 text-xs text-gray-600">${formattedDate}</div>
-                            <div class="flex-1 mx-2">
-                                <div class="clay-progress h-4">
-                                    <div class="clay-progress-bar clay-progress-primary" style="width: ${percentage}%"></div>
-                                </div>
-                            </div>
-                            <div class="w-8 text-xs text-gray-600 text-right">${count}</div>
-                        </div>
-                    `;
-                });
-
-                chartFallback.innerHTML = html;
-            } else {
-                const chainContext = selectedChain ? ` pada ${selectedChain.toUpperCase()}` : ' multi-chain';
-                chartFallback.innerHTML = `
-                    <div class="text-center py-16">
-                        <i class="fas fa-chart-line text-4xl text-gray-400 mb-3"></i>
-                        <p class="text-gray-500">Tidak ada data frekuensi transaksi${chainContext}</p>
-                        <p class="text-sm text-gray-400 mt-2">Grafik akan muncul setelah ada aktivitas trading</p>
-                    </div>
-                `;
-            }
-
-            chartFallback.style.display = 'block';
-        }
-    }
-
-    // View transaction on blockchain explorer dengan chain-specific explorers
-    function viewTransaction(chain, txHash) {
-        const explorers = {
-            'eth': 'https://etherscan.io',
-            'ethereum': 'https://etherscan.io',
-            'bsc': 'https://bscscan.com',
-            'binance_smart_chain': 'https://bscscan.com',
-            'polygon': 'https://polygonscan.com',
-            'avalanche': 'https://snowtrace.io'
-        };
-
-        const explorerUrl = explorers[chain.toLowerCase()];
-        if (explorerUrl && txHash) {
-            window.open(`${explorerUrl}/tx/${txHash}`, '_blank');
-        } else {
-            showNotification('Explorer not available for this chain', 'warning');
-        }
-    }
-
-    // ⚡ FIXED: Enhanced load analytics data dengan better error handling dan data processing
-    async function loadAnalyticsData() {
-        const loadingDiv = document.getElementById('analytics-loading');
-        const overviewDiv = document.getElementById('analytics-overview');
-        const contentDiv = document.getElementById('analytics-content');
-
-        // Show loading
-        loadingDiv.style.display = 'block';
-        overviewDiv.style.display = 'none';
-        contentDiv.style.display = 'none';
-
-        try {
-            // ⚡ FIXED: Build request URL dengan chain parameter dan debug
-            let requestUrl = '{{ route('panel.portfolio.load-analytics') }}';
-            if (selectedChain) {
-                requestUrl += `?chain=${selectedChain}`;
-            }
-
-            console.log('⚡ LOADING: Fetching analytics from:', requestUrl);
-
-            const response = await fetch(requestUrl, {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
-                }
-            });
-
-            const data = await response.json();
-            console.log('⚡ RESPONSE:', data);
-
-            if (data.success) {
-                analyticsData = data;
-                availableChains = data.available_chains || [];
-
-                // ⚡ Enhanced debug info logging
-                if (data.debug_info) {
-                    console.log('⚡ DEBUG INFO:', data.debug_info);
-                    console.log('⚡ NATIVE TOKENS COUNT:', data.debug_info.native_tokens_count);
-                    console.log('⚡ MOST TRADED COUNT:', data.debug_info.most_traded_count);
-                }
-
-                // ⚡ Populate chain selector jika belum ada
-                populateChainSelector();
-
-                // Update analytics overview
-                updateAnalyticsOverview(data.analytics);
-
-                // Populate native tokens
-                populateNativeTokensSection(data.analytics);
-
-                // ⚡ FIXED: Store data dengan proper native token separation
-                prepareMostTradedData(data.analytics);
-                chainActivityData = Object.entries(data.analytics.chains_activity || {});
-
-                // ⚡ FIXED: Filter transactions berdasarkan selected chain
-                transactionsData = data.transactions || [];
-                console.log(`⚡ TRANSACTIONS: Received ${transactionsData.length} transactions`);
-
-                // Update content sections
-                updateChainActivityPaginated();
-                updateTransactionChart(data.analytics.transaction_frequency || {});
-
-                // Populate transactions table with pagination
-                populateTransactionsTablePaginated();
-
-                // ⚡ Handle chain-specific data
-                handleChainSpecificData(data.analytics);
-
-                // Populate insights
-                populateAnalyticsInsights(data.analytics);
-
-                // Show content
-                loadingDiv.style.display = 'none';
-                overviewDiv.style.display = 'grid';
-                contentDiv.style.display = 'grid';
-                document.getElementById('chart-container-wrapper').style.display = 'block';
-                document.getElementById('recent-transactions-wrapper').style.display = 'block';
-                document.getElementById('analytics-insights').style.display = 'block';
-
-                // Update scope indicators
-                updateScopeIndicators();
-
-                // Show appropriate notification
-                if (data.cached) {
-                    const cacheType = selectedChain ? `cached (${selectedChain})` : 'cached (multi-chain)';
-                    showNotification(`⚡ Data loaded from ${cacheType}`, 'info');
-                }
-
-                // ⚡ FIXED: Enhanced data summary dengan native token info
-                const summary = `Analytics: ${data.analytics.total_transactions || 0} txs, Transactions: ${transactionsData.length}, Alt Tokens: ${data.analytics.unique_tokens_traded || 0}, Native Tokens: ${data.debug_info?.native_tokens_count || 0}`;
-                console.log('⚡ DATA SUMMARY:', summary);
-
-                if (data.analytics.total_transactions === 0) {
-                    showNotification('⚠️ No analytics data found. Check API configuration.', 'warning');
-                }
-
-            } else {
-                throw new Error(data.message || 'Failed to load analytics data');
-            }
-
-        } catch (error) {
-            console.error('⚡ ERROR: Loading analytics data:', error);
-
-            // Enhanced error state dengan troubleshooting
-            loadingDiv.innerHTML = `
-                <div class="clay-card p-6">
-                    <div class="text-center py-8">
-                        <i class="fas fa-exclamation-triangle text-5xl text-yellow-500 mb-4"></i>
-                        <h3 class="text-xl font-bold mb-3">Gagal Memuat Multi-Chain Analytics</h3>
-                        <p class="text-gray-600 mb-4">${error.message}</p>
-                        <div class="text-sm text-gray-500 mb-6">
-                            <p>Possible issues:</p>
-                            <ul class="list-disc list-inside text-left max-w-md mx-auto">
-                                <li>API endpoint not responding</li>
-                                <li>Analytics processing error</li>
-                                <li>Chain data not available</li>
-                                <li>Timezone handling errors</li>
-                                <li>Native token separation issues</li>
-                            </ul>
-                        </div>
-                        <div class="space-x-3">
-                            <button onclick="loadAnalyticsData()" class="clay-button clay-button-primary">
-                                <i class="fas fa-retry mr-2"></i> Coba Lagi
-                            </button>
-                            <button onclick="checkApiStatus()" class="clay-button clay-button-info">
-                                <i class="fas fa-heartbeat mr-2"></i> Check API
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-    }
-
-    // ⚡ FIXED: Enhanced chain selector population
-    function populateChainSelector() {
-        const selector = document.getElementById('chain-selector');
-        if (!selector || availableChains.length === 0) return;
-
-        let html = '';
-        availableChains.forEach(chain => {
-            const selected = chain.value === selectedChain ? 'selected' : '';
-            html += `<option value="${chain.value || ''}" ${selected}>${chain.label}</option>`;
-        });
-
-        selector.innerHTML = html;
-        updateChainInfoDisplay();
-
-        console.log('⚡ SELECTOR: Populated chain selector with', availableChains.length, 'options');
-    }
-
-    // ⚡ NEW: Handle chain-specific data
+    // ⚡ Handle chain-specific data (simplified)
     function handleChainSpecificData(analytics) {
         const chainSpecificSection = document.getElementById('chain-specific-section');
 
@@ -1271,114 +1062,33 @@
                 : 'No data';
             document.getElementById('chain-latest-activity').textContent = latestActivity;
 
-            // Populate chain-specific transactions table
-            populateChainSpecificTransactions(chainData.transactions || []);
-
         } else {
             // Hide chain-specific section
             chainSpecificSection.style.display = 'none';
         }
     }
 
-    // ⚡ NEW: Populate chain-specific transactions
-    function populateChainSpecificTransactions(transactions) {
-        const container = document.getElementById('chain-specific-transactions-table');
-
-        if (transactions.length === 0) {
-            container.innerHTML = `
-                <div class="text-center py-8">
-                    <i class="fas fa-info-circle text-4xl text-gray-400 mb-3"></i>
-                    <p class="text-gray-500">Tidak ada transaksi untuk chain yang dipilih</p>
-                </div>
-            `;
-            return;
-        }
-
-        // Show latest 10 transactions for selected chain
-        const latestTxs = transactions.slice(0, 10);
-
-        let html = `
-            <div class="overflow-x-auto">
-                <table class="clay-table min-w-full">
-                    <thead>
-                        <tr>
-                            <th class="py-2 px-4 text-left">Date</th>
-                            <th class="py-2 px-4 text-left">Hash</th>
-                            <th class="py-2 px-4 text-left">Value</th>
-                            <th class="py-2 px-4 text-left">Token</th>
-                            <th class="py-2 px-4 text-left">Type</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-        `;
-
-        latestTxs.forEach(tx => {
-            const date = new Date(tx.timestamp).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-
-            const txHash = tx.hash ? tx.hash.substring(0, 12) + '...' : 'N/A';
-
-            html += `
-                <tr>
-                    <td class="py-2 px-4 text-sm">${date}</td>
-                    <td class="py-2 px-4">
-                        <div class="font-mono text-xs">${txHash}</div>
-                    </td>
-                    <td class="py-2 px-4">
-                        <div class="font-medium">${numberFormat(tx.value || 0, 6)}</div>
-                    </td>
-                    <td class="py-2 px-4">
-                        <span class="clay-badge clay-badge-secondary">${tx.token_symbol || 'Unknown'}</span>
-                    </td>
-                    <td class="py-2 px-4">
-                        <span class="clay-badge clay-badge-info">${tx.transaction_type || 'Unknown'}</span>
-                    </td>
-                </tr>
-            `;
-        });
-
-        html += `
-                    </tbody>
-                </table>
-            </div>
-        `;
-
-        container.innerHTML = html;
-    }
-
-    // ⚡ FIXED: Enhanced update scope indicators
+    // ⚡ Update scope indicators
     function updateScopeIndicators() {
         const selectedChainInfo = availableChains.find(c => c.value === selectedChain);
 
         if (selectedChain && selectedChainInfo) {
-            // Update transaction scope badges
-            document.getElementById('transactions-scope-badge').textContent = selectedChainInfo.label.toUpperCase();
-            document.getElementById('chart-scope-info').textContent = selectedChainInfo.label;
-
-            // Update overview scope texts
             document.getElementById('transactions-scope').textContent = `${selectedChainInfo.label} activity`;
-            document.getElementById('tokens-scope').textContent = 'All chains'; // Always all chains for tokens
-            document.getElementById('volume-scope').textContent = 'All chains USD'; // Always all chains for volume
-            document.getElementById('chains-scope').textContent = 'All blockchains'; // Always all chains
+            document.getElementById('chart-scope-info').textContent = selectedChainInfo.label;
         } else {
-            // Multi-chain view
-            document.getElementById('transactions-scope-badge').textContent = 'ALL CHAINS';
-            document.getElementById('chart-scope-info').textContent = 'All chains';
-
             document.getElementById('transactions-scope').textContent = 'Multi-chain activity';
-            document.getElementById('tokens-scope').textContent = 'All chains';
-            document.getElementById('volume-scope').textContent = 'All chains USD';
-            document.getElementById('chains-scope').textContent = 'All blockchains';
+            document.getElementById('chart-scope-info').textContent = 'All chains';
         }
+
+        // Always keep these as all chains for comprehensive view
+        document.getElementById('tokens-scope').textContent = 'All chains';
+        document.getElementById('volume-scope').textContent = 'All chains USD';
+        document.getElementById('chains-scope').textContent = 'All blockchains';
 
         console.log('⚡ SCOPE: Updated indicators for chain:', selectedChain || 'all');
     }
 
-    // ⚡ FIXED: Enhanced refresh analytics dengan proper chain handling dan notification
+    // ⚡ Enhanced refresh analytics
     async function refreshAnalytics() {
         const btn = document.getElementById('refresh-analytics-btn');
         const originalText = btn.innerHTML;
@@ -1393,7 +1103,6 @@
         overviewDiv.style.display = 'none';
 
         try {
-            // ⚡ FIXED: Build request dengan chain selection
             let requestUrl = '{{ route('panel.portfolio.refresh-analytics') }}';
             const requestData = {
                 method: 'POST',
@@ -1418,20 +1127,19 @@
                 // Update analytics overview cards
                 updateAnalyticsOverview(data.analytics);
 
-                // ⚡ FIXED: Refresh data dengan proper native token separation
+                // ⚡ FIXED: Refresh data dengan comprehensive logic
                 prepareMostTradedData(data.analytics);
                 chainActivityData = Object.entries(data.analytics.chains_activity || {});
 
-                // ⚡ FIXED: Update transactions dengan proper filtering
+                // ⚡ FIXED: Update transactions
                 transactionsData = data.transactions || [];
                 console.log(`⚡ REFRESH: Received ${transactionsData.length} transactions`);
 
                 // Reset pagination
                 mostTradedPage = 1;
-                chainActivityPage = 1;
                 transactionsPage = 1;
 
-                // Update paginated sections
+                // Update sections
                 updateChainActivityPaginated();
                 populateTransactionsTablePaginated();
                 updateTransactionChart(data.analytics.transaction_frequency || {});
@@ -1445,11 +1153,8 @@
                 const chainInfo = selectedChain ? ` untuk ${selectedChain}` : ' multi-chain';
                 showNotification(`⚡ Analytics data${chainInfo} berhasil diperbarui!`, 'success');
 
-                // ⚡ Show enhanced debug info if available
                 if (data.debug_info) {
                     console.log('⚡ REFRESH DEBUG:', data.debug_info);
-                    const debugSummary = `Refreshed: ${data.debug_info.analytics_total_txs || 0} analytics txs, ${data.debug_info.transactions_count || 0} transaction records, ${data.debug_info.most_traded_count || 0} alt tokens, ${data.debug_info.native_tokens_count || 0} native tokens`;
-                    console.log('⚡ REFRESH SUMMARY:', debugSummary);
                 }
             } else {
                 showNotification(data.message || 'Gagal memperbarui data', 'error');
@@ -1480,15 +1185,16 @@
         const totalTx = analytics.total_transactions || 0;
         const uniqueTokens = analytics.unique_tokens_traded || 0;
         const chainsCount = Object.keys(analytics.chains_activity || {}).length;
+        const totalVolumeUsd = analytics.total_volume_usd || 0;
 
         // Trading Activity Insight
         let tradingInsight = '';
         if (totalTx > 200) {
-            tradingInsight = `Anda sangat aktif di multi-chain dengan ${numberFormat(totalTx, 0)} transaksi across ${chainsCount} blockchains.`;
+            tradingInsight = `Sangat aktif dengan ${numberFormat(totalTx, 0)} transaksi dan $${numberFormat(totalVolumeUsd, 2)} volume USD.`;
         } else if (totalTx > 50) {
-            tradingInsight = `Aktivitas multi-chain yang solid dengan ${numberFormat(totalTx, 0)} transaksi di ${chainsCount} chains.`;
+            tradingInsight = `Aktivitas solid dengan ${numberFormat(totalTx, 0)} transaksi di ${chainsCount} chains.`;
         } else {
-            tradingInsight = `Portfolio multi-chain masih developing dengan ${numberFormat(totalTx, 0)} transaksi.`;
+            tradingInsight = `Portfolio developing dengan ${numberFormat(totalTx, 0)} transaksi tracked.`;
         }
         document.getElementById('trading-activity-insight').textContent = tradingInsight;
 
@@ -1506,16 +1212,16 @@
         // Multi-Chain Strategy Insight
         let multichainInsight = '';
         if (chainsCount >= 3) {
-            multichainInsight = `Optimal multi-chain strategy! Aktif di ${chainsCount} blockchains untuk maximum opportunities.`;
+            multichainInsight = `Optimal multi-chain strategy! Aktif di ${chainsCount} blockchains dengan total volume $${numberFormat(totalVolumeUsd, 2)}.`;
         } else if (chainsCount >= 2) {
-            multichainInsight = `Good multi-chain approach dengan ${chainsCount} blockchains. Consider expand untuk better yields.`;
+            multichainInsight = `Good multi-chain approach. Consider expand untuk better yields dan opportunities.`;
         } else {
-            multichainInsight = `Single-chain focused. Multi-chain strategy dapat memberikan better yields dan opportunities.`;
+            multichainInsight = `Single-chain focused. Multi-chain strategy dapat memberikan better yields.`;
         }
         document.getElementById('multichain-insight').textContent = multichainInsight;
     }
 
-    // ⚡ Update analytics overview cards dengan multi-chain context
+    // ⚡ Update analytics overview cards
     function updateAnalyticsOverview(analytics) {
         document.getElementById('total-transactions').textContent = numberFormat(analytics.total_transactions || 0, 0);
         document.getElementById('unique-tokens').textContent = numberFormat(analytics.unique_tokens_traded || 0, 0);
@@ -1523,7 +1229,7 @@
         document.getElementById('active-chains').textContent = Object.keys(analytics.chains_activity || {}).length;
     }
 
-    // ⚡ NEW: Function untuk populate native tokens section
+    // ⚡ Function untuk populate native tokens section
     function populateNativeTokensSection(analytics) {
         const nativeTokensSection = document.getElementById('native-tokens-section');
         const container = document.getElementById('native-tokens-list');
@@ -1563,7 +1269,7 @@
         }
     }
 
-    // ⚡ ENHANCED: Update transaction chart dengan better fallback
+    // ⚡ Update transaction chart
     function updateTransactionChart(transactionFrequency) {
         const entries = Object.entries(transactionFrequency);
         if (entries.length === 0) {
@@ -1571,13 +1277,11 @@
             return;
         }
 
-        // Try to initialize Chart.js
         try {
             if (transactionChart) {
                 transactionChart.destroy();
             }
 
-            // Sort by date
             entries.sort((a, b) => new Date(a[0]) - new Date(b[0]));
 
             const labels = entries.map(([date]) => {
@@ -1592,7 +1296,6 @@
                 return;
             }
 
-            // Check if Chart.js is available
             if (typeof Chart === 'undefined') {
                 console.warn('Chart.js not loaded, showing fallback');
                 showChartFallback(transactionFrequency);
@@ -1662,7 +1365,6 @@
                 }
             });
 
-            // Hide fallback and show chart
             const chartFallback = document.getElementById('chart-fallback');
             const chartWrapper = document.getElementById('chart-wrapper');
             if (chartFallback) chartFallback.style.display = 'none';
@@ -1674,7 +1376,7 @@
         }
     }
 
-    // ⚡ Enhanced fallback chart dengan data
+    // ⚡ Enhanced fallback chart
     function showChartFallback(transactionFrequency = {}) {
         const chartWrapper = document.getElementById('chart-wrapper');
         const chartFallback = document.getElementById('chart-fallback');
@@ -1684,7 +1386,6 @@
             const entries = Object.entries(transactionFrequency);
 
             if (entries.length > 0) {
-                // Sort by date
                 entries.sort((a, b) => new Date(a[0]) - new Date(b[0]));
 
                 const maxCount = Math.max(...entries.map(([, count]) => count));
@@ -1712,10 +1413,11 @@
 
                 chartFallback.innerHTML = html;
             } else {
+                const chainContext = selectedChain ? ` pada ${selectedChain.toUpperCase()}` : ' multi-chain';
                 chartFallback.innerHTML = `
                     <div class="text-center py-16">
                         <i class="fas fa-chart-line text-4xl text-gray-400 mb-3"></i>
-                        <p class="text-gray-500">Tidak ada data frekuensi transaksi</p>
+                        <p class="text-gray-500">Tidak ada data frekuensi transaksi${chainContext}</p>
                         <p class="text-sm text-gray-400 mt-2">Grafik akan muncul setelah ada aktivitas trading</p>
                     </div>
                 `;
@@ -1744,7 +1446,7 @@
         }
     }
 
-    // ⚡ ENHANCED: Number formatting dengan support untuk decimal yang berbeda
+    // ⚡ Number formatting
     function numberFormat(number, decimals = 2) {
         if (number === null || number === undefined || isNaN(number)) {
             return '0';
