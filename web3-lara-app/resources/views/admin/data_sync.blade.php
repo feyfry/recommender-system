@@ -40,15 +40,15 @@
             </div>
         </div>
 
-        <!-- API Cache Stats -->
+        <!-- Memory Cache Stats -->
         <div class="clay-card p-6">
             <h2 class="text-lg font-bold mb-4 flex items-center">
-                <i class="fas fa-database mr-2 text-primary"></i>
-                Statistik Cache
+                <i class="fas fa-memory mr-2 text-primary"></i>
+                Cache Memory
             </h2>
             <div class="space-y-2">
                 <div class="flex justify-between">
-                    <span>Total Cache:</span>
+                    <span>Total Estimasi:</span>
                     <span class="font-bold">{{ $cacheStats['total'] ?? 0 }}</span>
                 </div>
                 <div class="flex justify-between">
@@ -56,7 +56,7 @@
                     <span class="font-bold">{{ $cacheStats['valid'] ?? 0 }}</span>
                 </div>
                 <div class="flex justify-between">
-                    <span>Cache Kadaluwarsa:</span>
+                    <span>Cache Expired:</span>
                     <span class="font-bold">{{ $cacheStats['expired'] ?? 0 }}</span>
                 </div>
                 <div class="flex justify-between">
@@ -69,6 +69,11 @@
                     Hapus Cache
                 </button>
             </div>
+            @if($cacheStats['type'] === 'memory_cache')
+            <div class="mt-2">
+                <p class="text-xs text-info">💡 Cache disimpan di memory</p>
+            </div>
+            @endif
         </div>
 
         <!-- Endpoint Usage -->
@@ -142,7 +147,7 @@
         </div>
     </div>
 
-    <!-- API Connection Test -->
+    <!-- API Connection Test - UPDATED dengan endpoint baru -->
     <div class="clay-card p-6 mb-8">
         <h2 class="text-xl font-bold mb-6 flex items-center">
             <i class="fas fa-plug mr-2 text-info"></i>
@@ -249,6 +254,42 @@
             </div>
         </div>
 
+        <!-- NEW: Blockchain Analytics Endpoints -->
+        <h3 class="text-lg font-bold mb-4">🚀 Multi-Chain Blockchain Analytics</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+            <div class="clay-card bg-purple/10 p-4 text-center api-test" data-endpoint="blockchain-portfolio">
+                <div class="status-indicator">
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-purple mb-2"></i>
+                </div>
+                <div class="font-bold">Portfolio Analysis</div>
+                <p class="text-xs mt-1">GET /blockchain/portfolio/{wallet}</p>
+            </div>
+
+            <div class="clay-card bg-indigo/10 p-4 text-center api-test" data-endpoint="blockchain-analytics">
+                <div class="status-indicator">
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-indigo mb-2"></i>
+                </div>
+                <div class="font-bold">Multi-Chain Analytics</div>
+                <p class="text-xs mt-1">GET /blockchain/analytics/{wallet}</p>
+            </div>
+
+            <div class="clay-card bg-teal/10 p-4 text-center api-test" data-endpoint="blockchain-transactions">
+                <div class="status-indicator">
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-teal mb-2"></i>
+                </div>
+                <div class="font-bold">Transactions</div>
+                <p class="text-xs mt-1">GET /blockchain/transactions/{wallet}</p>
+            </div>
+
+            <div class="clay-card bg-cyan/10 p-4 text-center api-test" data-endpoint="blockchain-health">
+                <div class="status-indicator">
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-cyan mb-2"></i>
+                </div>
+                <div class="font-bold">Blockchain Health</div>
+                <p class="text-xs mt-1">GET /blockchain/health</p>
+            </div>
+        </div>
+
         <h3 class="text-lg font-bold mb-4">Admin & Data Endpoints</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div class="clay-card bg-primary/10 p-4 text-center api-test" data-endpoint="record-interaction">
@@ -290,41 +331,47 @@
                 <div class="font-bold">Clear Analysis Cache</div>
                 <p class="text-xs mt-1">POST /analysis/cache/clear</p>
             </div>
+
+            <div class="clay-card bg-purple/10 p-4 text-center api-test" data-endpoint="blockchain-cache-clear">
+                <div class="status-indicator">
+                    <i class="fas fa-circle-notch fa-spin text-2xl text-purple mb-2"></i>
+                </div>
+                <div class="font-bold">Clear Blockchain Cache</div>
+                <p class="text-xs mt-1">POST /blockchain/cache/clear</p>
+            </div>
         </div>
     </div>
 
     <!-- Sync Options -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-        <!-- Sync Data -->
+        <!-- Production Pipeline -->
         <div class="clay-card p-6">
             <h2 class="text-lg font-bold mb-4 flex items-center">
-                <i class="fas fa-sync mr-2 text-success"></i>
-                Sinkronisasi Data
+                <i class="fas fa-rocket mr-2 text-success"></i>
+                Production Pipeline
             </h2>
             <p class="text-sm text-gray-600 mb-4">
-                Sinkronisasi data antara database Laravel dan engine rekomendasi Python
-                melalui file CSV yang di-sharing.
+                Jalankan production pipeline lengkap yang mencakup: collect data, update projects,
+                train models, evaluate, dan auto import ke database Laravel.
             </p>
             <div class="clay-card bg-success/5 p-4 mb-4">
-                <h3 class="font-bold mb-2">Command Artisan yang Tersedia:</h3>
+                <h3 class="font-bold mb-2">Production Command (Baru):</h3>
                 <div class="space-y-2 font-mono text-xs">
                     <div class="clay-card bg-success/10 p-2">
-                        php artisan recommend:sync --projects
+                        python main.py run --production --evaluate
                     </div>
-                    <div class="clay-card bg-success/10 p-2">
-                        php artisan recommend:sync --interactions
-                    </div>
-                    <div class="clay-card bg-success/10 p-2">
-                        php artisan recommend:sync --train
-                    </div>
-                    <div class="clay-card bg-success/10 p-2">
-                        php artisan recommend:sync --full
-                    </div>
+                </div>
+                <div class="mt-2 text-xs text-gray-600">
+                    ✅ Preserve existing interactions<br>
+                    ✅ Update projects dengan data terbaru<br>
+                    ✅ Train semua models (FECF, NCF, Hybrid)<br>
+                    ✅ Evaluate performa models<br>
+                    ✅ Auto import ke Laravel database
                 </div>
             </div>
             <div class="flex space-x-2">
-                <button onclick="document.getElementById('sync-data-modal').classList.remove('hidden')" class="clay-button clay-button-success">
-                    <i class="fas fa-sync mr-2"></i> Sinkronisasi Data
+                <button onclick="document.getElementById('production-pipeline-modal').classList.remove('hidden')" class="clay-button clay-button-success">
+                    <i class="fas fa-rocket mr-2"></i> Run Production Pipeline
                 </button>
             </div>
         </div>
@@ -370,8 +417,8 @@
     <!-- Cache Data -->
     <div class="clay-card p-6 mb-8" id="endpoint-list" style="display: none;">
         <h2 class="text-xl font-bold mb-6 flex items-center">
-            <i class="fas fa-database mr-2 text-primary"></i>
-            Daftar Endpoint Cache
+            <i class="fas fa-chart-line mr-2 text-primary"></i>
+            Estimasi Penggunaan Endpoint
         </h2>
 
         <div class="overflow-x-auto">
@@ -379,69 +426,29 @@
                 <thead>
                     <tr>
                         <th class="py-3 px-4 text-left">Endpoint</th>
-                        <th class="py-3 px-4 text-left">Jumlah Cache</th>
-                        <th class="py-3 px-4 text-left">Aksi</th>
+                        <th class="py-3 px-4 text-left">Estimasi Usage</th>
+                        <th class="py-3 px-4 text-left">Status</th>
                     </tr>
                 </thead>
                 <tbody>
-                    @php
-                        $endpointPage = request()->get('endpoint_page', 1);
-                        $endpointPerPage = 10;
-                        $endpointData = $endpointUsage ? $endpointUsage->forPage($endpointPage, $endpointPerPage) : collect([]);
-                        $totalEndpoints = $endpointUsage ? $endpointUsage->count() : 0;
-                        $totalPages = ceil($totalEndpoints / $endpointPerPage);
-                    @endphp
-
-                    @forelse($endpointData as $endpoint)
+                    @forelse($endpointUsage as $endpoint)
                     <tr>
                         <td class="py-3 px-4 font-medium">{{ $endpoint->endpoint }}</td>
                         <td class="py-3 px-4">{{ $endpoint->count }}</td>
                         <td class="py-3 px-4">
-                            <form action="{{ route('admin.clear-api-cache') }}" method="POST" class="inline-block">
-                                @csrf
-                                <input type="hidden" name="endpoint" value="{{ $endpoint->endpoint }}">
-                                <button type="submit" class="clay-badge clay-badge-danger py-1 px-2 text-xs">
-                                    <i class="fas fa-trash-alt"></i> Hapus Cache
-                                </button>
-                            </form>
+                            <span class="clay-badge clay-badge-success text-xs">Active</span>
                         </td>
                     </tr>
                     @empty
                     <tr>
                         <td colspan="3" class="py-6 px-4 text-center">
-                            <p class="text-gray-500">Tidak ada data cache yang tersedia.</p>
+                            <p class="text-gray-500">Estimasi penggunaan endpoint.</p>
                         </td>
                     </tr>
                     @endforelse
                 </tbody>
             </table>
         </div>
-
-        @if($totalPages > 1)
-        <div class="mt-6">
-            <div class="flex justify-center space-x-2">
-                @if($endpointPage > 1)
-                    <a href="{{ request()->fullUrlWithQuery(['endpoint_page' => $endpointPage - 1]) }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
-                        <i class="fas fa-chevron-left mr-1"></i> Sebelumnya
-                    </a>
-                @endif
-
-                @for($i = max(1, $endpointPage - 2); $i <= min($totalPages, $endpointPage + 2); $i++)
-                    @if($i == $endpointPage)
-                        <span class="clay-button clay-button-primary py-1.5 px-3 text-sm">{{ $i }}</span>
-                    @else
-                        <a href="{{ request()->fullUrlWithQuery(['endpoint_page' => $i]) }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">{{ $i }}</a>
-                    @endif
-                @endfor
-
-                @if($endpointPage < $totalPages)
-                    <a href="{{ request()->fullUrlWithQuery(['endpoint_page' => $endpointPage + 1]) }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
-                        Selanjutnya <i class="fas fa-chevron-right ml-1"></i>
-                    </a>
-                @endif
-            </div>
-        </div>
-        @endif
     </div>
 
     <!-- Import/Export Data -->
@@ -556,7 +563,7 @@
         </div>
     </div>
 
-    <!-- CRON Jobs Configuration -->
+    <!-- UPDATED: CRON Jobs Configuration -->
     <div class="clay-card p-6">
         <h2 class="text-xl font-bold mb-6 flex items-center">
             <i class="fas fa-clock mr-2 text-info"></i>
@@ -564,9 +571,9 @@
         </h2>
 
         <div class="clay-card bg-info/10 p-6 mb-6">
-            <h3 class="font-bold mb-3">Konfigurasi CRON Jobs</h3>
+            <h3 class="font-bold mb-3">Konfigurasi CRON Jobs (Updated)</h3>
             <p class="text-sm mb-4">
-                Jadwal tugas otomatis berikut sudah dikonfigurasi pada sistem:
+                Jadwal tugas otomatis telah diperbarui menggunakan production pipeline:
             </p>
             <div class="overflow-x-auto">
                 <table class="clay-table min-w-full">
@@ -578,14 +585,22 @@
                         </tr>
                     </thead>
                     <tbody>
-                        <tr>
+                        <tr class="bg-success/5">
                             <td class="py-2 px-4 font-mono text-xs">
-                                recommend:sync --projects
+                                python main.py run --production --evaluate
                             </td>
                             <td class="py-2 px-4">
-                                <span class="clay-badge clay-badge-info">12 jam sekali</span>
+                                <span class="clay-badge clay-badge-success">12 jam sekali</span>
                             </td>
-                            <td class="py-2 px-4">Sinkronisasi data proyek</td>
+                            <td class="py-2 px-4">
+                                Production pipeline lengkap + auto import
+                                <div class="text-xs text-gray-600 mt-1">
+                                    ✅ Update projects<br>
+                                    ✅ Train models<br>
+                                    ✅ Evaluate performance<br>
+                                    ✅ Auto import to Laravel
+                                </div>
+                            </td>
                         </tr>
                         <tr>
                             <td class="py-2 px-4 font-mono text-xs">
@@ -594,16 +609,7 @@
                             <td class="py-2 px-4">
                                 <span class="clay-badge clay-badge-info">4 jam sekali</span>
                             </td>
-                            <td class="py-2 px-4">Sinkronisasi interaksi pengguna</td>
-                        </tr>
-                        <tr>
-                            <td class="py-2 px-4 font-mono text-xs">
-                                recommend:sync --train
-                            </td>
-                            <td class="py-2 px-4">
-                                <span class="clay-badge clay-badge-info">03:00 setiap hari</span>
-                            </td>
-                            <td class="py-2 px-4">Melatih model rekomendasi</td>
+                            <td class="py-2 px-4">Export interaksi dari Laravel ke engine</td>
                         </tr>
                         <tr>
                             <td class="py-2 px-4 font-mono text-xs">
@@ -612,7 +618,7 @@
                             <td class="py-2 px-4">
                                 <span class="clay-badge clay-badge-info">Setiap jam</span>
                             </td>
-                            <td class="py-2 px-4">Membersihkan cache API kadaluwarsa</td>
+                            <td class="py-2 px-4">Membersihkan cache memory kadaluwarsa</td>
                         </tr>
                     </tbody>
                 </table>
@@ -624,6 +630,51 @@
                 <i class="fas fa-arrow-left mr-2"></i> Kembali ke Dashboard
             </a>
         </div>
+    </div>
+</div>
+
+<!-- Production Pipeline Modal -->
+<div id="production-pipeline-modal" class="fixed inset-0 z-50 hidden">
+    <div class="clay-modal-backdrop"></div>
+    <div class="clay-modal max-w-md">
+        <div class="clay-modal-header">
+            <h3 class="text-xl font-bold">Run Production Pipeline</h3>
+        </div>
+        <form action="{{ route('admin.run-production-pipeline') }}" method="POST">
+            @csrf
+            <div class="clay-modal-body">
+                <div class="space-y-4">
+                    <div class="clay-card bg-warning/10 p-4">
+                        <h4 class="font-bold mb-2">⚠️ Production Pipeline</h4>
+                        <p class="text-sm">
+                            Ini akan menjalankan pipeline production lengkap yang mencakup:
+                        </p>
+                        <ul class="text-sm mt-2 space-y-1">
+                            <li>✅ Collect data terbaru dari CoinGecko</li>
+                            <li>✅ Update projects (preserve existing interactions)</li>
+                            <li>✅ Train semua models (FECF, NCF, Hybrid)</li>
+                            <li>✅ Evaluate model performance</li>
+                            <li>✅ Auto import hasil ke Laravel database</li>
+                        </ul>
+                    </div>
+
+                    <div class="clay-card bg-info/10 p-4">
+                        <p class="text-sm">
+                            <strong>Estimasi waktu:</strong> 10-15 menit<br>
+                            <strong>Auto Import:</strong> Ya (otomatis setelah pipeline selesai)
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="clay-modal-footer">
+                <button type="button" class="clay-button" onclick="document.getElementById('production-pipeline-modal').classList.add('hidden')">
+                    Batal
+                </button>
+                <button type="submit" class="clay-button clay-button-success">
+                    <i class="fas fa-rocket mr-1"></i> Run Production Pipeline
+                </button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -719,27 +770,31 @@
     <div class="clay-modal-backdrop"></div>
     <div class="clay-modal max-w-md">
         <div class="clay-modal-header">
-            <h3 class="text-xl font-bold">Hapus Cache API</h3>
+            <h3 class="text-xl font-bold">Hapus Cache Memory</h3>
         </div>
         <form action="{{ route('admin.clear-api-cache') }}" method="POST">
             @csrf
             <div class="clay-modal-body">
                 <div class="space-y-4">
-                    <p>Pilih opsi pembersihan cache:</p>
+                    <p>Pilih opsi pembersihan cache memory:</p>
 
                     <div class="clay-checkbox-container">
                         <input type="radio" id="cache-all" name="cache_option" value="all" class="clay-checkbox" checked>
-                        <label for="cache-all">Semua Cache</label>
+                        <label for="cache-all">Semua Cache Memory</label>
                     </div>
 
                     <div class="clay-checkbox-container">
                         <input type="radio" id="cache-expired" name="cache_option" value="expired" class="clay-checkbox">
-                        <label for="cache-expired">Hanya Cache Kadaluwarsa</label>
+                        <label for="cache-expired">Cache Keys Terpilih</label>
                     </div>
 
                     <div class="clay-checkbox-container">
                         <input type="radio" id="cache-maintenance" name="cache_option" value="maintenance" class="clay-checkbox">
-                        <label for="cache-maintenance">Maintenance Cache</label>
+                        <label for="cache-maintenance">Maintenance Cache + OpCache</label>
+                    </div>
+
+                    <div class="text-xs text-gray-600">
+                        💡 Cache disimpan di memory Laravel, bukan database
                     </div>
                 </div>
             </div>
@@ -931,12 +986,19 @@
             test_only: true // Flag khusus untuk testing
         }, true);
 
-        // 4. Admin & data endpoints - SEMUA destructive
+        // 4. NEW: Blockchain Analytics endpoints (aman untuk GET)
+        testEndpoint('blockchain-portfolio', `${apiUrl}/blockchain/portfolio/0x1234567890123456789012345678901234567890`, 'GET');
+        testEndpoint('blockchain-analytics', `${apiUrl}/blockchain/analytics/0x1234567890123456789012345678901234567890`, 'GET');
+        testEndpoint('blockchain-transactions', `${apiUrl}/blockchain/transactions/0x1234567890123456789012345678901234567890?limit=10`, 'GET');
+        testEndpoint('blockchain-health', `${apiUrl}/blockchain/health`, 'GET');
+
+        // 5. Admin & data endpoints - SEMUA destructive
         testEndpoint('record-interaction', `${apiUrl}/interactions/record`, 'POST', null, true);
         testEndpoint('train-models', `${apiUrl}/admin/train-models`, 'POST', null, true);
         testEndpoint('sync-data', `${apiUrl}/admin/sync-data`, 'POST', null, true);
         testEndpoint('rec-cache-clear', `${apiUrl}/recommend/cache/clear`, 'POST', null, true);
         testEndpoint('analysis-cache-clear', `${apiUrl}/analysis/cache/clear`, 'POST', null, true);
+        testEndpoint('blockchain-cache-clear', `${apiUrl}/blockchain/cache/clear`, 'POST', null, true);
     });
 </script>
 @endpush

@@ -40,21 +40,45 @@ return Application::configure(basePath: dirname(__DIR__))
         App\Console\Commands\ClearApiCache::class,
     ])
     ->withSchedule(function (Schedule $schedule) {
-        $schedule->command('recommend:sync --projects')
+        // UPDATED: Production pipeline dengan auto import
+        $schedule->exec('cd ' . base_path('../recommendation-engine') . ' && python main.py run --production --evaluate')
             ->cron('0 */12 * * *')
-            ->description('Sinkronisasi data proyek dari engine rekomendasi');
+            ->description('Production pipeline lengkap dengan auto import')
+            ->after(function () {
+                // Auto import setelah production pipeline selesai
+                \Illuminate\Support\Facades\Artisan::call('recommend:import --projects --force');
+                \Illuminate\Support\Facades\Artisan::call('recommend:import --interactions --force');
 
+                // Clear cache setelah import
+                \Illuminate\Support\Facades\Cache::flush();
+
+                \Illuminate\Support\Facades\Log::info('Production pipeline completed with auto import');
+            });
+
+        // Export interaksi dari Laravel ke engine setiap 4 jam
         $schedule->command('recommend:sync --interactions')
             ->everyFourHours()
-            ->description('Sinkronisasi interaksi pengguna dengan engine rekomendasi');
+            ->description('Export interaksi pengguna dari Laravel ke engine');
 
-        $schedule->command('recommend:sync --train')
-            ->dailyAt('03:00')
-            ->description('Melatih model rekomendasi');
+        // Bersihkan cache memory setiap jam
+        $schedule->call(function () {
+            $knownKeys = [
+                'admin_user_stats',
+                'admin_project_stats',
+                'admin_interaction_stats',
+                'admin_transaction_stats',
+                'rec_trending_8',
+                'rec_popular_8',
+                'all_categories',
+                'all_chains',
+            ];
 
-        $schedule->command('cache:api-clear --expired')
+            foreach ($knownKeys as $key) {
+                \Illuminate\Support\Facades\Cache::forget($key);
+            }
+        })
             ->hourly()
-            ->description('Bersihkan cache API yang kadaluwarsa');
+            ->description('Bersihkan cache memory kadaluwarsa');
     })
     ->withExceptions(function (Exceptions $exceptions) {
         $exceptions->dontReport([
