@@ -40,24 +40,24 @@
             </div>
         </div>
 
-        <!-- Memory Cache Stats -->
+        <!-- FIXED: Real Cache Memory Stats -->
         <div class="clay-card p-6">
             <h2 class="text-lg font-bold mb-4 flex items-center">
                 <i class="fas fa-memory mr-2 text-primary"></i>
-                Cache Memory
+                Cache Memory Laravel
             </h2>
             <div class="space-y-2">
                 <div class="flex justify-between">
-                    <span>Total Estimasi:</span>
+                    <span>Cache Keys Total:</span>
                     <span class="font-bold">{{ $cacheStats['total'] ?? 0 }}</span>
                 </div>
                 <div class="flex justify-between">
                     <span>Cache Valid:</span>
-                    <span class="font-bold">{{ $cacheStats['valid'] ?? 0 }}</span>
+                    <span class="font-bold text-success">{{ $cacheStats['valid'] ?? 0 }}</span>
                 </div>
                 <div class="flex justify-between">
                     <span>Cache Expired:</span>
-                    <span class="font-bold">{{ $cacheStats['expired'] ?? 0 }}</span>
+                    <span class="font-bold text-danger">{{ $cacheStats['expired'] ?? 0 }}</span>
                 </div>
                 <div class="flex justify-between">
                     <span>Hit Rate:</span>
@@ -65,26 +65,28 @@
                 </div>
             </div>
             <div class="mt-4">
-                <button onclick="document.getElementById('clear-cache-modal').classList.remove('hidden')" class="clay-button clay-button-primary py-1.5 px-3 text-sm">
+                <button onclick="document.getElementById('clear-cache-modal').classList.remove('hidden')"
+                        class="clay-button clay-button-primary py-1.5 px-3 text-sm">
                     Hapus Cache
                 </button>
             </div>
-            @if($cacheStats['type'] === 'memory_cache')
             <div class="mt-2">
-                <p class="text-xs text-info">💡 Cache disimpan di memory</p>
+                <p class="text-xs text-info">💡 {{ $cacheStats['note'] ?? 'Cache disimpan di memory Laravel' }}</p>
+                @if(isset($cacheStats['error']) && $cacheStats['error'])
+                    <p class="text-xs text-danger">⚠️ Error: {{ $cacheStats['error_message'] ?? 'Unknown error' }}</p>
+                @endif
             </div>
-            @endif
         </div>
 
-        <!-- Endpoint Usage -->
+        <!-- FIXED: Real Endpoint Usage -->
         <div class="clay-card p-6">
             <h2 class="text-lg font-bold mb-4 flex items-center">
                 <i class="fas fa-chart-bar mr-2 text-info"></i>
-                Penggunaan Endpoint
+                Estimasi Penggunaan API
             </h2>
             <div class="space-y-2">
                 <div class="flex justify-between">
-                    <span>Endpoint:</span>
+                    <span>Endpoint Terpantau:</span>
                     <span class="font-bold">{{ count($endpointUsage ?? []) }}</span>
                 </div>
 
@@ -95,15 +97,20 @@
 
                 @foreach($topEndpoints as $endpoint)
                 <div class="flex justify-between">
-                    <span class="truncate max-w-[150px]">{{ $endpoint->endpoint }}</span>
-                    <span class="font-bold">{{ $endpoint->count }}</span>
+                    <span class="truncate max-w-[100px] text-xs" title="{{ $endpoint->endpoint }}">
+                        {{ Str::limit($endpoint->endpoint, 15) }}
+                    </span>
+                    <span class="font-bold text-xs">{{ $endpoint->count }}</span>
                 </div>
                 @endforeach
             </div>
             <div class="mt-4">
                 <button onclick="toggleEndpointList()" class="clay-button clay-button-info py-1.5 px-3 text-sm">
-                    Detail Endpoint
+                    <i class="fas fa-list mr-1"></i> Detail Estimasi
                 </button>
+            </div>
+            <div class="mt-2">
+                <p class="text-xs text-info">📊 Estimasi berdasarkan aktivitas sistem</p>
             </div>
         </div>
 
@@ -147,7 +154,7 @@
         </div>
     </div>
 
-    <!-- API Connection Test - UPDATED dengan endpoint baru -->
+    <!-- API Connection Test - UPDATED dengan test_only untuk resource-heavy endpoints -->
     <div class="clay-card p-6 mb-8">
         <h2 class="text-xl font-bold mb-6 flex items-center">
             <i class="fas fa-plug mr-2 text-info"></i>
@@ -194,91 +201,103 @@
                 <p class="text-xs mt-1">GET /recommend/popular</p>
             </div>
 
-            <div class="clay-card bg-warning/10 p-4 text-center api-test" data-endpoint="projects">
+            <!-- FIXED: Resource-heavy endpoint dengan test_only -->
+            <div class="clay-card bg-warning/10 p-4 text-center api-test" data-endpoint="projects" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-warning mb-2"></i>
                 </div>
                 <div class="font-bold">Recommendations</div>
                 <p class="text-xs mt-1">POST /recommend/projects</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
 
-            <div class="clay-card bg-info/10 p-4 text-center api-test" data-endpoint="similar">
+            <div class="clay-card bg-info/10 p-4 text-center api-test" data-endpoint="similar" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-info mb-2"></i>
                 </div>
                 <div class="font-bold">Similar Projects</div>
                 <p class="text-xs mt-1">GET /recommend/similar/{id}</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
         </div>
 
         <h3 class="text-lg font-bold mb-4">Analysis Endpoints</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-            <div class="clay-card bg-secondary/10 p-4 text-center api-test" data-endpoint="trading-signals">
+            <!-- FIXED: Resource-heavy endpoints dengan test_only -->
+            <div class="clay-card bg-secondary/10 p-4 text-center api-test" data-endpoint="trading-signals" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-secondary mb-2"></i>
                 </div>
                 <div class="font-bold">Trading Signals</div>
                 <p class="text-xs mt-1">POST /analysis/trading-signals</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
 
-            <div class="clay-card bg-primary/10 p-4 text-center api-test" data-endpoint="indicators">
+            <div class="clay-card bg-primary/10 p-4 text-center api-test" data-endpoint="indicators" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-primary mb-2"></i>
                 </div>
                 <div class="font-bold">Technical Indicators</div>
                 <p class="text-xs mt-1">POST /analysis/indicators</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
 
-            <div class="clay-card bg-success/10 p-4 text-center api-test" data-endpoint="market-events">
+            <div class="clay-card bg-success/10 p-4 text-center api-test" data-endpoint="market-events" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-success mb-2"></i>
                 </div>
                 <div class="font-bold">Market Events</div>
                 <p class="text-xs mt-1">GET /analysis/market-events/{id}</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
 
-            <div class="clay-card bg-warning/10 p-4 text-center api-test" data-endpoint="alerts">
+            <div class="clay-card bg-warning/10 p-4 text-center api-test" data-endpoint="alerts" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-warning mb-2"></i>
                 </div>
                 <div class="font-bold">Price Alerts</div>
                 <p class="text-xs mt-1">GET /analysis/alerts/{id}</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
 
-            <div class="clay-card bg-info/10 p-4 text-center api-test" data-endpoint="price-prediction">
+            <div class="clay-card bg-info/10 p-4 text-center api-test" data-endpoint="price-prediction" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-info mb-2"></i>
                 </div>
                 <div class="font-bold">Price Prediction</div>
                 <p class="text-xs mt-1">GET /analysis/price-prediction/{id}</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
         </div>
 
-        <!-- NEW: Blockchain Analytics Endpoints -->
+        <!-- Multi-Chain Blockchain Analytics Endpoints -->
         <h3 class="text-lg font-bold mb-4">🚀 Multi-Chain Blockchain Analytics</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-            <div class="clay-card bg-purple/10 p-4 text-center api-test" data-endpoint="blockchain-portfolio">
+            <div class="clay-card bg-purple/10 p-4 text-center api-test" data-endpoint="blockchain-portfolio" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-purple mb-2"></i>
                 </div>
                 <div class="font-bold">Portfolio Analysis</div>
                 <p class="text-xs mt-1">GET /blockchain/portfolio/{wallet}</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
 
-            <div class="clay-card bg-indigo/10 p-4 text-center api-test" data-endpoint="blockchain-analytics">
+            <div class="clay-card bg-indigo/10 p-4 text-center api-test" data-endpoint="blockchain-analytics" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-indigo mb-2"></i>
                 </div>
                 <div class="font-bold">Multi-Chain Analytics</div>
                 <p class="text-xs mt-1">GET /blockchain/analytics/{wallet}</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
 
-            <div class="clay-card bg-teal/10 p-4 text-center api-test" data-endpoint="blockchain-transactions">
+            <div class="clay-card bg-teal/10 p-4 text-center api-test" data-endpoint="blockchain-transactions" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-teal mb-2"></i>
                 </div>
                 <div class="font-bold">Transactions</div>
                 <p class="text-xs mt-1">GET /blockchain/transactions/{wallet}</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
 
             <div class="clay-card bg-cyan/10 p-4 text-center api-test" data-endpoint="blockchain-health">
@@ -292,57 +311,64 @@
 
         <h3 class="text-lg font-bold mb-4">Admin & Data Endpoints</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div class="clay-card bg-primary/10 p-4 text-center api-test" data-endpoint="record-interaction">
+            <!-- FIXED: Resource-heavy admin endpoints dengan test_only -->
+            <div class="clay-card bg-primary/10 p-4 text-center api-test" data-endpoint="record-interaction" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-primary mb-2"></i>
                 </div>
                 <div class="font-bold">Record Interaction</div>
                 <p class="text-xs mt-1">POST /interactions/record</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
 
-            <div class="clay-card bg-success/10 p-4 text-center api-test" data-endpoint="train-models">
+            <div class="clay-card bg-success/10 p-4 text-center api-test" data-endpoint="train-models" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-success mb-2"></i>
                 </div>
                 <div class="font-bold">Train Models</div>
                 <p class="text-xs mt-1">POST /admin/train-models</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
 
-            <div class="clay-card bg-warning/10 p-4 text-center api-test" data-endpoint="sync-data">
+            <div class="clay-card bg-warning/10 p-4 text-center api-test" data-endpoint="sync-data" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-warning mb-2"></i>
                 </div>
                 <div class="font-bold">Sync Data</div>
                 <p class="text-xs mt-1">POST /admin/sync-data</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
 
-            <div class="clay-card bg-info/10 p-4 text-center api-test" data-endpoint="rec-cache-clear">
+            <div class="clay-card bg-info/10 p-4 text-center api-test" data-endpoint="rec-cache-clear" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-info mb-2"></i>
                 </div>
                 <div class="font-bold">Clear Recommendation Cache</div>
                 <p class="text-xs mt-1">POST /recommend/cache/clear</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
 
-            <div class="clay-card bg-secondary/10 p-4 text-center api-test" data-endpoint="analysis-cache-clear">
+            <div class="clay-card bg-secondary/10 p-4 text-center api-test" data-endpoint="analysis-cache-clear" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-secondary mb-2"></i>
                 </div>
                 <div class="font-bold">Clear Analysis Cache</div>
                 <p class="text-xs mt-1">POST /analysis/cache/clear</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
 
-            <div class="clay-card bg-purple/10 p-4 text-center api-test" data-endpoint="blockchain-cache-clear">
+            <div class="clay-card bg-purple/10 p-4 text-center api-test" data-endpoint="blockchain-cache-clear" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-purple mb-2"></i>
                 </div>
                 <div class="font-bold">Clear Blockchain Cache</div>
                 <p class="text-xs mt-1">POST /blockchain/cache/clear</p>
+                <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
         </div>
     </div>
 
-    <!-- Sync Options -->
+    <!-- Production Pipeline & Train Models sections tetap sama -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <!-- Production Pipeline -->
         <div class="clay-card p-6">
@@ -414,11 +440,11 @@
         </div>
     </div>
 
-    <!-- Cache Data -->
+    <!-- FIXED: Endpoint Usage Detail dengan data real -->
     <div class="clay-card p-6 mb-8" id="endpoint-list" style="display: none;">
         <h2 class="text-xl font-bold mb-6 flex items-center">
             <i class="fas fa-chart-line mr-2 text-primary"></i>
-            Estimasi Penggunaan Endpoint
+            Estimasi Penggunaan Endpoint API
         </h2>
 
         <div class="overflow-x-auto">
@@ -427,31 +453,44 @@
                     <tr>
                         <th class="py-3 px-4 text-left">Endpoint</th>
                         <th class="py-3 px-4 text-left">Estimasi Usage</th>
+                        <th class="py-3 px-4 text-left">Deskripsi</th>
                         <th class="py-3 px-4 text-left">Status</th>
                     </tr>
                 </thead>
                 <tbody>
                     @forelse($endpointUsage as $endpoint)
                     <tr>
-                        <td class="py-3 px-4 font-medium">{{ $endpoint->endpoint }}</td>
-                        <td class="py-3 px-4">{{ $endpoint->count }}</td>
+                        <td class="py-3 px-4 font-medium font-mono text-sm">{{ $endpoint->endpoint }}</td>
+                        <td class="py-3 px-4 font-bold">{{ number_format($endpoint->count) }}</td>
+                        <td class="py-3 px-4 text-sm">{{ $endpoint->description ?? '-' }}</td>
                         <td class="py-3 px-4">
-                            <span class="clay-badge clay-badge-success text-xs">Active</span>
+                            <span class="clay-badge clay-badge-success text-xs">Aktif</span>
                         </td>
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="3" class="py-6 px-4 text-center">
-                            <p class="text-gray-500">Estimasi penggunaan endpoint.</p>
+                        <td colspan="4" class="py-6 px-4 text-center">
+                            <p class="text-gray-500">Tidak ada data estimasi penggunaan endpoint.</p>
                         </td>
                     </tr>
                     @endforelse
                 </tbody>
             </table>
         </div>
+
+        <div class="mt-4 p-4 clay-card bg-info/10">
+            <p class="text-sm text-info">
+                <i class="fas fa-info-circle mr-2"></i>
+                <strong>Catatan:</strong> Data ini adalah estimasi berdasarkan aktivitas sistem
+                (interaksi pengguna: {{ \App\Models\Interaction::count() }},
+                total pengguna: {{ \App\Models\User::count() }},
+                total proyek: {{ \App\Models\Project::count() }}).
+                Penggunaan sebenarnya mungkin berbeda.
+            </p>
+        </div>
     </div>
 
-    <!-- Import/Export Data -->
+    <!-- Import/Export Data dan sisa content tetap sama -->
     <div class="clay-card p-6 mb-8">
         <h2 class="text-xl font-bold mb-6 flex items-center">
             <i class="fas fa-exchange-alt mr-2 text-success"></i>
@@ -563,7 +602,7 @@
         </div>
     </div>
 
-    <!-- UPDATED: CRON Jobs Configuration -->
+    <!-- CRON Jobs Configuration tetap sama -->
     <div class="clay-card p-6">
         <h2 class="text-xl font-bold mb-6 flex items-center">
             <i class="fas fa-clock mr-2 text-info"></i>
@@ -633,6 +672,7 @@
     </div>
 </div>
 
+<!-- Modal components tetap sama -->
 <!-- Production Pipeline Modal -->
 <div id="production-pipeline-modal" class="fixed inset-0 z-50 hidden">
     <div class="clay-modal-backdrop"></div>
@@ -812,12 +852,25 @@
 
 @push('scripts')
 <script>
+    // FIXED: Toggle endpoint list function yang benar
     function toggleEndpointList() {
         const endpointList = document.getElementById('endpoint-list');
-        if (endpointList.style.display === 'none') {
+        const button = event.target.closest('button');
+
+        if (endpointList.style.display === 'none' || endpointList.style.display === '') {
             endpointList.style.display = 'block';
+            if (button) {
+                button.innerHTML = '<i class="fas fa-eye-slash mr-1"></i> Sembunyikan Detail';
+                button.classList.remove('clay-button-info');
+                button.classList.add('clay-button-warning');
+            }
         } else {
             endpointList.style.display = 'none';
+            if (button) {
+                button.innerHTML = '<i class="fas fa-list mr-1"></i> Detail Estimasi';
+                button.classList.remove('clay-button-warning');
+                button.classList.add('clay-button-info');
+            }
         }
     }
 
@@ -836,28 +889,43 @@
                     // Simpan teks original dan tambahkan spinner + teks loading
                     const originalHTML = submitButton.innerHTML;
                     submitButton.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Memproses...';
+
+                    // Set timeout untuk enable kembali jika diperlukan (fallback)
+                    setTimeout(() => {
+                        if (submitButton.disabled) {
+                            submitButton.disabled = false;
+                            submitButton.innerHTML = originalHTML;
+                        }
+                    }, 60000); // 1 menit timeout
                 }
             });
         });
     });
 
-    // API Connection Test
+    // UPDATED: API Connection Test yang lebih efisien dengan test_only untuk resource-heavy endpoints
     document.addEventListener('DOMContentLoaded', function() {
         const apiUrl = "{{ env('RECOMMENDATION_API_URL', 'http://localhost:8001') }}";
 
         // Fungsi untuk menguji endpoint dan memperbarui UI
-        function testEndpoint(endpoint, url, method, data = null, isDestructive = false) {
+        function testEndpoint(endpoint, url, method, data = null, testOnly = false) {
             const element = document.querySelector(`.api-test[data-endpoint="${endpoint}"] .status-indicator`);
-            if (!element) return;
-
-            // PERUBAHAN: Jika endpoint destructive (berbahaya), jangan lakukan test otomatis
-            if (isDestructive) {
-                element.innerHTML = `<button onclick="manualTestEndpoint('${endpoint}', '${url}', '${method}')"
-                    class="clay-button clay-button-primary py-1 px-2 text-xs">
-                    Tes Manual
-                </button>`;
+            if (!element) {
+                console.warn(`Element not found for endpoint: ${endpoint}`);
                 return;
             }
+
+            // UPDATED: Untuk endpoint yang memakan resource, tampilkan tombol test manual
+            if (testOnly) {
+                element.innerHTML = `
+                    <button onclick="manualTestEndpoint('${endpoint}', '${url}', '${method}')"
+                        class="clay-button clay-button-primary py-1 px-2 text-xs">
+                        <i class="fas fa-vial mr-1"></i> Tes Manual
+                    </button>`;
+                return;
+            }
+
+            // Reset ke loading state
+            element.innerHTML = `<i class="fas fa-circle-notch fa-spin text-2xl text-primary mb-2"></i>`;
 
             const options = {
                 method: method,
@@ -865,13 +933,12 @@
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
                 },
-                // Tambahkan body hanya jika method adalah POST/PUT
                 ...(method !== 'GET' && data ? { body: JSON.stringify(data) } : {})
             };
 
-            // Menambahkan timeout yang lebih lama (10 detik)
+            // Timeout 5 detik untuk endpoint yang aman
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
             options.signal = controller.signal;
 
             fetch(url, options)
@@ -879,9 +946,10 @@
                     clearTimeout(timeoutId);
                     if (response.ok) {
                         element.innerHTML = `<i class="fas fa-check-circle text-3xl text-success mb-2"></i>`;
+                        console.log(`✅ ${endpoint}: Success`);
                     } else {
                         element.innerHTML = `<i class="fas fa-exclamation-circle text-3xl text-danger mb-2"></i>`;
-                        console.error(`Error ${method} ${url}: ${response.status} ${response.statusText}`);
+                        console.warn(`⚠️ ${endpoint}: HTTP ${response.status}`);
                     }
                     return response.text().then(text => {
                         try {
@@ -893,112 +961,162 @@
                 })
                 .catch(error => {
                     clearTimeout(timeoutId);
-                    console.error(`Error testing ${endpoint} (${url}):`, error);
-                    element.innerHTML = `<i class="fas fa-exclamation-circle text-3xl text-danger mb-2"></i>`;
+                    console.error(`❌ ${endpoint}: ${error.message}`);
+                    if (error.name === 'AbortError') {
+                        element.innerHTML = `<i class="fas fa-clock text-3xl text-warning mb-2" title="Timeout"></i>`;
+                    } else {
+                        element.innerHTML = `<i class="fas fa-exclamation-circle text-3xl text-danger mb-2"></i>`;
+                    }
                 });
         }
 
-        // TAMBAHAN: Fungsi untuk test manual endpoint berbahaya
+        // FIXED: Fungsi untuk test manual endpoint berbahaya
         window.manualTestEndpoint = function(endpoint, url, method) {
-            if (!confirm(`Anda yakin ingin menguji endpoint ${endpoint}? Endpoint ini dapat menyebabkan perubahan pada sistem.`)) {
+            const warningMessage = `Anda yakin ingin menguji endpoint ${endpoint}?\n\n⚡ Endpoint ini memakan resource sistem dan hanya untuk testing.\n\nLanjutkan?`;
+
+            if (!confirm(warningMessage)) {
                 return;
             }
 
             const element = document.querySelector(`.api-test[data-endpoint="${endpoint}"] .status-indicator`);
             if (!element) return;
 
+            // Loading state
             element.innerHTML = `<i class="fas fa-circle-notch fa-spin text-2xl text-primary mb-2"></i>`;
 
-            // Penanganan khusus untuk endpoint tertentu
-            let data = {};
-            if (endpoint === 'train-models') {
-                data = {
-                    models: ['fecf'],
-                    save_model: false,
-                    force: false,
-                    test_only: true  // Flag khusus untuk testing
-                };
-            } else if (endpoint === 'record-interaction') {
-                data = {
-                    user_id: 'test_user',
-                    project_id: 'bitcoin',
-                    interaction_type: 'view',
-                    weight: 1,
-                    test_only: true  // Flag khusus untuk testing
-                };
-            } else if (endpoint === 'sync-data') {
-                data = {
-                    projects_updated: false,
-                    test_only: true  // Flag khusus untuk testing
-                };
+            // Data test yang ringan dengan flag test_only
+            let testData = { test_only: true };
+
+            // Konfigurasi data spesifik per endpoint
+            switch(endpoint) {
+                case 'record-interaction':
+                    testData = {
+                        user_id: 'test_user',
+                        project_id: 'bitcoin',
+                        interaction_type: 'view',
+                        weight: 1,
+                        test_only: true
+                    };
+                    break;
+                case 'projects':
+                    testData = {
+                        user_id: 'user_1',
+                        model_type: 'fecf',
+                        num_recommendations: 5,
+                        test_only: true
+                    };
+                    break;
+                case 'trading-signals':
+                    testData = {
+                        project_id: 'bitcoin',
+                        days: 30,
+                        risk_tolerance: 'medium',
+                        test_only: true
+                    };
+                    break;
+                case 'indicators':
+                    testData = {
+                        project_id: 'bitcoin',
+                        days: 30,
+                        indicators: ['rsi'],
+                        test_only: true
+                    };
+                    break;
+                case 'train-models':
+                    testData = {
+                        models: ['fecf'],
+                        save_model: false,
+                        test_only: true
+                    };
+                    break;
+                case 'sync-data':
+                    testData = {
+                        projects_updated: false,
+                        test_only: true
+                    };
+                    break;
             }
 
-            fetch(url, {
+            // Handle URL untuk endpoint yang memerlukan parameter
+            let requestUrl = url;
+            if (endpoint.includes('blockchain-') && requestUrl.includes('{wallet}')) {
+                requestUrl = requestUrl.replace('{wallet}', '0x1234567890123456789012345678901234567890');
+            }
+
+            // FIXED: Handle GET vs POST requests
+            const requestOptions = {
                 method: method,
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
-                },
-                body: JSON.stringify(data)
-            })
+                }
+            };
+
+            // Hanya tambahkan body untuk POST requests
+            if (method === 'POST') {
+                requestOptions.body = JSON.stringify(testData);
+            }
+
+            fetch(requestUrl, requestOptions)
             .then(response => {
                 if (response.ok) {
                     element.innerHTML = `<i class="fas fa-check-circle text-3xl text-success mb-2"></i>`;
+                    console.log(`✅ Manual test ${endpoint} (${method}): Success`);
                 } else {
                     element.innerHTML = `<i class="fas fa-exclamation-circle text-3xl text-danger mb-2"></i>`;
+                    console.warn(`⚠️ Manual test ${endpoint} (${method}): HTTP ${response.status}`);
                 }
             })
             .catch(error => {
                 element.innerHTML = `<i class="fas fa-exclamation-circle text-3xl text-danger mb-2"></i>`;
+                console.error(`❌ Manual test ${endpoint} (${method}): ${error.message}`);
             });
         }
 
-        // Tes untuk semua endpoint
-        // 1. Core endpoints (aman)
-        testEndpoint('root', `${apiUrl}/`, 'GET');
-        testEndpoint('health', `${apiUrl}/health`, 'GET');
+        // Test endpoint yang aman (otomatis) - FIXED: Hanya endpoint yang benar-benar aman dan ringan
+        const safeEndpoints = [
+            { endpoint: 'root', url: `${apiUrl}/`, method: 'GET' },
+            { endpoint: 'health', url: `${apiUrl}/health`, method: 'GET' },
+            { endpoint: 'trending', url: `${apiUrl}/recommend/trending?limit=5`, method: 'GET' },
+            { endpoint: 'popular', url: `${apiUrl}/recommend/popular?limit=5`, method: 'GET' },
+            { endpoint: 'blockchain-health', url: `${apiUrl}/blockchain/health`, method: 'GET' }
+        ];
 
-        // 2. Recommendation endpoints (aman untuk GET, hati-hati untuk POST)
-        testEndpoint('trending', `${apiUrl}/recommend/trending?limit=5`, 'GET');
-        testEndpoint('popular', `${apiUrl}/recommend/popular?limit=5`, 'GET');
-        testEndpoint('similar', `${apiUrl}/recommend/similar/bitcoin?limit=5`, 'GET');
+        // Test endpoint yang memakan resource (manual test only) - FIXED: Termasuk GET yang berat
+        const resourceHeavyEndpoints = [
+            // GET endpoints yang memakan resource
+            { endpoint: 'similar', url: `${apiUrl}/recommend/similar/bitcoin?limit=5`, method: 'GET' },
+            { endpoint: 'market-events', url: `${apiUrl}/analysis/market-events/bitcoin?days=30`, method: 'GET' },
+            { endpoint: 'alerts', url: `${apiUrl}/analysis/alerts/bitcoin?days=30`, method: 'GET' },
+            { endpoint: 'price-prediction', url: `${apiUrl}/analysis/price-prediction/bitcoin?days=30`, method: 'GET' },
+            { endpoint: 'blockchain-portfolio', url: `${apiUrl}/blockchain/portfolio/{wallet}`, method: 'GET' },
+            { endpoint: 'blockchain-analytics', url: `${apiUrl}/blockchain/analytics/{wallet}`, method: 'GET' },
+            { endpoint: 'blockchain-transactions', url: `${apiUrl}/blockchain/transactions/{wallet}`, method: 'GET' },
+            // POST endpoints yang memakan resource
+            { endpoint: 'projects', url: `${apiUrl}/recommend/projects`, method: 'POST' },
+            { endpoint: 'trading-signals', url: `${apiUrl}/analysis/trading-signals`, method: 'POST' },
+            { endpoint: 'indicators', url: `${apiUrl}/analysis/indicators`, method: 'POST' },
+            { endpoint: 'record-interaction', url: `${apiUrl}/interactions/record`, method: 'POST' },
+            { endpoint: 'train-models', url: `${apiUrl}/admin/train-models`, method: 'POST' },
+            { endpoint: 'sync-data', url: `${apiUrl}/admin/sync-data`, method: 'POST' },
+            { endpoint: 'rec-cache-clear', url: `${apiUrl}/recommend/cache/clear`, method: 'POST' },
+            { endpoint: 'analysis-cache-clear', url: `${apiUrl}/analysis/cache/clear`, method: 'POST' },
+            { endpoint: 'blockchain-cache-clear', url: `${apiUrl}/blockchain/cache/clear`, method: 'POST' }
+        ];
 
-        // Endpoint yang bisa mengubah data - tandai sebagai destructive
-        testEndpoint('projects', `${apiUrl}/recommend/projects`, 'POST', {
-            user_id: 'user_1',
-            model_type: 'fecf',
-            num_recommendations: 5,
-            test_only: true  // Flag khusus untuk testing
-        }, true);
+        // Jalankan test otomatis untuk endpoint yang aman
+        safeEndpoints.forEach(config => {
+            testEndpoint(config.endpoint, config.url, config.method, null, false);
+        });
 
-        // 3. Analysis endpoints (aman untuk GET)
-        testEndpoint('market-events', `${apiUrl}/analysis/market-events/bitcoin?days=30`, 'GET');
-        testEndpoint('alerts', `${apiUrl}/analysis/alerts/bitcoin?days=30`, 'GET');
-        testEndpoint('price-prediction', `${apiUrl}/analysis/price-prediction/bitcoin?days=30`, 'GET');
+        // Setup manual test untuk endpoint yang memakan resource
+        resourceHeavyEndpoints.forEach(config => {
+            testEndpoint(config.endpoint, config.url, config.method, null, true);
+        });
 
-        // Endpoint yang bisa berat prosesnya - tandai sebagai destructive
-        testEndpoint('trading-signals', `${apiUrl}/analysis/trading-signals`, 'POST', {
-            project_id: 'bitcoin',
-            test_only: true // Flag khusus untuk testing
-        }, true);
-        testEndpoint('indicators', `${apiUrl}/analysis/indicators`, 'POST', {
-            project_id: 'bitcoin',
-            test_only: true // Flag khusus untuk testing
-        }, true);
-
-        // 4. NEW: Blockchain Analytics endpoints (aman untuk GET)
-        testEndpoint('blockchain-portfolio', `${apiUrl}/blockchain/portfolio/0x1234567890123456789012345678901234567890`, 'GET');
-        testEndpoint('blockchain-analytics', `${apiUrl}/blockchain/analytics/0x1234567890123456789012345678901234567890`, 'GET');
-        testEndpoint('blockchain-transactions', `${apiUrl}/blockchain/transactions/0x1234567890123456789012345678901234567890?limit=10`, 'GET');
-        testEndpoint('blockchain-health', `${apiUrl}/blockchain/health`, 'GET');
-
-        // 5. Admin & data endpoints - SEMUA destructive
-        testEndpoint('record-interaction', `${apiUrl}/interactions/record`, 'POST', null, true);
-        testEndpoint('train-models', `${apiUrl}/admin/train-models`, 'POST', null, true);
-        testEndpoint('sync-data', `${apiUrl}/admin/sync-data`, 'POST', null, true);
-        testEndpoint('rec-cache-clear', `${apiUrl}/recommend/cache/clear`, 'POST', null, true);
-        testEndpoint('analysis-cache-clear', `${apiUrl}/analysis/cache/clear`, 'POST', null, true);
-        testEndpoint('blockchain-cache-clear', `${apiUrl}/blockchain/cache/clear`, 'POST', null, true);
+        console.log(`🚀 API Connection Test initialized:`);
+        console.log(`   Safe endpoints: ${safeEndpoints.length} (auto-tested)`);
+        console.log(`   Resource-heavy endpoints: ${resourceHeavyEndpoints.length} (manual test only)`);
     });
 </script>
 @endpush

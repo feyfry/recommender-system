@@ -35,34 +35,35 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withCommands([
+        // FIXED: Hanya command yang masih ada
         App\Console\Commands\ImportRecommendationData::class,
-        App\Console\Commands\SyncRecommendationData::class
+        App\Console\Commands\SyncRecommendationData::class,
     ])
     ->withSchedule(function (Schedule $schedule) {
         // ENHANCED: Production pipeline dengan auto import yang lebih robust
         $schedule->exec('cd ' . base_path('../recommendation-engine') . ' && python main.py run --production --evaluate')
-            ->cron('0 */12 * * *')
+            ->cron('0 */12 * * *') // Setiap 12 jam
             ->description('Production pipeline lengkap dengan auto import')
             ->after(function () {
                 try {
-                    // CHECK: Auto import enabled?
+                    // CHECK: Auto import enabled? (Optional berdasarkan .env)
                     $autoImportEnabled = env('AUTO_IMPORT_ENABLED', false);
 
-                    if (!$autoImportEnabled) {
+                    if (! $autoImportEnabled) {
                         \Illuminate\Support\Facades\Log::info('Auto import disabled, skipping...');
                         return;
                     }
 
-                    \Illuminate\Support\Facades\Log::info('Starting auto import after pipeline');
+                    \Illuminate\Support\Facades\Log::info('Starting auto import after production pipeline');
 
                     // Import projects & interactions
                     \Illuminate\Support\Facades\Artisan::call('recommend:import --projects --force');
                     \Illuminate\Support\Facades\Artisan::call('recommend:import --interactions --force');
 
-                    // Clear cache
+                    // Clear cache Laravel memory
                     \Illuminate\Support\Facades\Cache::flush();
 
-                    \Illuminate\Support\Facades\Log::info('Auto import completed');
+                    \Illuminate\Support\Facades\Log::info('Auto import completed successfully');
                 } catch (\Exception $e) {
                     \Illuminate\Support\Facades\Log::error('Auto import failed: ' . $e->getMessage());
                 }
@@ -79,7 +80,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 \Illuminate\Support\Facades\Log::error('Interaction sync failed');
             });
 
-        // Bersihkan Laravel memory cache setiap jam (lebih agresif)
+        // FIXED: Bersihkan Laravel memory cache setiap jam (lebih agresif)
         $schedule->call(function () {
             try {
                 // Clear specific cache keys yang sering digunakan
@@ -96,6 +97,10 @@ return Application::configure(basePath: dirname(__DIR__))
                     'projects_all_chains',
                     'all_project_categories',
                     'all_project_chains',
+                    'data_sync_project_stats',
+                    'admin_most_interacted_projects',
+                    'trending_projects_8',
+                    'popular_projects_8',
                 ];
 
                 $clearedCount = 0;
@@ -105,7 +110,7 @@ return Application::configure(basePath: dirname(__DIR__))
                     }
                 }
 
-                \Illuminate\Support\Facades\Log::info("Cleared {$clearedCount} cache keys from memory");
+                \Illuminate\Support\Facades\Log::info("Cleared {$clearedCount} cache keys from Laravel memory");
             } catch (\Exception $e) {
                 \Illuminate\Support\Facades\Log::error('Memory cache cleanup failed: ' . $e->getMessage());
             }
@@ -116,13 +121,14 @@ return Application::configure(basePath: dirname(__DIR__))
         // ENHANCED: Backup otomatis data penting setiap hari
         $schedule->call(function () {
             try {
-                // Backup hanya interaksi dan portfolio yang penting
+                // Backup hanya statistik penting
                 $backupData = [
                     'interactions_count' => \App\Models\Interaction::count(),
                     'portfolios_count'   => \App\Models\Portfolio::count(),
                     'users_count'        => \App\Models\User::count(),
                     'projects_count'     => \App\Models\Project::count(),
                     'backup_date'        => now(),
+                    'cache_status'       => 'memory_based',
                 ];
 
                 \Illuminate\Support\Facades\Log::info('Daily backup stats: ' . json_encode($backupData));
@@ -137,6 +143,7 @@ return Application::configure(basePath: dirname(__DIR__))
             });
     })
     ->withExceptions(function (Exceptions $exceptions) {
+        // FIXED: Hanya exception yang relevan
         $exceptions->dontReport([
             CacheException::class,
         ]);
