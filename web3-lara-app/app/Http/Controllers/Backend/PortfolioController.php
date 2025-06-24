@@ -884,8 +884,7 @@ class PortfolioController extends Controller
             'price'                   => $request->price,
             'total_value'             => $totalValue,
             'transaction_hash'        => $request->transaction_hash,
-            'followed_recommendation' => $request->has('followed_recommendation'),
-            'recommendation_id'       => $request->recommendation_id,
+            'followed_recommendation' => $request->has('followed_recommendation')
         ]);
 
         // Update atau buat portfolio

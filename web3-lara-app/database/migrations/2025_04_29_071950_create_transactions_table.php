@@ -21,12 +21,10 @@ return new class extends Migration
             $table->decimal('total_value', 30, 10)->nullable(false);
             $table->string('transaction_hash')->nullable();
             $table->boolean('followed_recommendation')->default(false);
-            $table->unsignedBigInteger('recommendation_id')->nullable();
             $table->timestamps();
 
             $table->foreign('user_id')->references('user_id')->on('users')->onDelete('cascade');
             $table->foreign('project_id')->references('id')->on('projects')->onDelete('cascade');
-            $table->foreign('recommendation_id')->references('id')->on('recommendations')->onDelete('set null');
         });
 
         // Indeks untuk transaction queries

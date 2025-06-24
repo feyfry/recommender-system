@@ -22,8 +22,7 @@ class Transaction extends Model
         'price',
         'total_value',
         'transaction_hash',
-        'followed_recommendation',
-        'recommendation_id',
+        'followed_recommendation'
     ];
 
     /**
