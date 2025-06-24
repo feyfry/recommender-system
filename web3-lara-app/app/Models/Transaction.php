@@ -65,14 +65,6 @@ class Transaction extends Model
     }
 
     /**
-     * Mendapatkan relasi ke Recommendation.
-     */
-    public function recommendation(): BelongsTo
-    {
-        return $this->belongsTo(Recommendation::class);
-    }
-
-    /**
      * Scope untuk filter transaksi berdasarkan pengguna.
      */
     public function scopeForUser($query, $userId)

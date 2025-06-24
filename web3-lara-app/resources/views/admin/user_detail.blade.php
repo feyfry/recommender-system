@@ -354,48 +354,6 @@
                         </table>
                     </div>
                 </div>
-
-                <!-- Recommendations Tab -->
-                <div x-show="activeTab === 'recommendations'" class="clay-card p-6 mb-6">
-                    <h3 class="text-xl font-bold mb-4">Rekomendasi Terbaru</h3>
-                    <div class="overflow-x-auto">
-                        <table class="clay-table min-w-full">
-                            <thead>
-                                <tr>
-                                    <th class="py-2 px-4 text-left">Proyek</th>
-                                    <th class="py-2 px-4 text-left">Tipe</th>
-                                    <th class="py-2 px-4 text-left">Score</th>
-                                    <th class="py-2 px-4 text-left">Rank</th>
-                                    <th class="py-2 px-4 text-left">Tanggal</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @forelse($recommendations ?? [] as $recommendation)
-                                <tr>
-                                    <td class="py-2 px-4">
-                                        <div class="flex items-center">
-                                            @if($recommendation->project->image)
-                                                <img src="{{ $recommendation->project->image }}" alt="{{ $recommendation->project->symbol }}" class="w-6 h-6 rounded-full mr-2">
-                                            @endif
-                                            <span class="font-medium">{{ $recommendation->project->name }} ({{ $recommendation->project->symbol }})</span>
-                                        </div>
-                                    </td>
-                                    <td class="py-2 px-4">
-                                        <span class="clay-badge clay-badge-primary">{{ $recommendation->recommendation_type }}</span>
-                                    </td>
-                                    <td class="py-2 px-4 font-medium">{{ number_format($recommendation->score, 4) }}</td>
-                                    <td class="py-2 px-4">{{ $recommendation->rank }}</td>
-                                    <td class="py-2 px-4 text-gray-500 text-sm">{{ $recommendation->created_at->format('j M Y H:i') }}</td>
-                                </tr>
-                                @empty
-                                <tr>
-                                    <td colspan="5" class="py-4 px-4 text-center text-gray-500">Tidak ada rekomendasi yang tersedia untuk pengguna ini.</td>
-                                </tr>
-                                @endforelse
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
             </div>
         </div>
     </div>

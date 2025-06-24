@@ -5,7 +5,6 @@ use App\Http\Controllers\Controller;
 use App\Models\Interaction;
 use App\Models\Portfolio;
 use App\Models\Project;
-use App\Models\Recommendation;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
@@ -292,13 +291,8 @@ class DashboardController extends Controller
         } catch (\Exception $e) {
             Log::error("Gagal mendapatkan rekomendasi personal: " . $e->getMessage());
 
-            // Fallback ke data dari database lokal
-            return Recommendation::where('user_id', $userId)
-                ->where('recommendation_type', $modelType)
-                ->orderBy('rank')
-                ->limit($limit)
-                ->get()
-                ->toArray();
+            // UPDATED: Fallback ke trending projects dari API
+            return $this->getTrendingProjects($limit);
         }
     }
 

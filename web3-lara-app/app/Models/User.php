@@ -65,14 +65,6 @@ class User extends Authenticatable
     }
 
     /**
-     * Mendapatkan relasi ke rekomendasi pengguna.
-     */
-    public function recommendations(): HasMany
-    {
-        return $this->hasMany(Recommendation::class, 'user_id', 'user_id');
-    }
-
-    /**
      * Mendapatkan relasi ke portfolio pengguna.
      */
     public function portfolios(): HasMany

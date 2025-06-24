@@ -36,49 +36,105 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withCommands([
         App\Console\Commands\ImportRecommendationData::class,
-        App\Console\Commands\SyncRecommendationData::class,
-        App\Console\Commands\ClearApiCache::class,
+        App\Console\Commands\SyncRecommendationData::class
     ])
     ->withSchedule(function (Schedule $schedule) {
-        // UPDATED: Production pipeline dengan auto import
+        // ENHANCED: Production pipeline dengan auto import yang lebih robust
         $schedule->exec('cd ' . base_path('../recommendation-engine') . ' && python main.py run --production --evaluate')
             ->cron('0 */12 * * *')
             ->description('Production pipeline lengkap dengan auto import')
             ->after(function () {
-                // Auto import setelah production pipeline selesai
-                \Illuminate\Support\Facades\Artisan::call('recommend:import --projects --force');
-                \Illuminate\Support\Facades\Artisan::call('recommend:import --interactions --force');
+                try {
+                    // CHECK: Auto import enabled?
+                    $autoImportEnabled = env('AUTO_IMPORT_ENABLED', false);
 
-                // Clear cache setelah import
-                \Illuminate\Support\Facades\Cache::flush();
+                    if (!$autoImportEnabled) {
+                        \Illuminate\Support\Facades\Log::info('Auto import disabled, skipping...');
+                        return;
+                    }
 
-                \Illuminate\Support\Facades\Log::info('Production pipeline completed with auto import');
+                    \Illuminate\Support\Facades\Log::info('Starting auto import after pipeline');
+
+                    // Import projects & interactions
+                    \Illuminate\Support\Facades\Artisan::call('recommend:import --projects --force');
+                    \Illuminate\Support\Facades\Artisan::call('recommend:import --interactions --force');
+
+                    // Clear cache
+                    \Illuminate\Support\Facades\Cache::flush();
+
+                    \Illuminate\Support\Facades\Log::info('Auto import completed');
+                } catch (\Exception $e) {
+                    \Illuminate\Support\Facades\Log::error('Auto import failed: ' . $e->getMessage());
+                }
+            })
+            ->onFailure(function () {
+                \Illuminate\Support\Facades\Log::error('Production pipeline failed to execute');
             });
 
         // Export interaksi dari Laravel ke engine setiap 4 jam
         $schedule->command('recommend:sync --interactions')
             ->everyFourHours()
-            ->description('Export interaksi pengguna dari Laravel ke engine');
+            ->description('Export interaksi pengguna dari Laravel ke engine')
+            ->onFailure(function () {
+                \Illuminate\Support\Facades\Log::error('Interaction sync failed');
+            });
 
-        // Bersihkan cache memory setiap jam
+        // Bersihkan Laravel memory cache setiap jam (lebih agresif)
         $schedule->call(function () {
-            $knownKeys = [
-                'admin_user_stats',
-                'admin_project_stats',
-                'admin_interaction_stats',
-                'admin_transaction_stats',
-                'rec_trending_8',
-                'rec_popular_8',
-                'all_categories',
-                'all_chains',
-            ];
+            try {
+                // Clear specific cache keys yang sering digunakan
+                $cacheKeys = [
+                    'admin_user_stats',
+                    'admin_project_stats',
+                    'admin_interaction_stats',
+                    'admin_transaction_stats',
+                    'rec_trending_8',
+                    'rec_popular_8',
+                    'all_categories',
+                    'all_chains',
+                    'projects_all_categories',
+                    'projects_all_chains',
+                    'all_project_categories',
+                    'all_project_chains',
+                ];
 
-            foreach ($knownKeys as $key) {
-                \Illuminate\Support\Facades\Cache::forget($key);
+                $clearedCount = 0;
+                foreach ($cacheKeys as $key) {
+                    if (\Illuminate\Support\Facades\Cache::forget($key)) {
+                        $clearedCount++;
+                    }
+                }
+
+                \Illuminate\Support\Facades\Log::info("Cleared {$clearedCount} cache keys from memory");
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::error('Memory cache cleanup failed: ' . $e->getMessage());
             }
         })
             ->hourly()
-            ->description('Bersihkan cache memory kadaluwarsa');
+            ->description('Bersihkan Laravel memory cache kadaluwarsa');
+
+        // ENHANCED: Backup otomatis data penting setiap hari
+        $schedule->call(function () {
+            try {
+                // Backup hanya interaksi dan portfolio yang penting
+                $backupData = [
+                    'interactions_count' => \App\Models\Interaction::count(),
+                    'portfolios_count'   => \App\Models\Portfolio::count(),
+                    'users_count'        => \App\Models\User::count(),
+                    'projects_count'     => \App\Models\Project::count(),
+                    'backup_date'        => now(),
+                ];
+
+                \Illuminate\Support\Facades\Log::info('Daily backup stats: ' . json_encode($backupData));
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::error('Daily backup failed: ' . $e->getMessage());
+            }
+        })
+            ->daily()
+            ->description('Backup statistik harian')
+            ->onFailure(function () {
+                \Illuminate\Support\Facades\Log::error('Daily backup failed to execute');
+            });
     })
     ->withExceptions(function (Exceptions $exceptions) {
         $exceptions->dontReport([

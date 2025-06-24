@@ -115,14 +115,6 @@ class Project extends Model
     }
 
     /**
-     * Mendapatkan rekomendasi untuk proyek ini.
-     */
-    public function recommendations(): HasMany
-    {
-        return $this->hasMany(Recommendation::class, 'project_id', 'id');
-    }
-
-    /**
      * Mendapatkan portfolios yang berisi proyek ini.
      */
     public function portfolios(): HasMany

@@ -505,7 +505,7 @@ class AdminController extends Controller
     }
 
     /**
-     * NEW: Mendapatkan statistik cache Laravel
+     * FIXED: Real cache stats bukan estimasi
      */
     private function getLaravelCacheStats()
     {
@@ -522,31 +522,28 @@ class AdminController extends Controller
                 'all_chains',
             ];
 
-            $validCount     = 0;
-            $totalEstimated = count($knownCacheKeys) * 10; // Estimasi total cache
-
+            $validCount = 0;
             foreach ($knownCacheKeys as $key) {
                 if (Cache::has($key)) {
                     $validCount++;
                 }
             }
 
+            $totalKeys = count($knownCacheKeys);
+            $expiredCount = $totalKeys - $validCount;
+
             return [
-                'total'    => $totalEstimated,
-                'valid'    => $validCount * 10, // Estimasi
-                'expired'  => max(0, $totalEstimated - ($validCount * 10)),
-                'hit_rate' => $totalEstimated > 0 ? ($validCount * 10 / $totalEstimated) * 100 : 0,
+                'total'    => $totalKeys,
+                'valid'    => $validCount,
+                'expired'  => $expiredCount,
+                'hit_rate' => $totalKeys > 0 ? ($validCount / $totalKeys) * 100 : 0,
                 'type'     => 'memory_cache',
-                'note'     => 'Statistik estimasi untuk Laravel Memory Cache',
+                'note'     => 'Cache keys yang dipantau sistem',
             ];
         } catch (\Exception $e) {
             return [
-                'total'    => 0,
-                'valid'    => 0,
-                'expired'  => 0,
-                'hit_rate' => 0,
-                'type'     => 'memory_cache',
-                'error'    => true,
+                'total' => 0, 'valid' => 0, 'expired' => 0, 'hit_rate' => 0,
+                'type' => 'memory_cache', 'error' => true,
             ];
         }
     }

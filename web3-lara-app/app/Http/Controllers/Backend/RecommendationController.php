@@ -745,13 +745,8 @@ class RecommendationController extends Controller
                 return $this->getTrendingProjects($limit);
             }
 
-            // Fallback ke data lokal
-            return Recommendation::where('user_id', $userId)
-                ->where('recommendation_type', $modelType)
-                ->orderBy('rank')
-                ->limit($limit)
-                ->get()
-                ->toArray();
+            // Fallback ke trending projects jika error
+            return $this->getTrendingProjects($limit);
         }
     }
 
