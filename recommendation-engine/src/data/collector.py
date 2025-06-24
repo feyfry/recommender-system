@@ -268,10 +268,18 @@ class CoinGeckoCollector:
             logger.error("Failed to fetch trending coins")
             return None
     
+    # ✅ FIXED: collect_all_data method dengan parameter handling yang benar
     def collect_all_data(self, limit: int = TOP_COINS_LIMIT, detail_limit: int = TOP_COINS_DETAIL, 
                          include_categories: bool = False) -> bool:
         try:
             start_time = time.time()
+            
+            # ✅ Log actual parameters being used
+            logger.info(f"LFG: Starting data collection with parameters:")
+            logger.info(f"  - Total coins limit: {limit}")
+            logger.info(f"  - Detail coins limit: {detail_limit}")
+            logger.info(f"  - Include categories: {include_categories}")
+            logger.info(f"  - Rate limit: {self.rate_limit}s")
             
             # 1. Fetch top coins
             top_coins = self.fetch_top_coins(limit)
@@ -326,12 +334,17 @@ class CoinGeckoCollector:
             coins_df.to_csv(csv_filename, index=False)
             logger.info(f"Saved combined coins as CSV to {csv_filename}")
             
-            # 3. Fetch detailed info for top coins
+            # ✅ FIXED: 3. Fetch detailed info dengan parameter detail_limit yang benar
             if detail_limit > 0:
-                # Get top N coins
-                detail_ids = [coin['id'] for coin in top_coins[:detail_limit]]
+                # ✅ IMPORTANT: Limit detail fetching berdasarkan parameter detail_limit
+                # Jangan gunakan len(detail_ids) dari top_coins, tapi gunakan detail_limit yang sebenarnya
+                actual_detail_limit = min(detail_limit, len(top_coins))
+                detail_ids = [coin['id'] for coin in top_coins[:actual_detail_limit]]
                 
-                logger.info(f"Fetching details for {len(detail_ids)} coins")
+                logger.info(f"INFO: Fetching detailed data for {actual_detail_limit} coins (from top {len(top_coins)} coins)")
+                logger.info(f"   Requested detail_limit: {detail_limit}")
+                logger.info(f"   Available top coins: {len(top_coins)}")
+                logger.info(f"   Actual detail fetch: {actual_detail_limit}")
                 
                 success_count = 0
                 for idx, coin_id in enumerate(detail_ids, 1):
@@ -341,7 +354,9 @@ class CoinGeckoCollector:
                     # Respect rate limits
                     time.sleep(self.rate_limit)
                 
-                logger.info(f"Successfully fetched details for {success_count}/{len(detail_ids)} coins")
+                logger.info(f"SUCCESS: Successfully fetched details for {success_count}/{len(detail_ids)} coins")
+            else:
+                logger.info("SKIP: Skipping detailed data collection (detail_limit = 0)")
             
             # 4. Fetch categories
             categories = self.fetch_coin_categories()
@@ -357,7 +372,14 @@ class CoinGeckoCollector:
             
             # Calculate duration
             duration = time.time() - start_time
-            logger.info(f"Data collection completed in {duration:.2f} seconds")
+            logger.info(f"Yay! Data collection completed in {duration:.2f} seconds")
+            
+            # ✅ Summary log untuk memastikan parameter bekerja dengan benar
+            logger.info("INFO: Collection Summary:")
+            logger.info(f"  - Unique coins collected: {len(unique_coins)}")
+            logger.info(f"  - Detail data fetched: {detail_limit if detail_limit > 0 else 'Skipped'}")
+            logger.info(f"  - Categories included: {'Yes' if include_categories else 'No'}")
+            logger.info(f"  - Total API calls (approx): {len(unique_coins) // 250 + (detail_limit if detail_limit > 0 else 0) + 3}")
             
             return True
             

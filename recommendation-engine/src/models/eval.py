@@ -493,7 +493,7 @@ def prepare_test_data(user_item_matrix: pd.DataFrame,
             # Coba parsing dengan format utama yang diharapkan: Y-m-d\TH:i:s.u
             logger.info("Attempting to parse timestamps with microseconds format...")
             interactions_df['timestamp'] = pd.to_datetime(interactions_df['timestamp'], format='%Y-%m-%dT%H:%M:%S.%f')
-            logger.info("✅ Timestamps successfully parsed with microseconds format")
+            logger.info("SUCCESS: Timestamps successfully parsed with microseconds format")
         except ValueError as e:
             logger.warning(f"Failed to parse with microseconds format: {e}")
             try:

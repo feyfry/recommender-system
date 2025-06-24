@@ -33,11 +33,15 @@ def collect_data(args):
     logger.info("Starting data collection from CoinGecko API")
     print("Collecting data from CoinGecko API...")
     
-    # Get parameters including rate limit
-    limit = getattr(args, 'limit', 500)
-    detail_limit = getattr(args, 'detail_limit', 100)
+    # ✅ FIXED: Get parameters with proper fallbacks for both collect and run commands
+    limit = getattr(args, 'limit', None) or getattr(args, 'data_limit', 1000)
+    detail_limit = getattr(args, 'detail_limit', 1000)
     rate_limit = getattr(args, 'rate_limit', 2.0)
     include_categories = getattr(args, 'include_categories', False)
+
+    # ✅ Log actual parameters being used
+    logger.info(f"Collection parameters: limit={limit}, detail_limit={detail_limit}, rate_limit={rate_limit}")
+    print(f"Collection parameters: limit={limit}, detail_limit={detail_limit}")
 
     # Initialize collector with rate limit
     collector = CoinGeckoCollector(rate_limit=rate_limit)
@@ -45,7 +49,7 @@ def collect_data(args):
     # Check if API is available
     if not collector.ping_api():
         logger.error("CoinGecko API is not available")
-        print("❌ CoinGecko API is not available")
+        print("ERROR: CoinGecko API is not available")
         return False
     
     start_time = time.time()
@@ -55,11 +59,11 @@ def collect_data(args):
     if result:
         elapsed_time = time.time() - start_time
         logger.info(f"Data collection completed in {elapsed_time:.2f} seconds")
-        print(f"✅ Data collection completed in {elapsed_time:.2f} seconds")
+        print(f"SUCCESS: Data collection completed in {elapsed_time:.2f} seconds")
         return True
     else:
         logger.error("Data collection failed")
-        print("❌ Data collection failed")
+        print("ERROR: Data collection failed")
         return False
 
 def process_data(args):
@@ -71,7 +75,7 @@ def process_data(args):
     processor = DataProcessor()
     
     # Get arguments
-    n_users = getattr(args, 'users', 500)
+    n_users = getattr(args, 'users', 5000)  # ✅ FIXED: Default untuk production lebih tinggi
     production_mode = getattr(args, 'production', False)
     
     start_time = time.time()
@@ -80,14 +84,14 @@ def process_data(args):
         if production_mode:
             # Production mode: preserve existing interactions
             logger.info("Production mode: Preserving existing interactions")
-            print("🏭 Production mode: Updating projects while preserving existing interactions")
+            print("Production mode: Updating projects while preserving existing interactions")
             
             # Load data terbaru
             projects_df, _, trending_df = processor.load_latest_data()  # ✅ Use _ for unused variable
             
             if projects_df is None or projects_df.empty:
                 logger.error("No project data available")
-                print("❌ No project data available")
+                print("ERROR: No project data available")
                 return False
             
             # Clean dan update project data
@@ -110,24 +114,24 @@ def process_data(args):
                 removed_count = original_count - len(interactions_df)
                 if removed_count > 0:
                     logger.info(f"Removed {removed_count} interactions for projects no longer available")
-                    print(f"🧹 Cleaned {removed_count} outdated interactions")
+                    print(f"CLEAN: Cleaned {removed_count} outdated interactions")
                 
                 logger.info(f"Preserved {len(interactions_df)} existing interactions")
-                print(f"✅ Preserved {len(interactions_df)} existing interactions")
+                print(f"SUCCESS: Preserved {len(interactions_df)} existing interactions")
                 
             else:
                 logger.warning("No existing interactions found in production mode")
-                print("⚠️ No existing interactions found. Consider running in development mode first.")
+                print("WARNING: No existing interactions found. Consider running in development mode first.")
                 return False
         else:
             # Development mode: full processing with synthetic data
             logger.info("Development mode: Full processing with synthetic data generation")
-            print("🔧 Development mode: Full processing with synthetic data generation")
+            print("Development mode: Full processing with synthetic data generation")
             
             result = processor.process_data(n_users=n_users)
             if not result:
                 logger.error("Data processing failed")
-                print("❌ Data processing failed")
+                print("ERROR: Data processing failed")
                 return False
                 
             projects_df, interactions_df, features_df = result
@@ -138,18 +142,18 @@ def process_data(args):
         
         elapsed_time = time.time() - start_time
         logger.info(f"Data processing completed in {elapsed_time:.2f} seconds")
-        print(f"✅ Data processing completed in {elapsed_time:.2f} seconds")
-        
+        print(f"SUCCESS: Data processing completed in {elapsed_time:.2f} seconds")
+
         if production_mode:
-            print(f"📊 Production stats: {len(projects_df)} projects, {len(interactions_df)} interactions")
+            print(f"Production stats: {len(projects_df)} projects, {len(interactions_df)} interactions")
         else:
-            print(f"📊 Development stats: {len(projects_df)} projects, {len(interactions_df)} interactions, {features_df.shape} features")
+            print(f"Development stats: {len(projects_df)} projects, {len(interactions_df)} interactions, {features_df.shape} features")
         
         return True
         
     except Exception as e:
         logger.error(f"Error during data processing: {str(e)}")
-        print(f"❌ Error during data processing: {str(e)}")
+        print(f"ERROR: Error during data processing: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
         return False
@@ -173,7 +177,7 @@ def update_projects_only():
         
         if projects_df is None or projects_df.empty:
             logger.error("No project data available")
-            print("❌ No project data available")
+            print("ERROR: No project data available")
             return False
         
         # 2. Clean dan update project data dengan metrik terbaru
@@ -190,7 +194,7 @@ def update_projects_only():
         if os.path.exists(interactions_path):
             interactions_df = pd.read_csv(interactions_path)
             logger.info(f"Loaded existing interactions: {len(interactions_df)} records")
-            print(f"✅ Preserved existing interactions: {len(interactions_df)} records")
+            print(f"SUCCESS: Preserved existing interactions: {len(interactions_df)} records")
             
             # Validate interactions masih kompatibel dengan projects terbaru
             valid_projects = set(projects_df['id'])
@@ -200,10 +204,10 @@ def update_projects_only():
             
             if removed_count > 0:
                 logger.info(f"Removed {removed_count} interactions for projects no longer available")
-                print(f"🧹 Cleaned {removed_count} outdated interactions")
+                print(f"CLEAN: Cleaned {removed_count} outdated interactions")
         else:
             logger.warning("No existing interactions found, will need to generate synthetic data")
-            print("⚠️ No existing interactions found. Run full process to generate synthetic data.")
+            print("WARNING: No existing interactions found. Run full process to generate synthetic data.")
             return False
         
         # 5. Save updated data
@@ -211,14 +215,14 @@ def update_projects_only():
         
         elapsed_time = time.time() - start_time
         logger.info(f"Projects update completed in {elapsed_time:.2f} seconds")
-        print(f"✅ Projects update completed in {elapsed_time:.2f} seconds")
-        print(f"📊 Updated: {len(projects_df)} projects, {len(interactions_df)} interactions preserved")
-        
+        print(f"SUCCESS: Projects update completed in {elapsed_time:.2f} seconds")
+        print(f"INFO: Updated: {len(projects_df)} projects, {len(interactions_df)} interactions preserved")
+
         return True
         
     except Exception as e:
         logger.error(f"Error during projects update: {str(e)}")
-        print(f"❌ Error during projects update: {str(e)}")
+        print(f"ERROR: Error during projects update: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
         return False
@@ -231,7 +235,7 @@ def train_models(args):
         processed_files = [f for f in os.listdir(PROCESSED_DIR) if f in ["projects.csv", "interactions.csv", "features.csv"]]
         if len(processed_files) < 3:
             logger.error("Missing processed data files")
-            print("❌ Missing processed data files. Please run data processing first with: python main.py process")
+            print("ERROR: Missing processed data files. Please run data processing first with: python main.py process")
             return False
         
         # Analisis data sebelum training untuk memeriksa kualitas
@@ -243,13 +247,13 @@ def train_models(args):
         logger.info(f"Force flag status: {force_flag}")
         
         if not validation_passed and not force_flag:
-            user_input = input("⚠️ Data quality validation failed. Continue with training anyway? (y/n): ")
+            user_input = input("WARNING: Data quality validation failed. Continue with training anyway? (y/n): ")
             if user_input.lower() != 'y':
                 return False
         elif not validation_passed and force_flag:
             # Jika force=True, lanjutkan meskipun validasi gagal
             logger.info("Data quality validation failed but continuing due to force flag")
-            print("⚠️ Data quality validation failed but continuing due to force flag")
+            print("WARNING: Data quality validation failed but continuing due to force flag")
                 
         # Pastikan direktori model ada
         models_dir = MODELS_DIR
@@ -265,9 +269,15 @@ def train_models(args):
         train_hybrid = getattr(args, 'hybrid', False)
         include_all = getattr(args, 'include_all', False)
         
-        # Jika tidak ada model yang dipilih atau include_all, latih semua model
-        if not (train_fecf or train_ncf or train_hybrid) or include_all:
+        # ✅ FIXED: Default untuk production mode adalah train all models
+        production_mode = getattr(args, 'production', False)
+        
+        # Jika tidak ada model yang dipilih atau include_all, atau production mode, latih semua model
+        if not (train_fecf or train_ncf or train_hybrid) or include_all or production_mode:
             train_fecf = train_ncf = train_hybrid = True
+            if production_mode:
+                logger.info("Production mode: Training all models (FECF, NCF, Hybrid)")
+                print("Production mode: Training all models (FECF, NCF, Hybrid)")
         
         # Inisialisasi model yang akan dilatih
         if train_fecf:
@@ -301,7 +311,7 @@ def train_models(args):
                 data_loaded = model.load_data()
                 if not data_loaded:
                     logger.error(f"Failed to load data for {model_name} model")
-                    print(f"❌ Failed to load data for {model_name} model")
+                    print(f"ERROR: Failed to load data for {model_name} model")
                     results[model_name] = {
                         "success": False,
                         "error": "Failed to load data"
@@ -329,7 +339,7 @@ def train_models(args):
                 # Cek apakah training berhasil
                 if "error" in metrics:
                     logger.error(f"Error training {model_name} model: {metrics['error']}")
-                    print(f"❌ Error training {model_name} model: {metrics['error']}")
+                    print(f"ERROR: Error training {model_name} model: {metrics['error']}")
                     results[model_name] = {
                         "success": False,
                         "error": metrics["error"],
@@ -345,12 +355,12 @@ def train_models(args):
                     "metrics": metrics
                 }
                 
-                print(f"✅ {model_name} model trained in {model_elapsed_time:.2f} seconds")
+                print(f"SUCCESS: {model_name} model trained in {model_elapsed_time:.2f} seconds")
                 
             except Exception as e:
                 logger.error(f"Error training {model_name} model: {str(e)}")
                 logger.error(traceback.format_exc())
-                print(f"❌ Error training {model_name} model: {str(e)}")
+                print(f"ERROR: Error training {model_name} model: {str(e)}")
                 
                 results[model_name] = {
                     "success": False,
@@ -369,7 +379,7 @@ def train_models(args):
                 data_loaded = model.load_data()
                 if not data_loaded:
                     logger.error(f"Failed to load data for {model_name} model")
-                    print(f"❌ Failed to load data for {model_name} model")
+                    print(f"ERROR: Failed to load data for {model_name} model")
                     results[model_name] = {
                         "success": False,
                         "error": "Failed to load data"
@@ -393,7 +403,7 @@ def train_models(args):
                 # Cek apakah training berhasil
                 if "error" in metrics:
                     logger.error(f"Error training {model_name} model: {metrics['error']}")
-                    print(f"❌ Error training {model_name} model: {metrics['error']}")
+                    print(f"ERROR: Error training {model_name} model: {metrics['error']}")
                     results[model_name] = {
                         "success": False,
                         "error": metrics["error"],
@@ -408,14 +418,14 @@ def train_models(args):
                     "time": model_elapsed_time,
                     "metrics": metrics
                 }
-                
-                print(f"✅ {model_name} model trained in {model_elapsed_time:.2f} seconds")
-                
+
+                print(f"SUCCESS: {model_name} model trained in {model_elapsed_time:.2f} seconds")
+
             except Exception as e:
                 logger.error(f"Error training {model_name} model: {str(e)}")
                 logger.error(traceback.format_exc())
-                print(f"❌ Error training {model_name} model: {str(e)}")
-                
+                print(f"ERROR: Error training {model_name} model: {str(e)}")
+
                 results[model_name] = {
                     "success": False,
                     "error": str(e)
@@ -429,7 +439,7 @@ def train_models(args):
         print(f"Total time: {total_time:.2f} seconds")
         
         for model_name, result in results.items():
-            status = "✅ Success" if result.get("success", False) else "❌ Failed"
+            status = "SUCCESS: Success" if result.get("success", False) else "ERROR: Failed"
             print(f"{model_name}: {status}")
             
             if result.get("success", False) and "time" in result:
@@ -457,12 +467,12 @@ def train_models(args):
     
     except ImportError as e:
         logger.error(f"Import error during model training: {e}")
-        print(f"❌ Error: Missing required module - {e}")
+        print(f"ERROR: Missing required module - {e}")
         return False
     except Exception as e:
         logger.error(f"Error during model training: {e}")
         logger.error(traceback.format_exc())
-        print(f"❌ Error during model training: {e}")
+        print(f"ERROR: Error during model training: {e}")
         return False
     
 def _validate_data_quality():
@@ -525,7 +535,7 @@ def _validate_data_quality():
             
             # Log weight distribution for information (not as warning)
             if unique_weights == 1:
-                logger.info(f"✅ Uniform interaction weights detected: all weights = {weight_stats['min']} (consistent with production data)")
+                logger.info(f"SUCCESS: Uniform interaction weights detected: all weights = {weight_stats['min']} (consistent with production data)")
             else:
                 logger.info(f"Variable interaction weights: min={weight_stats['min']}, max={weight_stats['max']}, unique_values={unique_weights}")
             
@@ -553,7 +563,7 @@ def _validate_data_quality():
 
         # Print warnings if any
         if warnings:
-            print("\n⚠️ Data Quality Warnings:")
+            print("\nWARNING: Data Quality Warnings:")
             for warning in warnings:
                 print(f"  - {warning}")
             print("\nThese issues may affect model performance.")
@@ -568,13 +578,13 @@ def _validate_data_quality():
             return len(critical_warnings) == 0  # Pass if no critical issues
         
         # Data seems good
-        print("✅ Data quality check passed.")
-        print("✅ Interaction weights are consistent with production requirements.")
+        print("SUCCESS: Data quality check passed.")
+        print("SUCCESS: Interaction weights are consistent with production requirements.")
         return True
         
     except Exception as e:
         logger.error(f"Error validating data quality: {e}")
-        print(f"⚠️ Could not validate data quality: {e}")
+        print(f"WARNING: Could not validate data quality: {e}")
         return True  # Let training proceed despite validation error
 
 def evaluate_models(args):
@@ -642,8 +652,7 @@ def evaluate_models(args):
         hybrid = HybridRecommender()
         if hybrid.load_data():
             # Cari hybrid model terbaru
-            hybrid_files = [f for f in os.listdir(MODELS_DIR) 
-                         if f.startswith("hybrid_model_") and f.endswith(".pkl")]
+            hybrid_files = [f for f in os.listdir(MODELS_DIR) if f.startswith("hybrid_model_") and f.endswith(".pkl")]
             if hybrid_files:
                 latest_model = sorted(hybrid_files)[-1]
                 model_path = os.path.join(MODELS_DIR, latest_model)
@@ -665,18 +674,24 @@ def evaluate_models(args):
         
         if not models:
             logger.error("No models available for evaluation")
-            print("❌ No models available for evaluation")
+            print("ERROR: No models available for evaluation")
             return False
         
-        # Get parameters
+        # ✅ FIXED: Get parameters with production defaults
         test_ratio = getattr(args, 'test_ratio', 0.3)
-        min_interactions = getattr(args, 'min_interactions', 20)
+        min_interactions = getattr(args, 'min_interactions', 20)  # Production default
         k_values = getattr(args, 'k_values', [5, 10, 20])
-        eval_cold_start = getattr(args, 'cold_start', True)
+        eval_cold_start = getattr(args, 'cold_start', True)  # Production default
         output_format = getattr(args, 'format', 'markdown')
         cold_start_runs = getattr(args, 'cold_start_runs', 5)
         max_test_users = getattr(args, 'max_test_users', 100)
         regular_runs = getattr(args, 'regular_runs', 5)
+        
+        # Production mode check
+        production_mode = getattr(args, 'production', False)
+        if production_mode:
+            logger.info("Production mode: Using production evaluation defaults")
+            print("Production mode: cold-start evaluation enabled, min-interactions=20")
         
         # Get main user-item matrix
         user_item_matrix = fecf.user_item_matrix if 'fecf' in models else ncf.user_item_matrix
@@ -713,7 +728,7 @@ def evaluate_models(args):
         # Print results
         elapsed_time = time.time() - start_time
         logger.info(f"Evaluation completed in {elapsed_time:.2f} seconds")
-        print(f"\n✅ Evaluation completed in {elapsed_time:.2f} seconds")
+        print(f"\nSUCCESS: Evaluation completed in {elapsed_time:.2f} seconds")
         print(f"Evaluation report saved to {report_path}")
         
         # Print brief summary
@@ -737,7 +752,7 @@ def evaluate_models(args):
         logger.error(f"Error during evaluation setup: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
-        print(f"❌ Error during evaluation: {str(e)}")
+        print(f"ERROR: Error during evaluation: {str(e)}")
         return False
 
 def recommend(args):
@@ -767,7 +782,7 @@ def recommend(args):
         # Load data
         if not model.load_data():
             logger.error("Failed to load data")
-            print("❌ Failed to load data")
+            print("ERROR: Failed to load data")
             return False
             
         # PERBAIKAN: Eksplisit load model file
@@ -800,13 +815,13 @@ def recommend(args):
                 
         if not model_loaded:
             logger.error(f"Failed to load {model_type} model")
-            print(f"❌ Failed to load {model_type} model")
+            print(f"ERROR: Failed to load {model_type} model")
             return False
             
         # Verifikasi model sudah dimuat dengan benar
         if hasattr(model, 'is_trained') and not model.is_trained():
             logger.error(f"Model {model_type} loaded but not properly initialized")
-            print(f"❌ Model {model_type} not properly initialized")
+            print(f"ERROR: Model {model_type} not properly initialized")
             return False
         
         # Check for cold-start user
@@ -872,7 +887,7 @@ def recommend(args):
         
     except Exception as e:
         logger.error(f"Error generating recommendations: {str(e)}")
-        print(f"❌ Error generating recommendations: {str(e)}")
+        print(f"ERROR: Error generating recommendations: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
         return False
@@ -993,14 +1008,14 @@ def trading_signals(args):
         
         if df.empty:
             logger.error(f"Gagal mengambil data pasar untuk {project_id}")
-            print(f"❌ Gagal mengambil data pasar untuk {project_id}")
+            print(f"ERROR: Gagal mengambil data pasar untuk {project_id}")
             return False
         
         # Log some info about the data
         print(f"Berhasil mendapatkan {len(df)} titik data harga")
         
         if len(df) < min_required_days:
-            print(f"⚠️ Peringatan: Data yang tersedia ({len(df)} hari) kurang dari minimal yang direkomendasikan ({min_required_days}) untuk analisis optimal")
+            print(f"WARNING: Peringatan: Data yang tersedia ({len(df)} hari) kurang dari minimal yang direkomendasikan ({min_required_days}) untuk analisis optimal")
         
         # Generate trading signals
         signals = generate_trading_signals(df, indicator_periods=indicator_periods)
@@ -1008,11 +1023,11 @@ def trading_signals(args):
         # Check if there's an error
         if 'error' in signals:
             logger.error(f"Error generating signals: {signals['error']}")
-            print(f"❌ Error: {signals['error']}")
+            print(f"ERROR: {signals['error']}")
             
             # If there's a minimum days hint, include it
             if 'min_days_needed' in signals:
-                print(f"📊 Coba kembali dengan parameter days={signals['min_days_needed']} atau lebih besar")
+                print(f"INFO: Coba kembali dengan parameter days={signals['min_days_needed']} atau lebih besar")
             
             return False
             
@@ -1047,7 +1062,7 @@ def trading_signals(args):
         
     except Exception as e:
         logger.error(f"Error generating trading signals: {str(e)}")
-        print(f"❌ Error generating trading signals: {str(e)}")
+        print(f"ERROR: Error generating trading signals: {str(e)}")
         return False
 
 def start_api(args):
@@ -1067,7 +1082,7 @@ def start_api(args):
             logger.error(f"Error importing app from src.api.main: {str(e)}")
             import traceback
             logger.error(traceback.format_exc())
-            print(f"❌ Error importing app: {str(e)}")
+            print(f"ERROR: Error importing app: {str(e)}")
             return False
         
         from config import API_HOST, API_PORT
@@ -1098,7 +1113,7 @@ def start_api(args):
         logger.error(f"Error starting API server: {str(e)}")
         import traceback
         logger.error(f"Full error traceback: {traceback.format_exc()}")  # Log full traceback
-        print(f"❌ Error starting API server: {str(e)}")
+        print(f"ERROR: Error starting API server: {str(e)}")
         print("Check logs/main.log for full traceback details")
         return False
 
@@ -1191,12 +1206,12 @@ def generate_sample_recommendations(args):
             return recommendation_success or len(trending) > 0
         else:
             logger.error("No user-item matrix available for sample recommendations")
-            print("❌ No user data available for sample recommendations")
+            print("ERROR: No user data available for sample recommendations")
             return False
             
     except Exception as e:
         logger.error(f"Error generating sample recommendations: {str(e)}")
-        print(f"❌ Error generating sample recommendations: {str(e)}")
+        print(f"ERROR: Error generating sample recommendations: {str(e)}")
         return False
 
 def analyze_results(args):
@@ -1209,7 +1224,7 @@ def analyze_results(args):
         
         if not eval_files:
             logger.warning("No evaluation results found")
-            print("⚠️ No evaluation results found. Run evaluation first with: python main.py evaluate")
+            print("WARNING: No evaluation results found. Run evaluation first with: python main.py evaluate")
             return False
         
         # Use the most recent evaluation file
@@ -1227,7 +1242,7 @@ def analyze_results(args):
         
         if not results:
             logger.error("Failed to load evaluation results")
-            print("❌ Failed to load evaluation results")
+            print("ERROR: Failed to load evaluation results")
             return False
         
         # Analyze model performance
@@ -1341,7 +1356,7 @@ def analyze_results(args):
             
     except Exception as e:
         logger.error(f"Error analyzing results: {str(e)}")
-        print(f"❌ Error analyzing results: {str(e)}")
+        print(f"ERROR: Error analyzing results: {str(e)}")
         return False
     
 def debug_recommendations(args):
@@ -1490,9 +1505,9 @@ def run_pipeline(args):
     production_mode = getattr(args, 'production', False)
     
     if production_mode:
-        print("🏭 PRODUCTION MODE: Preserving existing interactions")
+        print("PRODUCTION MODE: Preserving existing interactions")
     else:
-        print("🔧 DEVELOPMENT MODE: Full processing with synthetic data")
+        print("DEVELOPMENT MODE: Full processing with synthetic data")
     
     # Override arguments as needed
     if getattr(args, 'skip_collection', False):
@@ -1504,10 +1519,36 @@ def run_pipeline(args):
     if getattr(args, 'skip_training', False):
         print("Skipping training step (--skip-training flag used)")
     
-    # PERBAIKAN: Pastikan args memiliki flag production untuk step processing
+    # ✅ FIXED: Pastikan args memiliki parameter yang diperlukan
     if production_mode:
         # Set production flag explicitly untuk step processing
         args.production = True
+        
+        # ✅ Set production defaults jika tidak ada
+        if not hasattr(args, 'limit') and not hasattr(args, 'data_limit'):
+            args.limit = 1000  # Production default
+        if not hasattr(args, 'detail_limit'):
+            args.detail_limit = 1000  # Production default
+        if not hasattr(args, 'min_interactions'):
+            args.min_interactions = 20  # Production default  
+        if not hasattr(args, 'cold_start'):
+            args.cold_start = True  # Production default
+
+        # Log production defaults
+        logger.info("Production defaults applied:")
+        logger.info(f"  - Data limit: {getattr(args, 'limit', getattr(args, 'data_limit', 1000))}")
+        logger.info(f"  - Detail limit: {getattr(args, 'detail_limit', 1000)}")
+        logger.info(f"  - Min interactions: {getattr(args, 'min_interactions', 20)}")
+        logger.info(f"  - Cold start evaluation: {getattr(args, 'cold_start', True)}")
+        logger.info("  - User interactions: PRESERVED from existing data (no synthetic generation)")
+    else:
+        # ✅ Development-specific parameters only
+        if not hasattr(args, 'users'):
+            args.users = 5000  # Development default for synthetic users
+            
+        logger.info("Development defaults applied:")
+        logger.info(f"  - Synthetic users to generate: {getattr(args, 'users', 5000)}")
+        logger.info("  - Mode: Full synthetic data generation")
 
     # Tentukan langkah-langkah pipeline berdasarkan mode
     if production_mode:
@@ -1618,10 +1659,13 @@ def run_pipeline(args):
         # Execute step
         print(f"\n{'-'*70}")
         print(f"Step {step_idx+1}/{len(pipeline_steps)}: {step_name}")
-        if production_mode and step_name == "Data Processing":
-            print(f"🏭 PRODUCTION: {step_desc}")
+        
+        # ✅ FIXED: Correct production/development labeling logic
+        if production_mode:
+            print(f"PRODUCTION: {step_desc}")
         else:
-            print(f"🔧 {step_desc}")
+            print(f"DEVELOPMENT: {step_desc}")
+            
         print(f"{'-'*70}")
         print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
@@ -1632,11 +1676,11 @@ def run_pipeline(args):
             if step_name == "Sample Recommendations" and production_mode:
                 # Skip sample recommendations in production
                 success = True
-                print("✅ Skipped sample recommendations in production mode")
+                print("SUCCESS: Skipped sample recommendations in production mode")
             elif step_name == "Result Analysis" and production_mode:
                 # Skip result analysis in production
                 success = True
-                print("✅ Skipped result analysis in production mode")
+                print("SUCCESS: Skipped result analysis in production mode")
             else:
                 success = step_func(step_args)
                 
@@ -1667,44 +1711,44 @@ def run_pipeline(args):
     # Pipeline summary
     print(f"\n{'='*70}")
     if production_mode:
-        print("🏭 PRODUCTION Pipeline Execution Summary")
+        print("PRODUCTION Pipeline Execution Summary")
     else:
-        print("🔧 DEVELOPMENT Pipeline Execution Summary")
+        print("DEVELOPMENT Pipeline Execution Summary")
     print(f"{'='*70}")
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     all_required_success = all(
         [result for step, result, skipped in pipeline_results 
-         if not skipped and any(s["name"] == step and s["required"] for s in pipeline_steps)]
+        if not skipped and any(s["name"] == step and s["required"] for s in pipeline_steps)]
     )
     
     for step_name, result, skipped in pipeline_results:
         if skipped:
-            status = "⏩ SKIPPED"
+            status = "SKIPPED"
         elif result:
-            status = "✅ SUCCESS"
+            status = "SUCCESS"
         else:
-            status = "❌ FAILED"
+            status = "FAILED"
             
         print(f"{step_name}: {status}")
     
     if all_required_success:
         if production_mode:
-            print("\n🎉 Production pipeline completed successfully!")
-            print("\n🏭 Production Recommendations:")
+            print("\nYay! Production pipeline completed successfully!")
+            print("\nProduction Recommendations:")
             print("- Projects data updated with latest market information")
             print("- Existing user interactions preserved")
             print("- Models retrained with fresh data")
             print("- System ready for production use")
         else:
-            print("\n🎉 Development pipeline completed successfully!")
+            print("\nYay! Development pipeline completed successfully!")
             print("\nRecommendations for Next Steps:")
             print("- View evaluation report in the data/models directory")
             print("- Test the system with real users using: python main.py recommend --user-id <user_id>")
             print("- Start the API server to serve recommendations: python main.py api")
             print("- For production, use: python main.py run --production")
     else:
-        print("\n⚠️ Pipeline completed with errors in required steps.")
+        print("\nWARNING: Pipeline completed with errors in required steps.")
         print("Check logs for more details: logs/main.log")
     
     return all_required_success
@@ -1757,7 +1801,7 @@ Examples:
     
     # process command
     process_parser = subparsers.add_parser("process", help="Process collected data")
-    process_parser.add_argument("--users", type=int, default=1000, help="Number of synthetic users to generate")
+    process_parser.add_argument("--users", type=int, default=5000, help="Number of synthetic users to generate (production default: 5000)")
     process_parser.add_argument("--production", action="store_true", help="Production mode: preserve existing interactions")
 
     # update-projects command
@@ -1780,8 +1824,8 @@ Examples:
     """
     evaluate_parser = subparsers.add_parser("evaluate", help="Evaluate recommendation models")
     evaluate_parser.add_argument("--test-ratio", type=float, default=0.3, help="Test data ratio")
-    evaluate_parser.add_argument("--min-interactions", type=int, default=10, help="Minimum interactions for test users")
-    evaluate_parser.add_argument("--cold-start", action="store_true", help="Evaluate cold-start scenarios")
+    evaluate_parser.add_argument("--min-interactions", type=int, default=20, help="Minimum interactions for test users (production default: 20)")
+    evaluate_parser.add_argument("--cold-start", action="store_true", help="Evaluate cold-start scenarios (production default: enabled)")
     evaluate_parser.add_argument("--cold-start-runs", type=int, default=5, help="Number of runs for cold-start evaluation (default: 5)")
     evaluate_parser.add_argument("--regular-runs", type=int, default=5, help="Number of runs for regular model evaluation (default: 1)")
     evaluate_parser.add_argument("--format", choices=["text", "markdown", "json"], default="markdown", help="Output format")  
@@ -1833,7 +1877,7 @@ Examples:
     debug_parser.add_argument("--model", choices=["fecf", "ncf", "hybrid"], default="hybrid", help="Model to use")
     debug_parser.add_argument("--num", type=int, default=20, help="Number of recommendations")
     
-    # run command
+    # ✅ FIXED: run command dengan parameter yang consistent
     run_parser = subparsers.add_parser("run", help="Run complete pipeline")
     run_parser.add_argument("--skip-collection", action="store_true", 
                         help="Skip data collection step (use existing data)")
@@ -1845,14 +1889,15 @@ Examples:
                         help="Skip generating sample recommendations")
     run_parser.add_argument("--skip-analysis", action="store_true",
                         help="Skip result analysis step")
-    run_parser.add_argument("--data-limit", type=int, default=500,
-                        help="Number of coins to collect (default: 500)")
-    run_parser.add_argument("--detail-limit", type=int, default=100,
-                        help="Number of coins to get detailed data (default: 100)")
-    run_parser.add_argument("--users", type=int, default=500,
-                        help="Number of synthetic users to generate (default: 500)")
+    # ✅ FIXED: Use consistent parameter names
+    run_parser.add_argument("--limit", type=int, default=1000,
+                        help="Number of coins to collect (production default: 1000)")
+    run_parser.add_argument("--detail-limit", type=int, default=1000,
+                        help="Number of coins to get detailed data (production default: 1000)")
+    run_parser.add_argument("--users", type=int, default=5000,
+                        help="Number of synthetic users to generate (production default: 5000)")
     run_parser.add_argument("--models", choices=['all', 'fecf', 'ncf', 'hybrid'],
-                        default='all', help="Which models to train (default: all)")
+                        default='all', help="Which models to train (production default: all)")
     run_parser.add_argument("--evaluate", action="store_true",
                         help="Run evaluation after training")
     run_parser.add_argument("--force", action="store_true",
@@ -1861,6 +1906,11 @@ Examples:
                         help="Enable debug logging")
     run_parser.add_argument("--production", action="store_true",
                         help="Production mode: preserve existing interactions")
+    # ✅ FIXED: Add evaluation parameters untuk production
+    run_parser.add_argument("--min-interactions", type=int, default=20,
+                        help="Minimum interactions for evaluation (production default: 20)")
+    run_parser.add_argument("--cold-start", action="store_true", default=True,
+                        help="Enable cold-start evaluation (production default: enabled)")
     
     # Parse arguments
     args = parser.parse_args()
@@ -1872,6 +1922,13 @@ Examples:
     if hasattr(args, 'debug') and args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
         logger.info("Debug mode enabled")
+    
+    # ✅ FIXED: Set production defaults sebelum run command
+    if args.command == "run" and getattr(args, 'production', False):
+        # Ensure production defaults are applied
+        if not hasattr(args, 'evaluate') or not args.evaluate:
+            args.evaluate = True  # Production default: enable evaluation
+            logger.info("Production mode: Evaluation enabled by default")
     
     # Run appropriate command
     if args.command == "collect":
