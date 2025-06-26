@@ -68,7 +68,7 @@ def _get_cache_file_path(cache_type: str) -> str:
     return os.path.join(_cache_dir, f"{cache_type}_cache.pkl")
 
 def _load_persistent_cache():
-    """⚡ TAMBAHAN: Load cache dari file persistent"""
+    """⚡ PERBAIKAN: Load cache dengan better error handling"""
     global _user_recommendations_cache, _cold_start_tracking
     
     try:
@@ -76,40 +76,78 @@ def _load_persistent_cache():
         for cache_type in ["fecf", "ncf", "hybrid"]:
             cache_file = _get_cache_file_path(f"recommendations_{cache_type}")
             if os.path.exists(cache_file):
-                with open(cache_file, 'rb') as f:
-                    cached_data = pickle.load(f)
-                    # Filter expired entries
-                    current_time = datetime.now()
-                    valid_cache = {}
-                    for key, value in cached_data.items():
-                        if current_time < value['expires']:
-                            valid_cache[key] = value
-                    _user_recommendations_cache[cache_type] = valid_cache
-                    logger.info(f"Loaded {len(valid_cache)} valid {cache_type} cache entries")
+                try:
+                    with open(cache_file, 'rb') as f:
+                        cached_data = pickle.load(f)
+                        # Filter expired entries
+                        current_time = datetime.now()
+                        valid_cache = {}
+                        for key, value in cached_data.items():
+                            try:
+                                if current_time < value['expires']:
+                                    valid_cache[key] = value
+                            except (KeyError, TypeError) as e:
+                                logger.warning(f"Invalid cache entry {key}: {e}")
+                                continue
+                        _user_recommendations_cache[cache_type] = valid_cache
+                        logger.info(f"Loaded {len(valid_cache)} valid {cache_type} cache entries")
+                except (pickle.UnpicklingError, AttributeError, ImportError) as e:
+                    logger.warning(f"Failed to load {cache_type} cache, will recreate: {e}")
+                    # ⚡ PERBAIKAN: Delete corrupted cache file
+                    try:
+                        os.remove(cache_file)
+                        logger.info(f"Removed corrupted cache file: {cache_file}")
+                    except:
+                        pass
+                    _user_recommendations_cache[cache_type] = {}
         
         # Load cold-start tracking
         tracking_file = _get_cache_file_path("cold_start_tracking")
         if os.path.exists(tracking_file):
-            with open(tracking_file, 'rb') as f:
-                _cold_start_tracking = pickle.load(f)
-                logger.info(f"Loaded cold-start tracking for {len(_cold_start_tracking)} users")
+            try:
+                with open(tracking_file, 'rb') as f:
+                    _cold_start_tracking = pickle.load(f)
+                    logger.info(f"Loaded cold-start tracking for {len(_cold_start_tracking)} users")
+            except (pickle.UnpicklingError, AttributeError, ImportError) as e:
+                logger.warning(f"Failed to load cold-start tracking, will recreate: {e}")
+                try:
+                    os.remove(tracking_file)
+                    logger.info(f"Removed corrupted tracking file: {tracking_file}")
+                except:
+                    pass
+                _cold_start_tracking = {}
                 
     except Exception as e:
         logger.warning(f"Error loading persistent cache: {e}")
+        # ⚡ PERBAIKAN: Initialize empty cache on any error
+        for cache_type in ["fecf", "ncf", "hybrid"]:
+            _user_recommendations_cache[cache_type] = {}
+        _cold_start_tracking = {}
 
 def _save_persistent_cache():
-    """⚡ TAMBAHAN: Save cache ke file persistent"""
+    """⚡ PERBAIKAN: Save cache dengan better error handling"""
     try:
+        # Ensure cache directory exists
+        os.makedirs(_cache_dir, exist_ok=True)
+        
         # Save recommendation cache
         for cache_type, cache_data in _user_recommendations_cache.items():
-            cache_file = _get_cache_file_path(f"recommendations_{cache_type}")
-            with open(cache_file, 'wb') as f:
-                pickle.dump(cache_data, f)
+            try:
+                cache_file = _get_cache_file_path(f"recommendations_{cache_type}")
+                with open(cache_file, 'wb') as f:
+                    pickle.dump(cache_data, f)
+                logger.debug(f"Saved {cache_type} cache with {len(cache_data)} entries")
+            except Exception as e:
+                logger.warning(f"Failed to save {cache_type} cache: {e}")
         
         # Save cold-start tracking
-        tracking_file = _get_cache_file_path("cold_start_tracking")
-        with open(tracking_file, 'wb') as f:
-            pickle.dump(_cold_start_tracking, f)
+        try:
+            tracking_file = _get_cache_file_path("cold_start_tracking")
+            with open(tracking_file, 'wb') as f:
+                pickle.dump(_cold_start_tracking, f)
+            logger.debug(f"Saved cold-start tracking for {len(_cold_start_tracking)} users")
+        except Exception as e:
+            logger.warning(f"Failed to save cold-start tracking: {e}")
             
     except Exception as e:
         logger.warning(f"Error saving persistent cache: {e}")
