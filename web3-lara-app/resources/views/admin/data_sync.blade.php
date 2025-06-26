@@ -164,7 +164,7 @@
         <div class="mb-6">
             <div class="clay-card bg-primary/5 p-4">
                 <h3 class="font-bold mb-3">Status API Engine</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div class="clay-card bg-primary/10 p-3 text-center api-test" data-endpoint="root">
                         <div class="status-indicator">
                             <i class="fas fa-circle-notch fa-spin text-2xl text-primary mb-2"></i>
@@ -178,6 +178,13 @@
                         </div>
                         <div class="font-bold">Health Check</div>
                         <p class="text-xs mt-1">GET /health</p>
+                    </div>
+                    <div class="clay-card bg-purple/10 p-3 text-center api-test" data-endpoint="pipeline-status">
+                        <div class="status-indicator">
+                            <i class="fas fa-circle-notch fa-spin text-2xl text-purple mb-2"></i>
+                        </div>
+                        <div class="font-bold">Pipeline Status</div>
+                        <p class="text-xs mt-1">GET /admin/pipeline-status</p>
                     </div>
                 </div>
             </div>
@@ -368,36 +375,59 @@
         </div>
     </div>
 
-    <!-- Production Pipeline & Train Models sections tetap sama -->
+    <!-- Production Pipeline & Train Models sections -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-        <!-- Production Pipeline -->
+        <!-- Production Pipeline dengan Status Monitor -->
         <div class="clay-card p-6">
             <h2 class="text-lg font-bold mb-4 flex items-center">
                 <i class="fas fa-rocket mr-2 text-success"></i>
                 Production Pipeline
+                <span id="pipeline-status-indicator" class="ml-3 hidden">
+                    <i class="fas fa-spinner fa-spin text-primary"></i>
+                    <span class="text-sm text-primary ml-1">Running...</span>
+                </span>
             </h2>
+
             <p class="text-sm text-gray-600 mb-4">
-                Jalankan production pipeline lengkap yang mencakup: collect data, update projects,
-                train models, evaluate, dan auto import ke database Laravel.
+                Jalankan production pipeline lengkap secara asynchronous (background process).
+                Estimasi waktu: 30 menit - 2 jam (timeout: 2 jam maksimal).
             </p>
+
+            <!-- Status Monitor -->
+            <div id="pipeline-status-monitor" class="clay-card bg-info/10 p-4 mb-4 hidden">
+                <h3 class="font-bold mb-2">Pipeline Status:</h3>
+                <div id="pipeline-status-content">
+                    <!-- Status akan diisi via JavaScript -->
+                </div>
+            </div>
+
             <div class="clay-card bg-success/5 p-4 mb-4">
-                <h3 class="font-bold mb-2">Production Command (Baru):</h3>
+                <h3 class="font-bold mb-2">Production Command (Async):</h3>
                 <div class="space-y-2 font-mono text-xs">
                     <div class="clay-card bg-success/10 p-2">
-                        python main.py run --production --evaluate
+                        python main.py run --production --evaluate --force
                     </div>
                 </div>
                 <div class="mt-2 text-xs text-gray-600">
-                    ✅ Preserve existing interactions<br>
-                    ✅ Update projects dengan data terbaru<br>
-                    ✅ Train semua models (FECF, NCF, Hybrid)<br>
-                    ✅ Evaluate performa models<br>
-                    ✅ Auto import ke Laravel database
+                    ✅ Mode: Asynchronous (background)<br>
+                    ✅ Timeout: 2 jam maksimal<br>
+                    ✅ Auto status monitoring (15 detik)<br>
+                    ✅ Progress estimation<br>
+                    ✅ Preserves existing interactions
                 </div>
             </div>
+
             <div class="flex space-x-2">
-                <button onclick="document.getElementById('production-pipeline-modal').classList.remove('hidden')" class="clay-button clay-button-success">
-                    <i class="fas fa-rocket mr-2"></i> Run Production Pipeline
+                <button onclick="startProductionPipeline()"
+                        id="start-pipeline-btn"
+                        class="clay-button clay-button-success">
+                    <i class="fas fa-rocket mr-2"></i> Start Production Pipeline
+                </button>
+
+                <button onclick="checkPipelineStatus()"
+                        id="check-status-btn"
+                        class="clay-button clay-button-info">
+                    <i class="fas fa-search mr-2"></i> Check Status
                 </button>
             </div>
         </div>
@@ -490,7 +520,7 @@
         </div>
     </div>
 
-    <!-- Import/Export Data dan sisa content tetap sama -->
+    <!-- Import/Export Data -->
     <div class="clay-card p-6 mb-8">
         <h2 class="text-xl font-bold mb-6 flex items-center">
             <i class="fas fa-exchange-alt mr-2 text-success"></i>
@@ -602,7 +632,7 @@
         </div>
     </div>
 
-    <!-- CRON Jobs Configuration tetap sama -->
+    <!-- CRON Jobs Configuration -->
     <div class="clay-card p-6">
         <h2 class="text-xl font-bold mb-6 flex items-center">
             <i class="fas fa-clock mr-2 text-info"></i>
@@ -632,12 +662,12 @@
                                 <span class="clay-badge clay-badge-success">12 jam sekali</span>
                             </td>
                             <td class="py-2 px-4">
-                                Production pipeline lengkap + auto import
+                                Production pipeline lengkap
                                 <div class="text-xs text-gray-600 mt-1">
                                     ✅ Update projects<br>
                                     ✅ Train models<br>
                                     ✅ Evaluate performance<br>
-                                    ✅ Auto import to Laravel
+                                    ✅ Preserves existing interactions
                                 </div>
                             </td>
                         </tr>
@@ -670,38 +700,40 @@
             </a>
         </div>
     </div>
-</div>
+ </div>
 
-<!-- Modal components tetap sama -->
-<!-- Production Pipeline Modal -->
-<div id="production-pipeline-modal" class="fixed inset-0 z-50 hidden">
+ <!-- Modal components -->
+ <!-- Production Pipeline Modal -->
+ <div id="production-pipeline-modal" class="fixed inset-0 z-50 hidden">
     <div class="clay-modal-backdrop"></div>
     <div class="clay-modal max-w-md">
         <div class="clay-modal-header">
-            <h3 class="text-xl font-bold">Run Production Pipeline</h3>
+            <h3 class="text-xl font-bold">Start Production Pipeline</h3>
         </div>
         <form action="{{ route('admin.run-production-pipeline') }}" method="POST">
             @csrf
             <div class="clay-modal-body">
                 <div class="space-y-4">
                     <div class="clay-card bg-warning/10 p-4">
-                        <h4 class="font-bold mb-2">⚠️ Production Pipeline</h4>
+                        <h4 class="font-bold mb-2">⚡ Production Pipeline (Async)</h4>
                         <p class="text-sm">
-                            Ini akan menjalankan pipeline production lengkap yang mencakup:
+                            Ini akan menjalankan pipeline production lengkap secara asynchronous:
                         </p>
                         <ul class="text-sm mt-2 space-y-1">
                             <li>✅ Collect data terbaru dari CoinGecko</li>
                             <li>✅ Update projects (preserve existing interactions)</li>
                             <li>✅ Train semua models (FECF, NCF, Hybrid)</li>
                             <li>✅ Evaluate model performance</li>
-                            <li>✅ Auto import hasil ke Laravel database</li>
+                            <li>✅ Background processing (tidak blocking UI)</li>
                         </ul>
                     </div>
 
                     <div class="clay-card bg-info/10 p-4">
                         <p class="text-sm">
-                            <strong>Estimasi waktu:</strong> 10-15 menit<br>
-                            <strong>Auto Import:</strong> Ya (otomatis setelah pipeline selesai)
+                            <strong>Mode:</strong> Asynchronous (background)<br>
+                            <strong>Estimasi waktu:</strong> 15-30 menit<br>
+                            <strong>Monitoring:</strong> Real-time status updates<br>
+                            <strong>Timeout:</strong> 30 menit maksimal
                         </p>
                     </div>
                 </div>
@@ -711,15 +743,15 @@
                     Batal
                 </button>
                 <button type="submit" class="clay-button clay-button-success">
-                    <i class="fas fa-rocket mr-1"></i> Run Production Pipeline
+                    <i class="fas fa-rocket mr-1"></i> Start Pipeline
                 </button>
             </div>
         </form>
     </div>
-</div>
+ </div>
 
-<!-- Sync Data Modal -->
-<div id="sync-data-modal" class="fixed inset-0 z-50 hidden">
+ <!-- Sync Data Modal -->
+ <div id="sync-data-modal" class="fixed inset-0 z-50 hidden">
     <div class="clay-modal-backdrop"></div>
     <div class="clay-modal max-w-md">
         <div class="clay-modal-header">
@@ -757,10 +789,10 @@
             </div>
         </form>
     </div>
-</div>
+ </div>
 
-<!-- Train Models Modal -->
-<div id="train-models-modal" class="fixed inset-0 z-50 hidden">
+ <!-- Train Models Modal -->
+ <div id="train-models-modal" class="fixed inset-0 z-50 hidden">
     <div class="clay-modal-backdrop"></div>
     <div class="clay-modal max-w-md">
         <div class="clay-modal-header">
@@ -803,10 +835,10 @@
             </div>
         </form>
     </div>
-</div>
+ </div>
 
-<!-- Clear Cache Modal -->
-<div id="clear-cache-modal" class="fixed inset-0 z-50 hidden">
+ <!-- Clear Cache Modal -->
+ <div id="clear-cache-modal" class="fixed inset-0 z-50 hidden">
     <div class="clay-modal-backdrop"></div>
     <div class="clay-modal max-w-md">
         <div class="clay-modal-header">
@@ -848,10 +880,10 @@
             </div>
         </form>
     </div>
-</div>
+ </div>
 
-@push('scripts')
-<script>
+ @push('scripts')
+ <script>
     // FIXED: Toggle endpoint list function yang benar
     function toggleEndpointList() {
         const endpointList = document.getElementById('endpoint-list');
@@ -871,6 +903,184 @@
                 button.classList.remove('clay-button-warning');
                 button.classList.add('clay-button-info');
             }
+        }
+    }
+
+    // Production Pipeline Status Monitor
+    let pipelineCheckInterval = null;
+
+    function startProductionPipeline() {
+        document.getElementById('production-pipeline-modal').classList.remove('hidden');
+    }
+
+    function checkPipelineStatus() {
+        fetch('{{ route("admin.production-pipeline.status") }}')
+            .then(response => response.json())
+            .then(data => {
+                updatePipelineStatusDisplay(data);
+            })
+            .catch(error => {
+                console.error('Error checking pipeline status:', error);
+            });
+    }
+
+    function updatePipelineStatusDisplay(data) {
+        const monitor = document.getElementById('pipeline-status-monitor');
+        const content = document.getElementById('pipeline-status-content');
+        const indicator = document.getElementById('pipeline-status-indicator');
+
+        if (data.status === 'success' && data.pipeline) {
+            const pipeline = data.pipeline;
+
+            monitor.classList.remove('hidden');
+
+            let statusHtml = `
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <strong>Status:</strong> <span class="clay-badge clay-badge-${getStatusColor(pipeline.status)}">${pipeline.status}</span>
+                    </div>
+                    <div>
+                        <strong>Running:</strong> ${pipeline.running ? 'Yes' : 'No'}
+                    </div>
+            `;
+
+            // UPDATED: Better time display with hours support
+            if (pipeline.elapsed_time) {
+                const hours = Math.floor(pipeline.elapsed_time / 3600);
+                const minutes = Math.floor((pipeline.elapsed_time % 3600) / 60);
+                const seconds = pipeline.elapsed_time % 60;
+
+                let timeDisplay = '';
+                if (hours > 0) {
+                    timeDisplay = `${hours}h ${minutes}m ${seconds}s`;
+                } else if (minutes > 0) {
+                    timeDisplay = `${minutes}m ${seconds}s`;
+                } else {
+                    timeDisplay = `${seconds}s`;
+                }
+
+                statusHtml += `
+                    <div>
+                        <strong>Elapsed:</strong> ${timeDisplay}
+                    </div>
+                `;
+            }
+
+            if (pipeline.total_time) {
+                const hours = Math.floor(pipeline.total_time / 3600);
+                const minutes = Math.floor((pipeline.total_time % 3600) / 60);
+
+                let totalTimeDisplay = '';
+                if (hours > 0) {
+                    totalTimeDisplay = `${hours}h ${minutes}m`;
+                } else {
+                    totalTimeDisplay = `${minutes} minutes`;
+                }
+
+                statusHtml += `
+                    <div>
+                        <strong>Total Time:</strong> ${totalTimeDisplay}
+                    </div>
+                `;
+            }
+
+            // NEW: Show estimated progress
+            if (pipeline.estimated_progress) {
+                statusHtml += `
+                    <div class="col-span-2">
+                        <strong>Progress:</strong> <span class="text-primary">${pipeline.estimated_progress}</span>
+                    </div>
+                `;
+            }
+
+            statusHtml += `
+                    <div class="col-span-2">
+                        <strong>Message:</strong> ${pipeline.message}
+                    </div>
+                </div>
+            `;
+
+            // NEW: Progress bar estimation
+            if (pipeline.running && pipeline.elapsed_time) {
+                const elapsedMinutes = pipeline.elapsed_time / 60;
+                const estimatedTotalMinutes = 90; // 1.5 jam estimasi rata-rata
+                const progressPercent = Math.min((elapsedMinutes / estimatedTotalMinutes) * 100, 95);
+
+                statusHtml += `
+                    <div class="mt-3">
+                        <div class="flex justify-between text-xs mb-1">
+                            <span>Estimated Progress</span>
+                            <span>${Math.round(progressPercent)}%</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2">
+                            <div class="bg-primary h-2 rounded-full transition-all duration-300" style="width: ${progressPercent}%"></div>
+                        </div>
+                        <div class="text-xs text-gray-600 mt-1">
+                            Estimasi total: 30 menit - 2 jam (timeout: 2 jam)
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (pipeline.output) {
+                statusHtml += `
+                    <div class="mt-3">
+                        <strong>Output:</strong>
+                        <pre class="clay-card bg-gray/10 p-2 text-xs mt-1 max-h-40 overflow-y-auto">${pipeline.output}</pre>
+                    </div>
+                `;
+            }
+
+            if (pipeline.error) {
+                statusHtml += `
+                    <div class="mt-3">
+                        <strong>Error:</strong>
+                        <pre class="clay-card bg-danger/10 p-2 text-xs mt-1 max-h-32 overflow-y-auto text-danger">${pipeline.error}</pre>
+                    </div>
+                `;
+            }
+
+            content.innerHTML = statusHtml;
+
+            // Update indicator dengan informasi waktu
+            if (pipeline.running) {
+                const hours = Math.floor((pipeline.elapsed_time || 0) / 3600);
+                const minutes = Math.floor(((pipeline.elapsed_time || 0) % 3600) / 60);
+
+                let timeText = '';
+                if (hours > 0) {
+                    timeText = `${hours}h ${minutes}m`;
+                } else {
+                    timeText = `${minutes}m`;
+                }
+
+                indicator.innerHTML = `
+                    <i class="fas fa-spinner fa-spin text-primary"></i>
+                    <span class="text-sm text-primary ml-1">Running ${timeText}...</span>
+                `;
+                indicator.classList.remove('hidden');
+
+                // Auto refresh jika sedang running (lebih sering untuk pipeline panjang)
+                if (!pipelineCheckInterval) {
+                    pipelineCheckInterval = setInterval(checkPipelineStatus, 15000); // Check every 15 seconds
+                }
+            } else {
+                indicator.classList.add('hidden');
+                if (pipelineCheckInterval) {
+                    clearInterval(pipelineCheckInterval);
+                    pipelineCheckInterval = null;
+                }
+            }
+        }
+    }
+
+    function getStatusColor(status) {
+        switch(status) {
+            case 'running': return 'primary';
+            case 'completed': return 'success';
+            case 'failed': case 'error': return 'danger';
+            case 'timeout': return 'warning';
+            default: return 'secondary';
         }
     }
 
@@ -900,6 +1110,9 @@
                 }
             });
         });
+
+        // Auto check pipeline status on page load
+        checkPipelineStatus();
     });
 
     // UPDATED: API Connection Test yang lebih efisien dengan test_only untuk resource-heavy endpoints
@@ -1079,7 +1292,8 @@
             { endpoint: 'health', url: `${apiUrl}/health`, method: 'GET' },
             { endpoint: 'trending', url: `${apiUrl}/recommend/trending?limit=5`, method: 'GET' },
             { endpoint: 'popular', url: `${apiUrl}/recommend/popular?limit=5`, method: 'GET' },
-            { endpoint: 'blockchain-health', url: `${apiUrl}/blockchain/health`, method: 'GET' }
+            { endpoint: 'blockchain-health', url: `${apiUrl}/blockchain/health`, method: 'GET' },
+            { endpoint: 'pipeline-status', url: `${apiUrl}/admin/pipeline-status`, method: 'GET' }  // NEW
         ];
 
         // Test endpoint yang memakan resource (manual test only) - FIXED: Termasuk GET yang berat

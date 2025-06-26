@@ -638,8 +638,6 @@ class AdminController extends Controller
         ]);
     }
 
-    // ... [method lainnya tetap sama sampai clearApiCache] ...
-
     /**
      * FIXED: Membersihkan cache Laravel memory dengan implementasi yang benar
      */
@@ -719,8 +717,6 @@ class AdminController extends Controller
                 ->with('error', 'Gagal membersihkan cache: ' . $e->getMessage());
         }
     }
-
-    // ... [sisa method tetap sama] ...
 
     /**
      * Mendapatkan data evaluasi model terbaru
@@ -991,47 +987,129 @@ class AdminController extends Controller
     }
 
     /**
-     * NEW: Jalankan Production Pipeline dan Auto Import
+     * NEW: Jalankan Production Pipeline Asynchronous - UPDATED with 2 hour timeout
      */
     public function runProductionPipeline(Request $request)
     {
         try {
-            // Step 1: Jalankan production pipeline di engine
-            Log::info("Starting production pipeline...");
+            // Step 1: Start production pipeline asynchronously
+            Log::info("Starting production pipeline asynchronously...");
 
-            $response = Http::timeout(600)->post("{$this->apiUrl}/admin/production-pipeline", [
+            $response = Http::timeout(30)->post("{$this->apiUrl}/admin/production-pipeline", [
                 'evaluate' => true,
                 'force'    => true,
+                'async_mode' => true,  // Enable async mode
+            ]);
+
+            Log::info("Production pipeline start response:", [
+                'status' => $response->status(),
+                'body'   => $response->body(),
             ]);
 
             if (! $response->successful()) {
-                throw new \Exception("Production pipeline failed: " . $response->body());
+                $errorBody = $response->body();
+                throw new \Exception("Failed to start production pipeline (HTTP {$response->status()}): " . $errorBody);
             }
 
-            // Step 2: Auto import setelah pipeline selesai
-            Log::info("Starting auto import after production pipeline...");
+            $responseData = $response->json();
 
-            // Import projects
-            Artisan::call('recommend:import --projects --force');
-            $projectOutput = Artisan::output();
+            // Cek apakah pipeline berhasil dimulai
+            if (isset($responseData['status'])) {
+                switch ($responseData['status']) {
+                    case 'started':
+                        Log::info("Production pipeline started successfully in async mode");
 
-            // Import interactions
-            Artisan::call('recommend:import --interactions --force');
-            $interactionOutput = Artisan::output();
+                        return redirect()->route('admin.data-sync')
+                            ->with('success',
+                                'Production pipeline berhasil dimulai secara asynchronous. ' .
+                                'Estimasi waktu: 30 menit - 2 jam. Anda dapat memantau progress di halaman ini.'
+                            );
 
-            // Clear cache setelah import
-            Cache::flush();
+                    case 'already_running':
+                        $elapsed = $responseData['elapsed_time'] ?? 0;
+                        $elapsedMinutes = floor($elapsed / 60);
+                        $elapsedHours = floor($elapsed / 3600);
 
-            Log::info("Production pipeline and auto import completed successfully");
+                        $timeDisplay = $elapsedHours > 0 ?
+                            "{$elapsedHours} jam " . ($elapsedMinutes % 60) . " menit" :
+                            "{$elapsedMinutes} menit";
 
-            return redirect()->route('admin.data-sync')
-                ->with('success', 'Production pipeline berhasil dijalankan dan data otomatis diimport.');
+                        return redirect()->route('admin.data-sync')
+                            ->with('warning',
+                                "Production pipeline sudah berjalan selama {$timeDisplay}. " .
+                                "Silakan tunggu hingga selesai (maksimal 2 jam)."
+                            );
+
+                    case 'error':
+                        throw new \Exception($responseData['message'] ?? 'Unknown error');
+
+                    default:
+                        throw new \Exception("Unexpected response status: " . $responseData['status']);
+                }
+            }
+
+            throw new \Exception("Invalid response format from API");
 
         } catch (\Exception $e) {
             Log::error("Production pipeline failed: " . $e->getMessage());
 
             return redirect()->route('admin.data-sync')
-                ->with('error', 'Gagal menjalankan production pipeline: ' . $e->getMessage());
+                ->with('error', 'Gagal memulai production pipeline: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * NEW: Cek status production pipeline - UPDATED with better time formatting
+     */
+    public function checkProductionPipelineStatus(Request $request)
+    {
+        try {
+            $response = Http::timeout(10)->get("{$this->apiUrl}/admin/production-pipeline/status");
+
+            if (! $response->successful()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Gagal mendapatkan status pipeline'
+                ], 500);
+            }
+
+            $data = $response->json();
+            $pipelineStatus = $data['pipeline_status'] ?? [];
+
+            // Format response untuk frontend dengan time formatting yang lebih baik
+            $formattedStatus = [
+                'running' => $pipelineStatus['running'] ?? false,
+                'status' => $pipelineStatus['status'] ?? 'unknown',
+                'message' => $pipelineStatus['message'] ?? '',
+                'elapsed_time' => isset($pipelineStatus['elapsed_time']) ?
+                    floor($pipelineStatus['elapsed_time']) : null,
+                'elapsed_minutes' => isset($pipelineStatus['elapsed_minutes']) ?
+                    floor($pipelineStatus['elapsed_minutes']) : null,
+                'elapsed_hours' => isset($pipelineStatus['elapsed_hours']) ?
+                    round($pipelineStatus['elapsed_hours'], 1) : null,
+                'total_time' => isset($pipelineStatus['total_time']) ?
+                    floor($pipelineStatus['total_time']) : null,
+                'total_minutes' => isset($pipelineStatus['total_minutes']) ?
+                    floor($pipelineStatus['total_minutes']) : null,
+                'total_hours' => isset($pipelineStatus['total_hours']) ?
+                    round($pipelineStatus['total_hours'], 1) : null,
+                'estimated_progress' => $pipelineStatus['estimated_progress'] ?? '',
+                'output' => $pipelineStatus['output'] ?? '',
+                'error' => $pipelineStatus['error'] ?? ''
+            ];
+
+            return response()->json([
+                'status' => 'success',
+                'pipeline' => $formattedStatus
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error("Error checking pipeline status: " . $e->getMessage());
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error: ' . $e->getMessage()
+            ], 500);
         }
     }
 
