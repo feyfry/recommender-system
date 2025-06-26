@@ -7,6 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import time
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
 # ⚡ ENHANCED: Fix Unicode logging error with proper encoding
 import locale
@@ -222,6 +225,106 @@ class TrainModelsRequest(BaseModel):
     test_only: bool = Field(False, description="Flag to mark request as testing only")
     fecf_params: Optional[Dict[str, Any]] = Field(None, description="Parameters specific to FECF model")
 
+# NEW: Model untuk production pipeline request
+class ProductionPipelineRequest(BaseModel):
+    evaluate: bool = Field(True, description="Whether to run evaluation after pipeline")
+    force: bool = Field(False, description="Whether to force execution despite warnings")
+    test_only: bool = Field(False, description="Flag to mark request as testing only")
+    async_mode: bool = Field(True, description="Run pipeline asynchronously")
+
+# NEW: Global variable untuk track status pipeline
+pipeline_status = {
+    "running": False,
+    "last_run": None,
+    "status": "idle",
+    "message": "",
+    "start_time": None,
+    "end_time": None,
+    "output": "",
+    "error": ""
+}
+
+def run_pipeline_sync(evaluate=True, force=False):
+    """
+    Fungsi untuk menjalankan pipeline secara synchronous di thread terpisah
+    """
+    global pipeline_status
+    
+    try:
+        import subprocess
+        from pathlib import Path
+        import time
+        
+        pipeline_status["running"] = True
+        pipeline_status["status"] = "running"
+        pipeline_status["start_time"] = time.time()
+        pipeline_status["message"] = "Pipeline sedang berjalan..."
+        pipeline_status["output"] = ""
+        pipeline_status["error"] = ""
+        
+        logger.info("Starting production pipeline in background thread...")
+        
+        # Dapatkan path ke main.py
+        current_dir = Path(__file__).parent.parent.parent
+        main_py_path = current_dir / "main.py"
+        
+        if not main_py_path.exists():
+            raise FileNotFoundError(f"main.py tidak ditemukan di {main_py_path}")
+        
+        # Bangun command
+        cmd = ["python", str(main_py_path), "run", "--production"]
+        
+        if evaluate:
+            cmd.append("--evaluate")
+        if force:
+            cmd.append("--force")
+        
+        logger.info(f"Executing command: {' '.join(cmd)}")
+        
+        # UPDATED: Timeout 2 jam (7200 detik) untuk pipeline yang sangat panjang
+        process = subprocess.run(
+            cmd,
+            cwd=str(current_dir),
+            capture_output=True,
+            text=True,
+            timeout=7200,  # 2 jam timeout
+            encoding='utf-8'
+        )
+        
+        # Update status berdasarkan hasil
+        pipeline_status["end_time"] = time.time()
+        pipeline_status["running"] = False
+        
+        if process.returncode == 0:
+            pipeline_status["status"] = "completed"
+            pipeline_status["message"] = "Pipeline berhasil diselesaikan"
+            pipeline_status["output"] = process.stdout[-3000:] if process.stdout else ""  # Increase output size
+            logger.info("Production pipeline completed successfully in background")
+        else:
+            pipeline_status["status"] = "failed"
+            pipeline_status["message"] = f"Pipeline gagal dengan return code: {process.returncode}"
+            pipeline_status["output"] = process.stdout[-2000:] if process.stdout else ""
+            pipeline_status["error"] = process.stderr[-2000:] if process.stderr else ""
+            logger.error(f"Production pipeline failed with return code: {process.returncode}")
+            
+        pipeline_status["last_run"] = time.time()
+        
+    except subprocess.TimeoutExpired:
+        pipeline_status["running"] = False
+        pipeline_status["status"] = "timeout"
+        pipeline_status["message"] = "Pipeline timeout setelah 2 jam"
+        pipeline_status["error"] = "Timeout exceeded (2 hours)"
+        pipeline_status["end_time"] = time.time()
+        logger.error("Production pipeline timed out (> 2 hours)")
+        
+    except Exception as e:
+        pipeline_status["running"] = False
+        pipeline_status["status"] = "error"
+        pipeline_status["message"] = f"Error: {str(e)}"
+        pipeline_status["error"] = str(e)
+        pipeline_status["end_time"] = time.time()
+        logger.error(f"Error in background pipeline: {str(e)}")
+
 # Router untuk interaksi pengguna
 @app.post("/interactions/record", tags=["interactions"])
 async def record_interaction(interaction: InteractionRecord):
@@ -376,6 +479,248 @@ async def admin_sync_data(request: SyncDataRequest = Body(...)):
         logger.error(f"Error syncing data: {safe_error}")
         raise HTTPException(status_code=500, detail=f"Error syncing data: {safe_error}")
 
+# NEW: Production Pipeline Endpoints
+@app.post("/admin/production-pipeline", tags=["admin"])
+async def admin_production_pipeline(request: ProductionPipelineRequest = Body(...)):
+    """
+    Jalankan production pipeline lengkap - mode asynchronous
+    """
+    global pipeline_status
+    
+    if request.test_only:
+        return {
+            "status": "success",
+            "message": "Test mode - Production pipeline simulation successful"
+        }
+    
+    # Cek apakah pipeline sudah berjalan
+    if pipeline_status["running"]:
+        elapsed = time.time() - pipeline_status["start_time"] if pipeline_status["start_time"] else 0
+        elapsed_minutes = elapsed / 60
+        return {
+            "status": "already_running",
+            "message": f"Pipeline sudah berjalan selama {elapsed_minutes:.1f} menit",
+            "elapsed_time": elapsed,
+            "elapsed_minutes": elapsed_minutes,
+            "async_mode": True
+        }
+    
+    try:
+        if request.async_mode:
+            # Jalankan pipeline di background thread
+            thread = threading.Thread(
+                target=run_pipeline_sync,
+                args=(request.evaluate, request.force),
+                daemon=True
+            )
+            thread.start()
+            
+            return {
+                "status": "started",
+                "message": "Production pipeline dimulai secara asynchronous",
+                "async_mode": True,
+                "estimated_time": "30 menit - 2 jam",  # UPDATED estimate
+                "timeout": "2 jam maksimal",
+                "check_status_endpoint": "/admin/production-pipeline/status"
+            }
+        else:
+            # Mode synchronous dengan timeout lebih besar (hanya untuk testing)
+            return await admin_production_pipeline_sync(request)
+            
+    except Exception as e:
+        safe_error = str(e).encode('ascii', 'ignore').decode('ascii')
+        logger.error(f"Error starting production pipeline: {safe_error}")
+        return {
+            "status": "error",
+            "message": f"Error starting production pipeline: {safe_error}",
+            "error": safe_error
+        }
+
+@app.get("/admin/production-pipeline/status", tags=["admin"])
+async def admin_production_pipeline_status():
+    """
+    Cek status production pipeline yang sedang berjalan
+    """
+    global pipeline_status
+    
+    status_copy = pipeline_status.copy()
+    
+    # Hitung elapsed time jika sedang berjalan
+    if status_copy["running"] and status_copy["start_time"]:
+        elapsed_seconds = time.time() - status_copy["start_time"]
+        status_copy["elapsed_time"] = elapsed_seconds
+        status_copy["elapsed_minutes"] = elapsed_seconds / 60
+        status_copy["elapsed_hours"] = elapsed_seconds / 3600
+        
+        # Progress estimation berdasarkan waktu
+        if elapsed_seconds < 600:  # < 10 menit
+            status_copy["estimated_progress"] = "Collecting data..."
+        elif elapsed_seconds < 1200:  # < 20 menit
+            status_copy["estimated_progress"] = "Processing data..."
+        elif elapsed_seconds < 2400:  # < 40 menit
+            status_copy["estimated_progress"] = "Training FECF model..."
+        elif elapsed_seconds < 3600:  # < 1 jam
+            status_copy["estimated_progress"] = "Training NCF model..."
+        elif elapsed_seconds < 4800:  # < 1.3 jam
+            status_copy["estimated_progress"] = "Training Hybrid model..."
+        elif elapsed_seconds < 6000:  # < 1.7 jam
+            status_copy["estimated_progress"] = "Running evaluation..."
+        else:
+            status_copy["estimated_progress"] = "Finalizing pipeline..."
+            
+    elif status_copy["start_time"] and status_copy["end_time"]:
+        total_seconds = status_copy["end_time"] - status_copy["start_time"]
+        status_copy["total_time"] = total_seconds
+        status_copy["total_minutes"] = total_seconds / 60
+        status_copy["total_hours"] = total_seconds / 3600
+    
+    return {
+        "pipeline_status": status_copy,
+        "timestamp": time.time()
+    }
+
+@app.post("/admin/production-pipeline/stop", tags=["admin"])
+async def admin_production_pipeline_stop():
+    """
+    Stop production pipeline yang sedang berjalan (jika memungkinkan)
+    """
+    global pipeline_status
+    
+    if not pipeline_status["running"]:
+        return {
+            "status": "not_running",
+            "message": "Pipeline tidak sedang berjalan"
+        }
+    
+    # Catatan: Menghentikan subprocess yang sudah berjalan cukup sulit
+    # Untuk saat ini, hanya update status
+    pipeline_status["status"] = "stop_requested"
+    pipeline_status["message"] = "Stop request diterima (pipeline mungkin masih berjalan di background)"
+    
+    return {
+        "status": "stop_requested",
+        "message": "Stop request diterima",
+        "note": "Pipeline mungkin masih membutuhkan waktu untuk berhenti"
+    }
+
+# Keep original sync version untuk backward compatibility - UPDATED timeout
+async def admin_production_pipeline_sync(request: ProductionPipelineRequest):
+    """
+    Jalankan production pipeline secara synchronous (untuk testing)
+    """
+    try:
+        import subprocess
+        from pathlib import Path
+        
+        logger.info("Starting production pipeline synchronously...")
+        
+        current_dir = Path(__file__).parent.parent.parent
+        main_py_path = current_dir / "main.py"
+        
+        if not main_py_path.exists():
+            raise FileNotFoundError(f"main.py tidak ditemukan di {main_py_path}")
+        
+        cmd = ["python", str(main_py_path), "run", "--production"]
+        
+        if request.evaluate:
+            cmd.append("--evaluate")
+        if request.force:
+            cmd.append("--force")
+        
+        logger.info(f"Executing command: {' '.join(cmd)}")
+        
+        # UPDATED: Timeout 1 jam untuk mode sync (lebih singkat dari async)
+        process = subprocess.run(
+            cmd,
+            cwd=str(current_dir),
+            capture_output=True,
+            text=True,
+            timeout=3600,  # 1 jam untuk sync mode
+            encoding='utf-8'
+        )
+        
+        if process.returncode == 0:
+            return {
+                "status": "success",
+                "message": "Production pipeline completed successfully",
+                "returncode": process.returncode,
+                "output": process.stdout[-2000:] if process.stdout else "",
+                "sync_mode": True
+            }
+        else:
+            return {
+                "status": "error",
+                "message": f"Production pipeline failed with return code: {process.returncode}",
+                "returncode": process.returncode,
+                "error": process.stderr[-1500:] if process.stderr else "",
+                "output": process.stdout[-1500:] if process.stdout else "",
+                "sync_mode": True
+            }
+            
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "error",
+            "message": "Production pipeline timed out (exceeded 1 hour in sync mode)",
+            "error": "Timeout exceeded",
+            "sync_mode": True
+        }
+    except Exception as e:
+        safe_error = str(e).encode('ascii', 'ignore').decode('ascii')
+        return {
+            "status": "error", 
+            "message": f"Error: {safe_error}",
+            "error": safe_error,
+            "sync_mode": True
+        }
+
+# Endpoint untuk test ketersediaan pipeline
+@app.get("/admin/pipeline-status", tags=["admin"])
+async def admin_pipeline_status():
+    """
+    Cek status dan ketersediaan production pipeline
+    """
+    try:
+        import subprocess
+        from pathlib import Path
+        
+        # Cek ketersediaan main.py
+        current_dir = Path(__file__).parent.parent.parent
+        main_py_path = current_dir / "main.py"
+        
+        status = {
+            "pipeline_available": main_py_path.exists(),
+            "main_py_path": str(main_py_path),
+            "current_dir": str(current_dir),
+            "python_executable": "python",
+            "timestamp": time.time(),
+        }
+        
+        # Test basic python command
+        try:
+            result = subprocess.run(
+                ["python", "--version"], 
+                capture_output=True, 
+                text=True, 
+                timeout=5
+            )
+            status["python_version"] = result.stdout.strip() if result.returncode == 0 else "Unknown"
+            status["python_available"] = result.returncode == 0
+        except Exception as e:
+            status["python_available"] = False
+            status["python_error"] = str(e)
+        
+        return {
+            "status": "healthy",
+            "pipeline_status": status
+        }
+        
+    except Exception as e:
+        logger.error(f"Error checking pipeline status: {str(e)}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
 # Root endpoint
 @app.get("/")
 async def root():
@@ -400,7 +745,9 @@ async def root():
             "interactions": "/interactions/record",
             "admin": {
                 "train_models": "/admin/train-models",
-                "sync_data": "/admin/sync-data"
+                "sync_data": "/admin/sync-data",
+                "production_pipeline": "/admin/production-pipeline",
+                "production_pipeline_status": "/admin/production-pipeline/status"
             }
         }
     }
@@ -436,7 +783,8 @@ async def health_check():
             "unicode_logging": "enabled",
             "spam_filtering": "enabled", 
             "smart_batching": "enabled",
-            "retry_logic": "enabled"
+            "retry_logic": "enabled",
+            "production_pipeline": "enabled"
         }
     }
 
@@ -455,6 +803,7 @@ if __name__ == "__main__":
     logger.info(f"  - Etherscan: {'✓' if os.environ.get('ETHERSCAN_API_KEY') else '✗'}")
     logger.info("Unicode logging support: enabled")
     logger.info("Spam filtering: enabled")
+    logger.info("Production pipeline: enabled")
     
     # ⚡ ENHANCED: Uvicorn configuration
     uvicorn_config = {
