@@ -229,6 +229,23 @@ def update_projects_only():
 
 def train_models(args):
     logger.info("Training recommendation models")
+
+    # ✅ PERBAIKAN: Force reload sys.path untuk subprocess
+    import sys
+    import site
+    
+    # Reload site packages untuk memastikan venv ter-load
+    site.main()
+    
+    # Log untuk debug
+    logger.info(f"Python executable: {sys.executable}")
+    
+    # Test PyTorch import
+    try:
+        import torch
+        logger.info(f"SUCCESS: PyTorch {torch.__version__} available in subprocess")
+    except ImportError as e:
+        logger.error(f"ERROR: PyTorch still not available: {e}")
     
     try:
         # Cek apakah data yang diproses ada
