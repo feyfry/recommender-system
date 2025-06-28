@@ -107,7 +107,7 @@ Route::prefix('panel')->middleware('auth')->group(function () {
 
         // Sinkronisasi Data
         Route::get('/data-sync', [AdminController::class, 'dataSyncDashboard'])->name('admin.data-sync');
-        Route::post('/data-sync/trigger', [AdminController::class, 'triggerDataSync'])->name('admin.trigger-data-sync');
+        // Route::post('/data-sync/trigger', [AdminController::class, 'triggerDataSync'])->name('admin.trigger-data-sync');
         Route::post('/data-sync/clear-cache', [AdminController::class, 'clearApiCache'])->name('admin.clear-api-cache');
         Route::post('/data-sync/train-models', [AdminController::class, 'trainModels'])->name('admin.train-models');
 

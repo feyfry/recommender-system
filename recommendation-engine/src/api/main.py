@@ -433,51 +433,51 @@ class SyncDataRequest(BaseModel):
     users_count: Optional[int] = Field(None, description="Number of synthetic users to generate if needed")
     test_only: bool = Field(False, description="Flag to mark request as testing only")
 
-@app.post("/admin/sync-data", tags=["admin"])
-async def admin_sync_data(request: SyncDataRequest = Body(...)):
-    # Jika hanya test mode, kembalikan respons sukses tanpa melakukan perubahan
-    if request.test_only:
-        return {
-            "status": "success",
-            "message": "Test mode - Data sync simulation successful"
-        }
+# @app.post("/admin/sync-data", tags=["admin"])
+# async def admin_sync_data(request: SyncDataRequest = Body(...)):
+#     # Jika hanya test mode, kembalikan respons sukses tanpa melakukan perubahan
+#     if request.test_only:
+#         return {
+#             "status": "success",
+#             "message": "Test mode - Data sync simulation successful"
+#         }
         
-    try:
-        logger.info("Syncing data from PostgreSQL to recommendation engine CSV files")
+#     try:
+#         logger.info("Syncing data from PostgreSQL to recommendation engine CSV files")
         
-        # Jika projects data telah diperbarui, proses ulang data
-        if request.projects_updated:
-            # Buat objek args untuk diteruskan ke process_data
-            class Args:
-                pass
+#         # Jika projects data telah diperbarui, proses ulang data
+#         if request.projects_updated:
+#             # Buat objek args untuk diteruskan ke process_data
+#             class Args:
+#                 pass
             
-            args = Args()
-            args.users = request.users_count or 5000  # Default 5000 jika tidak disediakan
+#             args = Args()
+#             args.users = request.users_count or 5000  # Default 5000 jika tidak disediakan
             
-            # Panggil fungsi process_data dari main.py
-            result = process_data(args)
+#             # Panggil fungsi process_data dari main.py
+#             result = process_data(args)
             
-            if result:
-                return {
-                    "status": "success", 
-                    "message": "Data processed successfully"
-                }
-            else:
-                return {
-                    "status": "error", 
-                    "message": "Failed to process data. Check logs for details."
-                }
+#             if result:
+#                 return {
+#                     "status": "success", 
+#                     "message": "Data processed successfully"
+#                 }
+#             else:
+#                 return {
+#                     "status": "error", 
+#                     "message": "Failed to process data. Check logs for details."
+#                 }
         
-        # Jika tidak perlu memproses ulang data proyek
-        return {
-            "status": "success", 
-            "message": "No data processing needed"
-        }
+#         # Jika tidak perlu memproses ulang data proyek
+#         return {
+#             "status": "success", 
+#             "message": "No data processing needed"
+#         }
     
-    except Exception as e:
-        safe_error = str(e).encode('ascii', 'ignore').decode('ascii')
-        logger.error(f"Error syncing data: {safe_error}")
-        raise HTTPException(status_code=500, detail=f"Error syncing data: {safe_error}")
+#     except Exception as e:
+#         safe_error = str(e).encode('ascii', 'ignore').decode('ascii')
+#         logger.error(f"Error syncing data: {safe_error}")
+#         raise HTTPException(status_code=500, detail=f"Error syncing data: {safe_error}")
 
 # NEW: Production Pipeline Endpoints
 @app.post("/admin/production-pipeline", tags=["admin"])
@@ -742,13 +742,13 @@ async def root():
             "blockchain_portfolio": "/blockchain/portfolio/{wallet_address}",
             "blockchain_transactions": "/blockchain/transactions/{wallet_address}",
             "blockchain_analytics": "/blockchain/analytics/{wallet_address}",
-            "interactions": "/interactions/record",
-            "admin": {
-                "train_models": "/admin/train-models",
-                "sync_data": "/admin/sync-data",
-                "production_pipeline": "/admin/production-pipeline",
-                "production_pipeline_status": "/admin/production-pipeline/status"
-            }
+            # "interactions": "/interactions/record",
+            # "admin": {
+            #     "train_models": "/admin/train-models",
+            #     "sync_data": "/admin/sync-data",
+            #     "production_pipeline": "/admin/production-pipeline",
+            #     "production_pipeline_status": "/admin/production-pipeline/status"
+            # }
         }
     }
 

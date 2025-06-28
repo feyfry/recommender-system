@@ -75,7 +75,7 @@ class RecommendationController extends Controller
 
     /**
      * Mendapatkan rekomendasi personal untuk pengguna
-     * DIOPTIMALKAN: Menambahkan parameter filtering (kategori, chain, strict_filter, dll)
+     * MINIMAL FIX: Hanya perbaiki response handling untuk empty data
      */
     public function personal(Request $request)
     {
@@ -130,6 +130,48 @@ class RecommendationController extends Controller
             'strict' => $strictFilter
         ]));
 
+        // Jika format JSON diminta (untuk AJAX requests), kembalikan data sebagai JSON
+        if ($format === 'json') {
+            $modelRequested = $request->input('model', 'hybrid');
+
+            try {
+                $recommendations = [];
+                $cacheKey = '';
+
+                switch ($modelRequested) {
+                    case 'fecf':
+                        $cacheKey = $fecfCacheKey;
+                        break;
+                    case 'ncf':
+                        $cacheKey = $ncfCacheKey;
+                        break;
+                    case 'hybrid':
+                    default:
+                        $cacheKey = $hybridCacheKey;
+                        break;
+                }
+
+                // Cek cache terlebih dahulu
+                $recommendations = Cache::get($cacheKey);
+
+                if ($recommendations === null) {
+                    // Ambil dari API jika tidak ada di cache
+                    $recommendations = $this->getPersonalRecommendations($userId, $modelRequested, $limit, $category, $chain, $strictFilter);
+                    $recommendations = $this->normalizeRecommendationData($recommendations);
+
+                    // Cache untuk 15 menit
+                    Cache::put($cacheKey, $recommendations, 15);
+                }
+
+                // PERBAIKAN: Pastikan return array yang benar
+                return response()->json($recommendations ?: []);
+
+            } catch (\Exception $e) {
+                Log::error("Error getting {$modelRequested} recommendations: " . $e->getMessage());
+                return response()->json([]);
+            }
+        }
+
         // Ambil rekomendasi untuk semua model dengan parameter filter yang sama
         $hybridRecommendations = Cache::remember($hybridCacheKey, 15, function () use ($userId, $limit, $category, $chain, $strictFilter) {
             $recommendations = $this->getPersonalRecommendations($userId, 'hybrid', $limit, $category, $chain, $strictFilter);
@@ -145,21 +187,6 @@ class RecommendationController extends Controller
             $recommendations = $this->getPersonalRecommendations($userId, 'ncf', $limit, $category, $chain, $strictFilter);
             return $this->normalizeRecommendationData($recommendations);
         });
-
-        // Jika format JSON diminta (untuk AJAX requests), kembalikan data sebagai JSON
-        if ($format === 'json') {
-            $modelRequested = $request->input('model', 'hybrid');
-
-            switch ($modelRequested) {
-                case 'fecf':
-                    return response()->json($fecfRecommendations);
-                case 'ncf':
-                    return response()->json($ncfRecommendations);
-                case 'hybrid':
-                default:
-                    return response()->json($hybridRecommendations);
-            }
-        }
 
         // Untuk request normal (HTML), tampilkan view
         return view('backend.recommendation.personal', [
@@ -659,11 +686,10 @@ class RecommendationController extends Controller
     }
 
     /**
-     * Mendapatkan rekomendasi personal
+     * MINIMAL FIX: Enhanced getPersonalRecommendations dengan better empty handling
      */
     private function getPersonalRecommendations($userId, $modelType = 'hybrid', $limit = 10, $category = null, $chain = null, $strictFilter = false)
     {
-        // CLEANED: Parameter request hanya yang benar-benar digunakan
         $requestParams = [
             'user_id'             => $userId,
             'model_type'          => $modelType,
@@ -685,17 +711,6 @@ class RecommendationController extends Controller
             $requestParams['strict_filter'] = true;
         }
 
-        // STANDARDIZED: Buat cache key berdasarkan semua parameter
-        $cacheParams = $requestParams;
-        unset($cacheParams['user_id']); // Tidak perlu dalam cache key karena sudah digunakan dalam prefiks
-        $cacheKey = "personal_recommendations_{$userId}_{$modelType}_" . md5(json_encode($cacheParams));
-
-        $cachedData = Cache::get($cacheKey);
-
-        if ($cachedData) {
-            return $cachedData;
-        }
-
         try {
             // CLEANED: Deteksi cold-start users dengan caching (tanpa risk tolerance logic)
             $interactionCount = Cache::remember("user_interactions_count_{$userId}", 30, function () use ($userId) {
@@ -715,38 +730,41 @@ class RecommendationController extends Controller
             $response = Http::timeout($timeout)->post("{$this->apiUrl}/recommend/projects", $requestParams);
 
             // Validasi respons
-            if ($response->successful() && isset($response['recommendations']) && !empty($response['recommendations'])) {
-                // Log exact_match_count untuk debugging filter
-                if (isset($response['exact_match_count'])) {
-                    Log::info("Jumlah exact match: " . $response['exact_match_count']);
+            if ($response->successful()) {
+                $responseData = $response->json();
+
+                // PERBAIKAN: Handle response format yang berbeda
+                $recommendations = [];
+                if (isset($responseData['recommendations'])) {
+                    $recommendations = $responseData['recommendations'];
+                } elseif (is_array($responseData)) {
+                    $recommendations = $responseData;
                 }
 
-                // Simpan ke cache untuk 15 menit - konsisten dengan waktu cache lainnya
-                Cache::put($cacheKey, $response['recommendations'], 15);
-                return $response['recommendations'];
+                // Log exact_match_count untuk debugging filter
+                if (isset($responseData['exact_match_count'])) {
+                    Log::info("Jumlah exact match untuk {$modelType}: " . $responseData['exact_match_count']);
+                }
+
+                return $recommendations;
             } else {
                 // Log error respons
-                Log::warning("Respons API rekomendasi tidak valid", [
+                Log::warning("Respons API rekomendasi tidak valid untuk {$modelType}", [
                     'status' => $response->status(),
                     'body' => $response->body(),
                 ]);
 
-                // Fallback untuk cold-start users
-                if ($isColdStart) {
-                    return $this->getTrendingProjects($limit);
-                }
                 return [];
             }
         } catch (\Exception $e) {
-            Log::error("Gagal mendapatkan rekomendasi personal: " . $e->getMessage());
+            Log::error("Gagal mendapatkan rekomendasi {$modelType}: " . $e->getMessage());
 
-            // Fallback untuk cold-start atau error
-            if ($interactionCount < 10) {
+            // PERBAIKAN: Hanya fallback untuk hybrid dan cold-start
+            if ($modelType === 'hybrid' && $isColdStart) {
                 return $this->getTrendingProjects($limit);
             }
 
-            // Fallback ke trending projects jika error
-            return $this->getTrendingProjects($limit);
+            return [];
         }
     }
 

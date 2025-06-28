@@ -143,7 +143,7 @@ class AdminController extends Controller
             $query->where('created_at', '<=', $request->to_date);
         }
 
-        // PERBAIKAN: Hitung statistik dari query yang sudah difilter SEBELUM pagination
+                                    // PERBAIKAN: Hitung statistik dari query yang sudah difilter SEBELUM pagination
         $statsQuery = clone $query; // Clone query untuk statistik
         $totalStats = [
             'total'         => $statsQuery->count(),
@@ -382,7 +382,7 @@ class AdminController extends Controller
         // PERBAIKAN: Pagination dengan withQueryString untuk preserve filter parameters
         $projects = $query->paginate(10)->withQueryString();
 
-        // DIOPTIMALKAN: Cache daftar kategori dan blockchain yang sudah dibersihkan
+                                                                                    // DIOPTIMALKAN: Cache daftar kategori dan blockchain yang sudah dibersihkan
         $categories = Cache::remember('all_project_categories', 1440, function () { // 24 jam
             $rawCategories = Project::select('primary_category')
                 ->distinct()
@@ -525,7 +525,7 @@ class AdminController extends Controller
                 'popular_projects_8',
             ];
 
-            $validCount = 0;
+            $validCount   = 0;
             $expiredCount = 0;
 
             foreach ($knownCacheKeys as $key) {
@@ -537,26 +537,26 @@ class AdminController extends Controller
             }
 
             $totalKeys = count($knownCacheKeys);
-            $hitRate = $totalKeys > 0 ? ($validCount / $totalKeys) * 100 : 0;
+            $hitRate   = $totalKeys > 0 ? ($validCount / $totalKeys) * 100 : 0;
 
             return [
-                'total' => $totalKeys,
-                'valid' => $validCount,
-                'expired' => $expiredCount,
+                'total'    => $totalKeys,
+                'valid'    => $validCount,
+                'expired'  => $expiredCount,
                 'hit_rate' => $hitRate,
-                'type' => 'memory_cache',
-                'note' => 'Cache Laravel Memory (tidak tersimpan di database)',
+                'type'     => 'memory_cache',
+                'note'     => 'Cache Laravel Memory (tidak tersimpan di database)',
             ];
         } catch (\Exception $e) {
             Log::error('Error getting cache stats: ' . $e->getMessage());
             return [
-                'total' => 0,
-                'valid' => 0,
-                'expired' => 0,
-                'hit_rate' => 0,
-                'type' => 'memory_cache',
-                'error' => true,
-                'error_message' => $e->getMessage()
+                'total'         => 0,
+                'valid'         => 0,
+                'expired'       => 0,
+                'hit_rate'      => 0,
+                'type'          => 'memory_cache',
+                'error'         => true,
+                'error_message' => $e->getMessage(),
             ];
         }
     }
@@ -569,35 +569,35 @@ class AdminController extends Controller
         try {
             // FIXED: Data real berdasarkan aktivitas sistem
             $interactionCount = Interaction::count();
-            $userCount = User::count();
-            $projectCount = Project::count();
+            $userCount        = User::count();
+            $projectCount     = Project::count();
 
             // Estimasi penggunaan berdasarkan data real
             $usage = [
                 (object) [
-                    'endpoint' => '/recommend/projects',
-                    'count' => intval($interactionCount * 0.6), // 60% dari interaksi
-                    'description' => 'Personal recommendations'
+                    'endpoint'    => '/recommend/projects',
+                    'count'       => intval($interactionCount * 0.6), // 60% dari interaksi
+                    'description' => 'Personal recommendations',
                 ],
                 (object) [
-                    'endpoint' => '/recommend/trending',
-                    'count' => intval($userCount * 2.5), // Rata-rata 2.5x per user
-                    'description' => 'Trending projects'
+                    'endpoint'    => '/recommend/trending',
+                    'count'       => intval($userCount * 2.5), // Rata-rata 2.5x per user
+                    'description' => 'Trending projects',
                 ],
                 (object) [
-                    'endpoint' => '/recommend/popular',
-                    'count' => intval($userCount * 2.0), // Rata-rata 2x per user
-                    'description' => 'Popular projects'
+                    'endpoint'    => '/recommend/popular',
+                    'count'       => intval($userCount * 2.0), // Rata-rata 2x per user
+                    'description' => 'Popular projects',
                 ],
                 (object) [
-                    'endpoint' => '/analysis/trading-signals',
-                    'count' => intval($projectCount * 0.3), // 30% dari projects
-                    'description' => 'Technical analysis'
+                    'endpoint'    => '/analysis/trading-signals',
+                    'count'       => intval($projectCount * 0.3), // 30% dari projects
+                    'description' => 'Technical analysis',
                 ],
                 (object) [
-                    'endpoint' => '/recommend/similar/{id}',
-                    'count' => intval($interactionCount * 0.2), // 20% dari interaksi
-                    'description' => 'Similar recommendations'
+                    'endpoint'    => '/recommend/similar/{id}',
+                    'count'       => intval($interactionCount * 0.2), // 20% dari interaksi
+                    'description' => 'Similar recommendations',
                 ],
             ];
 
@@ -652,7 +652,7 @@ class AdminController extends Controller
                 case 'all':
                     // FIXED: Flush semua cache Laravel
                     Cache::flush();
-                    $message = "Semua cache Laravel berhasil dibersihkan.";
+                    $message      = "Semua cache Laravel berhasil dibersihkan.";
                     $clearedCount = "semua";
                     break;
 
@@ -703,8 +703,8 @@ class AdminController extends Controller
             }
 
             Log::info("Cache cleared successfully", [
-                'option' => $cacheOption,
-                'cleared_count' => $clearedCount
+                'option'        => $cacheOption,
+                'cleared_count' => $clearedCount,
             ]);
 
             return redirect()->route('admin.data-sync')
@@ -794,15 +794,15 @@ class AdminController extends Controller
                     ->map(function ($item) {
                         $project = Project::find($item->project_id);
                         return [
-                            'project_id' => $item->project_id,
+                            'project_id'        => $item->project_id,
                             'interaction_count' => $item->interaction_count,
-                            'project' => $project ? [
-                                'id' => $project->id,
-                                'name' => $project->name,
-                                'symbol' => $project->symbol,
-                                'image' => $project->image,
+                            'project'           => $project ? [
+                                'id'               => $project->id,
+                                'name'             => $project->name,
+                                'symbol'           => $project->symbol,
+                                'image'            => $project->image,
                                 'primary_category' => $project->primary_category,
-                            ] : null
+                            ] : null,
                         ];
                     })
                     ->filter(function ($item) {
@@ -812,8 +812,8 @@ class AdminController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $mostInteracted,
-                'total' => count($mostInteracted),
+                'data'    => $mostInteracted,
+                'total'   => count($mostInteracted),
             ]);
         } catch (\Exception $e) {
             Log::error('Error getting most interacted projects: ' . $e->getMessage());
@@ -821,7 +821,7 @@ class AdminController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal mendapatkan data proyek paling berinteraksi',
-                'error' => $e->getMessage(),
+                'error'   => $e->getMessage(),
             ], 500);
         }
     }
@@ -930,28 +930,28 @@ class AdminController extends Controller
     /**
      * Memicu sinkronisasi data
      */
-    public function triggerDataSync(Request $request)
-    {
-        $syncType = $request->input('sync_type', 'all');
+    // public function triggerDataSync(Request $request)
+    // {
+    //     $syncType = $request->input('sync_type', 'all');
 
-        try {
-            // DIOPTIMALKAN: Gunakan timeout yang lebih kecil untuk HTTP requests
-            $response = Http::timeout(5)->post("{$this->apiUrl}/admin/sync-data", [
-                'projects_updated' => in_array($syncType, ['all', 'projects']),
-                'users_count'      => User::count(),
-            ])->json();
+    //     try {
+    //         // DIOPTIMALKAN: Gunakan timeout yang lebih kecil untuk HTTP requests
+    //         $response = Http::timeout(5)->post("{$this->apiUrl}/admin/sync-data", [
+    //             'projects_updated' => in_array($syncType, ['all', 'projects']),
+    //             'users_count'      => User::count(),
+    //         ])->json();
 
-            // DIOPTIMALKAN: Hapus cache yang berkaitan dengan data sync
-            Cache::forget('data_sync_project_stats');
-            Cache::forget('admin_project_stats');
+    //         // DIOPTIMALKAN: Hapus cache yang berkaitan dengan data sync
+    //         Cache::forget('data_sync_project_stats');
+    //         Cache::forget('admin_project_stats');
 
-            return redirect()->route('admin.data-sync')
-                ->with('success', 'Sinkronisasi data berhasil dipicu.');
-        } catch (\Exception $e) {
-            return redirect()->route('admin.data-sync')
-                ->with('error', 'Gagal memicu sinkronisasi data: ' . $e->getMessage());
-        }
-    }
+    //         return redirect()->route('admin.data-sync')
+    //             ->with('success', 'Sinkronisasi data berhasil dipicu.');
+    //     } catch (\Exception $e) {
+    //         return redirect()->route('admin.data-sync')
+    //             ->with('error', 'Gagal memicu sinkronisasi data: ' . $e->getMessage());
+    //     }
+    // }
 
     /**
      * UPDATED: Melatih model rekomendasi dengan production pipeline
@@ -996,9 +996,9 @@ class AdminController extends Controller
             Log::info("Starting production pipeline asynchronously...");
 
             $response = Http::timeout(30)->post("{$this->apiUrl}/admin/production-pipeline", [
-                'evaluate' => true,
-                'force'    => true,
-                'async_mode' => true,  // Enable async mode
+                'evaluate'   => true,
+                'force'      => true,
+                'async_mode' => true, // Enable async mode
             ]);
 
             Log::info("Production pipeline start response:", [
@@ -1026,13 +1026,13 @@ class AdminController extends Controller
                             );
 
                     case 'already_running':
-                        $elapsed = $responseData['elapsed_time'] ?? 0;
+                        $elapsed        = $responseData['elapsed_time'] ?? 0;
                         $elapsedMinutes = floor($elapsed / 60);
-                        $elapsedHours = floor($elapsed / 3600);
+                        $elapsedHours   = floor($elapsed / 3600);
 
                         $timeDisplay = $elapsedHours > 0 ?
-                            "{$elapsedHours} jam " . ($elapsedMinutes % 60) . " menit" :
-                            "{$elapsedMinutes} menit";
+                        "{$elapsedHours} jam " . ($elapsedMinutes % 60) . " menit" :
+                        "{$elapsedMinutes} menit";
 
                         return redirect()->route('admin.data-sync')
                             ->with('warning',
@@ -1068,47 +1068,47 @@ class AdminController extends Controller
 
             if (! $response->successful()) {
                 return response()->json([
-                    'status' => 'error',
-                    'message' => 'Gagal mendapatkan status pipeline'
+                    'status'  => 'error',
+                    'message' => 'Gagal mendapatkan status pipeline',
                 ], 500);
             }
 
-            $data = $response->json();
+            $data           = $response->json();
             $pipelineStatus = $data['pipeline_status'] ?? [];
 
             // Format response untuk frontend dengan time formatting yang lebih baik
             $formattedStatus = [
-                'running' => $pipelineStatus['running'] ?? false,
-                'status' => $pipelineStatus['status'] ?? 'unknown',
-                'message' => $pipelineStatus['message'] ?? '',
-                'elapsed_time' => isset($pipelineStatus['elapsed_time']) ?
-                    floor($pipelineStatus['elapsed_time']) : null,
-                'elapsed_minutes' => isset($pipelineStatus['elapsed_minutes']) ?
-                    floor($pipelineStatus['elapsed_minutes']) : null,
-                'elapsed_hours' => isset($pipelineStatus['elapsed_hours']) ?
-                    round($pipelineStatus['elapsed_hours'], 1) : null,
-                'total_time' => isset($pipelineStatus['total_time']) ?
-                    floor($pipelineStatus['total_time']) : null,
-                'total_minutes' => isset($pipelineStatus['total_minutes']) ?
-                    floor($pipelineStatus['total_minutes']) : null,
-                'total_hours' => isset($pipelineStatus['total_hours']) ?
-                    round($pipelineStatus['total_hours'], 1) : null,
+                'running'            => $pipelineStatus['running'] ?? false,
+                'status'             => $pipelineStatus['status'] ?? 'unknown',
+                'message'            => $pipelineStatus['message'] ?? '',
+                'elapsed_time'       => isset($pipelineStatus['elapsed_time']) ?
+                floor($pipelineStatus['elapsed_time']) : null,
+                'elapsed_minutes'    => isset($pipelineStatus['elapsed_minutes']) ?
+                floor($pipelineStatus['elapsed_minutes']) : null,
+                'elapsed_hours'      => isset($pipelineStatus['elapsed_hours']) ?
+                round($pipelineStatus['elapsed_hours'], 1) : null,
+                'total_time'         => isset($pipelineStatus['total_time']) ?
+                floor($pipelineStatus['total_time']) : null,
+                'total_minutes'      => isset($pipelineStatus['total_minutes']) ?
+                floor($pipelineStatus['total_minutes']) : null,
+                'total_hours'        => isset($pipelineStatus['total_hours']) ?
+                round($pipelineStatus['total_hours'], 1) : null,
                 'estimated_progress' => $pipelineStatus['estimated_progress'] ?? '',
-                'output' => $pipelineStatus['output'] ?? '',
-                'error' => $pipelineStatus['error'] ?? ''
+                'output'             => $pipelineStatus['output'] ?? '',
+                'error'              => $pipelineStatus['error'] ?? '',
             ];
 
             return response()->json([
-                'status' => 'success',
-                'pipeline' => $formattedStatus
+                'status'   => 'success',
+                'pipeline' => $formattedStatus,
             ]);
 
         } catch (\Exception $e) {
             Log::error("Error checking pipeline status: " . $e->getMessage());
 
             return response()->json([
-                'status' => 'error',
-                'message' => 'Error: ' . $e->getMessage()
+                'status'  => 'error',
+                'message' => 'Error: ' . $e->getMessage(),
             ], 500);
         }
     }

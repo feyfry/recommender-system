@@ -146,11 +146,11 @@
                     </span>
                 </div>
             </div>
-            <div class="mt-4">
+            {{-- <div class="mt-4">
                 <button onclick="document.getElementById('sync-data-modal').classList.remove('hidden')" class="clay-button clay-button-warning py-1.5 px-3 text-sm">
                     Sinkronisasi Data
                 </button>
-            </div>
+            </div> --}}
         </div>
     </div>
 
@@ -337,14 +337,14 @@
                 <p class="text-xs text-warning">⚡ Test Only</p>
             </div>
 
-            <div class="clay-card bg-warning/10 p-4 text-center api-test" data-endpoint="sync-data" data-test-only="true">
+            {{-- <div class="clay-card bg-warning/10 p-4 text-center api-test" data-endpoint="sync-data" data-test-only="true">
                 <div class="status-indicator">
                     <i class="fas fa-circle-notch fa-spin text-2xl text-warning mb-2"></i>
                 </div>
                 <div class="font-bold">Sync Data</div>
                 <p class="text-xs mt-1">POST /admin/sync-data</p>
                 <p class="text-xs text-warning">⚡ Test Only</p>
-            </div>
+            </div> --}}
 
             <div class="clay-card bg-info/10 p-4 text-center api-test" data-endpoint="rec-cache-clear" data-test-only="true">
                 <div class="status-indicator">
@@ -700,11 +700,11 @@
             </a>
         </div>
     </div>
- </div>
+</div>
 
- <!-- Modal components -->
- <!-- Production Pipeline Modal -->
- <div id="production-pipeline-modal" class="fixed inset-0 z-50 hidden">
+<!-- Modal components -->
+<!-- Production Pipeline Modal -->
+<div id="production-pipeline-modal" class="fixed inset-0 z-50 hidden">
     <div class="clay-modal-backdrop"></div>
     <div class="clay-modal max-w-md">
         <div class="clay-modal-header">
@@ -748,10 +748,10 @@
             </div>
         </form>
     </div>
- </div>
+</div>
 
- <!-- Sync Data Modal -->
- <div id="sync-data-modal" class="fixed inset-0 z-50 hidden">
+<!-- Sync Data Modal -->
+{{-- <div id="sync-data-modal" class="fixed inset-0 z-50 hidden">
     <div class="clay-modal-backdrop"></div>
     <div class="clay-modal max-w-md">
         <div class="clay-modal-header">
@@ -789,10 +789,10 @@
             </div>
         </form>
     </div>
- </div>
+</div> --}}
 
- <!-- Train Models Modal -->
- <div id="train-models-modal" class="fixed inset-0 z-50 hidden">
+<!-- Train Models Modal -->
+<div id="train-models-modal" class="fixed inset-0 z-50 hidden">
     <div class="clay-modal-backdrop"></div>
     <div class="clay-modal max-w-md">
         <div class="clay-modal-header">
@@ -835,10 +835,10 @@
             </div>
         </form>
     </div>
- </div>
+</div>
 
- <!-- Clear Cache Modal -->
- <div id="clear-cache-modal" class="fixed inset-0 z-50 hidden">
+<!-- Clear Cache Modal -->
+<div id="clear-cache-modal" class="fixed inset-0 z-50 hidden">
     <div class="clay-modal-backdrop"></div>
     <div class="clay-modal max-w-md">
         <div class="clay-modal-header">
@@ -880,10 +880,10 @@
             </div>
         </form>
     </div>
- </div>
+</div>
 
- @push('scripts')
- <script>
+@push('scripts')
+<script>
     // FIXED: Toggle endpoint list function yang benar
     function toggleEndpointList() {
         const endpointList = document.getElementById('endpoint-list');
@@ -1242,12 +1242,12 @@
                         test_only: true
                     };
                     break;
-                case 'sync-data':
-                    testData = {
-                        projects_updated: false,
-                        test_only: true
-                    };
-                    break;
+                // case 'sync-data':
+                //     testData = {
+                //         projects_updated: false,
+                //         test_only: true
+                //     };
+                //     break;
             }
 
             // Handle URL untuk endpoint yang memerlukan parameter
@@ -1312,7 +1312,7 @@
             { endpoint: 'indicators', url: `${apiUrl}/analysis/indicators`, method: 'POST' },
             { endpoint: 'record-interaction', url: `${apiUrl}/interactions/record`, method: 'POST' },
             { endpoint: 'train-models', url: `${apiUrl}/admin/train-models`, method: 'POST' },
-            { endpoint: 'sync-data', url: `${apiUrl}/admin/sync-data`, method: 'POST' },
+            // { endpoint: 'sync-data', url: `${apiUrl}/admin/sync-data`, method: 'POST' },
             { endpoint: 'rec-cache-clear', url: `${apiUrl}/recommend/cache/clear`, method: 'POST' },
             { endpoint: 'analysis-cache-clear', url: `${apiUrl}/analysis/cache/clear`, method: 'POST' },
             { endpoint: 'blockchain-cache-clear', url: `${apiUrl}/blockchain/cache/clear`, method: 'POST' }

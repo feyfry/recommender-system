@@ -164,13 +164,13 @@
         </div>
     </div>
 
-    <!-- Model Tabs dengan Lazy Loading -->
+    <!-- Model Tabs dengan Lazy Loading - CONSERVATIVE FIX -->
     <div class="clay-card p-6 mb-8" x-data="{
         activeTab: 'hybrid',
         loading: {
-            hybrid: true,
-            fecf: true,
-            ncf: true
+            hybrid: false,
+            fecf: false,
+            ncf: false
         },
         hybridRecommendations: [],
         fecfRecommendations: [],
@@ -180,10 +180,10 @@
             <button @click="activeTab = 'hybrid'" :class="{ 'active': activeTab === 'hybrid' }" class="clay-tab">
                 <i class="fas fa-code-branch mr-2"></i> Hybrid Model
             </button>
-            <button @click="activeTab = 'fecf'" :class="{ 'active': activeTab === 'fecf' }" class="clay-tab">
+            <button @click="activeTab = 'fecf'; loadFecfData()" :class="{ 'active': activeTab === 'fecf' }" class="clay-tab">
                 <i class="fas fa-table mr-2"></i> Feature-Enhanced CF
             </button>
-            <button @click="activeTab = 'ncf'" :class="{ 'active': activeTab === 'ncf' }" class="clay-tab">
+            <button @click="activeTab = 'ncf'; loadNcfData()" :class="{ 'active': activeTab === 'ncf' }" class="clay-tab">
                 <i class="fas fa-brain mr-2"></i> Neural CF
             </button>
         </div>
@@ -204,62 +204,99 @@
             </div>
         </div>
 
-        <!-- Initialization Script - Muat data dari server atau via AJAX -->
-        <div x-init="
-            @if(isset($hybridRecommendations) && !empty($hybridRecommendations))
-                hybridRecommendations = {{ json_encode($hybridRecommendations) }};
-                loading.hybrid = false;
-            @else
-                fetch('{{ route('panel.recommendations.personal') }}?model=hybrid&format=json&category={{ $selectedCategory ?? '' }}&chain={{ $selectedChain ?? '' }}&strict_filter={{ $strictFilter ? '1' : '0' }}')
-                    .then(response => response.json())
-                    .then(data => {
-                        hybridRecommendations = data;
-                        loading.hybrid = false;
-                    })
-                    .catch(error => {
-                        console.error('Error loading hybrid recommendations:', error);
-                        loading.hybrid = false;
-                    });
-            @endif
+        <!-- PERBAIKAN: Methods untuk load data dengan proper implementation -->
+        <script>
+            document.addEventListener('alpine:init', () => {
+                Alpine.data('recommendationTabs', () => ({
+                    // ... existing data properties
 
-            @if(isset($fecfRecommendations) && !empty($fecfRecommendations))
-                fecfRecommendations = {{ json_encode($fecfRecommendations) }};
-                loading.fecf = false;
-            @else
-                document.querySelector('[x-data] button:nth-child(2)').addEventListener('click', function() {
-                    if (fecfRecommendations.length === 0 && loading.fecf) {
-                        fetch('{{ route('panel.recommendations.personal') }}?model=fecf&format=json&category={{ $selectedCategory ?? '' }}&chain={{ $selectedChain ?? '' }}&strict_filter={{ $strictFilter ? '1' : '0' }}')
+                    // PERBAIKAN: Method untuk load FECF data
+                    loadFecfData() {
+                        if (this.fecfRecommendations.length > 0 || this.loading.fecf) {
+                            return; // Sudah dimuat atau sedang loading
+                        }
+
+                        this.loading.fecf = true;
+                        console.log('Loading FECF recommendations...');
+
+                        const params = new URLSearchParams({
+                            model: 'fecf',
+                            format: 'json',
+                            category: '{{ $selectedCategory ?? '' }}',
+                            chain: '{{ $selectedChain ?? '' }}',
+                            strict_filter: '{{ $strictFilter ? '1' : '0' }}',
+                            limit: '{{ request()->input('limit', 10) }}'
+                        });
+
+                        fetch('{{ route('panel.recommendations.personal') }}?' + params.toString())
                             .then(response => response.json())
                             .then(data => {
-                                fecfRecommendations = data;
-                                loading.fecf = false;
+                                console.log('FECF Response:', data);
+                                this.fecfRecommendations = Array.isArray(data) ? data : [];
+                                this.loading.fecf = false;
                             })
                             .catch(error => {
                                 console.error('Error loading FECF recommendations:', error);
-                                loading.fecf = false;
+                                this.fecfRecommendations = [];
+                                this.loading.fecf = false;
                             });
-                    }
-                });
-            @endif
+                    },
 
-            @if(isset($ncfRecommendations) && !empty($ncfRecommendations))
-                ncfRecommendations = {{ json_encode($ncfRecommendations) }};
-                loading.ncf = false;
-            @else
-                document.querySelector('[x-data] button:nth-child(3)').addEventListener('click', function() {
-                    if (ncfRecommendations.length === 0 && loading.ncf) {
-                        fetch('{{ route('panel.recommendations.personal') }}?model=ncf&format=json&category={{ $selectedCategory ?? '' }}&chain={{ $selectedChain ?? '' }}&strict_filter={{ $strictFilter ? '1' : '0' }}')
+                    // PERBAIKAN: Method untuk load NCF data
+                    loadNcfData() {
+                        if (this.ncfRecommendations.length > 0 || this.loading.ncf) {
+                            return; // Sudah dimuat atau sedang loading
+                        }
+
+                        this.loading.ncf = true;
+                        console.log('Loading NCF recommendations...');
+
+                        const params = new URLSearchParams({
+                            model: 'ncf',
+                            format: 'json',
+                            category: '{{ $selectedCategory ?? '' }}',
+                            chain: '{{ $selectedChain ?? '' }}',
+                            strict_filter: '{{ $strictFilter ? '1' : '0' }}',
+                            limit: '{{ request()->input('limit', 10) }}'
+                        });
+
+                        fetch('{{ route('panel.recommendations.personal') }}?' + params.toString())
                             .then(response => response.json())
                             .then(data => {
-                                ncfRecommendations = data;
-                                loading.ncf = false;
+                                console.log('NCF Response:', data);
+                                this.ncfRecommendations = Array.isArray(data) ? data : [];
+                                this.loading.ncf = false;
                             })
                             .catch(error => {
                                 console.error('Error loading NCF recommendations:', error);
-                                loading.ncf = false;
+                                this.ncfRecommendations = [];
+                                this.loading.ncf = false;
                             });
                     }
-                });
+                }))
+            })
+        </script>
+
+        <!-- Initialization Script - Load Hybrid data from server -->
+        <div x-init="
+            @if(isset($hybridRecommendations) && !empty($hybridRecommendations))
+                hybridRecommendations = {{ json_encode($hybridRecommendations) }};
+                console.log('Hybrid recommendations loaded from server:', hybridRecommendations.length);
+            @else
+                console.log('No hybrid recommendations from server, will load via AJAX if needed');
+                hybridRecommendations = [];
+            @endif
+
+            // PERBAIKAN: Pre-load FECF data jika sudah ada dari server
+            @if(isset($fecfRecommendations) && !empty($fecfRecommendations))
+                fecfRecommendations = {{ json_encode($fecfRecommendations) }};
+                console.log('FECF recommendations loaded from server:', fecfRecommendations.length);
+            @endif
+
+            // PERBAIKAN: Pre-load NCF data jika sudah ada dari server
+            @if(isset($ncfRecommendations) && !empty($ncfRecommendations))
+                ncfRecommendations = {{ json_encode($ncfRecommendations) }};
+                console.log('NCF recommendations loaded from server:', ncfRecommendations.length);
             @endif
         ">
         </div>
@@ -403,7 +440,7 @@
                 <div class="col-span-full text-center py-8">
                     <div class="clay-alert clay-alert-info">
                         <p>Tidak ada rekomendasi FECF yang tersedia saat ini.</p>
-                        <p class="text-sm mt-2">Mulai berinteraksi dengan proyek untuk mendapatkan rekomendasi yang lebih baik.</p>
+                        <p class="text-sm mt-2">FECF model mungkin tidak memiliki data yang cukup untuk filter yang dipilih.</p>
                     </div>
                 </div>
             </template>
@@ -463,7 +500,7 @@
                 <div class="col-span-full text-center py-8">
                     <div class="clay-alert clay-alert-info">
                         <p>Tidak ada rekomendasi NCF yang tersedia saat ini.</p>
-                        <p class="text-sm mt-2">Mulai berinteraksi dengan proyek untuk mendapatkan rekomendasi yang lebih baik.</p>
+                        <p class="text-sm mt-2">NCF model memerlukan lebih banyak data untuk menghasilkan rekomendasi.</p>
                     </div>
                 </div>
             </template>

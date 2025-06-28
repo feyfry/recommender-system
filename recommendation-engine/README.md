@@ -1220,7 +1220,6 @@ Secara default, API akan berjalan di `http://0.0.0.0:8001`.
 
 **Parameters:**
 - `wallet_address` (string): Alamat wallet
-- `chains` (array, optional): Chains untuk di-scan (eth, bsc, polygon, avalanche)
 
 **Response:**
 ```json
