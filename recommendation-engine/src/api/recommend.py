@@ -41,11 +41,11 @@ _models = {
     "hybrid": None
 }
 
-# ⚡ PERBAIKAN: TTL cache dipendekkan sesuai permintaan user (1-5 menit)
+# ⚡ PERBAIKAN: TTL cache (2-5 menit)
 _cache_ttl = {
-    "cold_start": 180,     # 3 menit untuk cold-start user (dipendekkan dari 30 menit)
-    "low_activity": 240,   # 4 menit untuk pengguna dengan aktivitas rendah  
-    "normal": 300,         # 5 menit untuk pengguna normal
+    "cold_start": 120,     # 2 menit untuk cold-start user (dipendekkan dari 30 menit)
+    "low_activity": 180,   # 3 menit untuk pengguna dengan aktivitas rendah  
+    "normal": 240,         # 4 menit untuk pengguna normal
     "active": 300          # 5 menit untuk pengguna sangat aktif
 }
 
@@ -472,11 +472,11 @@ async def recommend_projects(request: RecommendationRequest):
         
         # Determine cache TTL
         if is_cold_start:
-            cache_ttl = _cache_ttl["cold_start"]  # 3 menit
+            cache_ttl = _cache_ttl["cold_start"]  # 2 menit
         elif user_interaction_count < 10:
-            cache_ttl = _cache_ttl["low_activity"]  # 4 menit
+            cache_ttl = _cache_ttl["low_activity"]  # 3 menit
         elif user_interaction_count < 50:
-            cache_ttl = _cache_ttl["normal"]  # 5 menit
+            cache_ttl = _cache_ttl["normal"]  # 4 menit
         else:
             cache_ttl = _cache_ttl["active"]  # 5 menit
 

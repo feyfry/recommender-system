@@ -7,3 +7,6 @@ notebooks/
 /data/*
 
 /cache
+
+output_figures/
+.ipynb_checkpoints
