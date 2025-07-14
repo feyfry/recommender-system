@@ -299,91 +299,116 @@ class AdminController extends Controller
     }
 
     /**
-     * PERBAIKAN: Menampilkan halaman pengelolaan proyek dengan fix sorting interactions dan statistik trending
+     * FIXED: Menampilkan halaman pengelolaan proyek dengan interaction count yang benar
      */
     public function projects(Request $request)
     {
-        $query = Project::query();
+        // FIXED: Base query dengan JOIN ke interactions untuk selalu mendapat interaction_count
+        $query = Project::leftJoin('interactions', 'projects.id', '=', 'interactions.project_id')
+            ->select('projects.*', DB::raw('COUNT(interactions.id) as interaction_count'))
+            ->groupBy(
+                'projects.id', 'projects.symbol', 'projects.name', 'projects.image',
+                'projects.current_price', 'projects.market_cap', 'projects.market_cap_rank',
+                'projects.fully_diluted_valuation', 'projects.total_volume', 'projects.high_24h',
+                'projects.low_24h', 'projects.price_change_24h', 'projects.price_change_percentage_24h',
+                'projects.market_cap_change_24h', 'projects.market_cap_change_percentage_24h',
+                'projects.circulating_supply', 'projects.total_supply', 'projects.max_supply',
+                'projects.ath', 'projects.ath_change_percentage', 'projects.ath_date',
+                'projects.atl', 'projects.atl_change_percentage', 'projects.atl_date',
+                'projects.roi', 'projects.last_updated', 'projects.price_change_percentage_1h_in_currency',
+                'projects.price_change_percentage_24h_in_currency', 'projects.price_change_percentage_30d_in_currency',
+                'projects.price_change_percentage_7d_in_currency', 'projects.query_category',
+                'projects.platforms', 'projects.categories', 'projects.twitter_followers',
+                'projects.github_stars', 'projects.github_subscribers', 'projects.github_forks',
+                'projects.description', 'projects.genesis_date', 'projects.sentiment_votes_up_percentage',
+                'projects.telegram_channel_user_count', 'projects.primary_category', 'projects.chain',
+                'projects.popularity_score', 'projects.trend_score', 'projects.developer_activity_score',
+                'projects.social_engagement_score', 'projects.description_length', 'projects.age_days',
+                'projects.maturity_score', 'projects.is_trending', 'projects.created_at', 'projects.updated_at'
+            );
 
         // Filter berdasarkan kategori
         if ($request->has('category') && ! empty($request->category)) {
             // Handle filter untuk kategori yang berbentuk array
             $query->where(function ($q) use ($request) {
+                $q->where('projects.primary_category', $request->category)
+                    ->orWhere('projects.primary_category', 'like', '%"' . $request->category . '"%')
+                    ->orWhere('projects.primary_category', 'like', "['" . $request->category . "']");
+            });
+        }
+
+        // Filter berdasarkan blockchain
+        if ($request->has('chain') && ! empty($request->chain)) {
+            $query->where('projects.chain', $request->chain);
+        }
+
+        // Filter berdasarkan pencarian
+        if ($request->has('search') && ! empty($request->search)) {
+            $query->where(function ($q) use ($request) {
+                $q->where('projects.name', 'like', "%{$request->search}%")
+                    ->orWhere('projects.symbol', 'like', "%{$request->search}%")
+                    ->orWhere('projects.id', 'like', "%{$request->search}%");
+            });
+        }
+
+        // FIXED: Clone query untuk statistik SEBELUM sorting dan pagination
+        $statsQuery = clone $query;
+
+        // FIXED: Hitung statistik dari query yang sudah difilter (tanpa groupBy untuk menghindari error)
+        $baseStatsQuery = Project::query();
+
+        // Apply same filters untuk statistik
+        if ($request->has('category') && ! empty($request->category)) {
+            $baseStatsQuery->where(function ($q) use ($request) {
                 $q->where('primary_category', $request->category)
                     ->orWhere('primary_category', 'like', '%"' . $request->category . '"%')
                     ->orWhere('primary_category', 'like', "['" . $request->category . "']");
             });
         }
 
-        // Filter berdasarkan blockchain
         if ($request->has('chain') && ! empty($request->chain)) {
-            $query->where('chain', $request->chain);
+            $baseStatsQuery->where('chain', $request->chain);
         }
 
-        // Filter berdasarkan pencarian
         if ($request->has('search') && ! empty($request->search)) {
-            $query->where(function ($q) use ($request) {
+            $baseStatsQuery->where(function ($q) use ($request) {
                 $q->where('name', 'like', "%{$request->search}%")
                     ->orWhere('symbol', 'like', "%{$request->search}%")
                     ->orWhere('id', 'like', "%{$request->search}%");
             });
         }
 
-        // PERBAIKAN: Clone query untuk statistik SEBELUM sorting dan pagination
-        $statsQuery   = clone $query;
         $projectStats = [
-            'total'      => $statsQuery->count(),
-            'trending'   => (clone $statsQuery)->where('trend_score', '>', 70)->count(),
-            'popular'    => (clone $statsQuery)->where('popularity_score', '>', 70)->count(),
-            'categories' => (clone $statsQuery)->select('primary_category')
+            'total'      => $baseStatsQuery->count(),
+            'trending'   => (clone $baseStatsQuery)->where('trend_score', '>', 70)->count(),
+            'popular'    => (clone $baseStatsQuery)->where('popularity_score', '>', 70)->count(),
+            'categories' => (clone $baseStatsQuery)->select('primary_category')
                 ->distinct()
                 ->whereNotNull('primary_category')
                 ->count(),
-            'chains'     => (clone $statsQuery)->select('chain')
+            'chains'     => (clone $baseStatsQuery)->select('chain')
                 ->distinct()
                 ->whereNotNull('chain')
                 ->count(),
         ];
 
-        // PERBAIKAN: Handle sorting berdasarkan interactions
+        // FIXED: Handle sorting dengan interaction_count yang sudah ada
         $sortField = $request->get('sort', 'popularity_score');
         $direction = $request->get('direction', 'desc');
 
         if ($sortField === 'interactions') {
-            // Join dengan tabel interactions dan hitung jumlahnya
-            $query->leftJoin('interactions', 'projects.id', '=', 'interactions.project_id')
-                ->select('projects.*', DB::raw('COUNT(interactions.id) as interaction_count'))
-                ->groupBy(
-                    'projects.id', 'projects.symbol', 'projects.name', 'projects.image',
-                    'projects.current_price', 'projects.market_cap', 'projects.market_cap_rank',
-                    'projects.fully_diluted_valuation', 'projects.total_volume', 'projects.high_24h',
-                    'projects.low_24h', 'projects.price_change_24h', 'projects.price_change_percentage_24h',
-                    'projects.market_cap_change_24h', 'projects.market_cap_change_percentage_24h',
-                    'projects.circulating_supply', 'projects.total_supply', 'projects.max_supply',
-                    'projects.ath', 'projects.ath_change_percentage', 'projects.ath_date',
-                    'projects.atl', 'projects.atl_change_percentage', 'projects.atl_date',
-                    'projects.roi', 'projects.last_updated', 'projects.price_change_percentage_1h_in_currency',
-                    'projects.price_change_percentage_24h_in_currency', 'projects.price_change_percentage_30d_in_currency',
-                    'projects.price_change_percentage_7d_in_currency', 'projects.query_category',
-                    'projects.platforms', 'projects.categories', 'projects.twitter_followers',
-                    'projects.github_stars', 'projects.github_subscribers', 'projects.github_forks',
-                    'projects.description', 'projects.genesis_date', 'projects.sentiment_votes_up_percentage',
-                    'projects.telegram_channel_user_count', 'projects.primary_category', 'projects.chain',
-                    'projects.popularity_score', 'projects.trend_score', 'projects.developer_activity_score',
-                    'projects.social_engagement_score', 'projects.description_length', 'projects.age_days',
-                    'projects.maturity_score', 'projects.is_trending', 'projects.created_at', 'projects.updated_at'
-                )
-                ->orderBy('interaction_count', $direction);
+            // Interaction count sudah ada dari LEFT JOIN di atas
+            $query->orderBy('interaction_count', $direction);
         } else {
-            // Urutkan berdasarkan field biasa
-            $query->orderBy($sortField, $direction);
+            // Urutkan berdasarkan field biasa dengan prefix projects.
+            $query->orderBy('projects.' . $sortField, $direction);
         }
 
-        // PERBAIKAN: Pagination dengan withQueryString untuk preserve filter parameters
+        // FIXED: Pagination dengan withQueryString untuk preserve filter parameters
         $projects = $query->paginate(10)->withQueryString();
 
-                                                                                    // DIOPTIMALKAN: Cache daftar kategori dan blockchain yang sudah dibersihkan
-        $categories = Cache::remember('all_project_categories', 1440, function () { // 24 jam
+        // DIOPTIMALKAN: Cache daftar kategori dan blockchain yang sudah dibersihkan
+        $categories = Cache::remember('admin_all_project_categories', 1440, function () { // 24 jam
             $rawCategories = Project::select('primary_category')
                 ->distinct()
                 ->whereNotNull('primary_category')
@@ -425,7 +450,7 @@ class AdminController extends Controller
                 ->values();
         });
 
-        $chains = Cache::remember('all_project_chains', 1440, function () { // 24 jam
+        $chains = Cache::remember('admin_all_project_chains', 1440, function () { // 24 jam
             return Project::select('chain')
                 ->distinct()
                 ->whereNotNull('chain')
@@ -438,7 +463,7 @@ class AdminController extends Controller
 
         return view('admin.projects', [
             'projects'     => $projects,
-            'projectStats' => $projectStats, // PERBAIKAN: Kirim statistik yang sudah diperbaiki
+            'projectStats' => $projectStats,
             'categories'   => $categories,
             'chains'       => $chains,
             'filters'      => $request->only(['category', 'chain', 'search', 'sort', 'direction']),

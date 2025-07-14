@@ -83,12 +83,15 @@ Route::prefix('panel')->middleware('auth')->group(function () {
         // ⚡ ENHANCED: AJAX endpoint untuk refresh onchain data dengan multi-chain native token focus
         Route::post('/refresh-onchain', [PortfolioController::class, 'refreshOnchainData'])->name('panel.portfolio.refresh-onchain');
 
-        // Transaction operations (existing)
+        // Transaction operations (existing + NEW delete)
         Route::post('/transactions/add', [PortfolioController::class, 'addTransaction'])->name('panel.portfolio.add-transaction');
+        Route::delete('/transactions/{id}/delete', [PortfolioController::class, 'deleteTransaction'])->name('panel.portfolio.delete-transaction');
 
-        // DEPRECATED ROUTES - For backward compatibility (redirects)
+        // FIXED: Deprecated route dengan parameter forwarding
         Route::get('/transactions', function () {
-            return redirect()->route('panel.portfolio.transaction-management');
+            // Forward semua query parameters ke route baru
+            $queryParams = request()->query();
+            return redirect()->route('panel.portfolio.transaction-management', $queryParams);
         })->name('panel.portfolio.transactions');
     });
 

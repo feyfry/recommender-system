@@ -163,7 +163,7 @@ class ProjectController extends Controller
     }
 
     /**
-     * Tambahkan project ke portfolio
+     * FIXED: Tambahkan project ke portfolio - langsung ke route yang benar
      */
     public function addToPortfolio(Request $request)
     {
@@ -174,12 +174,22 @@ class ProjectController extends Controller
             return redirect()->back()->with('error', 'ID project diperlukan');
         }
 
-        // Catat interaksi portfolio_add
-        $this->recordInteraction($user->user_id, $projectId, 'portfolio_add');
+        // Validasi project exists
+        $project = Project::find($projectId);
+        if (! $project) {
+            return redirect()->back()->with('error', 'Project tidak ditemukan');
+        }
 
-        // Redirect ke halaman portfolio untuk menambahkan detail transaksi
-        return redirect()->route('panel.portfolio.transactions', ['add_project' => $projectId])
-            ->with('info', 'Silakan tambahkan detail transaksi untuk project ini');
+        // Catat interaksi portfolio_add
+        $interaction = $this->recordInteraction($user->user_id, $projectId, 'portfolio_add');
+
+        if ($interaction) {
+            // FIXED: Redirect langsung ke route yang benar dengan parameter
+            return redirect()->route('panel.portfolio.transaction-management', ['add_project' => $projectId])
+                ->with('success', "Project {$project->name} ({$project->symbol}) telah dipilih. Silakan lengkapi detail transaksi.");
+        } else {
+            return redirect()->back()->with('error', 'Gagal menambahkan project ke portfolio');
+        }
     }
 
     /**
@@ -191,6 +201,7 @@ class ProjectController extends Controller
             // Validasi proyek ada di database
             $projectExists = Project::where('id', $projectId)->exists();
             if (! $projectExists) {
+                Log::warning("Project {$projectId} not found for interaction recording");
                 return null;
             }
 
@@ -202,6 +213,7 @@ class ProjectController extends Controller
                 ->first();
 
             if ($existingInteraction) {
+                Log::info("Duplicate interaction prevented: {$userId}:{$projectId}:{$interactionType}");
                 return $existingInteraction;
             }
 
@@ -212,13 +224,15 @@ class ProjectController extends Controller
                 'interaction_type' => $interactionType,
                 'weight'           => $weight,
                 'context'          => [
-                    'source'    => 'web',
+                    'source'    => 'projects_page',
                     'timestamp' => now()->timestamp,
                 ],
             ]);
 
             // Hapus cache rekomendasi
             $this->clearUserRecommendationCaches($userId);
+
+            Log::info("Interaction recorded successfully: {$userId}:{$projectId}:{$interactionType}");
 
             return $interaction;
         } catch (\Exception $e) {

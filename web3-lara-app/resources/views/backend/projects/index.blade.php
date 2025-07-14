@@ -15,6 +15,33 @@
         </p>
     </div>
 
+    @if(session('success'))
+    <div class="clay-alert clay-alert-success mb-6">
+        <div class="flex items-center">
+            <i class="fas fa-check-circle mr-2"></i>
+            {{ session('success') }}
+        </div>
+    </div>
+    @endif
+
+    @if(session('error'))
+    <div class="clay-alert clay-alert-danger mb-6">
+        <div class="flex items-center">
+            <i class="fas fa-exclamation-circle mr-2"></i>
+            {{ session('error') }}
+        </div>
+    </div>
+    @endif
+
+    @if(session('info'))
+    <div class="clay-alert clay-alert-info mb-6">
+        <div class="flex items-center">
+            <i class="fas fa-info-circle mr-2"></i>
+            {{ session('info') }}
+        </div>
+    </div>
+    @endif
+
     <!-- Stats Cards -->
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <div class="clay-card bg-primary/10 p-4 text-center">
@@ -214,17 +241,26 @@
                             <i class="fas fa-info-circle mr-1"></i> Detail
                         </a>
                         <div class="flex gap-1">
-                            <form method="POST" action="{{ route('panel.projects.favorite') }}" class="inline">
+                            <!-- IMPROVED: Like button dengan loading state -->
+                            <form method="POST" action="{{ route('panel.projects.favorite') }}" class="inline"
+                                  onsubmit="handleFormSubmit(this, 'favorite')">
                                 @csrf
                                 <input type="hidden" name="project_id" value="{{ $project->id }}">
-                                <button type="submit" class="clay-button clay-button-secondary py-1 px-2 text-xs">
+                                <button type="submit" class="clay-button clay-button-secondary py-1 px-2 text-xs favorite-btn"
+                                        title="Sukai proyek ini">
                                     <i class="fas fa-heart"></i>
                                 </button>
                             </form>
-                            <form method="POST" action="{{ route('panel.projects.add-portfolio') }}" class="inline">
+
+                            <!-- IMPROVED: Add to Portfolio button dengan loading state dan feedback yang lebih baik -->
+                            <form method="POST" action="{{ route('panel.projects.add-portfolio') }}" class="inline"
+                                  onsubmit="handleFormSubmit(this, 'portfolio')">
                                 @csrf
                                 <input type="hidden" name="project_id" value="{{ $project->id }}">
-                                <button type="submit" class="clay-button clay-button-info py-1 px-2 text-xs">
+                                <button type="submit" class="clay-button clay-button-info py-1 px-2 text-xs portfolio-btn"
+                                        title="Tambah ke portfolio & catat transaksi"
+                                        data-project-name="{{ $project->name }}"
+                                        data-project-symbol="{{ $project->symbol }}">
                                     <i class="fas fa-wallet"></i>
                                 </button>
                             </form>
@@ -296,9 +332,37 @@
 
             <div class="clay-card p-3 bg-info/5">
                 <h3 class="font-bold mb-2"><i class="fas fa-wallet mr-2"></i> Portfolio (Portfolio Add)</h3>
-                <p>Tambahkan proyek ke portfolio Anda untuk menandakan bahwa Anda berinteraksi secara signifikan dengan proyek tersebut.</p>
+                <p>Tambahkan proyek ke portfolio Anda untuk mencatat transaksi dan menandakan bahwa Anda berinteraksi secara signifikan dengan proyek tersebut.</p>
             </div>
         </div>
+
+        <!-- Additional Tips -->
+        <div class="mt-4 clay-card bg-warning/10 p-3">
+            <h3 class="font-bold mb-2">
+                <i class="fas fa-info-circle mr-2 text-warning"></i>
+                Cara Menggunakan "Tambah ke Portfolio"
+            </h3>
+            <ul class="text-sm space-y-1">
+                <li>• Klik tombol <i class="fas fa-wallet text-info"></i> untuk menambahkan proyek ke sistem pencatatan transaksi</li>
+                <li>• Anda akan diarahkan ke halaman Transaction Management dengan proyek yang sudah dipilih</li>
+                <li>• Lengkapi detail transaksi (beli/jual, jumlah, harga) untuk mencatat aktivitas trading Anda</li>
+                <li>• Data ini membantu sistem memberikan rekomendasi yang lebih akurat berdasarkan aktivitas trading Anda</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- Loading Overlay -->
+<div id="loadingOverlay" class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-lg p-6 max-w-sm w-full mx-4 text-center">
+        <div class="w-16 h-16 flex items-center justify-center mx-auto mb-4">
+            <svg class="animate-spin h-12 w-12 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        </div>
+        <h3 class="text-lg font-bold mb-2" id="loadingTitle">Memproses...</h3>
+        <p class="text-gray-600 text-sm" id="loadingMessage">Sedang memproses permintaan Anda</p>
     </div>
 </div>
 @endsection
@@ -310,5 +374,90 @@
         directionInput.value = directionInput.value === 'desc' ? 'asc' : 'desc';
         document.getElementById('filterForm').submit();
     }
+
+    // IMPROVED: Handle form submission dengan loading state dan feedback yang lebih baik
+    function handleFormSubmit(form, actionType) {
+        const button = form.querySelector('button[type="submit"]');
+        const icon = button.querySelector('i');
+        const originalIcon = icon.className;
+
+        // Disable button dan ubah icon
+        button.disabled = true;
+        icon.className = 'fas fa-spinner fa-spin';
+
+        // Show loading overlay dengan pesan yang sesuai
+        showLoadingOverlay(actionType, form);
+
+        // Reset setelah delay jika ada masalah
+        setTimeout(() => {
+            button.disabled = false;
+            icon.className = originalIcon;
+            hideLoadingOverlay();
+        }, 10000); // 10 detik timeout
+
+        return true; // Allow form submission
+    }
+
+    function showLoadingOverlay(actionType, form) {
+        const overlay = document.getElementById('loadingOverlay');
+        const title = document.getElementById('loadingTitle');
+        const message = document.getElementById('loadingMessage');
+
+        if (actionType === 'favorite') {
+            title.textContent = 'Menambahkan ke Favorit...';
+            message.textContent = 'Sistem sedang mencatat preferensi Anda';
+        } else if (actionType === 'portfolio') {
+            const projectName = form.querySelector('[data-project-name]')?.dataset.projectName || 'proyek';
+            const projectSymbol = form.querySelector('[data-project-symbol]')?.dataset.projectSymbol || '';
+
+            title.textContent = 'Menyiapkan Portfolio...';
+            message.textContent = `Mengarahkan ke halaman transaksi untuk ${projectName} (${projectSymbol})`;
+        }
+
+        overlay.classList.remove('hidden');
+    }
+
+    function hideLoadingOverlay() {
+        document.getElementById('loadingOverlay').classList.add('hidden');
+    }
+
+    // Auto-hide loading overlay jika halaman dimuat kembali
+    window.addEventListener('beforeunload', hideLoadingOverlay);
+
+    // Simple notification system untuk feedback
+    function showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.className = `fixed top-4 right-4 z-50 clay-alert clay-alert-${type} max-w-sm transform transition-all duration-300`;
+        notification.style.transform = 'translateX(100%)';
+        notification.innerHTML = `
+            <div class="flex items-center justify-between">
+                <span>${message}</span>
+                <button onclick="this.parentElement.parentElement.remove()" class="ml-3">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        `;
+
+        document.body.appendChild(notification);
+
+        // Animate in
+        setTimeout(() => {
+            notification.style.transform = 'translateX(0)';
+        }, 100);
+
+        // Auto remove after 4 seconds
+        setTimeout(() => {
+            if (notification.parentElement) {
+                notification.style.transform = 'translateX(100%)';
+                setTimeout(() => {
+                    if (notification.parentElement) {
+                        notification.remove();
+                    }
+                }, 300);
+            }
+        }, 4000);
+    }
 </script>
 @endpush
+</document>
+</document_content>

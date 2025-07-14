@@ -30,7 +30,7 @@
     </div>
 
     @if(session('success'))
-    <div class="clay-alert clay-alert-success mb-6">
+    <div class="clay-alert clay-alert-success mb-8">
         <div class="flex items-center">
             <i class="fas fa-check-circle mr-2"></i>
             {{ session('success') }}
@@ -39,7 +39,7 @@
     @endif
 
     @if(session('error'))
-    <div class="clay-alert clay-alert-danger mb-6">
+    <div class="clay-alert clay-alert-danger mb-8">
         <div class="flex items-center">
             <i class="fas fa-exclamation-circle mr-2"></i>
             {{ session('error') }}
@@ -116,7 +116,7 @@
                     </div>
                 </div>
 
-                <!-- Most Traded Projects (Manual Records) -->
+                <!-- Most Traded Projects (Manual Records) - REMOVED Actions column -->
                 <h3 class="font-bold mb-3 flex items-center">
                     <i class="fas fa-trophy mr-2 text-warning"></i>
                     Proyek Paling Sering Dicatat
@@ -128,7 +128,6 @@
                                 <th class="py-2 px-4 text-left">Proyek</th>
                                 <th class="py-2 px-4 text-left">Manual Records</th>
                                 <th class="py-2 px-4 text-left">Total Volume</th>
-                                <th class="py-2 px-4 text-left">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -146,16 +145,10 @@
                                     <span class="clay-badge clay-badge-primary">{{ $project->transaction_count }}</span>
                                 </td>
                                 <td class="py-2 px-4 font-medium">${{ number_format($project->total_value, 2) }}</td>
-                                <td class="py-2 px-4">
-                                    <button onclick="quickAddTransaction('{{ $project->id }}', '{{ $project->name }}', '{{ $project->symbol }}')"
-                                            class="clay-badge clay-badge-success py-1 px-2 text-xs">
-                                        <i class="fas fa-plus mr-1"></i> Quick Add
-                                    </button>
-                                </td>
                             </tr>
                             @empty
                             <tr>
-                                <td colspan="4" class="py-4 px-4 text-center text-gray-500">Belum ada data transaksi manual</td>
+                                <td colspan="3" class="py-4 px-4 text-center text-gray-500">Belum ada data transaksi manual</td>
                             </tr>
                             @endforelse
                         </tbody>
@@ -231,33 +224,39 @@
                                     data-name="{{ $project->name }}"
                                     data-price="{{ $project->current_price }}"
                                     {{ request('add_project') == $project->id ? 'selected' : '' }}>
-                                    {{ $project->name }} ({{ $project->symbol }}) - ${{ number_format($project->current_price, 4) }}
+                                    {{ $project->name }} ({{ $project->symbol }}) - ${{ number_format($project->current_price, 8) }}
                                 </option>
                             @endforeach
                         </select>
                     </div>
 
-                    <!-- Transaction Type -->
+                    <!-- Transaction Type - IMPROVED with better visual feedback -->
                     <div>
                         <label class="block font-medium mb-2">
                             <i class="fas fa-exchange-alt mr-1"></i> Tipe Transaksi
                         </label>
-                        <div class="grid grid-cols-2 gap-3">
-                            <label class="clay-card bg-success/10 p-3 cursor-pointer transaction-type-card border-2 border-transparent hover:border-success/30">
+                        <div class="grid grid-cols-2 gap-3" id="transaction-type-container">
+                            <label class="clay-card bg-success/10 p-3 cursor-pointer transaction-type-card border-2 border-transparent hover:border-success/30 transition-all duration-200">
                                 <input type="radio" name="transaction_type" value="buy" class="sr-only" checked>
                                 <div class="flex items-center justify-center">
                                     <i class="fas fa-shopping-cart text-success mr-2"></i>
                                     <span class="font-medium">BUY</span>
                                 </div>
                                 <div class="text-xs text-center mt-1">Purchase</div>
+                                <div class="hidden selected-indicator mt-2 text-center">
+                                    <i class="fas fa-check-circle text-success"></i>
+                                </div>
                             </label>
-                            <label class="clay-card bg-danger/10 p-3 cursor-pointer transaction-type-card border-2 border-transparent hover:border-danger/30">
+                            <label class="clay-card bg-danger/10 p-3 cursor-pointer transaction-type-card border-2 border-transparent hover:border-danger/30 transition-all duration-200">
                                 <input type="radio" name="transaction_type" value="sell" class="sr-only">
                                 <div class="flex items-center justify-center">
                                     <i class="fas fa-hand-holding-usd text-danger mr-2"></i>
                                     <span class="font-medium">SELL</span>
                                 </div>
                                 <div class="text-xs text-center mt-1">Sale</div>
+                                <div class="hidden selected-indicator mt-2 text-center">
+                                    <i class="fas fa-check-circle text-danger"></i>
+                                </div>
                             </label>
                         </div>
                     </div>
@@ -282,9 +281,6 @@
                                step="0.000001" min="0.000001" required
                                placeholder="0.000000">
                         <div class="text-xs text-gray-500 mt-1">Harga dalam USD</div>
-                        <button type="button" onclick="useCurrentPrice()" class="text-xs text-primary hover:underline mt-1">
-                            <i class="fas fa-sync-alt mr-1"></i> Use current market price
-                        </button>
                     </div>
 
                     <!-- Total Value Display -->
@@ -318,14 +314,11 @@
                     </button>
                 </form>
 
-                <!-- Quick Actions -->
+                <!-- Quick Actions - SIMPLIFIED -->
                 <div class="mt-6 space-y-2">
                     <div class="text-sm font-medium text-gray-600 mb-2">Quick Actions:</div>
                     <button onclick="clearForm()" class="clay-button clay-button-secondary w-full py-2 text-sm">
                         <i class="fas fa-eraser mr-1"></i> Clear Form
-                    </button>
-                    <button onclick="copyLastTransaction()" class="clay-button clay-button-info w-full py-2 text-sm">
-                        <i class="fas fa-copy mr-1"></i> Copy Last Transaction
                     </button>
                 </div>
             </div>
@@ -356,7 +349,7 @@
                 </thead>
                 <tbody>
                     @forelse($transactions as $transaction)
-                    <tr class="hover:bg-gray-50">
+                    <tr class="hover:bg-gray-50" id="transaction-{{ $transaction->id }}">
                         <td class="py-3 px-4 text-sm">
                             <div class="font-medium">{{ $transaction->created_at->format('M j, Y') }}</div>
                             <div class="text-xs text-gray-500">{{ $transaction->created_at->format('H:i:s') }}</div>
@@ -409,10 +402,11 @@
                                    title="View project details">
                                     <i class="fas fa-info-circle"></i>
                                 </a>
-                                <button onclick="duplicateTransaction({{ json_encode($transaction) }})"
-                                        class="clay-badge clay-badge-success py-1 px-2 text-xs"
-                                        title="Duplicate transaction">
-                                    <i class="fas fa-copy"></i>
+                                <!-- CHANGED: Duplicate button menjadi Delete button -->
+                                <button onclick="deleteTransaction({{ $transaction->id }}, '{{ $transaction->project->symbol }}')"
+                                        class="clay-badge clay-badge-danger py-1 px-2 text-xs"
+                                        title="Delete transaction">
+                                    <i class="fas fa-trash"></i>
                                 </button>
                             </div>
                         </td>
@@ -542,9 +536,30 @@
     </div>
 </div>
 
+<!-- Delete Confirmation Modal -->
+<div id="deleteModal" class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+        <div class="text-center">
+            <div class="w-16 h-16 flex items-center justify-center mx-auto mb-4 bg-danger/10 rounded-full">
+                <i class="fas fa-trash text-3xl text-danger"></i>
+            </div>
+            <h3 class="text-xl font-bold mb-2">Hapus Transaksi</h3>
+            <p class="text-gray-600 mb-6">Apakah Anda yakin ingin menghapus transaksi <span id="deleteProjectName" class="font-semibold"></span>? Tindakan ini tidak dapat dibatalkan.</p>
+            <div class="flex justify-center space-x-3">
+                <button onclick="closeDeleteModal()" class="clay-button clay-button-secondary px-6">
+                    Batal
+                </button>
+                <button onclick="confirmDelete()" class="clay-button clay-button-danger px-6">
+                    <i class="fas fa-trash mr-2"></i> Hapus
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @push('scripts')
 <script>
-    let lastTransaction = null;
+    let deleteTransactionId = null;
 
     document.addEventListener('DOMContentLoaded', function() {
         // Auto-populate project ketika ada parameter add_project
@@ -575,20 +590,35 @@
             }
         }
 
-        // Transaction type radio buttons
+        // IMPROVED: Transaction type radio buttons dengan visual feedback yang lebih baik
         const radios = document.querySelectorAll('input[name="transaction_type"]');
         for (const radio of radios) {
             radio.addEventListener('change', function(event) {
                 const cards = document.querySelectorAll('.transaction-type-card');
+                const indicators = document.querySelectorAll('.selected-indicator');
+
+                // Reset all cards and indicators
                 cards.forEach(card => {
-                    card.classList.remove('border-success', 'border-danger');
+                    card.classList.remove('border-success', 'border-danger', 'ring-2', 'ring-success/20', 'ring-danger/20');
+                });
+                indicators.forEach(indicator => {
+                    indicator.classList.add('hidden');
                 });
 
+                // Apply styles to selected card
+                const selectedCard = event.target.closest('.transaction-type-card');
+                const selectedIndicator = selectedCard.querySelector('.selected-indicator');
+
                 if (event.target.value === 'buy') {
-                    event.target.closest('.transaction-type-card').classList.add('border-success');
+                    selectedCard.classList.add('border-success', 'ring-2', 'ring-success/20');
                 } else {
-                    event.target.closest('.transaction-type-card').classList.add('border-danger');
+                    selectedCard.classList.add('border-danger', 'ring-2', 'ring-danger/20');
                 }
+
+                selectedIndicator.classList.remove('hidden');
+
+                // Update total value color
+                calculateTotal();
             });
         }
 
@@ -601,14 +631,14 @@
         // Calculate total value on amount/price change
         const amountInput = document.getElementById('amount');
         const priceInput = document.getElementById('price');
-        const totalValueDisplay = document.getElementById('total-value');
 
         function calculateTotal() {
             const amount = parseFloat(amountInput.value) || 0;
             const price = parseFloat(priceInput.value) || 0;
             const total = amount * price;
 
-            totalValueDisplay.textContent = ' + total.toLocaleString('en-US', {
+            const totalValueDisplay = document.getElementById('total-value');
+            totalValueDisplay.textContent = '$' + total.toLocaleString('en-US', {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
             });
@@ -618,6 +648,7 @@
             totalValueDisplay.className = transactionType === 'buy' ? 'text-xl font-bold text-success' : 'text-xl font-bold text-danger';
         }
 
+        // Attach event listeners
         amountInput.addEventListener('input', calculateTotal);
         priceInput.addEventListener('input', calculateTotal);
 
@@ -627,85 +658,73 @@
         });
     });
 
-    // Use current market price
-    function useCurrentPrice() {
-        const projectSelect = document.getElementById('project_id');
-        const priceInput = document.getElementById('price');
-        const selectedOption = projectSelect.options[projectSelect.selectedIndex];
-
-        if (selectedOption && selectedOption.dataset.price) {
-            priceInput.value = parseFloat(selectedOption.dataset.price).toFixed(6);
-            priceInput.dispatchEvent(new Event('input'));
-            showNotification('Current market price applied', 'success');
-        } else {
-            showNotification('Please select a project first', 'warning');
-        }
-    }
-
-    // Quick add transaction for frequently traded projects
-    function quickAddTransaction(projectId, projectName, projectSymbol) {
-        const projectSelect = document.getElementById('project_id');
-        projectSelect.value = projectId;
-
-        // Focus to amount field
-        setTimeout(() => {
-            document.getElementById('amount').focus();
-        }, 100);
-
-        showNotification(`${projectSymbol} selected for quick entry`, 'info');
-    }
-
-    // Clear form
+    // FIXED: Clear form function
     function clearForm() {
-        document.getElementById('transaction-form').reset();
+        const form = document.getElementById('transaction-form');
+        form.reset();
+
+        // Reset project selection
         document.getElementById('project_id').value = '';
+
+        // Reset total value display
         document.getElementById('total-value').textContent = '$0.00';
+        document.getElementById('total-value').className = 'text-xl font-bold';
 
-        // Reset transaction type styling
-        const defaultRadio = document.querySelector('input[name="transaction_type"][value="buy"]');
-        if (defaultRadio) {
-            defaultRadio.checked = true;
-            defaultRadio.dispatchEvent(new Event('change'));
+        // Reset transaction type to buy and trigger styling
+        const buyRadio = document.querySelector('input[name="transaction_type"][value="buy"]');
+        if (buyRadio) {
+            buyRadio.checked = true;
+            buyRadio.dispatchEvent(new Event('change'));
         }
 
-        showNotification('Form cleared', 'info');
+        // Clear any validation errors
+        const inputs = form.querySelectorAll('input, select');
+        inputs.forEach(input => {
+            input.classList.remove('border-red-500', 'border-green-500');
+        });
+
+        showNotification('Form berhasil dibersihkan', 'success');
     }
 
-    // Copy last transaction data
-    function copyLastTransaction() {
-        if (lastTransaction) {
-            document.getElementById('project_id').value = lastTransaction.project_id;
-            document.getElementById('amount').value = lastTransaction.amount;
-            document.getElementById('price').value = lastTransaction.price;
-
-            const transactionTypeRadio = document.querySelector(`input[name="transaction_type"][value="${lastTransaction.transaction_type}"]`);
-            if (transactionTypeRadio) {
-                transactionTypeRadio.checked = true;
-                transactionTypeRadio.dispatchEvent(new Event('change'));
-            }
-
-            showNotification('Last transaction data copied', 'success');
-        } else {
-            showNotification('No previous transaction to copy', 'warning');
-        }
+    // CHANGED: Delete transaction instead of duplicate
+    function deleteTransaction(transactionId, projectSymbol) {
+        deleteTransactionId = transactionId;
+        document.getElementById('deleteProjectName').textContent = projectSymbol;
+        document.getElementById('deleteModal').classList.remove('hidden');
     }
 
-    // Duplicate transaction (from table row)
-    function duplicateTransaction(transaction) {
-        document.getElementById('project_id').value = transaction.project_id;
-        document.getElementById('amount').value = transaction.amount;
-        document.getElementById('price').value = transaction.price;
+    function closeDeleteModal() {
+        document.getElementById('deleteModal').classList.add('hidden');
+        deleteTransactionId = null;
+    }
 
-        const transactionTypeRadio = document.querySelector(`input[name="transaction_type"][value="${transaction.transaction_type}"]`);
-        if (transactionTypeRadio) {
-            transactionTypeRadio.checked = true;
-            transactionTypeRadio.dispatchEvent(new Event('change'));
+    function confirmDelete() {
+        if (deleteTransactionId) {
+            // Create a form and submit it to the correct route
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = `{{ url('/panel/portfolio/transactions') }}/${deleteTransactionId}/delete`;
+
+            // Add CSRF token
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = '_token';
+            csrfInput.value = csrfToken;
+            form.appendChild(csrfInput);
+
+            // Add method spoofing for DELETE
+            const methodInput = document.createElement('input');
+            methodInput.type = 'hidden';
+            methodInput.name = '_method';
+            methodInput.value = 'DELETE';
+            form.appendChild(methodInput);
+
+            document.body.appendChild(form);
+            form.submit();
         }
 
-        // Scroll to form
-        document.getElementById('transaction-form').scrollIntoView({ behavior: 'smooth' });
-
-        showNotification('Transaction data duplicated to form', 'success');
+        closeDeleteModal();
     }
 
     // View transaction hash on explorer
@@ -724,7 +743,8 @@
     // Simple notification system
     function showNotification(message, type = 'info') {
         const notification = document.createElement('div');
-        notification.className = `fixed top-4 right-4 z-50 clay-alert clay-alert-${type} max-w-sm`;
+        notification.className = `fixed top-20 right-4 z-50 clay-alert clay-alert-${type} max-w-sm transform transition-all duration-300`;
+        notification.style.transform = 'translateX(100%)';
         notification.innerHTML = `
             <div class="flex items-center justify-between">
                 <span>${message}</span>
@@ -736,23 +756,23 @@
 
         document.body.appendChild(notification);
 
+        // Animate in
+        setTimeout(() => {
+            notification.style.transform = 'translateX(0)';
+        }, 100);
+
         // Auto remove after 4 seconds
         setTimeout(() => {
             if (notification.parentElement) {
-                notification.remove();
+                notification.style.transform = 'translateX(100%)';
+                setTimeout(() => {
+                    if (notification.parentElement) {
+                        notification.remove();
+                    }
+                }, 300);
             }
         }, 4000);
     }
-
-    // Save form data as last transaction when form is submitted
-    document.getElementById('transaction-form').addEventListener('submit', function() {
-        lastTransaction = {
-            project_id: document.getElementById('project_id').value,
-            amount: document.getElementById('amount').value,
-            price: document.getElementById('price').value,
-            transaction_type: document.querySelector('input[name="transaction_type"]:checked').value
-        };
-    });
 </script>
 @endpush
 @endsection

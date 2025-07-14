@@ -29,8 +29,17 @@
                     </p>
                 </div>
 
-                <button @click="connectWallet()" class="clay-button clay-button-warning w-full py-3 px-6 text-black font-bold text-lg">
-                    Hubungkan Wallet
+                <button @click="connectWallet()"
+                        :disabled="loading"
+                        class="clay-button clay-button-warning w-full py-3 px-6 text-black font-bold text-lg">
+                    <span x-show="!loading">Hubungkan Wallet</span>
+                    <span x-show="loading" class="flex items-center justify-center">
+                        <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-black" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Menghubungkan...
+                    </span>
                 </button>
             </div>
 
@@ -44,9 +53,15 @@
                     <div class="font-mono text-sm break-all bg-white p-3 rounded border border-gray-200">
                         <span x-text="walletAddress" class="text-gray-800"></span>
                     </div>
+                    <div class="mt-2 text-xs text-green-600 flex items-center">
+                        <i class="fas fa-check-circle mr-1"></i>
+                        Wallet berhasil terhubung
+                    </div>
                 </div>
 
-                <button @click="login()" class="clay-button clay-button-primary w-full py-3 px-6 text-white font-bold text-lg">
+                <button @click="login()"
+                        :disabled="loading"
+                        class="clay-button clay-button-primary w-full py-3 px-6 text-white font-bold text-lg">
                     <span x-show="!loading">Verifikasi Signature</span>
                     <span x-show="loading" class="flex items-center justify-center">
                         <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -55,6 +70,12 @@
                         </svg>
                         Memproses...
                     </span>
+                </button>
+
+                <!-- Reset Connection Button -->
+                <button @click="resetConnection()"
+                        class="clay-button clay-button-secondary w-full py-2 px-4 text-sm">
+                    <i class="fas fa-sync-alt mr-2"></i> Ganti Wallet
                 </button>
             </div>
 
@@ -135,6 +156,31 @@
                 if (typeof window.ethereum === 'undefined') {
                     this.error = 'MetaMask tidak terdeteksi. Silakan instal MetaMask terlebih dahulu.';
                 }
+
+                // Check if already connected
+                await this.checkExistingConnection();
+
+                // Setup event listeners
+                this.setupEventListeners();
+            },
+
+            async checkExistingConnection() {
+                try {
+                    if (window.ethereum && window.ethereum.isConnected()) {
+                        const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+                        if (accounts && accounts.length > 0) {
+                            this.walletAddress = accounts[0].toLowerCase();
+                            this.connected = true;
+                            // Force Alpine to update the DOM
+                            this.$nextTick(() => {
+                                // Trigger reactivity update
+                                console.log('Existing connection found:', this.walletAddress);
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error checking existing connection:', error);
+                }
             },
 
             async connectWallet() {
@@ -145,12 +191,6 @@
                     // Check if MetaMask is available
                     if (typeof window.ethereum === 'undefined') {
                         throw new Error('MetaMask tidak terdeteksi. Silakan instal MetaMask dan refresh halaman.');
-                    }
-
-                    // Check if ethereum is connected
-                    if (!window.ethereum.isConnected()) {
-                        // Try to enable ethereum
-                        await window.ethereum.enable();
                     }
 
                     // Request accounts with proper error handling
@@ -170,9 +210,14 @@
                         throw new Error('Tidak ada akun MetaMask yang terdeteksi.');
                     }
 
-                    // Normalize address
+                    // Normalize address and force reactivity update
                     this.walletAddress = accounts[0].toLowerCase();
                     this.connected = true;
+
+                    // Force Alpine to update the DOM
+                    await this.$nextTick();
+
+                    console.log('Wallet connected:', this.walletAddress);
 
                     // Get nonce from server
                     await this.getNonce();
@@ -181,9 +226,24 @@
                     console.error('Error connecting wallet:', error);
                     this.error = error.message || 'Gagal menghubungkan wallet. Silakan coba lagi.';
                     this.connected = false;
+                    this.walletAddress = '';
                 } finally {
                     this.loading = false;
                 }
+            },
+
+            async resetConnection() {
+                this.connected = false;
+                this.walletAddress = '';
+                this.nonce = '';
+                this.message = '';
+                this.error = '';
+                this.loading = false;
+
+                // Force update
+                await this.$nextTick();
+
+                console.log('Connection reset');
             },
 
             async getNonce() {
@@ -228,17 +288,15 @@
                     // Sign message with proper error handling
                     let signature;
                     try {
-                        // Use the exact message from server
                         signature = await window.ethereum.request({
                             method: 'personal_sign',
-                            params: [this.message, this.walletAddress, ''] // Add empty password parameter
+                            params: [this.message, this.walletAddress, '']
                         });
                     } catch (error) {
                         if (error.code === 4001) {
                             throw new Error('Anda menolak permintaan tanda tangan.');
                         }
                         if (error.code === -32603) {
-                            // Internal JSON-RPC error - try alternative signing method
                             try {
                                 signature = await window.ethereum.request({
                                     method: 'eth_sign',
@@ -275,12 +333,10 @@
                     }
 
                     if (verifyData.success) {
-                        // Show welcome alert before redirect
                         this.loading = false;
                         this.authenticated = true;
                         this.showWelcomeAlert = true;
 
-                        // Redirect after animation
                         setTimeout(() => {
                             window.location.href = '{{ route("panel.dashboard") }}';
                         }, 2000);
@@ -291,7 +347,6 @@
                 } catch (error) {
                     console.error('Error during login:', error);
 
-                    // Provide more specific error messages
                     if (error.code === -32603) {
                         this.error = 'MetaMask mengalami error internal. Silakan coba lagi atau restart MetaMask.';
                     } else if (error.code === 4001) {
@@ -304,18 +359,33 @@
                 }
             },
 
-            // Handle account changes
             setupEventListeners() {
                 if (window.ethereum) {
-                    window.ethereum.on('accountsChanged', (accounts) => {
+                    // Remove existing listeners to prevent duplicates
+                    if (window.ethereum.removeAllListeners) {
+                        window.ethereum.removeAllListeners('accountsChanged');
+                        window.ethereum.removeAllListeners('chainChanged');
+                    }
+
+                    window.ethereum.on('accountsChanged', async (accounts) => {
+                        console.log('Accounts changed:', accounts);
+
                         if (accounts.length === 0) {
-                            this.connected = false;
-                            this.walletAddress = '';
+                            await this.resetConnection();
                             this.error = 'Wallet terputus. Silakan hubungkan kembali.';
                         } else if (accounts[0].toLowerCase() !== this.walletAddress) {
-                            // Account changed, reset state
+                            // Account changed, update address and get new nonce
                             this.walletAddress = accounts[0].toLowerCase();
-                            this.getNonce();
+                            this.connected = true;
+
+                            // Force reactivity update
+                            await this.$nextTick();
+
+                            try {
+                                await this.getNonce();
+                            } catch (error) {
+                                this.error = 'Gagal mendapatkan nonce untuk akun baru.';
+                            }
                         }
                     });
 
@@ -328,14 +398,9 @@
         }
     }
 
-    // Initialize Alpine component with event listeners
+    // Initialize Alpine component
     document.addEventListener('alpine:init', () => {
-        Alpine.data('web3Login', () => {
-            const data = web3Login();
-            data.init();
-            data.setupEventListeners();
-            return data;
-        });
+        Alpine.data('web3Login', web3Login);
     });
 </script>
 @endpush

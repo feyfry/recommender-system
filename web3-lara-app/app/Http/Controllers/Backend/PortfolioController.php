@@ -899,6 +899,94 @@ class PortfolioController extends Controller
     }
 
     /**
+     * Delete transaction
+     */
+    public function deleteTransaction($transactionId)
+    {
+        $user = Auth::user();
+
+        try {
+            // Find transaction and verify ownership
+            $transaction = Transaction::where('id', $transactionId)
+                ->where('user_id', $user->user_id)
+                ->firstOrFail();
+
+            // Store project info for response message
+            $projectSymbol = $transaction->project->symbol ?? 'Unknown';
+            $transactionType = $transaction->transaction_type;
+            $amount = $transaction->amount;
+
+            // Update portfolio if needed
+            if ($transactionType === 'buy') {
+                // If this was a buy transaction, we need to reduce the portfolio amount
+                $portfolio = Portfolio::where('user_id', $user->user_id)
+                    ->where('project_id', $transaction->project_id)
+                    ->first();
+
+                if ($portfolio) {
+                    $newAmount = $portfolio->amount - $amount;
+
+                    if ($newAmount <= 0) {
+                        // Delete portfolio if amount becomes zero or negative
+                        $portfolio->delete();
+                    } else {
+                        // Update portfolio amount and recalculate average price
+                        $totalCost = $portfolio->amount * $portfolio->average_buy_price;
+                        $removedCost = $amount * $transaction->price;
+                        $newTotalCost = $totalCost - $removedCost;
+
+                        $portfolio->amount = $newAmount;
+                        $portfolio->average_buy_price = $newTotalCost / $newAmount;
+                        $portfolio->save();
+                    }
+                }
+            } else {
+                // If this was a sell transaction, we need to add back to portfolio
+                $portfolio = Portfolio::where('user_id', $user->user_id)
+                    ->where('project_id', $transaction->project_id)
+                    ->first();
+
+                if ($portfolio) {
+                    // Add amount back to portfolio
+                    $oldAmount = $portfolio->amount;
+                    $oldTotalCost = $oldAmount * $portfolio->average_buy_price;
+                    $addedCost = $amount * $transaction->price; // Use transaction price as cost basis
+
+                    $newAmount = $oldAmount + $amount;
+                    $newTotalCost = $oldTotalCost + $addedCost;
+
+                    $portfolio->amount = $newAmount;
+                    $portfolio->average_buy_price = $newTotalCost / $newAmount;
+                    $portfolio->save();
+                } else {
+                    // Create new portfolio entry if it doesn't exist
+                    Portfolio::create([
+                        'user_id' => $user->user_id,
+                        'project_id' => $transaction->project_id,
+                        'amount' => $amount,
+                        'average_buy_price' => $transaction->price,
+                    ]);
+                }
+            }
+
+            // Delete the transaction
+            $transaction->delete();
+
+            return redirect()->route('panel.portfolio.transaction-management')
+                ->with('success', "Transaksi {$transactionType} {$projectSymbol} berhasil dihapus dan portfolio telah diperbarui.");
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return redirect()->route('panel.portfolio.transaction-management')
+                ->with('error', 'Transaksi tidak ditemukan atau Anda tidak memiliki izin untuk menghapusnya.');
+        } catch (\Exception $e) {
+            Log::error("Error deleting transaction {$transactionId}: " . $e->getMessage());
+
+            return redirect()->route('panel.portfolio.transaction-management')
+                ->with('error', 'Gagal menghapus transaksi: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Memproses transaksi penjualan (existing - no change)
      */
     private function processSellTransaction($userId, $projectId, $amount, $price)

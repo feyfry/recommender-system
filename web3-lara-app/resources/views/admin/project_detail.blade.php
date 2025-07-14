@@ -176,9 +176,6 @@
                     <button @click="activeTab = 'interactions'" :class="{ 'active': activeTab === 'interactions' }" class="clay-tab">
                         <i class="fas fa-exchange-alt mr-2"></i> Interaksi
                     </button>
-                    <button @click="activeTab = 'recommendations'" :class="{ 'active': activeTab === 'recommendations' }" class="clay-tab">
-                        <i class="fas fa-star mr-2"></i> Rekomendasi
-                    </button>
                     <button @click="activeTab = 'portfolios'" :class="{ 'active': activeTab === 'portfolios' }" class="clay-tab">
                         <i class="fas fa-wallet mr-2"></i> Portfolio
                     </button>
@@ -281,48 +278,6 @@
                                 @empty
                                 <tr>
                                     <td colspan="4" class="py-4 px-4 text-center text-gray-500">Belum ada interaksi untuk proyek ini.</td>
-                                </tr>
-                                @endforelse
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Recommendations Tab -->
-                <div x-show="activeTab === 'recommendations'" class="clay-card p-6 mb-6">
-                    <h3 class="text-xl font-bold mb-4">Rekomendasi</h3>
-                    <div class="overflow-x-auto">
-                        <table class="clay-table min-w-full">
-                            <thead>
-                                <tr>
-                                    <th class="py-2 px-4 text-left">Pengguna</th>
-                                    <th class="py-2 px-4 text-left">Tipe Rekomendasi</th>
-                                    <th class="py-2 px-4 text-left">Score</th>
-                                    <th class="py-2 px-4 text-left">Rank</th>
-                                    <th class="py-2 px-4 text-left">Waktu</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @forelse($recommendations ?? [] as $recommendation)
-                                <tr>
-                                    <td class="py-2 px-4">
-                                        <div class="flex items-center">
-                                            @if($recommendation->user->profile && $recommendation->user->profile->avatar_url)
-                                                <img src="{{ asset($recommendation->user->profile->avatar_url) }}" alt="{{ $recommendation->user->profile->username ?? $recommendation->user->user_id }}" class="w-6 h-6 rounded-full mr-2">
-                                            @endif
-                                            <span class="font-medium">{{ $recommendation->user->profile->username ?? substr($recommendation->user->user_id, 0, 10) . '...' }}</span>
-                                        </div>
-                                    </td>
-                                    <td class="py-2 px-4">
-                                        <span class="clay-badge clay-badge-primary">{{ $recommendation->recommendation_type }}</span>
-                                    </td>
-                                    <td class="py-2 px-4 font-medium">{{ number_format($recommendation->score, 4) }}</td>
-                                    <td class="py-2 px-4">{{ $recommendation->rank }}</td>
-                                    <td class="py-2 px-4 text-gray-500 text-sm">{{ $recommendation->created_at->format('j M Y H:i') }}</td>
-                                </tr>
-                                @empty
-                                <tr>
-                                    <td colspan="5" class="py-4 px-4 text-center text-gray-500">Belum ada rekomendasi untuk proyek ini.</td>
                                 </tr>
                                 @endforelse
                             </tbody>

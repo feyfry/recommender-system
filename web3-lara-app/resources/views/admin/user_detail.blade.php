@@ -193,9 +193,6 @@
                     <button @click="activeTab = 'transactions'" :class="{ 'active': activeTab === 'transactions' }" class="clay-tab">
                         <i class="fas fa-money-bill-wave mr-2"></i> Transaksi
                     </button>
-                    <button @click="activeTab = 'recommendations'" :class="{ 'active': activeTab === 'recommendations' }" class="clay-tab">
-                        <i class="fas fa-star mr-2"></i> Rekomendasi
-                    </button>
                 </div>
 
                 <!-- Tab Contents -->
