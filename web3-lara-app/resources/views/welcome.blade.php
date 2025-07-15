@@ -306,8 +306,8 @@
                                     <tr class="bg-success/10">
                                         <td class="p-2 font-bold">Hybrid</td>
                                         <td class="p-2 font-bold text-success">0.2355</td>
-                                        <td class="p-2 font-bold text-success">0.7730</td>
-                                        <td class="p-2 font-bold text-success">0.4564</td>
+                                        <td class="p-2 font-bold">0.7730</td>
+                                        <td class="p-2 font-bold">0.4564</td>
                                     </tr>
                                 </tbody>
                             </table>
