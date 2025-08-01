@@ -52,7 +52,7 @@
                 <h1 class="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight mb-4 text-primary relative">
                     <span class="relative inline-block">
                         Crypto
-                        <span class="absolute -top-1 right-0 transform translate-x-1/2 -translate-y-1/2 rotate-12 clay-badge clay-badge-warning font-bold text-xs">
+                        <span class="absolute -top-1 right-0 transform translate-x-1/2 -translate-y-1 rotate-12 clay-badge clay-badge-warning font-bold text-xs">
                             v3.1
                         </span>
                     </span>
@@ -382,7 +382,7 @@
                             <p class="font-bold text-success">Trending Bullish Volatile</p>
                             <p>Tren naik dengan volatilitas tinggi</p>
                         </div>
-                        <div class="clay-card bg-danger/20 p-3">
+                        <div class="clay-card bg-warning/10 p-3">
                             <p class="font-bold text-danger">Trending Bearish</p>
                             <p>Tren turun dengan volatilitas normal</p>
                         </div>
@@ -612,9 +612,10 @@
                 </div>
 
                 <!-- API Example -->
-                <div class="clay-card bg-gray-900 text-green-400 p-6">
+                <div class="clay-card bg-gray-800 text-green-400 p-6">
                     <h3 class="text-lg font-bold mb-4 text-white">📝 Example API Response</h3>
-                    <pre class="font-mono text-xs overflow-x-auto whitespace-pre-wrap">{
+                    <pre class="font-mono text-xs overflow-x-auto whitespace-pre-wrap">
+{
   "user_id": "user_123",
   "model_type": "hybrid",
   "recommendations": [
@@ -632,7 +633,8 @@
   "is_cold_start": false,
   "exact_match_count": 10,
   "timestamp": "2025-06-23T10:30:00Z"
-}</pre>
+}
+</pre>
                 </div>
             </div>
 
