@@ -1,0 +1,412 @@
+@extends('layouts.app')
+
+@section('content')
+<div class="container mx-auto">
+    <!-- Header -->
+    <div class="clay-card p-6 mb-8">
+        <h1 class="text-3xl font-bold mb-4 flex items-center">
+            <div class="bg-primary/20 p-2 clay-badge mr-3">
+                <i class="fas fa-star text-primary"></i>
+            </div>
+            Rekomendasi
+        </h1>
+        <p class="text-lg">
+            Dapatkan rekomendasi proyek cryptocurrency berdasarkan popularitas, tren, dan filter yang Anda pilih.
+            Sistem kami menggunakan model hybrid untuk memberikan rekomendasi yang paling relevan.
+        </p>
+    </div>
+
+    <!-- Navigation Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <a href="{{ route('panel.recommendations.personal') }}" class="clay-card p-6 hover:translate-y-[-5px] transition-transform">
+            <div class="flex items-center mb-4">
+                <div class="clay-rounded-full bg-secondary/20 p-3 mr-3">
+                    <i class="fas fa-user text-secondary text-xl"></i>
+                </div>
+                <h2 class="text-xl font-bold">Personal</h2>
+            </div>
+            <p class="text-sm text-gray-600">
+                Rekomendasi berdasarkan interaksi dan pola penggunaan Anda.
+            </p>
+        </a>
+
+        <a href="{{ route('panel.recommendations.trending') }}" class="clay-card p-6 hover:translate-y-[-5px] transition-transform">
+            <div class="flex items-center mb-4">
+                <div class="clay-rounded-full bg-warning/20 p-3 mr-3">
+                    <i class="fas fa-fire text-warning text-xl"></i>
+                </div>
+                <h2 class="text-xl font-bold">Trending</h2>
+            </div>
+            <p class="text-sm text-gray-600">
+                Proyek-proyek yang sedang populer dan memiliki momentum pasar.
+            </p>
+        </a>
+
+        <a href="{{ route('panel.recommendations.popular') }}" class="clay-card p-6 hover:translate-y-[-5px] transition-transform">
+            <div class="flex items-center mb-4">
+                <div class="clay-rounded-full bg-success/20 p-3 mr-3">
+                    <i class="fas fa-trophy text-success text-xl"></i>
+                </div>
+                <h2 class="text-xl font-bold">Popular</h2>
+            </div>
+            <p class="text-sm text-gray-600">
+                Proyek dengan popularitas tinggi berdasarkan metrik sosial dan penggunaan.
+            </p>
+        </a>
+
+        <a href="{{ route('panel.recommendations.categories') }}" class="clay-card p-6 hover:translate-y-[-5px] transition-transform">
+            <div class="flex items-center mb-4">
+                <div class="clay-rounded-full bg-info/20 p-3 mr-3">
+                    <i class="fas fa-tags text-info text-xl"></i>
+                </div>
+                <h2 class="text-xl font-bold">Kategori</h2>
+            </div>
+            <p class="text-sm text-gray-600">
+                Temukan proyek berdasarkan kategori seperti DeFi, NFT, GameFi, dll.
+            </p>
+        </a>
+    </div>
+
+    <!-- Personal Recommendations Preview -->
+    <div class="clay-card p-6 mb-8" x-data="{ loading: true, recommendations: [] }">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-xl font-bold flex items-center">
+                <i class="fas fa-user-check mr-2 text-secondary"></i>
+                Rekomendasi Terbaru
+            </h2>
+            <a href="{{ route('panel.recommendations.personal') }}" class="clay-button clay-button-secondary py-1.5 px-3 text-sm">
+                Lihat Semua <i class="fas fa-arrow-right ml-1"></i>
+            </a>
+        </div>
+
+        <!-- Loading Spinner -->
+        <div x-show="loading" class="py-4 text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-secondary"></div>
+            <p class="mt-2 text-gray-500">Memuat rekomendasi...</p>
+        </div>
+
+        <!-- Rekomendasi Content -->
+        <div x-show="!loading" x-init="
+            @if(!empty($personalRecommendations))
+                recommendations = {{ json_encode($personalRecommendations) }};
+                loading = false;
+            @else
+                setTimeout(() => {
+                    fetch('{{ route('panel.recommendations.personal') }}?format=json')
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.recommendations) {
+                                recommendations = data.recommendations.slice(0, 4);
+                            } else if (data.data) {
+                                recommendations = data.data.slice(0, 4);
+                            } else {
+                                recommendations = data.slice(0, 4);
+                            }
+                            loading = false;
+                        })
+                        .catch(error => {
+                            console.error('Error:', error);
+                            loading = false;
+                        });
+                }, 100);
+            @endif">
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <template x-for="(recommendation, index) in recommendations.slice(0, 4)" :key="index">
+                    <div class="clay-card p-4 hover:translate-y-[-5px] transition-transform">
+                        <div class="font-bold text-lg mb-2" x-text="recommendation.name + ' (' + recommendation.symbol + ')'"></div>
+                        <div class="flex justify-between mb-2 text-sm">
+                            <span x-text="'$' + (recommendation.current_price ? recommendation.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8}) : '0.00')"></span>
+                            <span :class="(recommendation.price_change_24h || 0) >= 0 ? 'text-success' : 'text-danger'"
+                                x-text="((recommendation.price_change_24h || 0) >= 0 ? '+' : '') +
+                                        ((recommendation.price_change_24h || 0).toFixed(8)) + '$'">
+                            </span>
+                        </div>
+                        <div class="clay-badge clay-badge-secondary mb-3" x-text="recommendation.primary_category || recommendation.category || 'Umum'"></div>
+                        <div class="flex justify-between items-center">
+                            <div class="text-xs font-medium">Score: <span class="text-secondary"
+                                x-text="(recommendation.recommendation_score || 0).toFixed(2)"></span></div>
+                            <a :href="'/panel/recommendations/project/' + recommendation.id" class="clay-button clay-button-secondary py-1 px-2 text-xs">
+                                <i class="fas fa-info-circle mr-1"></i> Detail
+                            </a>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <template x-if="recommendations.length === 0">
+                <div class="col-span-full clay-card p-6 text-center">
+                    <p>Tidak ada rekomendasi yang tersedia saat ini.</p>
+                    <p class="text-sm mt-2 text-gray-500">Mulai berinteraksi dengan proyek untuk mendapatkan rekomendasi yang lebih baik.</p>
+                    <a href="{{ route('panel.recommendations.trending') }}" class="clay-button clay-button-primary mt-4">Lihat Trending</a>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Trending Projects Preview -->
+    <div class="clay-card p-6 mb-8" x-data="{ loading: true, trendingProjects: [] }">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-xl font-bold flex items-center">
+                <i class="fas fa-fire mr-2 text-warning"></i>
+                Proyek Trending
+            </h2>
+            <a href="{{ route('panel.recommendations.trending') }}" class="clay-button clay-button-warning py-1.5 px-3 text-sm">
+                Lihat Semua <i class="fas fa-arrow-right ml-1"></i>
+            </a>
+        </div>
+
+        <!-- Loading Spinner -->
+        <div x-show="loading" class="py-4 text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-warning"></div>
+            <p class="mt-2 text-gray-500">Memuat proyek trending...</p>
+        </div>
+
+        <!-- Trending Projects Table -->
+        <div class="overflow-x-auto" x-show="!loading" x-init="
+            @if(!empty($trendingProjects))
+                @if(is_object($trendingProjects) && method_exists($trendingProjects, 'items'))
+                    trendingProjects = {{ json_encode($trendingProjects->items()) }};
+                @else
+                    trendingProjects = {{ json_encode(is_array($trendingProjects) && isset($trendingProjects['data']) ? $trendingProjects['data'] : $trendingProjects) }};
+                @endif
+                loading = false;
+            @else
+                loading = false;
+            @endif">
+
+            <table class="clay-table min-w-full">
+                <thead>
+                    <tr>
+                        <th class="py-2 px-4 text-left">#</th>
+                        <th class="py-2 px-4 text-left">Project</th>
+                        <th class="py-2 px-4 text-left">Harga</th>
+                        <th class="py-2 px-4 text-left">24h $</th>
+                        <th class="py-2 px-4 text-left">7d %</th>
+                        <th class="py-2 px-4 text-left">Trend Score</th>
+                        <th class="py-2 px-4 text-left">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="(project, index) in trendingProjects.slice(0, 5)" :key="index">
+                        <tr>
+                            <td class="py-3 px-4" x-text="index + 1"></td>
+                            <td class="py-3 px-4 font-medium">
+                                <div class="flex items-center">
+                                    <template x-if="project.image">
+                                        <img :src="project.image" :alt="project.symbol" class="w-6 h-6 mr-2 rounded-full">
+                                    </template>
+                                    <div x-text="project.name + ' (' + project.symbol + ')'"></div>
+                                </div>
+                            </td>
+                            <td class="py-3 px-4" x-text="'$' + (project.current_price ? project.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8}) : '0.00')"></td>
+                            <td class="py-3 px-4" :class="(project.price_change_24h || 0) >= 0 ? 'text-success' : 'text-danger'"
+                                x-text="((project.price_change_24h || 0) >= 0 ? '+' : '') +
+                                        ((project.price_change_24h || 0).toFixed(8)) + '$'">
+                            </td>
+                            <td class="py-3 px-4" :class="(project.price_change_percentage_7d_in_currency || 0) > 0 ? 'text-success' : 'text-danger'"
+                                x-text="((project.price_change_percentage_7d_in_currency || 0) > 0 ? '+' : '') +
+                                        ((project.price_change_percentage_7d_in_currency || 0).toFixed(2)) + '%'"></td>
+                            <td class="py-3 px-4">
+                                <div class="flex items-center">
+                                    <div class="w-16 h-2 clay-progress overflow-hidden rounded-full mr-2">
+                                        <div class="h-full bg-warning" :style="'width: ' + Math.min(100, project.trend_score || 0) + '%;'"></div>
+                                    </div>
+                                    <span x-text="(project.trend_score || 0).toFixed(1)"></span>
+                                </div>
+                            </td>
+                            <td class="py-3 px-4">
+                                <a :href="'/panel/recommendations/project/' + project.id" class="clay-button clay-button-warning py-1 px-2 text-xs">
+                                    <i class="fas fa-info-circle mr-1"></i> Detail
+                                </a>
+                            </td>
+                        </tr>
+                    </template>
+
+                    <template x-if="trendingProjects.length === 0">
+                        <tr>
+                            <td colspan="7" class="py-6 px-4 text-center text-gray-500">Tidak ada data proyek trending</td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Recent Interactions -->
+    <div class="clay-card p-6 mb-8" x-data="{ loading: true, interactions: [] }">
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-xl font-bold flex items-center">
+                <i class="fas fa-history mr-2 text-info"></i>
+                Interaksi Terbaru
+            </h2>
+        </div>
+
+        <!-- Loading Spinner -->
+        <div x-show="loading" class="py-4 text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-info"></div>
+            <p class="mt-2 text-gray-500">Memuat interaksi terbaru...</p>
+        </div>
+
+        <!-- Recent Interactions Content -->
+        <div x-show="!loading" x-init="
+            setTimeout(() => {
+                fetch('{{ route('panel.dashboard.load-interactions') }}')
+                    .then(response => response.json())
+                    .then(data => {
+                        interactions = data;
+                        loading = false;
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        loading = false;
+                    });
+            }, 200);">
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <template x-for="(interaction, idx) in interactions.slice(0, 6)" :key="interaction.id">
+                    <div class="clay-card p-4 flex items-center">
+                        <div class="mr-4">
+                            <template x-if="interaction.interaction_type === 'view'">
+                                <div class="clay-rounded-full bg-info/20 p-2">
+                                    <i class="fas fa-eye text-info"></i>
+                                </div>
+                            </template>
+                            <template x-if="interaction.interaction_type === 'favorite'">
+                                <div class="clay-rounded-full bg-secondary/20 p-2">
+                                    <i class="fas fa-heart text-secondary"></i>
+                                </div>
+                            </template>
+                            <template x-if="interaction.interaction_type === 'portfolio_add'">
+                                <div class="clay-rounded-full bg-success/20 p-2">
+                                    <i class="fas fa-folder-plus text-success"></i>
+                                </div>
+                            </template>
+                            <template x-if="!['view', 'favorite', 'portfolio_add'].includes(interaction.interaction_type)">
+                                <div class="clay-rounded-full bg-warning/20 p-2">
+                                    <i class="fas fa-info-circle text-warning"></i>
+                                </div>
+                            </template>
+                        </div>
+                        <div class="flex-grow">
+                            <div class="font-medium">
+                                <template x-if="interaction.interaction_type === 'view'">
+                                    <span>Melihat detail</span>
+                                </template>
+                                <template x-if="interaction.interaction_type === 'favorite'">
+                                    <span>Sukai</span>
+                                </template>
+                                <template x-if="interaction.interaction_type === 'portfolio_add'">
+                                    <span>Menambahkan ke portfolio</span>
+                                </template>
+                                <template x-if="!['view', 'favorite', 'portfolio_add'].includes(interaction.interaction_type)">
+                                    <span>Berinteraksi dengan</span>
+                                </template>
+
+                                <span class="font-bold" x-text="interaction.project ? (interaction.project.name + ' (' + interaction.project.symbol + ')') : 'Unknown'"></span>
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                <span x-text="new Date(interaction.created_at).toLocaleString()"></span>
+                            </div>
+                        </div>
+                        <div>
+                            <a :href="'/panel/recommendations/project/' + interaction.project_id" class="clay-button clay-button-info py-1 px-2 text-xs">
+                                Detail
+                            </a>
+                        </div>
+                    </div>
+                </template>
+
+                <template x-if="interactions.length === 0">
+                    <div class="col-span-full clay-card p-6 text-center">
+                        <p>Belum ada interaksi yang tercatat.</p>
+                        <p class="text-sm mt-2 text-gray-500">Mulai berinteraksi dengan proyek untuk melihat riwayat aktivitas Anda.</p>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Comparison -->
+    <div class="clay-card p-6 mb-8">
+        <h2 class="text-xl font-bold mb-6 flex items-center">
+            <i class="fas fa-code-branch mr-2 text-primary"></i>
+            Model Rekomendasi
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="clay-card bg-primary/10 p-4">
+                <h3 class="font-bold mb-2 flex items-center">
+                    <i class="fas fa-table mr-2"></i>
+                    Feature-Enhanced CF
+                </h3>
+                <p class="text-sm mb-3">
+                    Model berbasis SVD yang menggabungkan matrix factorization dengan content-based filtering berdasarkan fitur proyek.
+                </p>
+            </div>
+
+            <div class="clay-card bg-secondary/10 p-4">
+                <h3 class="font-bold mb-2 flex items-center">
+                    <i class="fas fa-brain mr-2"></i>
+                    Neural CF
+                </h3>
+                <p class="text-sm mb-3">
+                    Deep learning model yang menangkap pola kompleks dalam interaksi user-item menggunakan jaringan neural.
+                </p>
+            </div>
+
+            <div class="clay-card bg-success/10 p-4">
+                <h3 class="font-bold mb-2 flex items-center">
+                    <i class="fas fa-layer-group mr-2"></i>
+                    Enhanced Hybrid Model
+                </h3>
+                <p class="text-sm mb-3">
+                    Gabungan kedua model dengan teknik ensemble canggih untuk hasil rekomendasi yang lebih akurat.
+                </p>
+            </div>
+        </div>
+
+        <div class="mt-6 clay-card bg-info/10 p-4">
+            <div class="font-bold mb-2 flex items-center">
+                <i class="fas fa-info-circle mr-2 text-info"></i>
+                Tentang Model Hybrid
+            </div>
+            <p class="text-sm">
+                Model hybrid menggabungkan kekuatan Feature-Enhanced CF dan Neural CF dengan pembobotan dinamis berdasarkan jumlah interaksi pengguna.
+                Untuk pengguna dengan interaksi sedikit (cold-start), model lebih menekankan pada fitur proyek (FECF).
+                Untuk pengguna aktif, model memanfaatkan pola interaksi yang dipelajari oleh komponen neural.
+            </p>
+        </div>
+    </div>
+
+    <!-- Filter & Search Info -->
+    <div class="clay-card p-6">
+        <h2 class="text-xl font-bold mb-6 flex items-center">
+            <i class="fas fa-filter mr-2 text-warning"></i>
+            Filter & Pencarian
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="clay-card bg-warning/10 p-4">
+                <h3 class="font-bold mb-2">Filter Manual</h3>
+                <p class="text-sm mb-3">
+                    Gunakan filter kategori (DeFi, NFT, Gaming) dan blockchain (Ethereum, Solana, dll) untuk menemukan proyek yang sesuai dengan minat Anda saat ini.
+                </p>
+                <a href="{{ route('panel.recommendations.personal') }}" class="clay-button clay-button-warning py-1.5 px-3 text-sm">
+                    Coba Filter
+                </a>
+            </div>
+
+            <div class="clay-card bg-primary/10 p-4">
+                <h3 class="font-bold mb-2">Analisis Teknikal</h3>
+                <p class="text-sm mb-3">
+                    Gunakan analisis teknikal dengan periode indikator yang dapat disesuaikan untuk gaya trading Anda (short-term, standard, long-term).
+                </p>
+                <a href="{{ route('panel.technical-analysis') }}" class="clay-button clay-button-primary py-1.5 px-3 text-sm">
+                    Buka Analisis
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+@endsection

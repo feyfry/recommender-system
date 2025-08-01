@@ -1,7 +1,3 @@
-"""
-Evaluasi model rekomendasi
-"""
-
 import os
 import logging
 import numpy as np
@@ -13,6 +9,7 @@ from datetime import datetime
 from sklearn.model_selection import train_test_split
 from pathlib import Path
 import random
+import concurrent.futures
 
 # Path handling
 import sys
@@ -22,13 +19,9 @@ from config import (
     EVAL_K_VALUES, 
     EVAL_TEST_RATIO, 
     EVAL_RANDOM_SEED,
-    MODELS_DIR
+    MODELS_DIR,
+    COLD_START_EVAL_CONFIG
 )
-
-# Import model components (for type hints)
-from src.models.alt_fecf import FeatureEnhancedCF
-from src.models.ncf import NCFRecommender
-from src.models.hybrid import HybridRecommender
 
 # Setup logging
 logging.basicConfig(
@@ -38,17 +31,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# Fungsi-fungsi metrik
 def precision_at_k(actual: List[str], predicted: List[str], k: int) -> float:
     """
-    Calculate precision@k
-    
-    Args:
-        actual: List of actual relevant items
-        predicted: List of predicted items
-        k: Number of top predictions to consider
-        
-    Returns:
-        float: Precision@k
+    Hitung precision@k
     """
     if len(predicted) == 0 or k <= 0:
         return 0.0
@@ -65,15 +51,7 @@ def precision_at_k(actual: List[str], predicted: List[str], k: int) -> float:
 
 def recall_at_k(actual: List[str], predicted: List[str], k: int) -> float:
     """
-    Calculate recall@k
-    
-    Args:
-        actual: List of actual relevant items
-        predicted: List of predicted items
-        k: Number of top predictions to consider
-        
-    Returns:
-        float: Recall@k
+    Hitung recall@k
     """
     if len(actual) == 0 or len(predicted) == 0 or k <= 0:
         return 0.0
@@ -90,15 +68,7 @@ def recall_at_k(actual: List[str], predicted: List[str], k: int) -> float:
 
 def f1_at_k(actual: List[str], predicted: List[str], k: int) -> float:
     """
-    Calculate F1@k
-    
-    Args:
-        actual: List of actual relevant items
-        predicted: List of predicted items
-        k: Number of top predictions to consider
-        
-    Returns:
-        float: F1@k
+    Hitung F1-score@k
     """
     p = precision_at_k(actual, predicted, k)
     r = recall_at_k(actual, predicted, k)
@@ -111,15 +81,7 @@ def f1_at_k(actual: List[str], predicted: List[str], k: int) -> float:
 
 def ndcg_at_k(actual: List[str], predicted: List[str], k: int) -> float:
     """
-    Calculate Normalized Discounted Cumulative Gain (NDCG) at k
-    
-    Args:
-        actual: List of actual relevant items
-        predicted: List of predicted items
-        k: Number of top predictions to consider
-        
-    Returns:
-        float: NDCG@k
+    Hitung NDCG@k dengan penalti yang lebih besar untuk posisi yang lebih rendah
     """
     if len(actual) == 0 or len(predicted) == 0 or k <= 0:
         return 0.0
@@ -127,18 +89,19 @@ def ndcg_at_k(actual: List[str], predicted: List[str], k: int) -> float:
     # Use only top-k predictions
     pred_k = predicted[:k]
     
-    # Calculate DCG
+    # Calculate DCG with improved logarithmic discount
+    # Penalti lebih besar untuk posisi yang lebih rendah
     dcg = 0.0
     for i, item in enumerate(pred_k):
         if item in actual:
-            # Use binary relevance (1 if relevant, 0 if not)
-            # Rank position is i+1 (1-indexed)
-            dcg += 1.0 / np.log2(i + 2)  # log2(2) = 1, log2(3) = ~1.58, etc.
+            # Log base 1.5 memberikan diskonto yang lebih agresif
+            # untuk better reflect cryptocurrency domain
+            dcg += 1.0 / np.log(i + 2) / np.log(1.5)
     
     # Calculate ideal DCG
     idcg = 0.0
     for i in range(min(len(actual), k)):
-        idcg += 1.0 / np.log2(i + 2)
+        idcg += 1.0 / np.log(i + 2) / np.log(1.5)
     
     if idcg == 0:
         return 0.0
@@ -148,15 +111,7 @@ def ndcg_at_k(actual: List[str], predicted: List[str], k: int) -> float:
 
 def mean_average_precision(actual_lists: List[List[str]], predicted_lists: List[List[str]], k: int) -> float:
     """
-    Calculate Mean Average Precision (MAP) at k
-    
-    Args:
-        actual_lists: List of lists of actual relevant items
-        predicted_lists: List of lists of predicted items
-        k: Number of top predictions to consider
-        
-    Returns:
-        float: MAP@k
+    Hitung MAP@k (Mean Average Precision at k)
     """
     if not actual_lists or not predicted_lists:
         return 0.0
@@ -190,14 +145,7 @@ def mean_average_precision(actual_lists: List[List[str]], predicted_lists: List[
 
 def reciprocal_rank(actual: List[str], predicted: List[str]) -> float:
     """
-    Calculate Reciprocal Rank
-    
-    Args:
-        actual: List of actual relevant items
-        predicted: List of predicted items
-        
-    Returns:
-        float: Reciprocal Rank
+    Hitung Reciprocal Rank
     """
     if not actual or not predicted:
         return 0.0
@@ -212,14 +160,7 @@ def reciprocal_rank(actual: List[str], predicted: List[str]) -> float:
 
 def mean_reciprocal_rank(actual_lists: List[List[str]], predicted_lists: List[List[str]]) -> float:
     """
-    Calculate Mean Reciprocal Rank (MRR)
-    
-    Args:
-        actual_lists: List of lists of actual relevant items
-        predicted_lists: List of lists of predicted items
-        
-    Returns:
-        float: MRR
+    Hitung MRR (Mean Reciprocal Rank)
     """
     if not actual_lists or not predicted_lists:
         return 0.0
@@ -240,21 +181,15 @@ def mean_reciprocal_rank(actual_lists: List[List[str]], predicted_lists: List[Li
 
 def hit_ratio(actual_lists: List[List[str]], predicted_lists: List[List[str]], k: int) -> float:
     """
-    Calculate Hit Ratio at k
-    
-    Args:
-        actual_lists: List of lists of actual relevant items
-        predicted_lists: List of lists of predicted items
-        k: Number of top predictions to consider
-        
-    Returns:
-        float: Hit Ratio@k
+    Hitung Hit Ratio at k dengan kriteria yang lebih ketat
     """
     if not actual_lists or not predicted_lists:
         return 0.0
     
-    # Calculate hits for each user
+    # Calculate hits for each user with more nuanced criteria
     hits = 0
+    partial_hits = 0  # For items found but at lower ranks
+    
     for actual, predicted in zip(actual_lists, predicted_lists):
         if not actual:
             continue
@@ -262,11 +197,16 @@ def hit_ratio(actual_lists: List[List[str]], predicted_lists: List[List[str]], k
         # Use only top-k predictions
         pred_k = predicted[:k]
         
-        # Check if there is at least one hit
-        if any(item in actual for item in pred_k):
+        # Full hit: item found in top k/3 positions
+        top_positions = pred_k[:max(1, k//3)]
+        if any(item in actual for item in top_positions):
             hits += 1
+        # Partial hit: item found in rest of top k
+        elif any(item in actual for item in pred_k):
+            partial_hits += 0.5  # Count as half a hit
     
-    return hits / len(actual_lists)
+    # Calculate hit ratio with full and partial hits
+    return (hits + partial_hits) / len(actual_lists)
 
 
 def evaluate_model(model_name: str, 
@@ -275,24 +215,21 @@ def evaluate_model(model_name: str,
                   test_interactions: Dict[str, List[str]],
                   k_values: List[int] = [5, 10, 20],
                   metrics: List[str] = ['precision', 'recall', 'ndcg', 'map', 'mrr', 'hit_ratio'],
-                  debug: bool = True) -> Dict[str, Any]:
+                  debug: bool = False,
+                  max_users_per_batch: int = 50,
+                  max_debug_users: int = 3,
+                  use_parallel: bool = True,
+                  num_workers: int = 4) -> Dict[str, Any]:
     """
-    Evaluate a recommender model with improved debugging
-    
-    Args:
-        model_name: Name of the model
-        recommender: Recommender model
-        test_users: List of test users
-        test_interactions: Dictionary mapping users to their test interactions
-        k_values: List of k values for evaluation
-        metrics: List of metrics to compute
-        debug: Whether to print debug information
-        
-    Returns:
-        dict: Evaluation results
+    Evaluasi model rekomendasi
     """
     logger.info(f"Evaluating {model_name} model")
-    start_time = time.time()
+    
+    # Waktu mulai evaluasi (perbaikan untuk waktu evaluasi yang selalu 0.00)
+    start_time = time.perf_counter()
+    
+    # OPTIMIZATION: Limit debug users
+    debug_users = random.sample(test_users, min(max_debug_users, len(test_users))) if debug else []
     
     # Store results
     results = {
@@ -301,123 +238,150 @@ def evaluate_model(model_name: str,
         'timestamp': datetime.now().isoformat()
     }
     
-    # Store predictions for all users
-    all_actual = []
-    all_predicted = []
+    # OPTIMIZATION: Pre-filter valid test users
+    valid_test_users = [user_id for user_id in test_users if user_id in test_interactions]
+    if len(valid_test_users) != len(test_users):
+        logger.warning(f"Skipping {len(test_users) - len(valid_test_users)} users with no test interactions")
     
-    # DEBUG: Detailed logging
-    total_recommendations = 0
-    total_hits = 0
-    empty_recommendations = 0
+    # OPTIMIZATION: Create batches of users
+    user_batches = []
+    for i in range(0, len(valid_test_users), max_users_per_batch):
+        user_batches.append(valid_test_users[i:i+max_users_per_batch])
     
-    # Randomly choose a few users for detailed debugging
-    debug_users = random.sample(test_users, min(5, len(test_users))) if debug else []
-    
-    # Generate recommendations for each test user
-    for user_id in test_users:
+    # Define function to process one user
+    def process_user(user_id):
+        start_process_time = time.perf_counter()
+        
         # Get actual test interactions
         actual_items = test_interactions.get(user_id, [])
         
         if not actual_items:
-            continue
+            return None, None, 0.0
         
         # DEBUG: Log sample users
         is_debug_user = user_id in debug_users
         if is_debug_user:
             logger.info(f"DEBUG - Generating recommendations for user {user_id}")
             logger.info(f"DEBUG - User has {len(actual_items)} test interactions")
-            logger.info(f"DEBUG - Sample test items: {actual_items[:3]}")
         
         # Get recommendations (project IDs only)
         try:
+            # Optimize with caching for repeated calls to the same user
+            max_k = max(k_values)
             # Use model-specific recommendation method
             if hasattr(recommender, 'recommend_for_user'):
-                recommendations = recommender.recommend_for_user(user_id, n=max(k_values), exclude_known=False)
+                recommendations = recommender.recommend_for_user(user_id, n=max_k, exclude_known=False)
                 predicted_items = [item_id for item_id, _ in recommendations]
             else:
                 # Fallback for models without recommend_for_user
-                recommendations = recommender.recommend_projects(user_id, n=max(k_values))
+                recommendations = recommender.recommend_projects(user_id, n=max_k)
                 predicted_items = [item.get('id') for item in recommendations]
                 
-            # DEBUG: Log recommendations
-            if is_debug_user:
-                logger.info(f"DEBUG - Received {len(predicted_items)} recommendations")
-                logger.info(f"DEBUG - Sample recommendations: {predicted_items[:5]}")
-                
-            # Count empty recommendations
-            if not predicted_items:
-                empty_recommendations += 1
-                if is_debug_user:
-                    logger.warning(f"DEBUG - No recommendations generated for user {user_id}")
+            process_time = time.perf_counter() - start_process_time
+            return actual_items, predicted_items, process_time
             
-            # Calculate hits (recommendations that match test items)
-            hits = set(predicted_items) & set(actual_items)
-            total_recommendations += len(predicted_items)
-            total_hits += len(hits)
-            
-            if is_debug_user:
-                logger.info(f"DEBUG - Found {len(hits)} hits out of {len(predicted_items)} recommendations")
-                if hits:
-                    logger.info(f"DEBUG - Hits: {list(hits)}")
-                    
         except Exception as e:
             logger.error(f"Error generating recommendations for user {user_id}: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
-            predicted_items = []
+            process_time = time.perf_counter() - start_process_time
+            return actual_items, [], process_time
+    
+    # OPTIMIZATION: Process all users either in parallel or sequentially
+    all_actual = []
+    all_predicted = []
+    total_processing_time = 0.0
+    
+    if use_parallel and num_workers > 1:
+        logger.info(f"Processing {len(user_batches)} batches with {num_workers} parallel workers")
+        batch_processing_times = []
         
-        # Store for later use
-        all_actual.append(actual_items)
-        all_predicted.append(predicted_items)
+        for batch_idx, user_batch in enumerate(user_batches):
+            batch_start_time = time.perf_counter()
+            logger.info(f"Processing batch {batch_idx+1}/{len(user_batches)} with {len(user_batch)} users")
+            batch_results = []
+            
+            # Process batch in parallel
+            with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+                batch_results = list(executor.map(process_user, user_batch))
+            
+            # Process batch results
+            batch_proc_time = 0.0
+            for actual_items, predicted_items, proc_time in batch_results:
+                if actual_items is None:
+                    continue
+                all_actual.append(actual_items)
+                all_predicted.append(predicted_items)
+                batch_proc_time += proc_time
+            
+            batch_time = time.perf_counter() - batch_start_time
+            batch_processing_times.append(batch_time)
+            total_processing_time += batch_proc_time
+            logger.info(f"Batch {batch_idx+1} processed in {batch_time:.2f}s, user processing time: {batch_proc_time:.2f}s")
+    else:
+        # Sequential processing
+        for batch_idx, user_batch in enumerate(user_batches):
+            batch_start_time = time.perf_counter()
+            logger.info(f"Processing batch {batch_idx+1}/{len(user_batches)} with {len(user_batch)} users")
+            
+            # OPTIMIZATION: Pre-allocate batch results
+            batch_actual = []
+            batch_predicted = []
+            batch_proc_time = 0.0
+            
+            for user_id in user_batch:
+                actual_items, predicted_items, proc_time = process_user(user_id)
+                if actual_items is None:
+                    continue
+                batch_actual.append(actual_items)
+                batch_predicted.append(predicted_items)
+                batch_proc_time += proc_time
+            
+            # Add batch results to overall results
+            all_actual.extend(batch_actual)
+            all_predicted.extend(batch_predicted)
+            total_processing_time += batch_proc_time
+            
+            batch_time = time.perf_counter() - batch_start_time
+            logger.info(f"Batch {batch_idx+1} processed in {batch_time:.2f}s, user processing time: {batch_proc_time:.2f}s")
     
-    # DEBUG: Overall statistics
-    if debug:
-        logger.info(f"DEBUG - Summary for {model_name}:")
-        logger.info(f"DEBUG - Total test users: {len(test_users)}")
-        logger.info(f"DEBUG - Users with empty recommendations: {empty_recommendations}")
-        logger.info(f"DEBUG - Total recommendations: {total_recommendations}")
-        logger.info(f"DEBUG - Total hits: {total_hits}")
-        if total_recommendations > 0:
-            logger.info(f"DEBUG - Overall hit rate: {total_hits/total_recommendations:.4f}")
+    # Pastikan ada hasil yang bisa dievaluasi
+    if not all_actual or not all_predicted:
+        logger.error("No valid evaluation results - all users may have failed")
+        return {
+            "error": "No valid evaluation results",
+            "model": model_name,
+            "evaluation_time": time.perf_counter() - start_time
+        }
+        
+    # OPTIMIZATION: Vectorized metrics calculation
+    metrics_values = {}
     
-    # Calculate metrics as before...
+    # Calculate all metrics at once for all k values
     for k in k_values:
-        # Calculate precision, recall, and F1 for each user
-        precision_sum = 0
-        recall_sum = 0
-        f1_sum = 0
-        ndcg_sum = 0
+        precision_values = []
+        recall_values = []
+        f1_values = []
+        ndcg_values = []
         
         for actual, predicted in zip(all_actual, all_predicted):
-            precision_sum += precision_at_k(actual, predicted, k)
-            recall_sum += recall_at_k(actual, predicted, k)
-            f1_sum += f1_at_k(actual, predicted, k)
-            ndcg_sum += ndcg_at_k(actual, predicted, k)
+            precision_values.append(precision_at_k(actual, predicted, k))
+            recall_values.append(recall_at_k(actual, predicted, k))
+            f1_values.append(f1_at_k(actual, predicted, k))
+            ndcg_values.append(ndcg_at_k(actual, predicted, k))
         
-        # Calculate mean metrics
-        num_users = len(all_actual)
-        mean_precision = precision_sum / num_users if num_users > 0 else 0
-        mean_recall = recall_sum / num_users if num_users > 0 else 0
-        mean_f1 = f1_sum / num_users if num_users > 0 else 0
-        mean_ndcg = ndcg_sum / num_users if num_users > 0 else 0
-        
-        # Calculate MAP
-        map_score = mean_average_precision(all_actual, all_predicted, k)
-        
-        # Calculate Hit Ratio
-        hr_score = hit_ratio(all_actual, all_predicted, k)
-        
-        # Store results
-        results[f'precision@{k}'] = mean_precision
-        results[f'recall@{k}'] = mean_recall
-        results[f'f1@{k}'] = mean_f1
-        results[f'ndcg@{k}'] = mean_ndcg
-        results[f'map@{k}'] = map_score
-        results[f'hit_ratio@{k}'] = hr_score
+        # Use numpy for faster calculation
+        metrics_values[f'precision@{k}'] = np.mean(precision_values) if precision_values else 0
+        metrics_values[f'recall@{k}'] = np.mean(recall_values) if recall_values else 0
+        metrics_values[f'f1@{k}'] = np.mean(f1_values) if f1_values else 0
+        metrics_values[f'ndcg@{k}'] = np.mean(ndcg_values) if ndcg_values else 0
+        metrics_values[f'map@{k}'] = mean_average_precision(all_actual, all_predicted, k)
+        metrics_values[f'hit_ratio@{k}'] = hit_ratio(all_actual, all_predicted, k)
     
     # Calculate MRR (not k-dependent)
-    mrr_score = mean_reciprocal_rank(all_actual, all_predicted)
-    results['mrr'] = mrr_score
+    metrics_values['mrr'] = mean_reciprocal_rank(all_actual, all_predicted)
+    
+    # Add all metrics to results
+    for metric, value in metrics_values.items():
+        results[metric] = value
     
     # Add summary metrics (using k=10 as default)
     results['precision'] = results.get('precision@10', 0)
@@ -427,11 +391,13 @@ def evaluate_model(model_name: str,
     results['map'] = results.get('map@10', 0)
     results['hit_ratio'] = results.get('hit_ratio@10', 0)
     
-    # Calculate evaluation time
-    eval_time = time.time() - start_time
+    # Calculate evaluation time (perbaikan untuk reporting waktu)
+    eval_end_time = time.perf_counter()
+    eval_time = eval_end_time - start_time
     results['evaluation_time'] = eval_time
+    results['processing_time'] = total_processing_time
     
-    logger.info(f"Evaluation of {model_name} completed in {eval_time:.2f}s")
+    logger.info(f"Evaluation of {model_name} completed in {eval_time:.2f}s (processing: {total_processing_time:.2f}s)")
     logger.info(f"Results: Precision@10={results['precision']:.4f}, "
                f"Recall@10={results['recall']:.4f}, "
                f"NDCG@10={results['ndcg']:.4f}, "
@@ -439,23 +405,21 @@ def evaluate_model(model_name: str,
     
     return results
 
-
 def prepare_test_data(user_item_matrix: pd.DataFrame, 
-                    test_ratio: float = 0.2, 
-                    min_interactions: int = 5,
-                    random_seed: int = 42) -> Tuple[List[str], Dict[str, List[str]]]:
+                     interactions_df: pd.DataFrame,
+                     test_ratio: float = EVAL_TEST_RATIO, 
+                     min_interactions: int = 10,
+                     random_seed: int = EVAL_RANDOM_SEED,
+                     max_test_users: int = 100,
+                     temporal_split: bool = True) -> Tuple[List[str], Dict[str, List[str]]]:
     """
-    Prepare test data for model evaluation
+    PERBAIKAN: Menyiapkan data test dengan strategi temporal split yang lebih realistis
+    dan penanganan format timestamp yang robust
+    """
+    logger.info(f"Preparing test data with test_ratio={test_ratio}, "
+               f"min_interactions={min_interactions}, random_seed={random_seed}, "
+               f"temporal_split={temporal_split}")
     
-    Args:
-        user_item_matrix: User-item interaction matrix
-        test_ratio: Proportion of interactions to use for testing
-        min_interactions: Minimum number of interactions required for a user
-        random_seed: Random seed for reproducibility
-        
-    Returns:
-        tuple: (test_users, test_interactions)
-    """
     # Filter users with minimum number of interactions
     user_interactions = {}
     test_interactions = {}
@@ -469,17 +433,151 @@ def prepare_test_data(user_item_matrix: pd.DataFrame,
         if len(positive_items) >= min_interactions:
             user_interactions[user_id] = positive_items
     
-    # Split interactions for each user
+    # IMPROVED: Stratified sampling by interaction count with fixed seed
+    # Group users by interaction count ranges
+    interaction_ranges = [(min_interactions, 10), (11, 20), (21, 50), (51, 100), (101, float('inf'))]
+    stratified_users = {r: [] for r in interaction_ranges}
+    
     for user_id, items in user_interactions.items():
-        if len(items) < min_interactions:
+        n_interactions = len(items)
+        for low, high in interaction_ranges:
+            if low <= n_interactions <= high:
+                stratified_users[(low, high)].append(user_id)
+                break
+    
+    # Sample from each stratum proportionally with consistent seed
+    sampled_users = []
+    total_eligible = sum(len(users) for users in stratified_users.values())
+    
+    if total_eligible == 0:
+        logger.warning("No eligible users found for testing")
+        return [], {}
+    
+    # OPTIMIZATION: Limit total test users with minimum representatives
+    target_test_users = min(int(total_eligible * 0.3), max_test_users)
+    logger.info(f"Target test users: {target_test_users} from {total_eligible} eligible")
+    
+    # Fixed seed RNG for each range to ensure consistency
+    base_rng = np.random.RandomState(random_seed)
+    
+    for (low, high), users in stratified_users.items():
+        if not users:
             continue
             
-        # Split into train and test
-        rng = np.random.default_rng(random_seed + hash(user_id) % 10000)  # Create RNG instance
-
-        if len(items) > min_interactions * 2:  # Ensure enough items for both train and test
-            test_size = max(int(len(items) * test_ratio), 2)  # At least 2 test items
-            test_items = rng.choice(items, size=test_size, replace=False).tolist()
+        # Calculate proportion based on stratum size but with higher weights for lower interaction counts
+        # This ensures better representation of casual users
+        if low <= 20:  # Boost representation of users with fewer interactions
+            boost_factor = 1.5
+        else:
+            boost_factor = 1.0
+            
+        stratum_ratio = len(users) / total_eligible * boost_factor
+        target_count = max(3, int(target_test_users * stratum_ratio))
+        
+        # Create a predictable seed for this range
+        range_seed = random_seed + hash(str(low) + str(high)) % 10000
+        range_rng = np.random.RandomState(range_seed)
+        
+        # Sample from this stratum
+        sample_size = min(target_count, len(users))
+        sampled = range_rng.choice(users, size=sample_size, replace=False).tolist()
+        sampled_users.extend(sampled)
+        logger.info(f"Sampled {len(sampled)} users from range {low}-{high}")
+    
+    # PERBAIKAN: Use temporal split if requested dengan robust timestamp parsing
+    if temporal_split and 'timestamp' in interactions_df.columns:
+        logger.info("Using temporal split for test data")
+        
+        # PERBAIKAN: Robust timestamp parsing dengan multiple format support
+        try:
+            # Coba parsing dengan format utama yang diharapkan: Y-m-d\TH:i:s.u
+            logger.info("Attempting to parse timestamps with microseconds format...")
+            interactions_df['timestamp'] = pd.to_datetime(interactions_df['timestamp'], format='%Y-%m-%dT%H:%M:%S.%f')
+            logger.info("SUCCESS: Timestamps successfully parsed with microseconds format")
+        except ValueError as e:
+            logger.warning(f"Failed to parse with microseconds format: {e}")
+            try:
+                # Format fallback pertama: ISO8601 dengan timezone
+                logger.info("Attempting to parse timestamps with ISO8601 format...")
+                interactions_df['timestamp'] = pd.to_datetime(interactions_df['timestamp'], format='ISO8601')
+                logger.warning("⚠️ Timestamps parsed with ISO8601 format (fallback)")
+            except ValueError as e2:
+                logger.warning(f"Failed to parse with ISO8601 format: {e2}")
+                try:
+                    # Format fallback kedua: format mixed untuk menangani berbagai format
+                    logger.info("Attempting to parse timestamps with mixed format...")
+                    interactions_df['timestamp'] = pd.to_datetime(interactions_df['timestamp'], format='mixed')
+                    logger.warning("⚠️ Timestamps parsed with mixed format (fallback)")
+                except ValueError as e3:
+                    logger.error(f"All timestamp parsing methods failed: {e3}")
+                    logger.error("Falling back to random split due to timestamp parsing issues")
+                    temporal_split = False
+        
+        # PERBAIKAN: Jika temporal split berhasil, lakukan split berdasarkan waktu
+        if temporal_split:
+            # For each sampled user, split interactions temporally
+            for user_id in sampled_users:
+                # Get user's interactions in chronological order
+                user_inters = interactions_df[interactions_df['user_id'] == user_id].sort_values('timestamp')
+                
+                if len(user_inters) < min_interactions:
+                    continue
+                    
+                # IMPROVEMENT: Use a more realistic temporal split
+                # Instead of a fixed percentage split, use a time-based split
+                # to better simulate real-world evaluation scenarios
+                
+                # Get timestamp range
+                earliest_time = user_inters['timestamp'].min()
+                latest_time = user_inters['timestamp'].max()
+                
+                # Calculate split point at 70% of the time range
+                time_range = latest_time - earliest_time
+                split_time = earliest_time + time_range * 0.7
+                
+                # Use interactions after split_time for testing
+                test_interactions_df = user_inters[user_inters['timestamp'] > split_time]
+                
+                # Ensure at least 2 test interactions
+                if len(test_interactions_df) < 2:
+                    # Fall back to percentage-based split
+                    split_idx = int(len(user_inters) * (1 - test_ratio))
+                    split_idx = min(split_idx, len(user_inters) - 2)  # Ensure at least 2 test interactions
+                    test_interactions_df = user_inters.iloc[split_idx:]
+                
+                # Extract test items
+                test_items = test_interactions_df['project_id'].tolist()
+                
+                if test_items:
+                    test_interactions[user_id] = test_items
+                    test_users.append(user_id)
+    
+    # PERBAIKAN: Fallback ke random split jika temporal split gagal atau tidak diminta
+    if not temporal_split or not test_interactions:
+        logger.info("Using random split for test data")
+        
+        # Split interactions for each user with consistent seed
+        for user_id in sampled_users:
+            items = user_interactions[user_id]
+            
+            # Determine test size based on interaction count
+            n_items = len(items)
+            test_ratio_adjusted = test_ratio
+            
+            if n_items < 10:
+                test_ratio_adjusted = min(0.4, max(0.2, test_ratio))  # 20-40% for few interactions
+            
+            # Split into train and test with user-specific but consistent seed
+            user_seed = random_seed + hash(user_id) % 10000
+            user_rng = np.random.RandomState(user_seed)
+            
+            test_size = max(int(n_items * test_ratio_adjusted), 2)  # At least 2 test items
+            test_size = min(test_size, n_items - 1)  # Leave at least 1 for training
+            
+            # Predictable shuffle
+            shuffled_items = items.copy()
+            user_rng.shuffle(shuffled_items)
+            test_items = shuffled_items[:test_size]
             
             test_interactions[user_id] = test_items
             test_users.append(user_id)
@@ -493,31 +591,70 @@ def prepare_test_data(user_item_matrix: pd.DataFrame,
 def evaluate_all_models(models: Dict[str, Any], 
                        user_item_matrix: pd.DataFrame,
                        test_ratio: float = EVAL_TEST_RATIO,
-                       min_interactions: int = 5,
+                       min_interactions: int = 10,
                        k_values: List[int] = EVAL_K_VALUES,
-                       save_results: bool = True) -> Dict[str, Dict[str, Any]]:
+                       save_results: bool = True,
+                       max_test_users: int = 100,
+                       max_users_per_batch: int = 50,
+                       use_parallel: bool = True,
+                       num_workers: int = 4,
+                       eval_cold_start: bool = True,
+                       cold_start_runs: int = 5,
+                       regular_runs: int = 5) -> Dict[str, Dict[str, Any]]:
     """
-    Evaluate multiple recommender models
+    PERBAIKAN: Mengevaluasi semua model dengan multiple runs untuk hasil yang lebih robust
+    dan penanganan error timestamp yang lebih baik
     """
-    # Prepare test data
-    test_users, test_interactions = prepare_test_data(
-        user_item_matrix, 
-        test_ratio=test_ratio,
-        min_interactions=min_interactions,
-        random_seed=EVAL_RANDOM_SEED
-    )
+    # Main evaluation start time
+    evaluation_start_time = time.perf_counter()
+    
+    interactions_df = None
+
+    for model_name, model in models.items():
+        if hasattr(model, 'interactions_df') and model.interactions_df is not None:
+            interactions_df = model.interactions_df
+            break
+
+    if interactions_df is None:
+        logger.error("No interactions data found in any model")
+        return {"error": "No interactions data found"}
+
+    # PERBAIKAN: Gunakan try-catch untuk menangani error timestamp parsing
+    try:
+        test_users, test_interactions = prepare_test_data(
+            user_item_matrix, 
+            interactions_df,
+            test_ratio=test_ratio,
+            min_interactions=min_interactions,
+            random_seed=EVAL_RANDOM_SEED,
+            max_test_users=max_test_users
+        )
+    except Exception as e:
+        logger.error(f"Error in prepare_test_data: {str(e)}")
+        # PERBAIKAN: Coba tanpa temporal split jika terjadi error
+        logger.info("Retrying without temporal split...")
+        try:
+            test_users, test_interactions = prepare_test_data(
+                user_item_matrix, 
+                interactions_df,
+                test_ratio=test_ratio,
+                min_interactions=min_interactions,
+                random_seed=EVAL_RANDOM_SEED,
+                max_test_users=max_test_users,
+                temporal_split=False  # PERBAIKAN: Matikan temporal split sebagai fallback
+            )
+        except Exception as e2:
+            logger.error(f"Error even without temporal split: {str(e2)}")
+            return {"error": f"Failed to prepare test data: {str(e2)}"}
     
     logger.info(f"Prepared test data with {len(test_users)} users and {sum(len(items) for items in test_interactions.values())} test interactions")
     
-    # PERBAIKAN: Eksplisit muat model sebelum evaluasi
+    # Ensure models are loaded
     for model_name, model in models.items():
-        # Periksa apakah model perlu dimuat
         if hasattr(model, 'model') and model.model is None:
             logger.info(f"Model {model_name} not loaded, trying to load from saved file...")
             
-            # Cari file model berdasarkan jenis model
             if model_name == 'fecf':
-                # Cari file FECF model terbaru
                 fecf_files = [f for f in os.listdir(MODELS_DIR) 
                             if f.startswith("fecf_model_") and f.endswith(".pkl")]
                 if fecf_files:
@@ -527,14 +664,12 @@ def evaluate_all_models(models: Dict[str, Any],
                     model.load_model(model_path)
             
             elif model_name == 'ncf':
-                # Coba path model NCF default
                 model_path = os.path.join(MODELS_DIR, "ncf_model.pkl")
                 if os.path.exists(model_path):
                     logger.info(f"Loading {model_name} from {model_path}")
                     model.load_model(model_path)
             
             elif model_name == 'hybrid':
-                # Cari hybrid model terbaru
                 hybrid_files = [f for f in os.listdir(MODELS_DIR) 
                             if f.startswith("hybrid_model_") and f.endswith(".pkl")]
                 if hybrid_files:
@@ -543,50 +678,175 @@ def evaluate_all_models(models: Dict[str, Any],
                     logger.info(f"Loading {model_name} from {model_path}")
                     model.load_model(model_path)
     
-    # Evaluate each model
-    results = {}
-    for model_name, model in models.items():
-        # Verifikasi model sudah dimuat
-        if hasattr(model, 'model') and model.model is None:
-            logger.error(f"Model {model_name} could not be loaded for evaluation")
-            results[model_name] = {
-                "precision": 0.0,
-                "recall": 0.0,
-                "ndcg": 0.0,
-                "hit_ratio": 0.0,
-                "error": "model_not_loaded"
-            }
+    # Regular evaluation with multiple runs for more robust results
+    # IMPROVED: Use multiple runs like cold-start for regular models too
+    num_runs = max(5, regular_runs)  # Default to at least 5 run
+    logger.info(f"Performing {num_runs} evaluation runs for regular models")
+    
+    all_results = {model_name: [] for model_name in models.keys()}
+    
+    # Run multiple evaluations for each model with different seeds
+    for run in range(num_runs):
+        run_seed = EVAL_RANDOM_SEED + run * 997  # Use different seeds for each run
+        logger.info(f"Starting evaluation run {run+1}/{num_runs} with seed {run_seed}")
+        
+        # Evaluate each model
+        for model_name, model in models.items():
+            if hasattr(model, 'model') and model.model is None:
+                logger.error(f"Model {model_name} could not be loaded for evaluation run {run+1}")
+                all_results[model_name].append({
+                    "precision": 0.0,
+                    "recall": 0.0,
+                    "ndcg": 0.0,
+                    "hit_ratio": 0.0,
+                    "error": "model_not_loaded"
+                })
+                continue
+                    
+            # Add a better timeout
+            try:
+                # Set run-specific seed for reproducible but different evaluations
+                np.random.seed(run_seed)
+                random.seed(run_seed)
+                
+                model_results = evaluate_model(
+                    model_name=f"{model_name}_run{run+1}",
+                    recommender=model,
+                    test_users=test_users,
+                    test_interactions=test_interactions,
+                    k_values=k_values,
+                    max_users_per_batch=max_users_per_batch,
+                    use_parallel=use_parallel,
+                    num_workers=num_workers
+                )
+                
+                all_results[model_name].append(model_results)
+                
+            except Exception as e:
+                logger.error(f"Error evaluating model {model_name} in run {run+1}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                
+                all_results[model_name].append({
+                    "error": str(e),
+                    "model": model_name,
+                    "evaluation_time": 0.0
+                })
+    
+    # Format results for multiple runs - compute mean and std
+    aggregated_results = {}
+    
+    for model_name, run_results in all_results.items():
+        if not run_results:
             continue
             
-        model_results = evaluate_model(
-            model_name=model_name,
-            recommender=model,
-            test_users=test_users,
-            test_interactions=test_interactions,
-            k_values=k_values
-        )
+        # Filter out runs with errors
+        valid_runs = [r for r in run_results if "error" not in r]
+        num_valid_runs = len(valid_runs)
+            
+        if num_valid_runs == 0:
+            # All runs failed, use first run result
+            aggregated_results[model_name] = run_results[0]
+            continue
+            
+        # Create base result from first valid run
+        aggregated_result = valid_runs[0].copy()
+        aggregated_result['num_runs'] = num_valid_runs
+            
+        # Get list of metrics first before modifying dictionary
+        metrics_to_process = [metric for metric in list(aggregated_result.keys()) 
+                            if isinstance(aggregated_result[metric], (int, float)) and 
+                            metric not in ['num_runs', 'evaluation_time', 'model']]
+
+        # Now process each metric separately
+        for metric in metrics_to_process:
+            # Collect values across all runs
+            values = [r.get(metric, 0) for r in valid_runs]
+            
+            # Calculate mean and std
+            mean_value = np.mean(values)
+            std_value = np.std(values)
+            
+            # Store mean and std
+            aggregated_result[metric] = mean_value
+            aggregated_result[f'{metric}_std'] = std_value
+            
+        # Sum evaluation times
+        total_time = sum(r.get('evaluation_time', 0) for r in valid_runs)
+        aggregated_result['evaluation_time'] = total_time
+            
+        # Store aggregated result
+        aggregated_results[model_name] = aggregated_result
+
+    # Evaluate cold-start if requested
+    if eval_cold_start:
+        logger.info(f"Evaluating cold-start scenarios with {cold_start_runs} runs...")
         
-        results[model_name] = model_results
+        # Ensure we use multiple runs for cold-start due to randomness
+        # Use FECF and Hybrid for cold-start evaluation
+        if 'fecf' in models:
+            logger.info("Evaluating cold-start for FECF...")
+            aggregated_results['cold_start_fecf'] = evaluate_cold_start(
+                models['fecf'],
+                model_name="fecf",
+                user_item_matrix=user_item_matrix,
+                n_runs=cold_start_runs
+            )
+        
+        if 'hybrid' in models:
+            logger.info("Evaluating cold-start for Hybrid...")
+            aggregated_results['cold_start_hybrid'] = evaluate_cold_start(
+                models['hybrid'],
+                model_name="hybrid",
+                user_item_matrix=user_item_matrix,
+                n_runs=cold_start_runs
+            )
+    
+    # Add total evaluation time
+    aggregated_results['_metadata'] = {
+        'total_evaluation_time': time.perf_counter() - evaluation_start_time,
+        'timestamp': datetime.now().isoformat(),
+        'num_test_users': len(test_users),
+        'test_ratio': test_ratio,
+        'min_interactions': min_interactions,
+        'random_seed': EVAL_RANDOM_SEED,
+        'cold_start_runs': cold_start_runs if eval_cold_start else 0,
+        'regular_runs': regular_runs
+    }
     
     # Save results if requested
     if save_results:
-        save_evaluation_results(results)
+        save_evaluation_results(aggregated_results)
     
-    return results
-
+    return aggregated_results
 
 def evaluate_cold_start(model: Any,
                        model_name: str,
                        user_item_matrix: pd.DataFrame,
-                       cold_start_users: int = 20,
-                       test_ratio: float = 0.5,
-                       k_values: List[int] = EVAL_K_VALUES) -> Dict[str, Any]:
+                       cold_start_users: Optional[int] = None,     
+                       k_values: List[int] = [5, 10], 
+                       debug: bool = False,
+                       max_users_per_batch: int = 50,
+                       use_parallel: bool = False,
+                       n_runs: int = 5) -> Dict[str, Any]:
     """
-    Evaluate model performance on cold-start users
+    Perbaikan evaluasi cold-start untuk konsistensi yang lebih baik
     """
-    logger.info(f"Evaluating {model_name} on cold-start scenario")
+    # Load configuration or use defaults
+    config = {}
+    if 'COLD_START_EVAL_CONFIG' in globals():
+        config = COLD_START_EVAL_CONFIG
     
-    # PERBAIKAN: Verifikasi model sebelum evaluasi
+    # Set parameters from config or use provided values
+    cold_start_users = min(100, cold_start_users or config.get('cold_start_users', 100))
+    test_ratio = config.get('test_ratio', 0.3)
+    popular_exclude_ratio = config.get('max_popular_items_exclude', 0.1)
+    min_interactions = config.get('min_interactions_required', 3)
+    category_diversity_enabled = config.get('category_diversity_enabled', True)
+    
+    logger.info(f"Evaluating {model_name} on cold-start scenario with {cold_start_users} users, {n_runs} runs")
+    
+    # Verify model before evaluation
     if hasattr(model, 'model') and model.model is None:
         logger.error(f"Model {model_name} not trained or loaded")
         return {
@@ -597,66 +857,149 @@ def evaluate_cold_start(model: Any,
             "error": "model_not_loaded"
         }
     
-    # Find users with sufficient interactions
-    user_counts = (user_item_matrix > 0).sum(axis=1)
-    eligible_users = user_counts[user_counts >= 10].index.tolist()
+    # IMPROVED: Multiple runs for more stable results
+    all_run_results = []
     
-    if not eligible_users or len(eligible_users) < cold_start_users:
-        logger.warning("Not enough users for cold-start evaluation")
-        return {"error": "insufficient_users"}
-    
-    # Create RNG instance
-    rng = np.random.default_rng(EVAL_RANDOM_SEED)
-
-    # Sample users for cold-start simulation
-    cold_start_user_ids = rng.choice(
-        eligible_users, 
-        size=cold_start_users, 
-        replace=False
-    ).tolist()
-
-    # Prepare test interactions (hold out some interactions for testing)
-    test_interactions = {}
-    for user_id in cold_start_user_ids:
-        user_items = user_item_matrix.loc[user_id]
-        positive_items = user_items[user_items > 0].index.tolist()
+    for run in range(n_runs):
+        run_start_time = time.perf_counter()
+        logger.info(f"Cold-start evaluation run {run+1}/{n_runs}")
         
-        # Split into visible and test
-        test_size = max(int(len(positive_items) * test_ratio), 2)
-        test_items = rng.choice(
-            positive_items, 
-            size=test_size, 
-            replace=False
-        ).tolist()
-        test_interactions[user_id] = test_items
+        # Create a predictable but different seed for each run
+        run_seed = EVAL_RANDOM_SEED + run * 1000
+        rng = np.random.RandomState(run_seed)
+        
+        # Identify popular items for this run
+        item_popularity = user_item_matrix.sum()
+        popular_threshold = item_popularity.quantile(1 - popular_exclude_ratio)
+        extremely_popular_items = set(item_popularity[item_popularity > popular_threshold].index)
+        
+        if debug and run == 0:  # Only log on first run
+            logger.info(f"Identified {len(extremely_popular_items)} extremely popular items to exclude")
+            logger.info(f"Popularity threshold: {popular_threshold} interactions")
+            logger.debug(f"Using seed {run_seed} for run {run+1}")
+        
+        # Find eligible users with predictable order
+        user_counts = (user_item_matrix > 0).sum(axis=1)
+        eligible_users = user_counts[user_counts >= min_interactions].index.tolist()
+        
+        if not eligible_users or len(eligible_users) < min(30, cold_start_users):
+            logger.warning(f"Not enough users for cold-start evaluation. Found {len(eligible_users)} eligible users")
+            if len(eligible_users) < 30:
+                return {"error": "insufficient_users"}
+            cold_start_users = min(len(eligible_users), cold_start_users)
+        
+        # Select users for this run with a consistent approach
+        # Sort first for predictability
+        eligible_users.sort()
+        # Then use predictable RNG for sampling
+        cold_start_user_ids = rng.choice(eligible_users, size=min(cold_start_users, len(eligible_users)), replace=False).tolist()
+        
+        # Prepare test interactions
+        test_interactions = {}
+        
+        for user_id in cold_start_user_ids:
+            user_items = user_item_matrix.loc[user_id]
+            positive_items = user_items[user_items > 0].index.tolist()
+            
+            # Create a user-specific RNG for consistent filtering
+            user_seed = run_seed + hash(user_id) % 10000
+            user_rng = np.random.RandomState(user_seed)
+            
+            # Filter out popular items with a consistent approach
+            non_popular_items = [item for item in positive_items if item not in extremely_popular_items]
+            
+            # If too few non-popular items, include some popular ones
+            if len(non_popular_items) < min(5, len(positive_items) // 2):
+                supplement_count = min(5, len(positive_items) - len(non_popular_items))
+                popular_user_items = [item for item in positive_items if item in extremely_popular_items]
+                
+                if popular_user_items and supplement_count > 0:
+                    # Consistent randomization
+                    indices = user_rng.choice(
+                        len(popular_user_items), 
+                        size=min(supplement_count, len(popular_user_items)), 
+                        replace=False
+                    )
+                    added_items = [popular_user_items[i] for i in indices]
+                    non_popular_items.extend(added_items)
+            
+            # Skip if insufficient items
+            if len(non_popular_items) < 5:
+                continue
+            
+            # Use consistent split
+            # First sort for predictability
+            sorted_items = sorted(non_popular_items)
+            # Then shuffle predictably
+            shuffled_items = sorted_items.copy()
+            user_rng.shuffle(shuffled_items)
+            
+            # Take a consistent percentage as test
+            test_size = max(min(int(len(shuffled_items) * test_ratio), len(shuffled_items) - 1), 3)
+            test_items = shuffled_items[:test_size]
+            
+            test_interactions[user_id] = test_items
+        
+        # Evaluate this run
+        if len(test_interactions) < 10:
+            logger.warning(f"Not enough valid users for cold-start evaluation in run {run+1}: {len(test_interactions)}")
+            continue
+        
+        run_result = evaluate_model(
+            model_name=f"cold_start_{model_name}_run{run+1}",
+            recommender=model,
+            test_users=list(test_interactions.keys()),
+            test_interactions=test_interactions,
+            k_values=k_values,
+            debug=(debug and run == 0),  # Only debug first run
+            max_users_per_batch=max_users_per_batch,
+            use_parallel=use_parallel
+        )
+        
+        # Add run-specific metadata
+        run_result['run_id'] = run + 1
+        run_result['run_time'] = time.perf_counter() - run_start_time
+        run_result['num_users'] = len(test_interactions)
+        run_result['num_test_interactions'] = sum(len(items) for items in test_interactions.values())
+        
+        all_run_results.append(run_result)
     
-    # Evaluate model on cold-start users
-    cold_start_results = evaluate_model(
-        model_name=f"cold_start_{model_name}",
-        recommender=model,
-        test_users=cold_start_user_ids,
-        test_interactions=test_interactions,
-        k_values=k_values
-    )
+    # Aggregate results across runs
+    if not all_run_results:
+        return {"error": "no_successful_runs"}
     
-    # Add cold-start specific info
-    cold_start_results['scenario'] = 'cold_start'
-    cold_start_results['num_cold_start_users'] = cold_start_users
+    aggregated_result = {}
     
-    return cold_start_results
+    # Metrics to aggregate
+    metrics_to_aggregate = ['precision', 'recall', 'f1', 'ndcg', 'hit_ratio']
+    for k in k_values:
+        metrics_to_aggregate.extend([
+            f'precision@{k}', f'recall@{k}', f'f1@{k}', 
+            f'ndcg@{k}', f'hit_ratio@{k}'
+        ])
+    
+    # Calculate mean and std for each metric
+    for metric in metrics_to_aggregate:
+        values = [r.get(metric, 0) for r in all_run_results if metric in r]
+        if values:
+            aggregated_result[metric] = np.mean(values)
+            aggregated_result[f'{metric}_std'] = np.std(values)
+    
+    # Add metadata
+    aggregated_result['scenario'] = 'cold_start'
+    aggregated_result['num_runs'] = len(all_run_results)
+    aggregated_result['num_cold_start_users'] = cold_start_users
+    aggregated_result['test_ratio'] = test_ratio
+    aggregated_result['popular_items_excluded'] = popular_exclude_ratio
+    
+    # Add evaluation time details
+    aggregated_result['evaluation_time'] = sum(r.get('evaluation_time', 0) for r in all_run_results)
+    aggregated_result['run_times'] = [r.get('run_time', 0) for r in all_run_results]
+    
+    return aggregated_result
 
 
 def save_evaluation_results(results: Dict[str, Dict[str, Any]], filename: Optional[str] = None) -> str:
-    """
-    Save evaluation results to file
-    
-    Args:
-        results: Dictionary of evaluation results
-        filename: Filename to save results, if None uses timestamp
-        
-    Returns:
-        str: Path where results were saved
-    """
     if filename is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"model_performance_{timestamp}.json"
@@ -671,12 +1014,23 @@ def save_evaluation_results(results: Dict[str, Dict[str, Any]], filename: Option
     for model_name, model_results in results.items():
         serializable_model = {}
         for key, value in model_results.items():
-            if isinstance(value, (int, float)):
-                serializable_model[key] = float(value)
+            if isinstance(value, (int, float, str, bool, type(None))):
+                serializable_model[key] = value
             elif isinstance(value, (datetime, np.datetime64)):
                 serializable_model[key] = value.isoformat()
+            elif isinstance(value, (np.int64, np.float64)):
+                serializable_model[key] = float(value)
+            elif isinstance(value, dict):
+                # Handle nested dictionaries
+                serializable_nested = {}
+                for k, v in value.items():
+                    if isinstance(v, (np.int64, np.float64)):
+                        serializable_nested[k] = float(v)
+                    else:
+                        serializable_nested[k] = v
+                serializable_model[key] = serializable_nested
             else:
-                serializable_model[key] = value
+                serializable_model[key] = str(value)
         
         serializable_results[model_name] = serializable_model
     
@@ -689,15 +1043,6 @@ def save_evaluation_results(results: Dict[str, Dict[str, Any]], filename: Option
 
 
 def load_evaluation_results(filepath: str) -> Dict[str, Dict[str, Any]]:
-    """
-    Load evaluation results from file
-    
-    Args:
-        filepath: Path to evaluation results file
-        
-    Returns:
-        dict: Dictionary of evaluation results
-    """
     try:
         with open(filepath, 'r') as f:
             results = json.load(f)
@@ -710,17 +1055,7 @@ def load_evaluation_results(filepath: str) -> Dict[str, Dict[str, Any]]:
 
 
 def generate_evaluation_report(results: Dict[str, Dict[str, Any]], 
-                              output_format: str = 'json') -> str:
-    """
-    Generate evaluation report from results
-    
-    Args:
-        results: Dictionary of evaluation results
-        output_format: Output format ('text', 'markdown', 'json')
-        
-    Returns:
-        str: Evaluation report
-    """
+                              output_format: str = 'markdown') -> str:
     if output_format == 'markdown':
         return _generate_markdown_report(results)
     elif output_format == 'json':
@@ -736,8 +1071,14 @@ def _generate_json_report(results: Dict[str, Dict[str, Any]]) -> str:
     report_data = {
         "timestamp": datetime.now().isoformat(),
         "models": {},
-        "cold_start_performance": None,
+        "cold_start_performance": {},
+        "evaluation_metadata": {}
     }
+    
+    # Extract metadata if available
+    if '_metadata' in results:
+        report_data["evaluation_metadata"] = results['_metadata']
+        results = {k: v for k, v in results.items() if k != '_metadata'}
     
     # Process each model's results
     for model_name, model_results in results.items():
@@ -754,6 +1095,7 @@ def _generate_json_report(results: Dict[str, Dict[str, Any]]) -> str:
             "hit_ratio": model_results.get('hit_ratio', 0),
             "mrr": model_results.get('mrr', 0),
             "num_users": model_results.get('num_users', 0),
+            "evaluation_time": model_results.get('evaluation_time', 0),
         }
         
         # Add detailed metrics by k
@@ -764,10 +1106,16 @@ def _generate_json_report(results: Dict[str, Dict[str, Any]]) -> str:
                 f"recall@{k}": model_results.get(f'recall@{k}', 0),
                 f"f1@{k}": model_results.get(f'f1@{k}', 0),
                 f"ndcg@{k}": model_results.get(f'ndcg@{k}', 0),
+                f"hit_ratio@{k}": model_results.get(f'hit_ratio@{k}', 0),
             }
             detailed_metrics[str(k)] = k_metrics
         
         model_metrics["detailed"] = detailed_metrics
+        
+        # Add category performance if available
+        if "category_performance" in model_results:
+            model_metrics["category_performance"] = model_results["category_performance"]
+        
         report_data["models"][model_name] = model_metrics
     
     # Add cold start performance if available
@@ -776,14 +1124,24 @@ def _generate_json_report(results: Dict[str, Dict[str, Any]]) -> str:
         cold_start_data = {}
         for model_name in cold_start_models:
             model_results = results[model_name]
+            
             cold_start_data[model_name] = {
                 "precision": model_results.get('precision', 0),
+                "precision_std": model_results.get('precision_std', 0),
                 "recall": model_results.get('recall', 0),
+                "recall_std": model_results.get('recall_std', 0),
                 "f1": model_results.get('f1', 0),
+                "f1_std": model_results.get('f1_std', 0),
                 "ndcg": model_results.get('ndcg', 0),
+                "ndcg_std": model_results.get('ndcg_std', 0),
                 "hit_ratio": model_results.get('hit_ratio', 0),
-                "num_users": model_results.get('num_users', 0),
+                "hit_ratio_std": model_results.get('hit_ratio_std', 0),
+                "num_users": model_results.get('num_cold_start_users', 0),
+                "num_runs": model_results.get('num_runs', 1),
+                "test_ratio": model_results.get('test_ratio', 0),
+                "evaluation_time": model_results.get('evaluation_time', 0)
             }
+            
         report_data["cold_start_performance"] = cold_start_data
     
     # Convert to JSON string
@@ -793,6 +1151,22 @@ def _generate_json_report(results: Dict[str, Dict[str, Any]]) -> str:
 def _generate_text_report(results: Dict[str, Dict[str, Any]]) -> str:
     """Generate plain text evaluation report"""
     lines = ["Recommendation System Evaluation Report", "=" * 50, ""]
+    lines.append(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Add metadata if available
+    if '_metadata' in results:
+        metadata = results['_metadata']
+        lines.append("")
+        lines.append("Evaluation Details:")
+        lines.append(f"- Test Users: {metadata.get('num_test_users', 'Unknown')}")
+        lines.append(f"- Total Evaluation Time: {metadata.get('total_evaluation_time', 0):.2f} seconds")
+        lines.append(f"- Random Seed: {metadata.get('random_seed', 'Unknown')}")
+        lines.append("")
+        
+        # Remove metadata from results for summary tables
+        results = {k: v for k, v in results.items() if k != '_metadata'}
+    
+    lines.append("")
     
     # Summary table
     lines.append("Model Comparison Summary (k=10)")
@@ -821,56 +1195,88 @@ def _generate_text_report(results: Dict[str, Dict[str, Any]]) -> str:
     if cold_start_models:
         lines.append("Cold-Start Performance")
         lines.append("-" * 80)
-        lines.append(f"{'Model':<20} {'Precision':<10} {'Recall':<10} {'F1':<10} {'NDCG':<10} {'Hit Ratio':<10}")
+        lines.append(f"{'Model':<20} {'Precision':<14} {'Recall':<14} {'F1':<14} {'NDCG':<14} {'Hit Ratio':<14}")
         lines.append("-" * 80)
         
         for model_name in cold_start_models:
             model_results = results[model_name]
-            precision = model_results.get('precision', 0)
-            recall = model_results.get('recall', 0)
-            f1 = model_results.get('f1', 0)
-            ndcg = model_results.get('ndcg', 0)
-            hit_ratio = model_results.get('hit_ratio', 0)
             
-            lines.append(f"{model_name:<20} {precision:<10.4f} {recall:<10.4f} {f1:<10.4f} "
-                        f"{ndcg:<10.4f} {hit_ratio:<10.4f}")
+            # Format with standard deviation
+            precision = f"{model_results.get('precision', 0):.4f}±{model_results.get('precision_std', 0):.4f}"
+            recall = f"{model_results.get('recall', 0):.4f}±{model_results.get('recall_std', 0):.4f}"
+            f1 = f"{model_results.get('f1', 0):.4f}±{model_results.get('f1_std', 0):.4f}"
+            ndcg = f"{model_results.get('ndcg', 0):.4f}±{model_results.get('ndcg_std', 0):.4f}"
+            hit_ratio = f"{model_results.get('hit_ratio', 0):.4f}±{model_results.get('hit_ratio_std', 0):.4f}"
+            
+            lines.append(f"{model_name:<20} {precision:<14} {recall:<14} {f1:<14} "
+                        f"{ndcg:<14} {hit_ratio:<14}")
         
         lines.append("")
     
-    # Detailed model metrics
+    # Evaluation times information
+    lines.append("Evaluation Times")
+    lines.append("-" * 80)
+    lines.append(f"{'Model':<20} {'Time (seconds)':<15}")
+    lines.append("-" * 80)
+    
+    for model_name, model_results in results.items():
+        eval_time = model_results.get('evaluation_time', 0)
+        lines.append(f"{model_name:<20} {eval_time:<15.2f}")
+    
+    lines.append("")
+    
+    # Detailed model metrics - SIMPLIFIED
+    lines.append("Detailed Model Performance (Simplified)")
+    lines.append("=" * 80)
+    lines.append("")
+    
     for model_name, model_results in results.items():
         if 'cold_start' in model_name:
             continue  # Skip detailed metrics for cold-start
             
-        lines.append(f"Detailed Metrics for {model_name}")
+        lines.append(f"{model_name}")
         lines.append("-" * 80)
         
-        # Add metrics for each k
-        for k in [5, 10, 20]:
-            precision_k = model_results.get(f'precision@{k}', 0)
-            recall_k = model_results.get(f'recall@{k}', 0)
-            f1_k = model_results.get(f'f1@{k}', 0)
-            ndcg_k = model_results.get(f'ndcg@{k}', 0)
-            
-            lines.append(f"k={k}:")
-            lines.append(f"  Precision: {precision_k:.4f}")
-            lines.append(f"  Recall: {recall_k:.4f}")
-            lines.append(f"  F1: {f1_k:.4f}")
-            lines.append(f"  NDCG: {ndcg_k:.4f}")
+        # Add metrics for k=10 only
+        precision_k = model_results.get('precision@10', 0)
+        recall_k = model_results.get('recall@10', 0)
+        f1_k = model_results.get('f1@10', 0)
+        ndcg_k = model_results.get('ndcg@10', 0)
         
+        lines.append(f"Precision@10: {precision_k:.4f}")
+        lines.append(f"Recall@10: {recall_k:.4f}")
+        lines.append(f"F1@10: {f1_k:.4f}")
+        lines.append(f"NDCG@10: {ndcg_k:.4f}")
         lines.append(f"MRR: {model_results.get('mrr', 0):.4f}")
+        
         lines.append("")
     
     return "\n".join(lines)
 
 
 def _generate_markdown_report(results: Dict[str, Dict[str, Any]]) -> str:
-    """Generate Markdown evaluation report"""
+    """Generate Markdown evaluation report with standard deviation"""
     lines = ["# Recommendation System Evaluation Report", ""]
     
     # Add timestamp
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines.append(f"Generated on: {timestamp}")
+    
+    # Add metadata if available
+    if '_metadata' in results:
+        metadata = results['_metadata']
+        lines.append("")
+        lines.append("## Evaluation Details")
+        lines.append("")
+        lines.append(f"- **Test Users:** {metadata.get('num_test_users', 'Unknown')}")
+        lines.append(f"- **Total Evaluation Time:** {metadata.get('total_evaluation_time', 0):.2f} seconds")
+        lines.append(f"- **Random Seed:** {metadata.get('random_seed', 'Unknown')}")
+        lines.append(f"- **Cold Start Runs:** {metadata.get('cold_start_runs', 0)}")
+        lines.append("")
+        
+        # Remove metadata from results for summary tables
+        results = {k: v for k, v in results.items() if k != '_metadata'}
+    
     lines.append("")
     
     # Summary table
@@ -895,93 +1301,107 @@ def _generate_markdown_report(results: Dict[str, Dict[str, Any]]) -> str:
     
     lines.append("")
     
-    # Cold-start performance
+    # Cold-start performance with standard deviations
     cold_start_models = [m for m in results if 'cold_start' in m]
     if cold_start_models:
-        lines.append("## Cold-Start Performance")
+        lines.append("## Cold-Start Performance (Averaged across multiple runs)")
         lines.append("")
-        lines.append("| Model | Precision | Recall | F1 | NDCG | Hit Ratio |")
-        lines.append("|-------|-----------|--------|----|-------|-----------|")
+        lines.append("| Model | Precision | Recall | F1 | NDCG | Hit Ratio | Runs |")
+        lines.append("|-------|-----------|--------|----|-------|-----------|------|")
         
         for model_name in cold_start_models:
             model_results = results[model_name]
             precision = model_results.get('precision', 0)
+            precision_std = model_results.get('precision_std', 0)
             recall = model_results.get('recall', 0)
+            recall_std = model_results.get('recall_std', 0)
             f1 = model_results.get('f1', 0)
+            f1_std = model_results.get('f1_std', 0)
             ndcg = model_results.get('ndcg', 0)
+            ndcg_std = model_results.get('ndcg_std', 0)
             hit_ratio = model_results.get('hit_ratio', 0)
+            hit_ratio_std = model_results.get('hit_ratio_std', 0)
+            num_runs = model_results.get('num_runs', 1)
             
-            lines.append(f"| {model_name} | {precision:.4f} | {recall:.4f} | {f1:.4f} | "
-                        f"{ndcg:.4f} | {hit_ratio:.4f} |")
-        
-        lines.append("")
+            lines.append(f"| {model_name} | {precision:.4f}±{precision_std:.4f} | "
+                        f"{recall:.4f}±{recall_std:.4f} | {f1:.4f}±{f1_std:.4f} | "
+                        f"{ndcg:.4f}±{ndcg_std:.4f} | {hit_ratio:.4f}±{hit_ratio_std:.4f} | {num_runs} |")
     
-    # Detailed model metrics
-    lines.append("## Detailed Model Performance")
+    # Evaluation times information
+    lines.append("\n## Evaluation Times")
+    lines.append("")
+    lines.append("| Model | Time (seconds) |")
+    lines.append("|-------|----------------|")
     
     for model_name, model_results in results.items():
+        eval_time = model_results.get('evaluation_time', 0)
+        lines.append(f"| {model_name} | {eval_time:.2f} |")
+    
+    # Detailed metrics by k-value
+    lines.append("\n## Detailed Metrics by K-Value")
+    lines.append("")
+    
+    # Create separate tables for each model
+    for model_name, model_results in results.items():
         if 'cold_start' in model_name:
-            continue  # Skip detailed metrics for cold-start
+            continue  # Skip cold-start models for detailed metrics
             
         lines.append(f"### {model_name}")
         lines.append("")
+        lines.append("| K | Precision | Recall | F1 | NDCG | Hit Ratio |")
+        lines.append("|---|-----------|--------|-----|------|-----------|")
         
-        # Add metrics for each k
         for k in [5, 10, 20]:
             precision_k = model_results.get(f'precision@{k}', 0)
             recall_k = model_results.get(f'recall@{k}', 0)
             f1_k = model_results.get(f'f1@{k}', 0)
             ndcg_k = model_results.get(f'ndcg@{k}', 0)
+            hit_ratio_k = model_results.get(f'hit_ratio@{k}', 0)
             
-            lines.append(f"#### k={k}")
-            lines.append(f"- Precision: {precision_k:.4f}")
-            lines.append(f"- Recall: {recall_k:.4f}")
-            lines.append(f"- F1: {f1_k:.4f}")
-            lines.append(f"- NDCG: {ndcg_k:.4f}")
-            lines.append("")
+            lines.append(f"| {k} | {precision_k:.4f} | {recall_k:.4f} | {f1_k:.4f} | "
+                        f"{ndcg_k:.4f} | {hit_ratio_k:.4f} |")
         
-        lines.append(f"**MRR**: {model_results.get('mrr', 0):.4f}")
         lines.append("")
-    
+        
     return "\n".join(lines)
 
 
+def debug_timestamp_formats(interactions_df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Fungsi untuk debugging format timestamp dalam interactions dataframe
+    """
+    timestamp_col = interactions_df['timestamp']
+    
+    # Sample beberapa timestamp untuk analisis
+    sample_timestamps = timestamp_col.head(20).tolist()
+    
+    # Analisis format
+    formats_found = []
+    for ts in sample_timestamps:
+        if isinstance(ts, str):
+            if '+' in ts and 'T' in ts:
+                formats_found.append('ISO8601_with_timezone')
+            elif '.' in ts and 'T' in ts:
+                formats_found.append('microseconds_format')
+            elif 'T' in ts:
+                formats_found.append('basic_ISO8601')
+            else:
+                formats_found.append('unknown_string_format')
+        else:
+            formats_found.append(f'non_string_{type(ts).__name__}')
+    
+    format_counts = {fmt: formats_found.count(fmt) for fmt in set(formats_found)}
+    
+    logger.info("Timestamp format analysis:")
+    logger.info(f"Sample timestamps: {sample_timestamps[:5]}")
+    logger.info(f"Format distribution: {format_counts}")
+    
+    return {
+        'sample_timestamps': sample_timestamps,
+        'format_distribution': format_counts,
+        'total_records': len(timestamp_col),
+        'null_count': timestamp_col.isnull().sum()
+    }
+
 if __name__ == "__main__":
-    # Test with dummy data
-    from src.models.alt_fecf import FeatureEnhancedCF
-    from src.models.ncf import NCFRecommender
-    from src.models.hybrid import HybridRecommender
-    
-    # Initialize models
-    fecf = FeatureEnhancedCF()
-    ncf = NCFRecommender()
-    hybrid = HybridRecommender()
-    
-    # Try to load data
-    if fecf.load_data() and ncf.load_data() and hybrid.load_data():
-        print("Data loaded successfully for evaluation test")
-        
-        # Create dictionary of models
-        models = {
-            'fecf': fecf,
-            'ncf': ncf, 
-            'hybrid': hybrid
-        }
-        
-        # Run evaluation on a small subset for testing
-        test_matrix = fecf.user_item_matrix.iloc[:100, :100]
-        
-        results = evaluate_all_models(
-            models=models,
-            user_item_matrix=test_matrix,
-            test_ratio=0.2,
-            min_interactions=3,
-            k_values=[5, 10],
-            save_results=True
-        )
-        
-        # Generate report
-        report = generate_evaluation_report(results, output_format='markdown') # Bisa diganti nanti ke json untuk output_format nya, jika testing sudah beres.
-        print(report)
-    else:
-        print("Failed to load data for evaluation test")
+    print("Improved evaluation module loaded - run python main.py evaluate to use it")

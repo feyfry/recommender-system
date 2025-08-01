@@ -1,23 +1,27 @@
-"""
-API endpoints untuk analisis teknikal proyek Web3
-"""
-
 import os
 import logging
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any, Tuple, Union
 from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query, Depends, Body, Path
 from pydantic import BaseModel, Field
+import time
 
 # Path handling
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 # Technical analysis imports
-from src.technical.indicators import TechnicalIndicators
-from src.technical.signals import generate_trading_signals, personalize_signals, detect_market_events
+from src.technical.indicators import TechnicalIndicators, predict_price_ml, predict_price_arima, predict_price_simple
+from src.technical.signals import (
+    generate_trading_signals, 
+    personalize_signals, 
+    detect_market_events, 
+    detect_market_regime, 
+    get_optimal_parameters,
+    weighted_signal_ensemble
+)
 from src.data.collector import fetch_real_market_data
 
 # Setup router
@@ -34,6 +38,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Nonaktifkan beberapa warning yang tidak perlu dari library lain
+import warnings
+# Konfigurasi untuk meredam warning TensorFlow
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # 0=DEBUG, 1=INFO, 2=WARNING, 3=ERROR
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", message="No supported index is available")
+warnings.filterwarnings("ignore", message="A date index has been provided")
+warnings.filterwarnings("ignore", message="Do not pass an `input_shape`/`input_dim` argument to a layer")
+
+# Untuk statsmodels
+try:
+    from statsmodels.tools.sm_exceptions import ValueWarning
+    warnings.filterwarnings("ignore", category=ValueWarning)
+except ImportError:
+    pass
+
 # Cache for price data and signals
 _price_data_cache = {}
 _signals_cache = {}
@@ -41,17 +62,6 @@ _cache_ttl = 300  # 5 minutes in seconds
 
 # Function to get price data using real market data
 async def get_price_data(project_id: str, days: int = 30, interval: str = "1d") -> pd.DataFrame:
-    """
-    Get historical price data for a project using real market data
-    
-    Args:
-        project_id: Project ID
-        days: Number of days of data to fetch
-        interval: Data interval ('1h', '1d', etc.)
-        
-    Returns:
-        pd.DataFrame: DataFrame with price data
-    """
     # Check cache first
     cache_key = f"{project_id}:{days}:{interval}"
     if cache_key in _price_data_cache:
@@ -83,6 +93,409 @@ async def get_price_data(project_id: str, days: int = 30, interval: str = "1d") 
         logger.error(f"Error fetching price data for {project_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching price data: {str(e)}")
 
+def get_optimal_timeframe(price_data: pd.DataFrame, request: Any) -> Tuple[int, str]:
+    # Hitung volatilitas harian
+    if 'close' in price_data.columns:
+        returns = price_data['close'].pct_change().dropna()
+        daily_volatility = returns.std()
+        
+        # Tentukan timeframe berdasarkan volatilitas dan tujuan
+        trading_style = getattr(request, 'trading_style', 'standard')
+        
+        if trading_style == 'short_term':
+            # Untuk trading jangka pendek, gunakan data yang lebih sedikit
+            # tapi dengan interval yang lebih rapat
+            if daily_volatility > 0.05:  # Volatilitas tinggi
+                return min(60, request.days), '15m'
+            else:
+                return min(90, request.days), '1h'
+        elif trading_style == 'long_term':
+            # Untuk trading jangka panjang, gunakan lebih banyak data historis
+            return max(180, request.days), '1d'
+        else:  # standard
+            # Untuk keseimbangan
+            return request.days, '1d'
+    
+    # Default jika kolom close tidak ada
+    return request.days, '1d'
+
+def _extract_trend_indicators(df: pd.DataFrame, latest_data: Dict[str, Any], 
+                          indicator_periods: Dict[str, Any]) -> Dict[str, Any]:
+    ma_short = indicator_periods.get('ma_short', 20)
+    ma_medium = indicator_periods.get('ma_medium', 50)
+    ma_long = indicator_periods.get('ma_long', 200)
+    
+    result = {}
+    
+    # Moving Averages
+    mas = {}
+    for period in [ma_short, ma_medium, ma_long]:
+        sma_key = f'sma_{period}'
+        ema_key = f'ema_{period}'
+        
+        if sma_key in latest_data:
+            mas[f'sma_{period}'] = float(latest_data[sma_key])
+        if ema_key in latest_data:
+            mas[f'ema_{period}'] = float(latest_data[ema_key])
+    
+    result['moving_averages'] = mas
+    
+    # MACD
+    if all(k in latest_data for k in ['macd', 'macd_signal', 'macd_hist']):
+        result['macd'] = {
+            'value': float(latest_data['macd']),
+            'signal': float(latest_data['macd_signal']),
+            'histogram': float(latest_data['macd_hist']),
+            'cross_up': bool(latest_data.get('macd_cross_up', False)),
+            'cross_down': bool(latest_data.get('macd_cross_down', False)),
+            'signal_type': latest_data.get('macd_signal_type', 'neutral')
+        }
+    
+    # ADX
+    if all(k in latest_data for k in ['adx', 'plus_di', 'minus_di']):
+        result['adx'] = {
+            'value': float(latest_data['adx']),
+            'plus_di': float(latest_data['plus_di']),
+            'minus_di': float(latest_data['minus_di']),
+            'trend_strength': "strong" if float(latest_data['adx']) > 25 else "weak",
+            'trend_direction': "bullish" if float(latest_data['plus_di']) > float(latest_data['minus_di']) else "bearish"
+        }
+    
+    # Moving Average Crossovers
+    if 'golden_cross' in latest_data:
+        result['ma_crossovers'] = {
+            'golden_cross': bool(latest_data.get('golden_cross', False)),
+            'death_cross': bool(latest_data.get('death_cross', False)),
+            'short_medium_cross_up': bool(latest_data.get('sma_short_medium_cross_up', False)),
+            'short_medium_cross_down': bool(latest_data.get('sma_short_medium_cross_down', False))
+        }
+    
+    return result
+
+def _extract_momentum_indicators(df: pd.DataFrame, latest_data: Dict[str, Any], 
+                            indicator_periods: Dict[str, Any]) -> Dict[str, Any]:
+    result = {}
+    
+    # RSI
+    if 'rsi' in latest_data:
+        rsi_value = float(latest_data['rsi'])
+        result['rsi'] = {
+            'value': rsi_value,
+            'signal': "oversold" if rsi_value < 30 else "overbought" if rsi_value > 70 else "neutral",
+            'description': f"RSI is at {rsi_value:.2f}",
+            'period': indicator_periods.get('rsi_period', 14)
+        }
+    
+    # Stochastic
+    if all(k in latest_data for k in ['stoch_k', 'stoch_d']):
+        k_value = float(latest_data['stoch_k'])
+        d_value = float(latest_data['stoch_d'])
+        
+        if k_value < 20:
+            stoch_signal = "oversold"
+        elif k_value > 80:
+            stoch_signal = "overbought"
+        else:
+            stoch_signal = "neutral"
+            
+        result['stochastic'] = {
+            'k': k_value,
+            'd': d_value,
+            'signal': stoch_signal,
+            'cross_up': bool(latest_data.get('stoch_cross_up', False)),
+            'cross_down': bool(latest_data.get('stoch_cross_down', False)),
+            'description': f"Stochastic oscillator is {stoch_signal} at {k_value:.2f}",
+            'period_k': indicator_periods.get('stoch_k', 14),
+            'period_d': indicator_periods.get('stoch_d', 3)
+        }
+    
+    # ROC
+    if 'roc' in latest_data:
+        roc_value = float(latest_data['roc'])
+        result['roc'] = {
+            'value': roc_value,
+            'signal': "bullish" if roc_value > 0 else "bearish",
+            'description': f"Rate of Change is {roc_value:.2f}%",
+            'period': indicator_periods.get('roc_period', 10)
+        }
+    
+    # Williams %R
+    if 'willr' in latest_data:
+        willr_value = float(latest_data['willr'])
+        result['willr'] = {
+            'value': willr_value,
+            'signal': "oversold" if willr_value < -80 else "overbought" if willr_value > -20 else "neutral",
+            'description': f"Williams %R is at {willr_value:.2f}",
+            'period': indicator_periods.get('willr_period', 14)
+        }
+    
+    # CCI
+    if 'cci' in latest_data:
+        cci_value = float(latest_data['cci'])
+        result['cci'] = {
+            'value': cci_value,
+            'signal': "oversold" if cci_value < -100 else "overbought" if cci_value > 100 else "neutral",
+            'description': f"CCI is at {cci_value:.2f}",
+            'period': indicator_periods.get('cci_period', 20)
+        }
+    
+    # RSI Divergence
+    if any(k in latest_data for k in ['bullish_divergence', 'bearish_divergence']):
+        result['divergence'] = {
+            'bullish': bool(latest_data.get('bullish_divergence', False)),
+            'bearish': bool(latest_data.get('bearish_divergence', False)),
+            'description': "Divergence detected" if any(latest_data.get(k, False) for k in ['bullish_divergence', 'bearish_divergence']) else "No divergence"
+        }
+        
+    return result
+
+def _extract_volatility_indicators(df: pd.DataFrame, latest_data: Dict[str, Any], 
+                              indicator_periods: Dict[str, Any]) -> Dict[str, Any]:
+    result = {}
+    
+    # Bollinger Bands
+    if all(k in latest_data for k in ['bb_upper', 'bb_middle', 'bb_lower']):
+        upper = float(latest_data['bb_upper'])
+        middle = float(latest_data['bb_middle'])
+        lower = float(latest_data['bb_lower'])
+        close = float(latest_data['close'])
+        
+        # Calculate %B
+        if upper != lower:
+            pct_b = (close - lower) / (upper - lower)
+        else:
+            pct_b = 0.5
+        
+        if pct_b > 1:
+            bb_signal = "overbought"
+        elif pct_b < 0:
+            bb_signal = "oversold"
+        elif pct_b > 0.8:
+            bb_signal = "high"
+        elif pct_b < 0.2:
+            bb_signal = "low"
+        else:
+            bb_signal = "neutral"
+            
+        result['bollinger'] = {
+            'upper': upper,
+            'middle': middle,
+            'lower': lower,
+            'percent_b': pct_b,
+            'bandwidth': float(latest_data.get('bb_bandwidth', (upper - lower) / middle if middle != 0 else 0)),
+            'signal': bb_signal,
+            'description': f"Price is {bb_signal} relative to Bollinger Bands (%B: {pct_b:.2f})",
+            'period': indicator_periods.get('bb_period', 20)
+        }
+    
+    # ATR
+    if 'atr' in latest_data:
+        atr_value = float(latest_data['atr'])
+        atr_pct = float(latest_data.get('atr_pct', atr_value / float(latest_data['close']) * 100 if float(latest_data['close']) != 0 else 0))
+        
+        # Assess volatility
+        if atr_pct > 5:
+            volatility = "very_high"
+        elif atr_pct > 3:
+            volatility = "high"
+        elif atr_pct > 1.5:
+            volatility = "moderate"
+        else:
+            volatility = "low"
+            
+        result['atr'] = {
+            'value': atr_value,
+            'percent': atr_pct,
+            'volatility': volatility,
+            'description': f"{volatility.capitalize()} volatility (ATR: {atr_pct:.2f}% of price)",
+            'period': indicator_periods.get('atr_period', 14)
+        }
+    
+    # Keltner Channels
+    if all(k in latest_data for k in ['keltner_upper', 'keltner_middle', 'keltner_lower']):
+        result['keltner'] = {
+            'upper': float(latest_data['keltner_upper']),
+            'middle': float(latest_data['keltner_middle']),
+            'lower': float(latest_data['keltner_lower']),
+            'width': float(latest_data['keltner_upper']) - float(latest_data['keltner_lower'])
+        }
+        
+    # Volatility Squeeze
+    if 'squeeze_on' in latest_data:
+        result['squeeze'] = {
+            'active': bool(latest_data['squeeze_on']),
+            'starting': bool(latest_data.get('squeeze_starting', False)),
+            'releasing': bool(latest_data.get('squeeze_releasing', False)),
+            'description': "Volatility squeeze active" if latest_data['squeeze_on'] else "No volatility squeeze"
+        }
+        
+    # Historical Volatility
+    if 'volatility_21d' in latest_data:
+        vol_21d = float(latest_data['volatility_21d'])
+        result['historical_volatility'] = {
+            '21d': vol_21d,
+            '63d': float(latest_data.get('volatility_63d', 0)),
+            'annualized': vol_21d * np.sqrt(252),
+            'description': f"21-day historical volatility: {vol_21d * 100:.2f}%"
+        }
+        
+    return result
+
+def _extract_volume_indicators(df: pd.DataFrame, latest_data: Dict[str, Any]) -> Dict[str, Any]:
+    result = {}
+    
+    # Volume
+    if 'volume' in latest_data:
+        volume = float(latest_data['volume'])
+        volume_ratio = float(latest_data.get('volume_ratio', 1.0))
+        
+        if volume_ratio > 2:
+            volume_signal = "very_high"
+        elif volume_ratio > 1.5:
+            volume_signal = "high"
+        elif volume_ratio < 0.5:
+            volume_signal = "low"
+        else:
+            volume_signal = "normal"
+            
+        result['volume'] = {
+            'value': volume,
+            'ratio': volume_ratio,
+            'signal': volume_signal,
+            'description': f"Volume is {volume_ratio:.2f}x average ({volume_signal})"
+        }
+    
+    # OBV
+    if 'obv' in latest_data:
+        result['obv'] = {
+            'value': float(latest_data['obv']),
+            'direction': "up" if latest_data.get('obv_direction', 0) > 0 else "down"
+        }
+    
+    # Money Flow Index
+    if 'mfi' in latest_data:
+        mfi_value = float(latest_data['mfi'])
+        result['mfi'] = {
+            'value': mfi_value,
+            'signal': "oversold" if mfi_value < 20 else "overbought" if mfi_value > 80 else "neutral",
+            'description': f"Money Flow Index is {mfi_value:.2f}"
+        }
+    
+    # Volume Spikes
+    if 'volume_spike' in latest_data:
+        result['volume_spike'] = {
+            'active': bool(latest_data['volume_spike']),
+            'up': bool(latest_data.get('volume_spike_up', False)),
+            'down': bool(latest_data.get('volume_spike_down', False)),
+            'description': "Volume spike detected" if latest_data['volume_spike'] else "No volume spike"
+        }
+        
+    # Volume Divergence
+    if any(k in latest_data for k in ['bullish_vol_div', 'bearish_vol_div']):
+        result['volume_divergence'] = {
+            'bullish': bool(latest_data.get('bullish_vol_div', False)),
+            'bearish': bool(latest_data.get('bearish_vol_div', False)),
+            'description': "Volume divergence detected" if any(latest_data.get(k, False) for k in ['bullish_vol_div', 'bearish_vol_div']) else "No volume divergence"
+        }
+        
+    return result
+
+def _extract_ichimoku_indicators(df: pd.DataFrame, latest_data: Dict[str, Any]) -> Dict[str, Any]:
+    if not all(k in latest_data for k in ['tenkan_sen', 'kijun_sen', 'senkou_span_a', 'senkou_span_b']):
+        return {}
+    
+    result = {
+        'tenkan': float(latest_data['tenkan_sen']),
+        'kijun': float(latest_data['kijun_sen']),
+        'senkou_a': float(latest_data['senkou_span_a']),
+        'senkou_b': float(latest_data['senkou_span_b'])
+    }
+    
+    # Chikou Span if available
+    if 'chikou_span' in latest_data:
+        result['chikou'] = float(latest_data['chikou_span'])
+    
+    # Cloud color/type
+    result['cloud_green'] = bool(latest_data.get('cloud_green', False))
+    result['cloud_red'] = bool(latest_data.get('cloud_red', False))
+    
+    # Price position
+    result['price_above_cloud'] = bool(latest_data.get('price_above_cloud', False))
+    result['price_in_cloud'] = bool(latest_data.get('price_in_cloud', False))
+    result['price_below_cloud'] = bool(latest_data.get('price_below_cloud', False))
+    
+    # TK Cross
+    result['tk_cross_bull'] = bool(latest_data.get('tk_cross_bull', False))
+    result['tk_cross_bear'] = bool(latest_data.get('tk_cross_bear', False))
+    
+    # Signal
+    if result['price_above_cloud'] and result['cloud_green']:
+        signal = "strong_bullish"
+    elif result['price_below_cloud'] and result['cloud_red']:
+        signal = "strong_bearish"
+    elif result['price_above_cloud']:
+        signal = "bullish"
+    elif result['price_below_cloud']:
+        signal = "bearish"
+    elif result['price_in_cloud'] and result['cloud_green']:
+        signal = "neutral_bullish"
+    elif result['price_in_cloud'] and result['cloud_red']:
+        signal = "neutral_bearish"
+    else:
+        signal = "neutral"
+        
+    result['signal'] = signal
+    
+    # Description
+    if latest_data.get('tk_cross_bull', False):
+        result['description'] = "Bullish TK Cross detected"
+    elif latest_data.get('tk_cross_bear', False):
+        result['description'] = "Bearish TK Cross detected"
+    else:
+        result['description'] = f"Ichimoku Cloud is {signal.replace('_', ' ')}"
+        
+    return result
+
+def _extract_oscillator_composite(df: pd.DataFrame, latest_data: Dict[str, Any]) -> Dict[str, Any]:
+    if 'momentum_composite' not in latest_data:
+        return {}
+    
+    composite_value = float(latest_data['momentum_composite'])
+    
+    if composite_value > 70:
+        signal = "overbought"
+    elif composite_value < 30:
+        signal = "oversold"
+    elif composite_value > 60:
+        signal = "high"
+    elif composite_value < 40:
+        signal = "low"
+    else:
+        signal = "neutral"
+        
+    return {
+        'value': composite_value,
+        'signal': signal,
+        'components': latest_data.get('momentum_signal', 'neutral'),
+        'description': f"Combined oscillator value is {composite_value:.2f} ({signal})"
+    }
+
+def _get_regime_description(market_regime: str) -> str:
+    descriptions = {
+        "trending_bullish": "Strong uptrend with normal volatility",
+        "trending_bullish_volatile": "Strong uptrend with high volatility",
+        "trending_bearish": "Strong downtrend with normal volatility",
+        "trending_bearish_volatile": "Strong downtrend with high volatility",
+        "trending_neutral": "Market is trending but direction is unclear",
+        "ranging_volatile": "Sideways market with high volatility",
+        "ranging_low_volatility": "Sideways market with low volatility",
+        "volatile_bullish": "Bullish market with very high volatility",
+        "volatile_bearish": "Bearish market with very high volatility",
+        "volatile_sideways": "Sideways market with extremely high volatility"
+    }
+    
+    return descriptions.get(market_regime, "Unknown market conditions")
+
 # Pydantic models
 class IndicatorPeriods(BaseModel):
     rsi_period: int = Field(14, ge=3, le=50, description="Periode RSI (standard: 14)")
@@ -97,7 +510,7 @@ class IndicatorPeriods(BaseModel):
     ma_long: int = Field(200, ge=50, le=500, description="Periode MA jangka panjang (standard: 200)")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "rsi_period": 14,
                 "macd_fast": 12,
@@ -119,11 +532,17 @@ class TradingSignalRequest(BaseModel):
     risk_tolerance: str = Field("medium", description="Toleransi risiko pengguna (low, medium, high)")
     periods: Optional[IndicatorPeriods] = Field(None, description="Periode indikator teknikal")
     trading_style: str = Field("standard", description="Gaya trading ('short_term', 'standard', 'long_term')")
+    auto_optimize: bool = Field(True, description="Otomatis optimasi parameter berdasarkan market regime")
 
 class IndicatorValue(BaseModel):
     value: float
     signal: Optional[str] = None
     description: Optional[str] = None
+
+class ReversalSignal(BaseModel):
+    type: str
+    description: str
+    strength: float
 
 class TradingSignalResponse(BaseModel):
     project_id: str
@@ -132,23 +551,35 @@ class TradingSignalResponse(BaseModel):
     strong_signal: bool
     evidence: List[str]
     target_price: Optional[float] = None
+    target_2: Optional[float] = None
+    support_1: Optional[float] = None
+    support_2: Optional[float] = None
     personalized_message: Optional[str] = None
     risk_profile: Optional[str] = None
     indicators: Dict[str, float]
     indicator_periods: Dict[str, int]
+    market_regime: Optional[str] = None
+    trend_direction: Optional[str] = None
+    buy_score: Optional[float] = None
+    sell_score: Optional[float] = None
+    reversal_probability: Optional[float] = None
+    reversal_signals: Optional[List[ReversalSignal]] = None
     timestamp: datetime
 
 class TechnicalIndicatorsRequest(BaseModel):
     project_id: str
     days: int = Field(30, ge=1, le=365)
     interval: str = Field("1d", description="Price data interval")
-    indicators: List[str] = ["rsi", "macd", "bollinger", "sma"]
+    indicators: List[str] = ["rsi", "macd", "bollinger", "sma", "stochastic", "adx", "atr", "ichimoku"]
     periods: Optional[IndicatorPeriods] = Field(None, description="Periode indikator teknikal")
+    trading_style: str = Field("standard", description="Gaya trading ('short_term', 'standard', 'long_term')")
+    auto_optimize: bool = Field(True, description="Otomatis optimasi parameter berdasarkan market regime")
 
 class TechnicalIndicatorsResponse(BaseModel):
     project_id: str
     indicators: Dict[str, Dict[str, Any]]
     latest_close: float
+    market_regime: str
     latest_timestamp: datetime
     period: str
     execution_time: float
@@ -156,183 +587,123 @@ class TechnicalIndicatorsResponse(BaseModel):
 class MarketEventResponse(BaseModel):
     project_id: str
     latest_event: str
+    market_regime: str
     event_counts: Dict[str, int]
+    recent_events: Dict[str, List[str]]
     close_price: float
+    timestamp: datetime
+
+class PredictionDataPoint(BaseModel):
+    date: str
+    value: float
+    confidence: float
+
+class PricePredictionResponse(BaseModel):
+    project_id: str
+    current_price: float
+    prediction_direction: str
+    predicted_change_percent: float
+    confidence: float
+    model_type: str
+    market_regime: str
+    reversal_probability: Optional[float] = None
+    support_levels: Optional[Dict[str, float]] = None
+    resistance_levels: Optional[Dict[str, float]] = None
+    predictions: List[PredictionDataPoint]
     timestamp: datetime
 
 # Routes
 @router.post("/trading-signals", response_model=TradingSignalResponse)
 async def get_trading_signals(request: TradingSignalRequest):
-    """
-    Get trading signals based on technical analysis
-    """
     start_time = datetime.now()
     logger.info(f"Trading signal request for {request.project_id} with days={request.days}")
     
-    # Prepare indicator periods
-    indicator_periods = {}
-    
-    # Handle trading style presets
-    if request.trading_style == "short_term":
-        indicator_periods = {
-            'rsi_period': 7,
-            'macd_fast': 8,
-            'macd_slow': 17,
-            'macd_signal': 9,
-            'bb_period': 10,
-            'stoch_k': 7,
-            'stoch_d': 3,
-            'ma_short': 10,
-            'ma_medium': 30,
-            'ma_long': 60
-        }
-        logger.info(f"Using short-term trading parameters (periode lebih pendek)")
-    elif request.trading_style == "long_term":
-        indicator_periods = {
-            'rsi_period': 21,
-            'macd_fast': 19,
-            'macd_slow': 39,
-            'macd_signal': 9,
-            'bb_period': 30,
-            'stoch_k': 21,
-            'stoch_d': 7,
-            'ma_short': 50,
-            'ma_medium': 100,
-            'ma_long': 200
-        }
-        logger.info(f"Using long-term trading parameters (periode lebih panjang)")
-    else:  # standard
-        indicator_periods = {
-            'rsi_period': 14,
-            'macd_fast': 12,
-            'macd_slow': 26,
-            'macd_signal': 9,
-            'bb_period': 20,
-            'stoch_k': 14,
-            'stoch_d': 3,
-            'ma_short': 20,
-            'ma_medium': 50,
-            'ma_long': 200
-        }
-        logger.info(f"Using standard trading parameters (periode default)")
-    
-    # Override dengan nilai kustom jika disediakan
-    if request.periods:
-        for key, value in request.periods.dict().items():
-            indicator_periods[key] = value
-    
-    # Hitung minimal data yang diperlukan
-    min_required_days = max(
-        3 * indicator_periods['rsi_period'],
-        indicator_periods['macd_slow'] + indicator_periods['macd_signal'] + 10,
-        indicator_periods['bb_period'] + 10,
-        indicator_periods['stoch_k'] + indicator_periods['stoch_d'] + 5,
-        indicator_periods['ma_long'] + 10
-    )
-    
-    # Sanity check: minimum 30 days
-    min_required_days = max(30, min_required_days)
-    
-    # Check if request has valid number of days
-    if request.days < min_required_days:
-        logger.warning(f"Requested days {request.days} is below recommended minimum of {min_required_days} for selected parameters.")
-        logger.info(f"Automatically adjusting requested days to {min_required_days}")
-        request.days = min_required_days
-    
-    # Check cache first
-    cache_key = f"{request.project_id}:{request.days}:{request.interval}:{request.risk_tolerance}:{request.trading_style}"
-    
-    # Add indicator periods to cache key if customized
-    if request.periods:
-        periods_str = ":".join([f"{k}={v}" for k, v in request.periods.dict().items()])
-        cache_key += f":{periods_str}"
-        
-    if cache_key in _signals_cache:
-        cache_entry = _signals_cache[cache_key]
-        
-        # Check if cache is still valid
-        if datetime.now() < cache_entry['expires']:
-            logger.info(f"Returning cached trading signals for {cache_key}")
-            
-            # Update timestamp
-            cache_entry['data'].timestamp = datetime.now()
-            
-            return cache_entry['data']
-    
     try:
-        # Get real price data
+        # Get optimal timeframe based on trading style and data characteristics
+        optimal_days, optimal_interval = request.days, request.interval
+        
+        if request.auto_optimize:
+            # Get a small sample of data first to determine characteristics
+            sample_data = await get_price_data(
+                request.project_id, 
+                days=min(30, request.days), 
+                interval=request.interval
+            )
+            
+            optimal_days, optimal_interval = get_optimal_timeframe(sample_data, request)
+            
+            if optimal_days != request.days or optimal_interval != request.interval:
+                logger.info(f"Optimized timeframe from {request.days}d/{request.interval} to {optimal_days}d/{optimal_interval}")
+        
+        # Get price data with optimal timeframe
         price_data = await get_price_data(
             request.project_id, 
-            days=request.days, 
-            interval=request.interval
+            days=optimal_days, 
+            interval=optimal_interval
         )
         
-        if price_data.empty:
-            logger.error(f"No price data available for {request.project_id}")
-            raise HTTPException(
-                status_code=404, 
-                detail=f"No price data available for {request.project_id}"
-            )
+        # Ensure price_data has necessary columns (PERBAIKAN)
+        if 'close' not in price_data.columns and 'price' in price_data.columns:
+            price_data['close'] = price_data['price']
         
-        logger.info(f"Got {len(price_data)} data points for {request.project_id}")
+        # Detect market regime
+        market_regime = detect_market_regime(price_data)
+        logger.info(f"Detected market regime: {market_regime}")
         
-        # Check for sufficient data
-        if len(price_data) < min_required_days:
-            logger.warning(f"Insufficient data points for accurate technical analysis with selected parameters: {len(price_data)} < {min_required_days} recommended minimum")
-            
-            # Continue with warning but don't fail the request
-            if len(price_data) < 20:
-                # However, if there's really too little data, return a proper error
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Data tidak cukup untuk analisis teknikal. Tersedia {len(price_data)} titik data, dibutuhkan minimal 20. Coba tingkatkan parameter 'days'."
-                )
-        
-        # Generate trading signals with custom periods
-        signals = generate_trading_signals(price_data, indicator_periods=indicator_periods)
-        
-        # Check if the result contains an error
-        if 'error' in signals:
-            logger.error(f"Error in signal generation: {signals['error']}")
-            
-            # If there's a minimum days needed hint, include it in the response
-            if 'min_days_needed' in signals:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"{signals['error']} Coba dengan parameter days={signals['min_days_needed']}."
-                )
+        # Optimize parameters if requested
+        if request.auto_optimize:
+            if request.periods:
+                # Use provided parameters but enhance them for this market regime
+                indicator_periods = request.periods.dict()
+                optimized_params = get_optimal_parameters(price_data, market_regime, request.trading_style)
+                
+                # Merge the parameters, keeping user-specified ones
+                for key, value in optimized_params.items():
+                    if key not in indicator_periods:
+                        indicator_periods[key] = value
+                        
+                logger.info(f"Using optimized parameters for {market_regime} regime with user customizations")
             else:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=signals['error']
-                )
+                # Use fully optimized parameters
+                indicator_periods = get_optimal_parameters(price_data, market_regime, request.trading_style)
+                logger.info(f"Using fully optimized parameters for {market_regime} regime")
+        else:
+            # Use provided parameters or defaults
+            indicator_periods = request.periods.dict() if request.periods else None
         
-        # Personalize based on risk tolerance
+        # Generate trading signals
+        signals = generate_trading_signals(price_data, indicator_periods)
+        
+        # Personalize based on preferences
         personalized = personalize_signals(signals, risk_tolerance=request.risk_tolerance)
         
-        # Sanitize NaN values in indicators (enhance with more verbose messages)
-        if 'indicators' in personalized:
-            for key, value in list(personalized['indicators'].items()):
-                if pd.isna(value):
-                    logger.warning(f"NaN value detected for indicator {key}, replacing with 0.0")
-                    personalized['indicators'][key] = 0.0
-                    
-        # Sanitize target_price if it's NaN
-        if 'target_price' in personalized and pd.isna(personalized['target_price']):
-            logger.warning("NaN value detected for target_price, removing from response")
-            personalized.pop('target_price')
-            
-        # Sanitize confidence if it's NaN
-        if 'confidence' in personalized and pd.isna(personalized['confidence']):
-            logger.warning("NaN value detected for confidence, setting to default 0.5")
-            personalized['confidence'] = 0.5
-            
-        # Check evidence quality
-        if len(personalized.get('evidence', [])) == 0:
-            logger.warning("No evidence found for trading signal")
-            personalized['evidence'] = ["Not enough data for detailed signal analysis"]
+        # Get additional technical analysis
+        ti = TechnicalIndicators(price_data, indicator_periods)
+        reversal_data = ti.generate_reversal_signals()
         
-        # Create response
+        # Add trend prediction
+        trend_prediction = ti.predict_price_trend(periods=5)
+        
+        # PERBAIKAN: Format reversal signals dengan konsisten
+        formatted_reversal_signals = []
+        if reversal_data and 'signals' in reversal_data and reversal_data['signals']:
+            for signal in reversal_data['signals']:
+                if isinstance(signal, dict):
+                    # Signal sudah dalam format object yang benar
+                    formatted_reversal_signals.append({
+                        "type": signal.get('type', 'unknown'),
+                        "description": signal.get('description', 'Unknown signal'),
+                        "strength": float(signal.get('strength', 0.5))
+                    })
+                elif isinstance(signal, str):
+                    # Convert string signal ke object format
+                    formatted_reversal_signals.append({
+                        "type": "general",
+                        "description": signal,
+                        "strength": 0.5
+                    })
+        
+        # Buat response
         response = TradingSignalResponse(
             project_id=request.project_id,
             action=personalized.get('action', 'hold'),
@@ -340,22 +711,21 @@ async def get_trading_signals(request: TradingSignalRequest):
             strong_signal=personalized.get('strong_signal', False),
             evidence=personalized.get('evidence', []),
             target_price=personalized.get('target_price'),
+            target_2=trend_prediction.get('target_2'),
+            support_1=trend_prediction.get('support_1'),
+            support_2=trend_prediction.get('support_2'),
             personalized_message=personalized.get('personalized_message'),
             risk_profile=personalized.get('risk_profile'),
             indicators=personalized.get('indicators', {}),
             indicator_periods=personalized.get('indicator_periods', indicator_periods),
+            market_regime=market_regime,
+            trend_direction=signals.get('trend_direction', 'neutral'),
+            buy_score=signals.get('buy_score', 0.5),
+            sell_score=signals.get('sell_score', 0.5),
+            reversal_probability=reversal_data.get('reversal_probability', 0.0),
+            reversal_signals=formatted_reversal_signals,  # PERBAIKAN: Gunakan format yang sudah dinormalisasi
             timestamp=datetime.now()
         )
-        
-        # Log indicator values for debugging
-        logger.info(f"MACD value: {response.indicators.get('macd', 'N/A')}")
-        logger.info(f"RSI value: {response.indicators.get('rsi', 'N/A')}")
-        
-        # Store in cache
-        _signals_cache[cache_key] = {
-            'data': response,
-            'expires': datetime.now() + timedelta(seconds=_cache_ttl)
-        }
         
         return response
         
@@ -365,516 +735,174 @@ async def get_trading_signals(request: TradingSignalRequest):
     except Exception as e:
         logger.error(f"Error generating trading signals: {str(e)}")
         import traceback
-        logger.error(traceback.format_exc())  # Log the full traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 @router.post("/indicators", response_model=TechnicalIndicatorsResponse)
 async def get_technical_indicators(request: TechnicalIndicatorsRequest):
-    """
-    Calculate and return technical indicators for a project
-    """
     start_time = datetime.now()
     logger.info(f"Technical indicators request for {request.project_id}")
     
-    # Handle custom periods
-    indicator_periods = {}
-    if request.periods:
-        indicator_periods = request.periods.dict()
-    
     try:
-        # Get real price data
-        price_data = await get_price_data(
-            request.project_id, 
-            days=request.days, 
-            interval=request.interval
-        )
+        # Optimize parameters based on market conditions
+        if request.auto_optimize:
+            # Get a small sample of data first to determine characteristics
+            sample_data = await get_price_data(
+                request.project_id, 
+                days=min(30, request.days), 
+                interval=request.interval
+            )
+            
+            optimal_days, optimal_interval = get_optimal_timeframe(sample_data, request)
+            
+            if optimal_days != request.days or optimal_interval != request.interval:
+                logger.info(f"Optimized timeframe from {request.days}d/{request.interval} to {optimal_days}d/{optimal_interval}")
+                
+            # Get price data with optimal timeframe
+            price_data = await get_price_data(
+                request.project_id, 
+                days=optimal_days, 
+                interval=optimal_interval
+            )
+        else:
+            # Use requested parameters directly
+            price_data = await get_price_data(
+                request.project_id, 
+                days=request.days, 
+                interval=request.interval
+            )
         
         if price_data.empty:
             raise HTTPException(status_code=404, detail=f"No price data found for {request.project_id}")
         
-        # Ensure all price columns are numeric
-        for col in price_data.columns:
-            price_data[col] = pd.to_numeric(price_data[col], errors='coerce')
+        # Detect market regime
+        market_regime = detect_market_regime(price_data)
+        logger.info(f"Detected market regime: {market_regime}")
         
-        # Calculate indicators with error handling
-        try:
-            ti = TechnicalIndicators(price_data)
-            df_with_indicators = ti.add_indicators()
-        except Exception as e:
-            logger.error(f"Error calculating indicators: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=f"Error calculating indicators: {str(e)}")
+        # Determine parameters
+        if request.auto_optimize:
+            if request.periods:
+                # Use provided parameters but enhance them for this market regime
+                indicator_periods = request.periods.dict()
+                optimized_params = get_optimal_parameters(price_data, market_regime, request.trading_style)
+                
+                # Merge the parameters, keeping user-specified ones
+                for key, value in optimized_params.items():
+                    if key not in indicator_periods:
+                        indicator_periods[key] = value
+                        
+                logger.info(f"Using optimized parameters for {market_regime} regime with user customizations")
+            else:
+                # Use fully optimized parameters
+                indicator_periods = get_optimal_parameters(price_data, market_regime, request.trading_style)
+                logger.info(f"Using fully optimized parameters for {market_regime} regime")
+        else:
+            # Use provided parameters or defaults
+            indicator_periods = request.periods.dict() if request.periods else None
         
-        # Extract requested indicators from the last row
-        latest_data = df_with_indicators.iloc[-1].to_dict()
+        # Calculate indicators
+        ti = TechnicalIndicators(price_data, indicator_periods)
+        df_with_indicators = ti.add_indicators()
         
-        # Fix any NaN or non-primitive values
-        for k, v in list(latest_data.items()):
-            if pd.isna(v):
-                latest_data[k] = 0.0
-            elif not isinstance(v, (int, float, bool, str)):
-                # Convert non-primitive types to string
-                latest_data[k] = str(v)
-        
+        # Extract results into a structured response
         indicators_result = {}
         
-        # Safely extract indicators with complete error handling
+        # Get the latest data
+        latest_data = df_with_indicators.iloc[-1].to_dict()
+        
+        # Process and structure indicators by category
         try:
-            # RSI
-            if "rsi" in request.indicators and "rsi" in latest_data:
-                rsi_value = float(latest_data["rsi"])
-                rsi_signal = "oversold" if rsi_value < 30 else "overbought" if rsi_value > 70 else "neutral"
-                indicators_result["rsi"] = {
-                    "value": rsi_value,
-                    "signal": rsi_signal,
-                    "description": f"RSI is {rsi_signal} at {rsi_value:.2f}",
-                    "period": indicator_periods.get("rsi_period", 14)
-                }
+            # 1. Trend Indicators
+            if "sma" in request.indicators or "trend" in request.indicators:
+                trend_data = _extract_trend_indicators(df_with_indicators, latest_data, indicator_periods)
+                indicators_result["trend"] = trend_data
+                
+            # 2. Momentum Indicators
+            if any(ind in request.indicators for ind in ["rsi", "macd", "stochastic", "momentum"]):
+                momentum_data = _extract_momentum_indicators(df_with_indicators, latest_data, indicator_periods)
+                indicators_result["momentum"] = momentum_data
+                
+            # 3. Volatility Indicators
+            if any(ind in request.indicators for ind in ["bollinger", "atr", "volatility"]):
+                volatility_data = _extract_volatility_indicators(df_with_indicators, latest_data, indicator_periods)
+                indicators_result["volatility"] = volatility_data
+                
+            # 4. Volume Indicators (if available)
+            if "volume" in request.indicators and "volume" in price_data.columns:
+                volume_data = _extract_volume_indicators(df_with_indicators, latest_data)
+                indicators_result["volume"] = volume_data
+                
+            # 5. Ichimoku Cloud (if requested)
+            if "ichimoku" in request.indicators:
+                ichimoku_data = _extract_ichimoku_indicators(df_with_indicators, latest_data)
+                indicators_result["ichimoku"] = ichimoku_data
+                
+            # 6. Oscillator Combined
+            if "oscillator" in request.indicators or "momentum_composite" in df_with_indicators.columns:
+                oscillator_data = _extract_oscillator_composite(df_with_indicators, latest_data)
+                indicators_result["oscillator_composite"] = oscillator_data
+                
+            # 7. Market Analysis
+            indicators_result["market_analysis"] = {
+                "regime": market_regime,
+                "overall_signal": latest_data.get("overall_signal", "neutral"),
+                "buy_signals": int(latest_data.get("buy_signals", 0)),
+                "sell_signals": int(latest_data.get("sell_signals", 0)),
+                "neutral_signals": int(latest_data.get("neutral_signals", 0)),
+                "buy_strength": float(latest_data.get("buy_strength", 0)),
+                "sell_strength": float(latest_data.get("sell_strength", 0))
+            }
             
-            # MACD
-            if "macd" in request.indicators and all(k in latest_data for k in ["macd", "macd_signal"]):
-                try:
-                    macd_value = float(latest_data["macd"])
-                    signal_value = float(latest_data["macd_signal"])
-                    hist_value = float(latest_data.get("macd_hist", macd_value - signal_value))
-                    
-                    macd_signal = "bullish" if macd_value > signal_value else "bearish"
-                    
-                    # Check for crossover
-                    macd_cross_up = False
-                    macd_cross_down = False
-                    if "macd_cross_up" in df_with_indicators.columns:
-                        macd_cross_up = bool(df_with_indicators["macd_cross_up"].iloc[-1])
-                    if "macd_cross_down" in df_with_indicators.columns:
-                        macd_cross_down = bool(df_with_indicators["macd_cross_down"].iloc[-1])
-                    
-                    if macd_cross_up:
-                        macd_signal = "strong_bullish"
-                        description = "MACD crossed above signal line (strong buy)"
-                    elif macd_cross_down:
-                        macd_signal = "strong_bearish"
-                        description = "MACD crossed below signal line (strong sell)"
-                    else:
-                        description = f"MACD is {macd_signal} at {macd_value:.4f} (Signal: {signal_value:.4f})"
-                    
-                    indicators_result["macd"] = {
-                        "value": macd_value,
-                        "signal_line": signal_value,
-                        "histogram": hist_value,
-                        "signal": macd_signal,
-                        "description": description,
-                        "periods": {
-                            "fast": indicator_periods.get("macd_fast", 12),
-                            "slow": indicator_periods.get("macd_slow", 26),
-                            "signal": indicator_periods.get("macd_signal", 9)
-                        }
-                    }
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error calculating MACD indicators: {str(e)}")
+            # 8. Market Condition
+            # Prepare market analysis data
+            if "adx" in df_with_indicators.columns:
+                trend_strength = float(latest_data.get("adx", 0))
+                is_trending = trend_strength > 25
+                if "plus_di" in df_with_indicators.columns and "minus_di" in df_with_indicators.columns:
+                    trend_direction = "bullish" if float(latest_data.get("plus_di", 0)) > float(latest_data.get("minus_di", 0)) else "bearish"
+                else:
+                    trend_direction = "unknown"
+            else:
+                trend_strength = 0
+                is_trending = False
+                trend_direction = "unknown"
             
-            # Bollinger Bands
-            if "bollinger" in request.indicators:
-                try:
-                    bb_columns = ["bb_upper", "bb_middle", "bb_lower"]
-                    if all(col in latest_data for col in bb_columns):
-                        upper = float(latest_data["bb_upper"])
-                        middle = float(latest_data["bb_middle"])
-                        lower = float(latest_data["bb_lower"])
-                        close = float(latest_data["close"])
-                        
-                        # Calculate %B safely
-                        bb_width = upper - lower
-                        if bb_width > 0:
-                            bb_pct = (close - lower) / bb_width
-                        else:
-                            bb_pct = 0.5
-                        
-                        if close > upper:
-                            bb_signal = "overbought"
-                            description = "Price is above upper Bollinger Band (potential reversal)"
-                        elif close < lower:
-                            bb_signal = "oversold"
-                            description = "Price is below lower Bollinger Band (potential reversal)"
-                        elif bb_pct > 0.8:
-                            bb_signal = "high"
-                            description = "Price is near upper Bollinger Band"
-                        elif bb_pct < 0.2:
-                            bb_signal = "low"
-                            description = "Price is near lower Bollinger Band"
-                        else:
-                            bb_signal = "neutral"
-                            description = "Price is within Bollinger Bands"
-                        
-                        indicators_result["bollinger"] = {
-                            "upper": upper,
-                            "middle": middle,
-                            "lower": lower,
-                            "percent_b": bb_pct,
-                            "signal": bb_signal,
-                            "description": description,
-                            "period": indicator_periods.get("bb_period", 20)
-                        }
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error calculating Bollinger Band indicators: {str(e)}")
+            # Volatility assessment
+            if "volatility_21d" in df_with_indicators.columns:
+                volatility = float(latest_data.get("volatility_21d", 0))
+                if volatility > 0.05:  # 5% daily volatility is very high for crypto
+                    volatility_level = "very_high"
+                elif volatility > 0.03:
+                    volatility_level = "high"
+                elif volatility > 0.015:
+                    volatility_level = "medium"
+                else:
+                    volatility_level = "low"
+            else:
+                volatility = 0
+                volatility_level = "unknown"
             
-            # Moving Averages
-            if "sma" in request.indicators:
-                try:
-                    ma_data = {}
-                    short_period = indicator_periods.get("ma_short", 20)
-                    medium_period = indicator_periods.get("ma_medium", 50)
-                    long_period = indicator_periods.get("ma_long", 200)
-                    
-                    ma_periods = [short_period, medium_period, long_period]
-                    
-                    for period in ma_periods:
-                        sma_key = f"sma_{period}"
-                        if sma_key in latest_data:
-                            ma_data[f"sma_{period}"] = float(latest_data[sma_key])
-                    
-                    # Define signals based on key moving averages
-                    ma_signal = "neutral"
-                    description = "Moving averages are neutral"
-                    
-                    # Detect Golden/Death Cross
-                    if "golden_cross" in latest_data and latest_data["golden_cross"] == 1:
-                        ma_signal = "strong_bullish"
-                        description = f"Golden Cross detected ({medium_period}-day MA crossed above {long_period}-day MA)"
-                    elif "death_cross" in latest_data and latest_data["death_cross"] == 1:
-                        ma_signal = "strong_bearish"
-                        description = f"Death Cross detected ({medium_period}-day MA crossed below {long_period}-day MA)"
-                    elif f"sma_{short_period}" in latest_data and f"sma_{medium_period}" in latest_data:
-                        close = float(latest_data["close"])
-                        sma_short = float(latest_data[f"sma_{short_period}"])
-                        sma_medium = float(latest_data[f"sma_{medium_period}"])
-                        
-                        if close > sma_short > sma_medium:
-                            ma_signal = "bullish"
-                            description = f"Price is above {short_period} and {medium_period}-day moving averages (bullish trend)"
-                        elif close < sma_short < sma_medium:
-                            ma_signal = "bearish"
-                            description = f"Price is below {short_period} and {medium_period}-day moving averages (bearish trend)"
-                    
-                    indicators_result["moving_averages"] = {
-                        "values": ma_data,
-                        "signal": ma_signal,
-                        "description": description,
-                        "periods": {
-                            "short": short_period,
-                            "medium": medium_period,
-                            "long": long_period
-                        }
-                    }
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error calculating Moving Average indicators: {str(e)}")
-            
-            # Stochastic Oscillator
-            if "stochastic" in request.indicators:
-                try:
-                    if "stoch_k" in latest_data and "stoch_d" in latest_data:
-                        k_value = float(latest_data["stoch_k"])
-                        d_value = float(latest_data["stoch_d"])
-                        
-                        if k_value < 20:
-                            stoch_signal = "oversold"
-                            description = f"Stochastic Oscillator is oversold at {k_value:.2f}"
-                        elif k_value > 80:
-                            stoch_signal = "overbought"
-                            description = f"Stochastic Oscillator is overbought at {k_value:.2f}"
-                        else:
-                            stoch_signal = "neutral"
-                            description = f"Stochastic Oscillator is neutral at {k_value:.2f}"
-                        
-                        # Check for stochastic crossover
-                        if "stoch_cross_up" in latest_data and latest_data["stoch_cross_up"] == 1:
-                            if k_value < 20:
-                                stoch_signal = "strong_buy"
-                                description = "Stochastic %K crossed above %D from oversold (strong buy signal)"
-                        elif "stoch_cross_down" in latest_data and latest_data["stoch_cross_down"] == 1:
-                            if k_value > 80:
-                                stoch_signal = "strong_sell"
-                                description = "Stochastic %K crossed below %D from overbought (strong sell signal)"
-                        
-                        indicators_result["stochastic"] = {
-                            "k": k_value,
-                            "d": d_value,
-                            "signal": stoch_signal,
-                            "description": description,
-                            "periods": {
-                                "k": indicator_periods.get("stoch_k", 14),
-                                "d": indicator_periods.get("stoch_d", 3)
-                            }
-                        }
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error calculating Stochastic indicators: {str(e)}")
-            
-            # ATR (Average True Range) - volatility indicator
-            if "atr" in request.indicators:
-                try:
-                    if "atr" in latest_data:
-                        atr_value = float(latest_data["atr"])
-                        close = float(latest_data["close"])
-                        
-                        # Calculate ATR as percentage of price
-                        atr_percent = (atr_value / close) * 100 if close > 0 else 0
-                        
-                        if atr_percent > 5:
-                            volatility = "very_high"
-                            description = f"Very high volatility (ATR: {atr_percent:.2f}% of price)"
-                        elif atr_percent > 3:
-                            volatility = "high"
-                            description = f"High volatility (ATR: {atr_percent:.2f}% of price)"
-                        elif atr_percent > 1.5:
-                            volatility = "moderate"
-                            description = f"Moderate volatility (ATR: {atr_percent:.2f}% of price)"
-                        else:
-                            volatility = "low"
-                            description = f"Low volatility (ATR: {atr_percent:.2f}% of price)"
-                        
-                        indicators_result["atr"] = {
-                            "value": atr_value,
-                            "percent_of_price": atr_percent,
-                            "volatility": volatility,
-                            "description": description
-                        }
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error calculating ATR indicators: {str(e)}")
-            
-            # ADX (Average Directional Index) - trend strength
-            if "adx" in request.indicators:
-                try:
-                    if "adx" in latest_data:
-                        adx_value = float(latest_data["adx"])
-                        
-                        if "plus_di" in latest_data and "minus_di" in latest_data:
-                            plus_di = float(latest_data["plus_di"])
-                            minus_di = float(latest_data["minus_di"])
-                            
-                            if adx_value > 25:
-                                if plus_di > minus_di:
-                                    trend_signal = "strong_uptrend"
-                                    description = f"Strong uptrend (ADX: {adx_value:.2f}, +DI > -DI)"
-                                else:
-                                    trend_signal = "strong_downtrend"
-                                    description = f"Strong downtrend (ADX: {adx_value:.2f}, -DI > +DI)"
-                            elif adx_value > 20:
-                                if plus_di > minus_di:
-                                    trend_signal = "moderate_uptrend"
-                                    description = f"Moderate uptrend (ADX: {adx_value:.2f}, +DI > -DI)"
-                                else:
-                                    trend_signal = "moderate_downtrend"
-                                    description = f"Moderate downtrend (ADX: {adx_value:.2f}, -DI > +DI)"
-                            else:
-                                trend_signal = "weak_trend"
-                                description = f"Weak trend (ADX: {adx_value:.2f})"
-                        else:
-                            # If DI values not available
-                            if adx_value > 25:
-                                trend_signal = "strong_trend"
-                                description = f"Strong trend detected (ADX: {adx_value:.2f})"
-                            elif adx_value > 20:
-                                trend_signal = "moderate_trend"
-                                description = f"Moderate trend (ADX: {adx_value:.2f})"
-                            else:
-                                trend_signal = "weak_trend"
-                                description = f"Weak trend (ADX: {adx_value:.2f})"
-                        
-                        indicators_result["adx"] = {
-                            "value": adx_value,
-                            "plus_di": float(latest_data.get("plus_di", 0)),
-                            "minus_di": float(latest_data.get("minus_di", 0)),
-                            "trend": trend_signal,
-                            "description": description
-                        }
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error calculating ADX indicators: {str(e)}")
-            
-            # Volume indicators
-            if "volume" in request.indicators and "volume" in latest_data:
-                try:
-                    volume_value = float(latest_data["volume"])
-                    
-                    # Volume analysis
-                    if "volume_sma_20" in latest_data:
-                        volume_avg = float(latest_data["volume_sma_20"])
-                        volume_ratio = volume_value / volume_avg if volume_avg > 0 else 1.0
-                        
-                        if volume_ratio > 2.0:
-                            volume_signal = "very_high"
-                            description = f"Volume is {volume_ratio:.2f}x average (very high)"
-                        elif volume_ratio > 1.5:
-                            volume_signal = "high"
-                            description = f"Volume is {volume_ratio:.2f}x average (high)"
-                        elif volume_ratio < 0.5:
-                            volume_signal = "low"
-                            description = f"Volume is {volume_ratio:.2f}x average (low)"
-                        else:
-                            volume_signal = "normal"
-                            description = f"Volume is {volume_ratio:.2f}x average (normal)"
-                    else:
-                        volume_signal = "unknown"
-                        description = "Volume comparison not available"
-                    
-                    indicators_result["volume"] = {
-                        "value": volume_value,
-                        "signal": volume_signal,
-                        "ratio": volume_ratio if 'volume_ratio' in locals() else None,
-                        "description": description
-                    }
-                    
-                    # On Balance Volume
-                    if "obv" in latest_data:
-                        obv_value = float(latest_data["obv"])
-                        indicators_result["obv"] = {
-                            "value": obv_value
-                        }
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error calculating Volume indicators: {str(e)}")
-            
-            # Money Flow Index
-            if "mfi" in request.indicators and "mfi" in latest_data:
-                try:
-                    mfi_value = float(latest_data["mfi"])
-                    
-                    if mfi_value < 20:
-                        mfi_signal = "oversold"
-                        description = f"Money Flow Index is oversold at {mfi_value:.2f}"
-                    elif mfi_value > 80:
-                        mfi_signal = "overbought"
-                        description = f"Money Flow Index is overbought at {mfi_value:.2f}"
-                    else:
-                        mfi_signal = "neutral"
-                        description = f"Money Flow Index is neutral at {mfi_value:.2f}"
-                    
-                    indicators_result["mfi"] = {
-                        "value": mfi_value,
-                        "signal": mfi_signal,
-                        "description": description
-                    }
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error calculating MFI indicators: {str(e)}")
-            
-            # Price ROC (Rate of Change)
-            if "roc" in request.indicators and "roc" in latest_data:
-                try:
-                    roc_value = float(latest_data["roc"])
-                    
-                    if roc_value > 10:
-                        roc_signal = "strong_bullish"
-                        description = f"Very high rate of change: {roc_value:.2f}% (strongly bullish)"
-                    elif roc_value > 5:
-                        roc_signal = "bullish"
-                        description = f"High rate of change: {roc_value:.2f}% (bullish)"
-                    elif roc_value < -10:
-                        roc_signal = "strong_bearish"
-                        description = f"Very low rate of change: {roc_value:.2f}% (strongly bearish)"
-                    elif roc_value < -5:
-                        roc_signal = "bearish"
-                        description = f"Low rate of change: {roc_value:.2f}% (bearish)"
-                    else:
-                        roc_signal = "neutral"
-                        description = f"Moderate rate of change: {roc_value:.2f}% (neutral)"
-                    
-                    indicators_result["roc"] = {
-                        "value": roc_value,
-                        "signal": roc_signal,
-                        "description": description
-                    }
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error calculating ROC indicators: {str(e)}")
-            
-            # Williams %R
-            if "willr" in request.indicators and "willr" in latest_data:
-                try:
-                    willr_value = float(latest_data["willr"])
-                    
-                    if willr_value < -80:
-                        willr_signal = "oversold"
-                        description = f"Williams %R is oversold at {willr_value:.2f}"
-                    elif willr_value > -20:
-                        willr_signal = "overbought"
-                        description = f"Williams %R is overbought at {willr_value:.2f}"
-                    else:
-                        willr_signal = "neutral"
-                        description = f"Williams %R is neutral at {willr_value:.2f}"
-                    
-                    indicators_result["willr"] = {
-                        "value": willr_value,
-                        "signal": willr_signal,
-                        "description": description
-                    }
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error calculating Williams %R indicators: {str(e)}")
-            
-            # Commodity Channel Index (CCI)
-            if "cci" in request.indicators and "cci" in latest_data:
-                try:
-                    cci_value = float(latest_data["cci"])
-                    
-                    if cci_value > 100:
-                        cci_signal = "overbought"
-                        description = f"CCI is overbought at {cci_value:.2f}"
-                    elif cci_value < -100:
-                        cci_signal = "oversold"
-                        description = f"CCI is oversold at {cci_value:.2f}"
-                    else:
-                        cci_signal = "neutral"
-                        description = f"CCI is neutral at {cci_value:.2f}"
-                    
-                    indicators_result["cci"] = {
-                        "value": cci_value,
-                        "signal": cci_signal,
-                        "description": description
-                    }
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error calculating CCI indicators: {str(e)}")
-                    
-            # Overall signal based on multiple indicators
-            if "overall_signal" in latest_data:
-                try:
-                    overall_signal = str(latest_data["overall_signal"])
-                    
-                    # Add to result
-                    indicators_result["overall"] = {
-                        "signal": overall_signal,
-                        "buy_strength": float(latest_data.get("buy_strength", 50)),
-                        "description": f"Overall signal: {overall_signal}"
-                    }
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error calculating overall signal: {str(e)}")
-            elif "buy_signals" in latest_data and "sell_signals" in latest_data:
-                try:
-                    buy_signals = int(latest_data["buy_signals"])
-                    sell_signals = int(latest_data["sell_signals"])
-                    
-                    if buy_signals > sell_signals:
-                        overall_signal = "buy"
-                    elif sell_signals > buy_signals:
-                        overall_signal = "sell"
-                    else:
-                        overall_signal = "hold"
-                    
-                    indicators_result["overall"] = {
-                        "signal": overall_signal,
-                        "buy_signals": buy_signals,
-                        "sell_signals": sell_signals,
-                        "description": f"Overall signal based on {buy_signals} buy vs {sell_signals} sell indicators"
-                    }
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Error calculating overall signal from buy/sell counts: {str(e)}")
+            indicators_result["market_condition"] = {
+                "trend_strength": trend_strength,
+                "trend_direction": trend_direction,
+                "is_trending": is_trending,
+                "volatility": volatility,
+                "volatility_level": volatility_level,
+                "market_regime": market_regime,
+                "regime_description": _get_regime_description(market_regime)
+            }
             
         except Exception as e:
-            logger.error(f"Error processing indicator data: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
+            logger.error(f"Error extracting indicator data: {str(e)}")
+            # Continue with partial results
         
         # Create response
         response = TechnicalIndicatorsResponse(
             project_id=request.project_id,
             indicators=indicators_result,
-            latest_close=float(latest_data.get("close", 0)),
-            latest_timestamp=df_with_indicators.index[-1],
+            latest_close=float(price_data['close'].iloc[-1]),
+            market_regime=market_regime,
+            latest_timestamp=price_data.index[-1],
             period=f"{request.days} days ({request.interval})",
             execution_time=(datetime.now() - start_time).total_seconds()
         )
@@ -894,29 +922,74 @@ async def get_technical_indicators(request: TechnicalIndicatorsRequest):
 async def get_market_events(
     project_id: str = Path(..., description="Project ID"),
     days: int = Query(40, ge=1, le=365),
-    interval: str = Query("1d", description="Price data interval")
+    interval: str = Query("1d", description="Price data interval"),
+    # custom_thresholds: Dict[str, float] = Query(None, description="Custom thresholds for event detection")
+    pump_threshold: Optional[float] = Query(None, description="Threshold for pump events"),
+    dump_threshold: Optional[float] = Query(None, description="Threshold for dump events"),
+    volatility_threshold: Optional[float] = Query(None, description="Threshold for high volatility events"),
+    volume_threshold: Optional[float] = Query(None, description="Threshold for volume spike events")
 ):
-    """
-    Detect market events such as pumps, dumps, high volatility, etc.
-    """
     logger.info(f"Market events request for {project_id}")
     
     try:
-        # Get real price data
+        # Get price data
         price_data = await get_price_data(
             project_id, 
             days=days, 
             interval=interval
         )
         
-        # Detect market events
-        events = detect_market_events(price_data)
+        # Detect market regime first
+        market_regime = detect_market_regime(price_data)
+
+        # custom_thresholds dari parameter individual
+        custom_thresholds = {}
+        if pump_threshold is not None:
+            custom_thresholds['pump'] = pump_threshold
+        if dump_threshold is not None:
+            custom_thresholds['dump'] = dump_threshold
+        if volatility_threshold is not None:
+            custom_thresholds['volatility'] = volatility_threshold
+        if volume_threshold is not None:
+            custom_thresholds['volume_spike'] = volume_threshold
+        
+        # Adjust thresholds based on market regime if no custom thresholds
+        if not custom_thresholds:
+            if "volatile" in market_regime:
+                # For volatile markets, use higher thresholds to avoid noise
+                custom_thresholds = {
+                    'pump': 2.5,        # Higher pump threshold
+                    'dump': 2.5,        # Higher dump threshold
+                    'volatility': 2.5,  # Higher volatility threshold
+                    'volume_spike': 2.5 # Higher volume spike threshold
+                }
+            elif "trending" in market_regime:
+                # For trending markets, use standard thresholds
+                custom_thresholds = {
+                    'pump': 2.0,        # Standard pump threshold
+                    'dump': 2.0,        # Standard dump threshold
+                    'volatility': 2.0,  # Standard volatility threshold
+                    'volume_spike': 2.0 # Standard volume spike threshold
+                }
+            else:  # ranging
+                # For ranging markets, use lower thresholds to detect smaller movements
+                custom_thresholds = {
+                    'pump': 1.8,        # Lower pump threshold
+                    'dump': 1.8,        # Lower dump threshold
+                    'volatility': 1.8,  # Lower volatility threshold
+                    'volume_spike': 1.8 # Lower volume spike threshold
+                }
+        
+        # Detect market events with adaptive thresholds
+        events = detect_market_events(price_data, custom_thresholds=custom_thresholds)
         
         # Create response
         response = MarketEventResponse(
             project_id=project_id,
             latest_event=events.get('latest_event', 'normal'),
+            market_regime=market_regime,
             event_counts=events.get('event_counts', {}),
+            recent_events=events.get('recent_events', {}),
             close_price=float(price_data['close'].iloc[-1]),
             timestamp=price_data.index[-1]
         )
@@ -927,36 +1000,404 @@ async def get_market_events(
         logger.error(f"Error detecting market events: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
-@router.get("/alerts/{project_id}")
-async def get_technical_alerts(
+# PERBAIKAN: Update price prediction endpoint untuk handling yang lebih baik
+@router.get("/price-prediction/{project_id}", response_model=PricePredictionResponse)
+async def predict_future_price(
     project_id: str = Path(..., description="Project ID"),
-    days: int = Query(30, ge=1, le=365),
+    days: int = Query(50, ge=1, le=365, description="Historical data days"),
+    prediction_days: int = Query(7, ge=1, le=30, description="Days to predict"),
     interval: str = Query("1d", description="Price data interval"),
-    lookback: int = Query(5, ge=1, le=30, description="Number of periods to look back for alerts")
+    model: str = Query("auto", description="Prediction model (auto, ml, arima, simple)")
 ):
-    """
-    Get technical alerts for a project
-    """
-    logger.info(f"Technical alerts request for {project_id}")
+    logger.info(f"Price prediction request for {project_id} using {model} model")
+    
+    # Periksa cache untuk menghindari komputasi berulang
+    cache_key = f"price_prediction:{project_id}:{days}:{prediction_days}:{model}"
+    if cache_key in _price_data_cache:
+        cache_entry = _price_data_cache[cache_key]
+        if datetime.now() < cache_entry['expires']:
+            logger.info(f"Returning cached prediction for {project_id}")
+            return cache_entry['data']
     
     try:
-        # Get real price data
+        start_time = time.time()
+        
+        # Get price data
         price_data = await get_price_data(
             project_id, 
             days=days, 
             interval=interval
         )
         
-        # Calculate indicators and generate alerts
+        # PERBAIKAN: Enhanced logging untuk debugging
+        logger.info(f"Retrieved {len(price_data)} data points for {project_id}")
+        
+        # Detect market regime
+        market_regime = detect_market_regime(price_data)
+        logger.info(f"Market regime detected: {market_regime}")
+        
+        # PERBAIKAN: Enhanced model selection dengan better error handling
+        if model == "auto":
+            if days >= 180 and len(price_data) >= 180:
+                try:
+                    import tensorflow as tf
+                    # PERBAIKAN: Test TensorFlow availability dengan simple operation
+                    test_tensor = tf.constant([1.0, 2.0])
+                    test_result = tf.reduce_sum(test_tensor)
+                    model = "ml"
+                    logger.info(f"Auto-selected ML model for {project_id} with {len(price_data)} data points")
+                except Exception as tf_error:
+                    logger.warning(f"TensorFlow test failed: {str(tf_error)}, using ARIMA for {project_id}")
+                    model = "arima"
+            elif len(price_data) >= 60:
+                model = "arima"
+                logger.info(f"Using ARIMA model for {project_id} with {len(price_data)} data points")
+            else:
+                model = "simple"
+                logger.info(f"Using Simple model for {project_id} with {len(price_data)} data points")
+        
+        # PERBAIKAN: Enhanced prediction execution dengan comprehensive error handling
+        import asyncio
+        
+        async def run_prediction_with_timeout():
+            try:
+                if model == "ml":
+                    logger.info(f"Starting ML prediction for {project_id}...")
+                    
+                    # PERBAIKAN: Pre-validation untuk ML model
+                    if len(price_data) < 100:
+                        logger.warning(f"Insufficient data for ML ({len(price_data)} < 100), switching to ARIMA")
+                        return await asyncio.to_thread(predict_price_arima, price_data, days_to_predict=prediction_days)
+                    
+                    # PERBAIKAN: Check data quality sebelum ML training
+                    close_data = price_data['close'].dropna()
+                    if len(close_data) < len(price_data) * 0.95:
+                        logger.warning(f"Too much missing data for ML model, switching to ARIMA")
+                        return await asyncio.to_thread(predict_price_arima, price_data, days_to_predict=prediction_days)
+                    
+                    # PERBAIKAN: Timeout yang disesuaikan berdasarkan data size
+                    data_size = len(price_data)
+                    if data_size > 300:
+                        timeout = 90  # 1.5 menit untuk data besar
+                    elif data_size > 200:
+                        timeout = 75  # 1.25 menit untuk data sedang
+                    else:
+                        timeout = 60  # 1 menit untuk data kecil
+                    
+                    logger.info(f"Using {timeout}s timeout for ML model with {data_size} data points")
+                    
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(predict_price_ml, price_data, prediction_days),
+                        timeout=timeout
+                    )
+                    
+                    # PERBAIKAN: Validate ML result lebih ketat
+                    if result and 'error' not in result:
+                        # Check if predictions are valid
+                        if 'prediction_data' in result and result['prediction_data']:
+                            valid_predictions = [p for p in result['prediction_data'] 
+                                               if p.get('value', 0) > 0 and 
+                                               isinstance(p.get('value'), (int, float)) and
+                                               not np.isnan(p.get('value', 0)) and
+                                               np.isfinite(p.get('value', 0))]
+                            
+                            if len(valid_predictions) >= prediction_days * 0.8:  # At least 80% valid predictions
+                                result['prediction_data'] = valid_predictions[:prediction_days]  # Limit to requested days
+                                logger.info(f"ML prediction completed for {project_id}: {result.get('model_type', 'Unknown')}")
+                                return result
+                            else:
+                                logger.warning(f"ML predictions quality too low ({len(valid_predictions)}/{prediction_days}), falling back to ARIMA")
+                        else:
+                            logger.warning(f"ML prediction returned no valid data, falling back to ARIMA")
+                    else:
+                        logger.warning(f"ML prediction failed for {project_id}, falling back to ARIMA")
+                    
+                    # Fallback to ARIMA
+                    return await asyncio.to_thread(predict_price_arima, price_data, days_to_predict=prediction_days)
+                        
+                elif model == "arima":
+                    logger.info(f"Starting ARIMA prediction for {project_id}...")
+                    result = await asyncio.to_thread(predict_price_arima, price_data, days_to_predict=prediction_days)
+                    logger.info(f"ARIMA prediction completed for {project_id}: {result.get('model_type', 'Unknown')}")
+                    return result
+                else:
+                    logger.info(f"Starting Simple prediction for {project_id}...")
+                    result = await asyncio.to_thread(predict_price_simple, price_data, days_to_predict=prediction_days)
+                    logger.info(f"Simple prediction completed for {project_id}: {result.get('model_type', 'Unknown')}")
+                    return result
+                    
+            except asyncio.TimeoutError:
+                logger.warning(f"Prediction timeout for {project_id} using {model} model, falling back to simple model")
+                return await asyncio.to_thread(predict_price_simple, price_data, days_to_predict=prediction_days)
+            except Exception as e:
+                logger.error(f"Error in {model} prediction for {project_id}: {str(e)}")
+                # PERBAIKAN: Specific error handling untuk LSTM
+                if "inverse transform" in str(e).lower() or "array element" in str(e).lower():
+                    logger.error(f"LSTM inverse transform error detected, using ARIMA fallback")
+                    try:
+                        return await asyncio.to_thread(predict_price_arima, price_data, days_to_predict=prediction_days)
+                    except:
+                        return await asyncio.to_thread(predict_price_simple, price_data, days_to_predict=prediction_days)
+                else:
+                    return await asyncio.to_thread(predict_price_simple, price_data, days_to_predict=prediction_days)
+        
+        # Jalankan prediksi dengan enhanced timeout handling
+        prediction_result = await run_prediction_with_timeout()
+        
+        # PERBAIKAN: Enhanced validation untuk prediction result
+        if prediction_result is None or 'error' in prediction_result:
+            logger.warning(f"Prediction failed for {project_id}, using simple model fallback")
+            prediction_result = predict_price_simple(price_data, days_to_predict=prediction_days)
+        
+        # PERBAIKAN: Comprehensive validation untuk prediction_data
+        if not prediction_result.get('prediction_data') or len(prediction_result.get('prediction_data', [])) == 0:
+            logger.warning(f"Empty prediction data for {project_id}, regenerating with simple model")
+            prediction_result = predict_price_simple(price_data, days_to_predict=prediction_days)
+        
+        # PERBAIKAN: Validate individual predictions
+        valid_predictions = []
+        if prediction_result.get('prediction_data'):
+            for i, point in enumerate(prediction_result.get('prediction_data', [])):
+                try:
+                    # Validate structure
+                    if not isinstance(point, dict):
+                        logger.warning(f"Invalid prediction point structure at index {i}: {type(point)}")
+                        continue
+                        
+                    # Validate required fields
+                    if 'date' not in point or 'value' not in point:
+                        logger.warning(f"Missing required fields in prediction point {i}: {point}")
+                        continue
+                        
+                    # Validate value
+                    value = point.get('value')
+                    if not isinstance(value, (int, float)) or not np.isfinite(value) or value <= 0:
+                        logger.warning(f"Invalid prediction value at index {i}: {value}")
+                        continue
+                        
+                    # Validate confidence
+                    confidence = point.get('confidence', 0.5)
+                    if not isinstance(confidence, (int, float)) or not np.isfinite(confidence):
+                        point['confidence'] = 0.5
+                    else:
+                        point['confidence'] = max(0.0, min(1.0, float(confidence)))
+                        
+                    valid_predictions.append(point)
+                    
+                except Exception as e:
+                    logger.warning(f"Error validating prediction point {i}: {str(e)}")
+                    continue
+        
+        # PERBAIKAN: Ensure we have enough valid predictions
+        if len(valid_predictions) < prediction_days * 0.5:  # At least 50% valid predictions
+            logger.warning(f"Too few valid predictions ({len(valid_predictions)}/{prediction_days}) for {project_id}, using simple fallback")
+            prediction_result = predict_price_simple(price_data, days_to_predict=prediction_days)
+            valid_predictions = prediction_result.get('prediction_data', [])
+        
+        # Update with validated predictions
+        prediction_result['prediction_data'] = valid_predictions[:prediction_days]  # Ensure exact count
+        
+        # PERBAIKAN: Enhanced logging untuk hasil prediksi
+        model_type = prediction_result.get('model_type', 'Unknown')
+        trend = prediction_result.get('trend', 'unknown')
+        confidence = prediction_result.get('confidence', 0)
+        valid_count = len(valid_predictions)
+        
+        logger.info(f"Final prediction for {project_id}: Model={model_type}, Trend={trend}, Confidence={confidence:.3f}, Valid_predictions={valid_count}")
+        
+        # PERBAIKAN: Special logging untuk ML models
+        if 'LSTM' in model_type:
+            training_info = prediction_result.get('training_info', {})
+            logger.info(f"LSTM model details: epochs={training_info.get('epochs_trained', 'N/A')}, "
+                       f"loss={training_info.get('final_loss', 'N/A'):.6f}, "
+                       f"data_points={training_info.get('data_points', 'N/A')}")
+        
+        # Get additional technical analysis
         ti = TechnicalIndicators(price_data)
+        reversal_data = ti.generate_reversal_signals()
+        trend_prediction = ti.predict_price_trend(periods=prediction_days)
+        
+        # PERBAIKAN: Enhanced prediction data formatting
+        predictions = []
+        if prediction_result.get('prediction_data'):
+            for point in prediction_result.get('prediction_data', []):
+                try:
+                    predictions.append(PredictionDataPoint(
+                        date=point.get('date', ''),
+                        value=float(point.get('value', 0)),
+                        confidence=float(point.get('confidence', 0.5))
+                    ))
+                except Exception as e:
+                    logger.warning(f"Error formatting prediction point: {str(e)}")
+                    continue
+        
+        # PERBAIKAN: Final fallback jika masih belum ada predictions yang valid
+        if not predictions:
+            logger.error(f"No valid predictions generated for {project_id}, creating minimal fallback")
+            current_price = float(price_data['close'].iloc[-1])
+            dates = pd.date_range(
+                start=price_data.index[-1] + pd.Timedelta(days=1),
+                periods=prediction_days,
+                freq='D'
+            )
+            
+            for i, date in enumerate(dates):
+                predictions.append(PredictionDataPoint(
+                    date=date.strftime('%Y-%m-%d'),
+                    value=current_price,  # Flat prediction as ultimate fallback
+                    confidence=0.2
+                ))
+        
+        # PERBAIKAN: Enhanced response creation dengan comprehensive error handling
+        try:
+            current_price = prediction_result.get('current_price', float(price_data['close'].iloc[-1]))
+            
+            response = PricePredictionResponse(
+                project_id=project_id,
+                current_price=float(current_price),
+                prediction_direction=prediction_result.get('trend', 'unknown'),
+                predicted_change_percent=float(prediction_result.get('change_percent', 0.0)),
+                confidence=float(prediction_result.get('confidence', 0.5)),
+                model_type=prediction_result.get('model_type', 'Simple'),
+                market_regime=market_regime,
+                reversal_probability=reversal_data.get('reversal_probability'),
+                support_levels={
+                    "support_1": trend_prediction.get('support_1'),
+                    "support_2": trend_prediction.get('support_2')
+                },
+                resistance_levels={
+                    "resistance_1": trend_prediction.get('target_1'),
+                    "resistance_2": trend_prediction.get('target_2')
+                },
+                predictions=predictions,
+                timestamp=datetime.now()
+            )
+        except Exception as e:
+            logger.error(f"Error creating response for {project_id}: {str(e)}")
+            # Create minimal fallback response
+            response = PricePredictionResponse(
+                project_id=project_id,
+                current_price=float(price_data['close'].iloc[-1]),
+                prediction_direction='unknown',
+                predicted_change_percent=0.0,
+                confidence=0.3,
+                model_type='Simple (Fallback)',
+                market_regime=market_regime,
+                reversal_probability=0.0,
+                support_levels={},
+                resistance_levels={},
+                predictions=predictions,
+                timestamp=datetime.now()
+            )
+        
+        # Hitung waktu eksekusi
+        execution_time = time.time() - start_time
+        logger.info(f"Price prediction completed in {execution_time:.2f}s using {model} model")
+        
+        # PERBAIKAN: Cache dengan TTL yang disesuaikan berdasarkan model dan performance
+        if 'LSTM' in response.model_type:
+            cache_ttl_minutes = 90  # LSTM cache lebih lama karena computationally expensive
+        elif 'ARIMA' in response.model_type:
+            cache_ttl_minutes = 60  # ARIMA cache medium
+        else:
+            cache_ttl_minutes = 30  # Simple model cache shorter
+            
+        _price_data_cache[cache_key] = {
+            'data': response,
+            'expires': datetime.now() + timedelta(minutes=cache_ttl_minutes)
+        }
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Critical error generating price prediction for {project_id}: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        # PERBAIKAN: Return proper error response instead of raising exception
+        try:
+            current_price = float(price_data['close'].iloc[-1]) if 'price_data' in locals() else 100.0
+            error_response = PricePredictionResponse(
+                project_id=project_id,
+                current_price=current_price,
+                prediction_direction='unknown',
+                predicted_change_percent=0.0,
+                confidence=0.0,
+                model_type='Error',
+                market_regime='unknown',
+                reversal_probability=0.0,
+                support_levels={},
+                resistance_levels={},
+                predictions=[],
+                timestamp=datetime.now()
+            )
+            return error_response
+        except:
+            # Final fallback - raise HTTP exception
+            raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@router.get("/alerts/{project_id}")
+async def get_technical_alerts(
+    project_id: str = Path(..., description="Project ID"),
+    days: int = Query(30, ge=1, le=365),
+    interval: str = Query("1d", description="Price data interval"),
+    lookback: int = Query(5, ge=1, le=30, description="Number of periods to look back for alerts"),
+    trading_style: str = Query("standard", description="Trading style (short_term, standard, long_term)")
+):
+    logger.info(f"Technical alerts request for {project_id}")
+    
+    try:
+        # Get price data
+        price_data = await get_price_data(
+            project_id, 
+            days=days, 
+            interval=interval
+        )
+        
+        # Detect market regime
+        market_regime = detect_market_regime(price_data)
+        
+        # Get optimal parameters for this regime and trading style
+        indicator_periods = get_optimal_parameters(price_data, market_regime, trading_style)
+        
+        # Calculate indicators and generate alerts
+        ti = TechnicalIndicators(price_data, indicator_periods)
+        
+        # Perbaikan: Simpan dataframe dengan indikator
         df_with_indicators = ti.add_indicators()
-        alerts = ti.generate_alerts(lookback_period=lookback)
+        
+        # Perbaikan: Gunakan df_with_indicators untuk generate_alerts
+        alerts = ti.generate_alerts(lookback_period=lookback, df=df_with_indicators)
+        
+        # Get reversal signals
+        reversal_data = ti.generate_reversal_signals()
+        
+        # Add market regime signals
+        regime_alert = {
+            'date': price_data.index[-1],
+            'type': f"market_regime_{market_regime}",
+            'message': f"Market Regime: {market_regime.replace('_', ' ')}",
+            'signal': 'buy' if 'bullish' in market_regime else 'sell' if 'bearish' in market_regime else 'neutral',
+            'strength': 0.6
+        }
+        alerts.insert(0, regime_alert)
+        
+        # Add reversal probability if significant
+        if reversal_data.get('reversal_probability', 0) > 0.6:
+            reversal_alert = {
+                'date': price_data.index[-1],
+                'type': f"potential_reversal_{reversal_data.get('direction', 'unknown')}",
+                'message': f"Potential {reversal_data.get('direction', '')} reversal detected (probability: {reversal_data.get('reversal_probability', 0)*100:.1f}%)",
+                'signal': 'buy' if reversal_data.get('direction') == 'bullish' else 'sell' if reversal_data.get('direction') == 'bearish' else 'neutral',
+                'strength': reversal_data.get('reversal_probability', 0)
+            }
+            alerts.insert(1, reversal_alert)
         
         # Format response
         formatted_alerts = []
         for alert in alerts:
             formatted_alerts.append({
-                "date": alert.get('date').isoformat(),
+                "date": alert.get('date').isoformat() if isinstance(alert.get('date'), pd.Timestamp) else str(alert.get('date')),
                 "type": alert.get('type'),
                 "message": alert.get('message'),
                 "signal": alert.get('signal'),
@@ -967,118 +1408,14 @@ async def get_technical_alerts(
             "project_id": project_id,
             "alerts": formatted_alerts,
             "count": len(formatted_alerts),
+            "market_regime": market_regime,
             "period": f"{days} days ({interval})",
-            "lookback": lookback
+            "lookback": lookback,
+            "trading_style": trading_style
         }
         
     except Exception as e:
         logger.error(f"Error generating technical alerts: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-
-@router.get("/price-prediction/{project_id}")
-async def predict_future_price(
-    project_id: str = Path(..., description="Project ID"),
-    days: int = Query(50, ge=1, le=365, description="Historical data days"),
-    prediction_days: int = Query(7, ge=1, le=50, description="Days to predict"),
-    interval: str = Query("1d", description="Price data interval")
-):
-    """
-    Predict future price movement based on technical analysis
-    """
-    logger.info(f"Price prediction request for {project_id}")
-    
-    try:
-        # Get real price data
-        price_data = await get_price_data(
-            project_id, 
-            days=days, 
-            interval=interval
-        )
-        
-        # Get trading signals
-        signals = generate_trading_signals(price_data)
-        
-        # Calculate current price and ATR for volatility estimation
-        current_price = float(price_data['close'].iloc[-1])
-        
-        # Use ATR for volatility if available
-        if 'high' in price_data.columns and 'low' in price_data.columns:
-            from src.technical.signals import calculate_atr
-            atr = calculate_atr(
-                price_data['high'], 
-                price_data['low'], 
-                price_data['close']
-            ).iloc[-1]
-        else:
-            # Estimate volatility from standard deviation of returns
-            returns = price_data['close'].pct_change()
-            atr = current_price * returns.std() * 2
-        
-        # Determine trend direction from signals
-        action = signals.get('action', 'hold')
-        confidence = signals.get('confidence', 0.5)
-        
-        # Set trend factor based on action and confidence
-        if action == 'buy':
-            trend_factor = confidence * 0.01  # 0-1% daily increase
-        elif action == 'sell':
-            trend_factor = -confidence * 0.01  # 0-1% daily decrease
-        else:
-            trend_factor = 0  # Neutral
-        
-        # Generate prediction dates
-        last_date = price_data.index[-1]
-        prediction_dates = pd.date_range(
-            start=last_date + pd.Timedelta(days=1),
-            periods=prediction_days,
-            freq='D'
-        )
-        
-        # Create RNG instance
-        rng = np.random.default_rng(42)  # Use fixed seed for reproducibility
-
-        # Generate predictions with random walk + trend
-        predictions = []
-        price = current_price
-        
-        for date in prediction_dates:
-            # Add trend component and random noise
-            daily_return = trend_factor + rng.normal(0, atr / price / 2)
-            price = price * (1 + daily_return)
-            
-            # Calculate confidence with decreasing trend
-            prediction_confidence = max(0.1, confidence - (len(predictions) * 0.05))
-            
-            predictions.append({
-                "date": date.isoformat(),
-                "predicted_price": price,
-                "confidence": prediction_confidence
-            })
-        
-        # Calculate prediction statistics
-        final_price = predictions[-1]["predicted_price"]
-        price_change = (final_price / current_price - 1) * 100
-
-        # Determine prediction direction with clear logic steps
-        if price_change > 0:
-            prediction_direction = "up"
-        elif price_change < 0:
-            prediction_direction = "down"
-        else:
-            prediction_direction = "neutral"
-        
-        return {
-            "project_id": project_id,
-            "current_price": current_price,
-            "prediction_direction": prediction_direction,
-            "predicted_change_percent": price_change,
-            "confidence": confidence,
-            "predictions": predictions,
-            "data_source": "Real market data"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error generating price prediction: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 # Cache management endpoint
@@ -1102,4 +1439,150 @@ async def clear_cache():
     
     except Exception as e:
         logger.error(f"Error clearing cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+# Backtesting endpoint
+@router.post("/backtest/{project_id}")
+async def backtest_strategy(
+    project_id: str = Path(..., description="Project ID"),
+    days: int = Query(180, ge=30, le=365, description="Historical days to backtest"),
+    interval: str = Query("1d", description="Price data interval"),
+    strategy_type: str = Query("macd", description="Strategy type (macd, rsi, bollinger)"),
+    indicator_periods: Optional[Dict[str, Any]] = None,
+    initial_capital: float = Query(10000.0, gt=0, description="Initial capital for backtest")
+):
+    """
+    Backtest a trading strategy on historical data
+    """
+    logger.info(f"Backtest request for {project_id} using {strategy_type} strategy")
+    
+    try:
+        # Get historical price data
+        price_data = await get_price_data(
+            project_id,
+            days=days,
+            interval=interval
+        )
+
+        # Detect market regime
+        market_regime = detect_market_regime(price_data)
+        
+        # Get optimal parameters if none provided
+        if not indicator_periods:
+            indicator_periods = get_optimal_parameters(price_data, market_regime)
+            logger.info(f"Using optimized parameters for {market_regime} regime")
+            
+        # Run backtest - import dari src.technical.signals untuk menghindari rekursi
+        from src.technical.signals import backtest_strategy as run_backtest
+        backtest_results = run_backtest(
+            price_data, 
+            strategy_type=strategy_type,
+            indicator_periods=indicator_periods,
+            initial_capital=initial_capital
+        )
+        
+        # Format trade history
+        trade_history = []
+        for trade in backtest_results.get('trades', []):
+            trade_history.append({
+                "date": trade['date'].isoformat() if isinstance(trade['date'], pd.Timestamp) else str(trade['date']),
+                "type": trade['type'],
+                "price": float(trade['price']),
+                "holdings": float(trade['holdings']),
+                "capital": float(trade['capital'])
+            })
+            
+        # Calculate additional metrics
+        returns_series = backtest_results.get('returns_series', pd.Series())
+        drawdown_series = backtest_results.get('drawdown_series', pd.Series())
+        
+        # Helper functions untuk metrik tambahan
+        def calculate_sortino_ratio(returns):
+            """Calculate Sortino ratio (return / downside risk)"""
+            if returns.empty:
+                return 0
+            downside_returns = returns[returns < 0]
+            if downside_returns.empty or downside_returns.std() == 0:
+                return 0
+            return (returns.mean() * np.sqrt(252)) / (downside_returns.std() * np.sqrt(252))
+        
+        def get_max_consecutive(trades, result_type):
+            """Get maximum consecutive wins or losses"""
+            max_consecutive = 0
+            current_consecutive = 0
+            
+            if result_type == "win":
+                for i in range(0, len(trades), 2):
+                    if i+1 < len(trades) and trades[i+1]['capital'] > trades[i]['capital']:
+                        current_consecutive += 1
+                        max_consecutive = max(max_consecutive, current_consecutive)
+                    else:
+                        current_consecutive = 0
+            else:  # loss
+                for i in range(0, len(trades), 2):
+                    if i+1 < len(trades) and trades[i+1]['capital'] <= trades[i]['capital']:
+                        current_consecutive += 1
+                        max_consecutive = max(max_consecutive, current_consecutive)
+                    else:
+                        current_consecutive = 0
+                        
+            return max_consecutive
+        
+        def calculate_profit_factor(trades):
+            """Calculate profit factor (total gains / total losses)"""
+            total_gains = 0
+            total_losses = 0
+            
+            for i in range(0, len(trades), 2):
+                if i+1 < len(trades):
+                    trade_result = trades[i+1]['capital'] - trades[i]['capital']
+                    if trade_result > 0:
+                        total_gains += trade_result
+                    else:
+                        total_losses += abs(trade_result)
+            
+            return total_gains / total_losses if total_losses > 0 else float('inf')
+        
+        def calculate_recovery_factor(total_return, max_drawdown):
+            """Calculate recovery factor (return / max drawdown)"""
+            if max_drawdown == 0:
+                return float('inf')
+            return total_return / max_drawdown
+        
+        additional_metrics = {
+            "volatility": float(returns_series.std() * np.sqrt(252)) if not returns_series.empty else 0,
+            "sortino_ratio": calculate_sortino_ratio(returns_series),
+            "max_consecutive_wins": get_max_consecutive(trade_history, "win"),
+            "max_consecutive_losses": get_max_consecutive(trade_history, "loss"),
+            "profit_factor": calculate_profit_factor(trade_history),
+            "recovery_factor": calculate_recovery_factor(
+                backtest_results['total_return'],
+                backtest_results['max_drawdown']
+            ) if backtest_results.get('max_drawdown') else 0
+        }
+
+        # Create response
+        response = {
+            "project_id": project_id,
+            "strategy": strategy_type,
+            "market_regime": market_regime,
+            "period": f"{days} days ({interval})",
+            "initial_capital": initial_capital,
+            "final_capital": initial_capital * (1 + backtest_results['total_return']),
+            "total_return": backtest_results['total_return'],
+            "annual_return": backtest_results['annual_return'],
+            "max_drawdown": backtest_results['max_drawdown'],
+            "sharpe_ratio": backtest_results['sharpe_ratio'],
+            "win_rate": backtest_results['win_rate'],
+            "num_trades": backtest_results['num_trades'],
+            "trades": trade_history,
+            "additional_metrics": additional_metrics,
+            "parameters_used": indicator_periods,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error running backtest: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")

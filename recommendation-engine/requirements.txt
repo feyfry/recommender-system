@@ -7,12 +7,14 @@ matplotlib
 python-dotenv
 requests
 pydantic
+statsmodels
+typing_extensions
 
 # Recommender systems
 # lightfm
 torch
 torchvision
-# tensorflow
+tensorflow
 
 # Technical analysis
 # Note: Installing TA-Lib can be complex - see https://github.com/mrjbq7/ta-lib
@@ -29,6 +31,7 @@ uvicorn
 httpx
 aiohttp
 python-multipart
+asyncio
 
 # API Documentation
 swagger-ui-bundle

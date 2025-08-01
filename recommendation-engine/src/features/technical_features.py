@@ -1,8 +1,3 @@
-"""
-Modul untuk ekstraksi dan perhitungan fitur teknikal menggunakan TA-Lib
-dengan dukungan periode indikator dinamis
-"""
-
 import pandas as pd
 import numpy as np
 import logging
@@ -37,23 +32,6 @@ class TechnicalAnalyzer:
     """
     
     def __init__(self, price_data: Optional[pd.DataFrame] = None, indicator_periods: Optional[Dict[str, Any]] = None):
-        """
-        Inisialisasi analyzer dengan periode indikator yang fleksibel
-        
-        Args:
-            price_data: DataFrame data harga (opsional)
-            indicator_periods: Dictionary periode indikator kustom:
-                - rsi_period: Periode RSI (default 14)
-                - macd_fast: Periode MACD fast EMA (default 12)
-                - macd_slow: Periode MACD slow EMA (default 26)
-                - macd_signal: Periode MACD signal line (default 9)
-                - bb_period: Periode Bollinger Bands (default 20)
-                - stoch_k: Periode Stochastic %K (default 14)
-                - stoch_d: Periode Stochastic %D (default 3)
-                - ma_short: Periode MA jangka pendek (default 20)
-                - ma_medium: Periode MA jangka menengah (default 50)
-                - ma_long: Periode MA jangka panjang (default 200)
-        """
         self.data = price_data
         
         # Set default periods jika tidak disediakan
@@ -92,33 +70,14 @@ class TechnicalAnalyzer:
                    f"MA={self.periods['ma_short']}/{self.periods['ma_medium']}/{self.periods['ma_long']}")
     
     def set_data(self, price_data: pd.DataFrame) -> None:
-        """
-        Set data harga untuk analisis
-        
-        Args:
-            price_data: DataFrame data harga
-        """
         self.data = price_data
     
     def add_all_indicators(self, 
                           open_col: str = 'open',
                           high_col: str = 'high',
                           low_col: str = 'low',
-                          close_col: str = 'price_usd',
-                          volume_col: Optional[str] = 'volume_24h') -> pd.DataFrame:
-        """
-        Tambahkan semua indikator teknikal ke data
-        
-        Args:
-            open_col: Nama kolom open price
-            high_col: Nama kolom high price
-            low_col: Nama kolom low price
-            close_col: Nama kolom close price
-            volume_col: Nama kolom volume
-            
-        Returns:
-            pd.DataFrame: DataFrame dengan indikator teknikal
-        """
+                          close_col: str = 'current_price',
+                          volume_col: Optional[str] = 'total_volume') -> pd.DataFrame:
         if self.data is None:
             raise ValueError("Price data not set. Use set_data() first.")
         
@@ -175,13 +134,6 @@ class TechnicalAnalyzer:
             return df
         
     def _add_trend_indicators(self, df: pd.DataFrame, close_col: str) -> None:
-        """
-        Tambahkan indikator trend
-        
-        Args:
-            df: DataFrame data harga
-            close_col: Nama kolom close price
-        """
         # Moving Average berbagai periode
         ma_periods = [self.periods['ma_short'], self.periods['ma_medium'], self.periods['ma_long']]
         
@@ -239,13 +191,6 @@ class TechnicalAnalyzer:
             df['macd_hist'] = df['macd'] - df['macd_signal']
     
     def _add_momentum_indicators(self, df: pd.DataFrame, close_col: str) -> None:
-        """
-        Tambahkan indikator momentum
-        
-        Args:
-            df: DataFrame data harga
-            close_col: Nama kolom close price
-        """
         if self.use_talib:
             # RSI - Relative Strength Index
             df['rsi'] = talib.RSI(df[close_col], timeperiod=self.periods['rsi_period'])
@@ -304,15 +249,6 @@ class TechnicalAnalyzer:
             df['roc'] = (df[close_col] / df[close_col].shift(self.periods['roc_period']) - 1) * 100
     
     def _add_volatility_indicators(self, df: pd.DataFrame, high_col: str, low_col: str, close_col: str) -> None:
-        """
-        Tambahkan indikator volatilitas
-        
-        Args:
-            df: DataFrame data harga
-            high_col: Nama kolom high price
-            low_col: Nama kolom low price
-            close_col: Nama kolom close price
-        """
         if self.use_talib:
             # Bollinger Bands
             df['bb_upper'], df['bb_middle'], df['bb_lower'] = talib.BBANDS(
@@ -355,14 +291,6 @@ class TechnicalAnalyzer:
             df['atr'] = df['tr'].rolling(window=self.periods['atr_period']).mean()
     
     def _add_volume_indicators(self, df: pd.DataFrame, close_col: str, volume_col: str) -> None:
-        """
-        Tambahkan indikator volume
-        
-        Args:
-            df: DataFrame data harga
-            close_col: Nama kolom close price
-            volume_col: Nama kolom volume
-        """
         if self.use_talib:
             # On Balance Volume
             df['obv'] = talib.OBV(df[close_col], df[volume_col])
@@ -400,13 +328,6 @@ class TechnicalAnalyzer:
             df['vpr'] = df[volume_col] / df[volume_col].rolling(window=self.periods['ma_short']).mean()
     
     def _add_cycle_indicators(self, df: pd.DataFrame, close_col: str) -> None:
-        """
-        Tambahkan indikator cycle
-        
-        Args:
-            df: DataFrame data harga
-            close_col: Nama kolom close price
-        """
         if self.use_talib:
             # Hilbert Transform - Dominant Cycle Period
             df['ht_dcperiod'] = talib.HT_DCPERIOD(df[close_col])
@@ -426,16 +347,6 @@ class TechnicalAnalyzer:
     
     def _add_pattern_indicators(self, df: pd.DataFrame, open_col: str, high_col: str, 
                                low_col: str, close_col: str) -> None:
-        """
-        Tambahkan indikator pattern recognition
-        
-        Args:
-            df: DataFrame data harga
-            open_col: Nama kolom open price
-            high_col: Nama kolom high price
-            low_col: Nama kolom low price
-            close_col: Nama kolom close price
-        """
         if self.use_talib:
             # Candlestick Patterns
             df['doji'] = talib.CDLDOJI(df[open_col], df[high_col], df[low_col], df[close_col])
@@ -451,13 +362,6 @@ class TechnicalAnalyzer:
             pass
     
     def _add_statistic_indicators(self, df: pd.DataFrame, close_col: str) -> None:
-        """
-        Tambahkan indikator statistik
-        
-        Args:
-            df: DataFrame data harga
-            close_col: Nama kolom close price
-        """
         if self.use_talib:
             # Linear Regression
             df['linearreg'] = talib.LINEARREG(df[close_col], timeperiod=self.periods['rsi_period'])
@@ -474,16 +378,6 @@ class TechnicalAnalyzer:
             df['linearreg_slope'] = df.ta.slope(close=close_col, length=self.periods['rsi_period'])
     
     def _add_custom_indicators(self, df: pd.DataFrame, close_col: str) -> pd.DataFrame:
-        """
-        Tambahkan indikator custom
-        
-        Args:
-            df: DataFrame data harga
-            close_col: Nama kolom close price
-            
-        Returns:
-            pd.DataFrame: DataFrame dengan indikator custom
-        """
         # Moving Average Convergence Divergence Percentage (MACDP)
         if 'macd' in df.columns and 'macd_signal' in df.columns:
             df['macdp'] = (df['macd'] - df['macd_signal']) / df[close_col] * 100
@@ -497,10 +391,10 @@ class TechnicalAnalyzer:
             df['rsi_slope'] = df['rsi'].diff(5)
             df['price_slope'] = df[close_col].diff(5)
             
-            # Bullish divergence (price: down, RSI: up)
+            # Bullish divergence: price makes higher high but RSI makes lower high
             df['bullish_divergence'] = ((df['price_slope'] < 0) & (df['rsi_slope'] > 0)).astype(int)
             
-            # Bearish divergence (price: up, RSI: down)
+            # Bearish divergence: price makes lower low but RSI makes higher low
             df['bearish_divergence'] = ((df['price_slope'] > 0) & (df['rsi_slope'] < 0)).astype(int)
         
         # Price Rate of Change Indicator dengan berbagai periode
@@ -543,16 +437,6 @@ class TechnicalAnalyzer:
         return df
     
     def _calculate_trading_signal(self, df: pd.DataFrame, close_col: str) -> pd.DataFrame:
-        """
-        Hitung sinyal trading berdasarkan kombinasi indikator
-        
-        Args:
-            df: DataFrame dengan indikator teknikal
-            close_col: Nama kolom close price
-            
-        Returns:
-            pd.DataFrame: DataFrame dengan sinyal trading
-        """
         # Inisialisasi skor dan signals
         df['bull_score'] = 50  # Nilai netral
         df['bear_score'] = 50  # Nilai netral
@@ -657,16 +541,6 @@ class TechnicalAnalyzer:
     
     
 def generate_trading_signals(price_data: pd.DataFrame, indicator_periods: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """
-    Generate trading signals dari data harga
-    
-    Args:
-        price_data: DataFrame dengan data harga
-        indicator_periods: Dictionary periode indikator kustom
-        
-    Returns:
-        dict: Dictionary dengan trading signals dan confidence level
-    """
     analyzer = TechnicalAnalyzer(price_data, indicator_periods)
     
     # Add all technical indicators
@@ -699,8 +573,8 @@ def generate_trading_signals(price_data: pd.DataFrame, indicator_periods: Option
         elif latest.get('macd_cross_down', False):
             explanation.append(f"MACD memotong ke bawah signal line (bearish) - ({macd_fast}/{macd_slow}/{macd_signal_period})")
             
-    if all(col in df_with_indicators.columns for col in ['bb_upper', 'bb_lower', 'price_usd']):
-        price = latest['price_usd']
+    if all(col in df_with_indicators.columns for col in ['bb_upper', 'bb_lower', 'current_price']):
+        price = latest['current_price']
         bb_period = analyzer.periods['bb_period']
         
         if price > latest['bb_upper']:
@@ -715,7 +589,7 @@ def generate_trading_signals(price_data: pd.DataFrame, indicator_periods: Option
     
     # Target price calculation (simple implementation)
     target_price = None
-    current_price = latest.get('price_usd', None)
+    current_price = latest.get('current_price', None)
     atr = latest.get('atr', None)
     
     if current_price is not None and atr is not None:
@@ -757,8 +631,8 @@ if __name__ == "__main__":
         'Open': 'open',
         'High': 'high',
         'Low': 'low',
-        'Close': 'price_usd',
-        'Volume': 'volume_24h'
+        'Close': 'current_price',
+        'Volume': 'total_volume'
     })
     
     # Test dengan periode standar

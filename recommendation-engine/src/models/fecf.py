@@ -1,7 +1,3 @@
-"""
-Feature-Enhanced Collaborative Filtering menggunakan LightFM
-"""
-
 import os
 import logging
 import numpy as np
@@ -36,12 +32,6 @@ class FeatureEnhancedCF:
     """
     
     def __init__(self, params: Optional[Dict[str, Any]] = None):
-        """
-        Initialize Feature-Enhanced CF model
-        
-        Args:
-            params: Model parameters (overwrites defaults from config)
-        """
         # Model parameters
         self.params = params or FECF_PARAMS
         
@@ -65,17 +55,6 @@ class FeatureEnhancedCF:
                  projects_path: Optional[str] = None, 
                  interactions_path: Optional[str] = None,
                  features_path: Optional[str] = None) -> bool:
-        """
-        Load data for the model
-        
-        Args:
-            projects_path: Path to projects data
-            interactions_path: Path to interactions data
-            features_path: Path to features data
-            
-        Returns:
-            bool: Success status
-        """
         # Use default paths if not specified
         if projects_path is None:
             projects_path = os.path.join(PROCESSED_DIR, "projects.csv")
@@ -127,12 +106,6 @@ class FeatureEnhancedCF:
             return False
     
     def _prepare_dataset(self) -> bool:
-        """
-        Prepare LightFM dataset with user and item features
-        
-        Returns:
-            bool: Success status
-        """
         try:
             logger.info("Preparing LightFM dataset")
             
@@ -177,7 +150,7 @@ class FeatureEnhancedCF:
                 item_features.extend([f"chain:{chain}" for chain in chains if pd.notna(chain)])
                 
             # Add price range features
-            if 'price_usd' in self.projects_df.columns:
+            if 'current_price' in self.projects_df.columns:
                 price_ranges = ["low_price", "medium_price", "high_price", "very_high_price"]
                 item_features.extend([f"price:{price}" for price in price_ranges])
                 
@@ -235,12 +208,6 @@ class FeatureEnhancedCF:
             return False
     
     def _build_interaction_matrix(self) -> Tuple[csr_matrix, Dict[str, int], Dict[str, int]]:
-        """
-        Build sparse interaction matrix spesifik untuk LightFM 1.17
-        
-        Returns:
-            tuple: (interactions, user_map, item_map)
-        """
         logger.info("Building interaction matrix for LightFM 1.17")
         
         # Log statistik untuk debugging
@@ -344,12 +311,6 @@ class FeatureEnhancedCF:
                 raise ValueError(f"Failed to build interactions: Original error: {str(e)}, Fallback error: {str(e2)}")
     
     def _build_item_features(self) -> csr_matrix:
-        """
-        Build item features matrix
-        
-        Returns:
-            csr_matrix: Item features
-        """
         # Initialize item features dict
         item_features_dict = {}
         
@@ -377,8 +338,8 @@ class FeatureEnhancedCF:
                 item_features_dict[(item_idx, feature_name)] = 1.0
                 
             # Add price feature
-            if 'price_usd' in project and pd.notna(project['price_usd']):
-                price = project['price_usd']
+            if 'current_price' in project and pd.notna(project['current_price']):
+                price = project['current_price']
                 if price < 1:
                     price_range = "low_price"
                 elif price < 100:
@@ -431,15 +392,6 @@ class FeatureEnhancedCF:
         return item_features
     
     def train(self, save_model: bool = True) -> Dict[str, float]:
-        """
-        Train the Feature-Enhanced CF model
-        
-        Args:
-            save_model: Whether to save the model after training
-            
-        Returns:
-            dict: Training metrics
-        """
         start_time = time.time()
         logger.info("Training Feature-Enhanced CF model")
         
@@ -501,15 +453,6 @@ class FeatureEnhancedCF:
             return {"error": str(e), "training_time": time.time() - start_time}
     
     def save_model(self, filepath: Optional[str] = None) -> str:
-        """
-        Save model to file
-        
-        Args:
-            filepath: Path to save model, if None will use default path
-            
-        Returns:
-            str: Path where model was saved
-        """
         if filepath is None:
             # Create default path
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -538,15 +481,6 @@ class FeatureEnhancedCF:
         return filepath
     
     def load_model(self, filepath: str) -> bool:
-        """
-        Load model from file
-        
-        Args:
-            filepath: Path to model file
-            
-        Returns:
-            bool: Success status
-        """
         try:
             with open(filepath, 'rb') as f:
                 model_state = pickle.load(f)
@@ -569,17 +503,6 @@ class FeatureEnhancedCF:
     
     def recommend_for_user(self, user_id: str, n: int = 10, 
                          exclude_known: bool = True) -> List[Tuple[str, float]]:
-        """
-        Generate recommendations for a user
-        
-        Args:
-            user_id: User ID
-            n: Number of recommendations
-            exclude_known: Whether to exclude already interacted items
-            
-        Returns:
-            list: List of (project_id, score) tuples
-        """
         if self.model is None:
             logger.error("Model not trained or loaded")
             return []
@@ -630,16 +553,6 @@ class FeatureEnhancedCF:
         return recommendations
     
     def recommend_projects(self, user_id: str, n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Generate project recommendations with full details
-        
-        Args:
-            user_id: User ID
-            n: Number of recommendations
-            
-        Returns:
-            list: List of project dictionaries with recommendation scores
-        """
         # Get recommendations as (project_id, score) tuples
         recommendations = self.recommend_for_user(user_id, n)
         
@@ -663,16 +576,6 @@ class FeatureEnhancedCF:
         return detailed_recommendations
     
     def get_similar_projects(self, project_id: str, n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Find similar projects based on features
-        
-        Args:
-            project_id: Project ID
-            n: Number of similar projects to return
-            
-        Returns:
-            list: List of similar project dictionaries with similarity scores
-        """
         if self.model is None:
             logger.error("Model not trained or loaded")
             return []
@@ -725,16 +628,6 @@ class FeatureEnhancedCF:
     def get_cold_start_recommendations(self, 
                                       user_interests: Optional[List[str]] = None,
                                       n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Get recommendations for cold-start users based on interests
-        
-        Args:
-            user_interests: List of categories/interests
-            n: Number of recommendations
-            
-        Returns:
-            list: List of project dictionaries with recommendation scores
-        """
         # Filter projects by categories if interests are provided
         if user_interests and 'primary_category' in self.projects_df.columns:
             # Filter projects by category
@@ -773,15 +666,6 @@ class FeatureEnhancedCF:
             return filtered_projects.head(n).to_dict('records')
     
     def get_trending_projects(self, n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Get trending projects based on trend score
-        
-        Args:
-            n: Number of trending projects to return
-            
-        Returns:
-            list: List of trending project dictionaries
-        """
         if 'trend_score' in self.projects_df.columns:
             trending = self.projects_df.sort_values('trend_score', ascending=False).head(n)
             result = []
@@ -797,15 +681,6 @@ class FeatureEnhancedCF:
             return self.get_popular_projects(n)
     
     def get_popular_projects(self, n: int = 10) -> List[Dict[str, Any]]:
-        """
-        Get popular projects based on popularity score
-        
-        Args:
-            n: Number of popular projects to return
-            
-        Returns:
-            list: List of popular project dictionaries
-        """
         if 'popularity_score' in self.projects_df.columns:
             popular = self.projects_df.sort_values('popularity_score', ascending=False).head(n)
             result = []

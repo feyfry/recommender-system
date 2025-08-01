@@ -1,7 +1,3 @@
-"""
-Modul untuk ekstraksi dan perhitungan fitur berbasis market dengan dukungan periode dinamis
-"""
-
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Union, Tuple, Any
@@ -16,37 +12,12 @@ logger = logging.getLogger(__name__)
 
 
 def calculate_market_metrics(price_df: pd.DataFrame, 
-                            price_col: str = 'price_usd',
-                            volume_col: Optional[str] = 'volume_24h',
+                            price_col: str = 'current_price',
+                            volume_col: Optional[str] = 'total_volume',
                             market_cap_col: Optional[str] = 'market_cap',
                             date_col: str = 'timestamp',
                             window_sizes: List[int] = [7, 14, 30],
                             indicator_periods: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
-    """
-    Hitung metrik pasar seperti volatilitas, rasio volume, dll dengan periode dinamis
-    
-    Args:
-        price_df: DataFrame dengan data harga time series
-        price_col: Nama kolom harga
-        volume_col: Nama kolom volume perdagangan
-        market_cap_col: Nama kolom kapitalisasi pasar
-        date_col: Nama kolom tanggal
-        window_sizes: Ukuran window untuk perhitungan metrik
-        indicator_periods: Dictionary dengan periode kustom untuk indikator:
-            - rsi_period: Periode RSI (default 14)
-            - macd_fast: Periode MACD cepat (default 12)
-            - macd_slow: Periode MACD lambat (default 26)
-            - macd_signal: Periode MACD signal (default 9)
-            - bb_period: Periode Bollinger Bands (default 20)
-            - stoch_k: Periode Stochastic %K (default 14)
-            - stoch_d: Periode Stochastic %D (default 3)
-            - ma_short: Periode MA jangka pendek (default 20)
-            - ma_medium: Periode MA jangka menengah (default 50)
-            - ma_long: Periode MA jangka panjang (default 200)
-        
-    Returns:
-        pd.DataFrame: DataFrame dengan metrik market tambahan
-    """
     logger.info("Calculating market metrics with custom periods")
     
     # Set periode default
@@ -185,18 +156,6 @@ def calculate_market_sentiment(data: pd.DataFrame,
                              indicator_periods: Optional[Dict[str, Any]] = None,
                              sentiment_weights: Optional[Dict[str, float]] = None,
                              sentiment_thresholds: Optional[Dict[str, Dict[str, float]]] = None) -> pd.Series:
-    """
-    Hitung skor sentimen pasar berdasarkan indikator teknikal dengan parameter yang dapat dikonfigurasi
-    
-    Args:
-        data: DataFrame dengan indikator pasar
-        indicator_periods: Dictionary dengan periode kustom untuk indikator
-        sentiment_weights: Bobot kustom untuk indikator berbeda dalam perhitungan sentimen
-        sentiment_thresholds: Threshold kustom untuk indikator berbeda
-        
-    Returns:
-        pd.Series: Skor sentimen pasar (0-100)
-    """
     # Set default thresholds
     default_thresholds = {
         'rsi': {'oversold': 30, 'overbought': 70},
@@ -270,9 +229,9 @@ def calculate_market_sentiment(data: pd.DataFrame,
     
     # 4. Price vs MA
     ma_col = f"ma_{periods['ma_short']}d"
-    if ma_col in data.columns and 'price_usd' in data.columns:
+    if ma_col in data.columns and 'current_price' in data.columns:
         # Price > MA (bullish), Price < MA (bearish)
-        price_vs_ma = (data['price_usd'] / data[ma_col]).fillna(1)
+        price_vs_ma = (data['current_price'] / data[ma_col]).fillna(1)
         price_ma_score = 50 + 50 * (price_vs_ma - 1)
         # Clip to reasonable range
         price_ma_score = price_ma_score.clip(0, 100)
@@ -323,31 +282,12 @@ def calculate_market_sentiment(data: pd.DataFrame,
 
 
 def detect_market_events(price_df: pd.DataFrame,
-                        price_col: str = 'price_usd',
-                        volume_col: Optional[str] = 'volume_24h',
+                        price_col: str = 'current_price',
+                        volume_col: Optional[str] = 'total_volume',
                         date_col: str = 'timestamp',
                         window_size: int = 14,
                         threshold_std: float = 2.0,
                         event_thresholds: Optional[Dict[str, float]] = None) -> pd.DataFrame:
-    """
-    Deteksi market events seperti pump, dump, volatilitas tinggi, dll dengan parameter kustom.
-    
-    Args:
-        price_df: DataFrame dengan data harga
-        price_col: Nama kolom harga
-        volume_col: Nama kolom volume
-        date_col: Nama kolom tanggal
-        window_size: Ukuran window untuk perhitungan
-        threshold_std: Threshold standar deviasi untuk deteksi event
-        event_thresholds: Dictionary threshold kustom untuk berbagai event:
-            - pump: Threshold untuk event pump (default: 2.0)
-            - dump: Threshold untuk event dump (default: 2.0)
-            - volatility: Threshold untuk event volatilitas tinggi (default: 2.0)
-            - volume_spike: Threshold untuk lonjakan volume (default: 2.0)
-        
-    Returns:
-        pd.DataFrame: DataFrame dengan informasi event
-    """
     logger.info("Detecting market events with custom parameters")
     
     # Set default thresholds

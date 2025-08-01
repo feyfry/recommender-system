@@ -1,14 +1,14 @@
-"""
-API endpoints untuk rekomendasi proyek Web3 (dengan perbaikan nama field image)
-"""
-
 import os
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import pandas as pd
+import numpy as np
+import json
+import pickle
 from fastapi import APIRouter, HTTPException, Query, Depends, Body, Path
 from pydantic import BaseModel, Field
+import inspect
 
 # Path handling
 import sys
@@ -18,7 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from src.models.alt_fecf import FeatureEnhancedCF
 from src.models.ncf import NCFRecommender
 from src.models.hybrid import HybridRecommender
-from config import MODELS_DIR
+from config import MODELS_DIR, PROCESSED_DIR
 
 # Setup router
 router = APIRouter(
@@ -34,18 +34,194 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Global models container
+# Global model dan cache
 _models = {
     "fecf": None,
     "ncf": None,
     "hybrid": None
 }
 
-# Cache for recommendations
-_recommendations_cache = {}
-_cache_ttl = 3600  # 1 hour in seconds
+# ⚡ PERBAIKAN: TTL cache (2-5 menit)
+_cache_ttl = {
+    "cold_start": 120,     # 2 menit untuk cold-start user (dipendekkan dari 30 menit)
+    "low_activity": 180,   # 3 menit untuk pengguna dengan aktivitas rendah  
+    "normal": 240,         # 4 menit untuk pengguna normal
+    "active": 300          # 5 menit untuk pengguna sangat aktif
+}
 
-# Pydantic models
+# ⚡ PERBAIKAN: Cache dengan persistent storage untuk mengatasi restart
+_cache_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'cache')
+os.makedirs(_cache_dir, exist_ok=True)
+
+# Cache in-memory
+_user_recommendations_cache = {
+    "fecf": {},
+    "ncf": {},
+    "hybrid": {}
+}
+
+# ⚡ TAMBAHAN: Tracking untuk cold-start users yang baru dapat interaksi
+_cold_start_tracking = {}
+
+def _get_cache_file_path(cache_type: str) -> str:
+    """Generate path file cache persistent"""
+    return os.path.join(_cache_dir, f"{cache_type}_cache.pkl")
+
+def _load_persistent_cache():
+    """⚡ PERBAIKAN: Load cache dengan better error handling"""
+    global _user_recommendations_cache, _cold_start_tracking
+    
+    try:
+        # Load recommendation cache
+        for cache_type in ["fecf", "ncf", "hybrid"]:
+            cache_file = _get_cache_file_path(f"recommendations_{cache_type}")
+            if os.path.exists(cache_file):
+                try:
+                    with open(cache_file, 'rb') as f:
+                        cached_data = pickle.load(f)
+                        # Filter expired entries
+                        current_time = datetime.now()
+                        valid_cache = {}
+                        for key, value in cached_data.items():
+                            try:
+                                if current_time < value['expires']:
+                                    valid_cache[key] = value
+                            except (KeyError, TypeError) as e:
+                                logger.warning(f"Invalid cache entry {key}: {e}")
+                                continue
+                        _user_recommendations_cache[cache_type] = valid_cache
+                        logger.info(f"Loaded {len(valid_cache)} valid {cache_type} cache entries")
+                except (pickle.UnpicklingError, AttributeError, ImportError) as e:
+                    logger.warning(f"Failed to load {cache_type} cache, will recreate: {e}")
+                    # ⚡ PERBAIKAN: Delete corrupted cache file
+                    try:
+                        os.remove(cache_file)
+                        logger.info(f"Removed corrupted cache file: {cache_file}")
+                    except:
+                        pass
+                    _user_recommendations_cache[cache_type] = {}
+        
+        # Load cold-start tracking
+        tracking_file = _get_cache_file_path("cold_start_tracking")
+        if os.path.exists(tracking_file):
+            try:
+                with open(tracking_file, 'rb') as f:
+                    _cold_start_tracking = pickle.load(f)
+                    logger.info(f"Loaded cold-start tracking for {len(_cold_start_tracking)} users")
+            except (pickle.UnpicklingError, AttributeError, ImportError) as e:
+                logger.warning(f"Failed to load cold-start tracking, will recreate: {e}")
+                try:
+                    os.remove(tracking_file)
+                    logger.info(f"Removed corrupted tracking file: {tracking_file}")
+                except:
+                    pass
+                _cold_start_tracking = {}
+                
+    except Exception as e:
+        logger.warning(f"Error loading persistent cache: {e}")
+        # ⚡ PERBAIKAN: Initialize empty cache on any error
+        for cache_type in ["fecf", "ncf", "hybrid"]:
+            _user_recommendations_cache[cache_type] = {}
+        _cold_start_tracking = {}
+
+def _save_persistent_cache():
+    """⚡ PERBAIKAN: Save cache dengan better error handling"""
+    try:
+        # Ensure cache directory exists
+        os.makedirs(_cache_dir, exist_ok=True)
+        
+        # Save recommendation cache
+        for cache_type, cache_data in _user_recommendations_cache.items():
+            try:
+                cache_file = _get_cache_file_path(f"recommendations_{cache_type}")
+                with open(cache_file, 'wb') as f:
+                    pickle.dump(cache_data, f)
+                logger.debug(f"Saved {cache_type} cache with {len(cache_data)} entries")
+            except Exception as e:
+                logger.warning(f"Failed to save {cache_type} cache: {e}")
+        
+        # Save cold-start tracking
+        try:
+            tracking_file = _get_cache_file_path("cold_start_tracking")
+            with open(tracking_file, 'wb') as f:
+                pickle.dump(_cold_start_tracking, f)
+            logger.debug(f"Saved cold-start tracking for {len(_cold_start_tracking)} users")
+        except Exception as e:
+            logger.warning(f"Failed to save cold-start tracking: {e}")
+            
+    except Exception as e:
+        logger.warning(f"Error saving persistent cache: {e}")
+
+def _check_recent_interactions(user_id: str) -> bool:
+    """⚡ PERBAIKAN: Check apakah user memiliki interaksi baru dalam 5 menit terakhir"""
+    try:
+        interactions_path = os.path.join(PROCESSED_DIR, "interactions.csv")
+        if not os.path.exists(interactions_path):
+            return False
+            
+        # Baca file interactions
+        interactions_df = pd.read_csv(interactions_path)
+        
+        # Filter untuk user ini
+        user_interactions = interactions_df[interactions_df['user_id'] == user_id].copy()  # ⚡ FIX: Tambah .copy()
+        
+        if user_interactions.empty:
+            return False
+        
+        # Check timestamp kolom
+        if 'timestamp' in user_interactions.columns:
+            # Parse timestamp dan check 5 menit terakhir
+            try:
+                user_interactions.loc[:, 'timestamp'] = pd.to_datetime(user_interactions['timestamp'])  # ⚡ FIX: Gunakan .loc
+                recent_threshold = datetime.now() - timedelta(minutes=5)
+                recent_interactions = user_interactions[user_interactions['timestamp'] > recent_threshold]
+                
+                if not recent_interactions.empty:
+                    logger.info(f"Found {len(recent_interactions)} recent interactions for user {user_id}")
+                    return True
+            except Exception as e:
+                logger.warning(f"Error parsing timestamps: {e}")
+                
+        # Fallback: check jika user ada di file (tanpa timestamp check)
+        return len(user_interactions) > 0
+        
+    except Exception as e:
+        logger.warning(f"Error checking recent interactions: {e}")
+        return False
+
+def _invalidate_cold_start_cache(user_id: str):
+    """⚡ TAMBAHAN: Invalidate cache untuk user yang tidak lagi cold-start"""
+    global _user_recommendations_cache, _cold_start_tracking
+    
+    try:
+        # Mark user sebagai tidak cold-start lagi
+        _cold_start_tracking[user_id] = {
+            'last_interaction': datetime.now(),
+            'was_cold_start': True,
+            'cache_invalidated': True
+        }
+        
+        # Hapus cache untuk user ini dari semua model
+        for cache_type in _user_recommendations_cache:
+            cache = _user_recommendations_cache[cache_type]
+            keys_to_remove = [key for key in cache.keys() if key.startswith(f"{user_id}_")]
+            
+            for key in keys_to_remove:
+                del cache[key]
+                logger.info(f"Invalidated cache key: {key}")
+        
+        # Save persistent cache
+        _save_persistent_cache()
+        
+        logger.info(f"Invalidated cold-start cache for user {user_id}")
+        
+    except Exception as e:
+        logger.error(f"Error invalidating cold-start cache: {e}")
+
+# Load persistent cache saat startup
+_load_persistent_cache()
+
+# Pydantic models (tetap sama)
 class RecommendationRequest(BaseModel):
     user_id: str
     model_type: str = "hybrid"
@@ -55,22 +231,24 @@ class RecommendationRequest(BaseModel):
     chain: Optional[str] = None
     user_interests: Optional[List[str]] = None
     risk_tolerance: Optional[str] = "medium"
+    strict_filter: bool = False
 
 class ProjectResponse(BaseModel):
     id: str
     name: Optional[str] = None
     symbol: Optional[str] = None
-    image: Optional[str] = None  # Menggunakan image, bukan image_url
-    price_usd: Optional[float] = None
+    image: Optional[str] = None
+    current_price: Optional[float] = None
     price_change_24h: Optional[float] = None
-    price_change_7d: Optional[float] = None
+    price_change_percentage_7d_in_currency: Optional[float] = None
     market_cap: Optional[float] = None
-    volume_24h: Optional[float] = None
+    total_volume: Optional[float] = None
     popularity_score: Optional[float] = None
     trend_score: Optional[float] = None
     category: Optional[str] = None
-    chain: Optional[str] = None  # Must be optional to handle NaN
+    chain: Optional[str] = None
     recommendation_score: float
+    filter_match: Optional[str] = None 
 
 class RecommendationResponse(BaseModel):
     user_id: str
@@ -81,14 +259,15 @@ class RecommendationResponse(BaseModel):
     category_filter: Optional[str] = None
     chain_filter: Optional[str] = None
     execution_time: float
+    exact_match_count: int = 0
+    cache_hit: bool = False  # ⚡ TAMBAHAN: Info apakah dari cache
+    cold_start_invalidated: bool = False  # ⚡ TAMBAHAN: Info apakah cache cold-start di-invalidate
 
+# Load models function (tetap sama)
 def load_models_on_startup():
-    """
-    Load recommendation models on API startup
-    """
+    """Load recommendation models on API startup"""
     logger.info("Loading recommendation models on startup...")
     
-    # Find model files
     try:
         # Check for FECF model files
         fecf_files = [f for f in os.listdir(MODELS_DIR) 
@@ -98,7 +277,6 @@ def load_models_on_startup():
             latest_fecf = sorted(fecf_files)[-1]
             fecf_path = os.path.join(MODELS_DIR, latest_fecf)
             
-            # Initialize and load FECF model
             logger.info(f"Loading FECF model from {fecf_path}")
             model = FeatureEnhancedCF()
             if model.load_data():
@@ -115,7 +293,6 @@ def load_models_on_startup():
         # Check for NCF model file
         ncf_path = os.path.join(MODELS_DIR, "ncf_model.pkl")
         if os.path.exists(ncf_path):
-            # Initialize and load NCF model
             logger.info(f"Loading NCF model from {ncf_path}")
             model = NCFRecommender()
             if model.load_data():
@@ -137,7 +314,6 @@ def load_models_on_startup():
             latest_hybrid = sorted(hybrid_files)[-1]
             hybrid_path = os.path.join(MODELS_DIR, latest_hybrid)
             
-            # Initialize and load Hybrid model
             logger.info(f"Loading Hybrid model from {hybrid_path}")
             model = HybridRecommender()
             if model.load_data():
@@ -158,52 +334,35 @@ def load_models_on_startup():
         import traceback
         logger.error(traceback.format_exc())
 
-# Add this line right after the router declaration
 load_models_on_startup()
 
-# Helper functions
+# Helper functions (get_model tetap sama)
 def get_model(model_type: str) -> Any:
-    """
-    Get or initialize model based on type with improved error handling
-    
-    Args:
-        model_type: Type of model ('fecf', 'ncf', 'hybrid')
-        
-    Returns:
-        Model instance
-    """
     global _models
     
     if model_type not in ["fecf", "ncf", "hybrid"]:
         raise ValueError(f"Invalid model type: {model_type}")
     
-    # Return existing model if available
     if _models[model_type] is not None:
-        # Verify the model is properly loaded
-        if hasattr(_models[model_type], 'model') and _models[model_type].model is None:
-            logger.warning(f"{model_type} model is loaded but not trained, attempting to reload")
-        else:
-            return _models[model_type]
+        return _models[model_type]
     
-    # Initialize model if it's not loaded yet
     try:
         if model_type == "fecf":
+            from src.models.alt_fecf import FeatureEnhancedCF
             model = FeatureEnhancedCF()
         elif model_type == "ncf":
+            from src.models.ncf import NCFRecommender
             model = NCFRecommender()
         else:  # hybrid
+            from src.models.hybrid import HybridRecommender
             model = HybridRecommender()
         
-        # Load data
+        logger.info(f"Loading data for {model_type} model")
         data_loaded = model.load_data()
         if not data_loaded:
             logger.error(f"Failed to load data for {model_type} model")
-            # Try to return whatever we have, even if incomplete
-            if _models[model_type] is not None:
-                return _models[model_type]
-            return model
+            return None
             
-        # Find model file paths
         model_loaded = False
         if model_type == "fecf":
             fecf_files = [f for f in os.listdir(MODELS_DIR) 
@@ -229,164 +388,243 @@ def get_model(model_type: str) -> Any:
         
         if model_loaded:
             logger.info(f"{model_type} model loaded successfully")
+            _models[model_type] = model
+            return model
         else:
-            logger.warning(f"Could not load {model_type} model file")
-        
-        # Store model for later use
-        _models[model_type] = model
-        
-        return model
-    
+            logger.error(f"Failed to load {model_type} model file")
+            return None
+            
     except Exception as e:
         logger.error(f"Error initializing {model_type} model: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
-        
-        # Fallback to existing model if available, even if it might not be fully loaded
-        if _models[model_type] is not None:
-            return _models[model_type]
-            
-        raise HTTPException(status_code=500, detail=f"Model initialization error: {str(e)}")
+        return None
 
 def is_cold_start_user(user_id: str, model: Any) -> bool:
-    """
-    Check if user is a cold-start user
+    """⚡ PERBAIKAN: Enhanced cold-start detection dengan proper matrix check"""
     
-    Args:
-        user_id: User ID
-        model: Recommender model
-        
-    Returns:
-        bool: True if user is cold-start
-    """
+    # Check basic condition - apakah user ada di trained matrix
+    user_in_matrix = False
     if hasattr(model, 'user_item_matrix') and model.user_item_matrix is not None:
-        return user_id not in model.user_item_matrix.index
+        user_in_matrix = user_id in model.user_item_matrix.index
     
-    return True
+    # ⚡ PERBAIKAN: Jika user TIDAK ada di matrix, SELALU cold-start
+    # Meskipun ada recent interactions, matrix belum ter-update
+    if not user_in_matrix:
+        logger.info(f"User {user_id} not in trained matrix, treating as cold-start (matrix needs retrain)")
+        return True
+    
+    # Jika user ada di matrix, tidak cold-start
+    return False
 
-def get_cache_key(request: RecommendationRequest) -> str:
-    """Generate cache key from request parameters"""
-    return f"{request.user_id}:{request.model_type}:{request.num_recommendations}:{request.category}:{request.chain}"
-
-def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Clean project data to handle NaN values
-    
-    Args:
-        project_dict: Project data dictionary
-        
-    Returns:
-        dict: Cleaned project data
-    """
-    result = {}
-    
-    for key, value in project_dict.items():
-        # Handle NaN values
-        if pd.isna(value):
-            result[key] = None
-        else:
-            result[key] = value
-    
-    return result
-
-# Routes
+# Main recommendation endpoint
 @router.post("/projects", response_model=RecommendationResponse)
 async def recommend_projects(request: RecommendationRequest):
-    """
-    Get project recommendations for a user
-    """
     start_time = datetime.now()
     logger.info(f"Recommendation request for user {request.user_id} using {request.model_type} model")
     
-    # Check cache first
-    cache_key = get_cache_key(request)
-    if cache_key in _recommendations_cache:
-        cache_entry = _recommendations_cache[cache_key]
-        
-        # Check if cache is still valid
+    # Cache checking (tetap sama)
+    cache = _user_recommendations_cache.get(request.model_type, {})
+    cache_key = f"{request.user_id}_{request.num_recommendations}_{request.category}_{request.chain}"
+    
+    cache_hit = False
+    cold_start_invalidated = False
+    
+    if cache_key in cache:
+        cache_entry = cache[cache_key]
         if datetime.now() < cache_entry['expires']:
             logger.info(f"Returning cached recommendations for {cache_key}")
             
-            # Update timestamp and execution time
-            cache_entry['response'].timestamp = datetime.now()
-            cache_entry['response'].execution_time = (datetime.now() - start_time).total_seconds()
+            cached_response = cache_entry['response']
+            cached_response.timestamp = datetime.now()
+            cached_response.execution_time = (datetime.now() - start_time).total_seconds()
+            cached_response.cache_hit = True
             
-            return cache_entry['response']
-    
+            return cached_response
+
     try:
         # Get appropriate model
         model = get_model(request.model_type)
+        if not model:
+            raise HTTPException(status_code=500, detail=f"Failed to load {request.model_type} model")
         
-        # Check if this is a cold-start user
+        # ⚡ PERBAIKAN: Simplified cold-start detection
         is_cold_start = is_cold_start_user(request.user_id, model)
+        user_interaction_count = 0
         
-        # Get recommendations
+        # ⚡ PERBAIKAN: Hanya hitung interactions jika user ada di matrix
+        if not is_cold_start and hasattr(model, 'user_item_matrix') and model.user_item_matrix is not None:
+            try:
+                user_interactions = model.user_item_matrix.loc[request.user_id]
+                user_interaction_count = (user_interactions > 0).sum()
+            except KeyError:
+                # ⚡ SAFETY: Jika user tidak ada di matrix, fallback ke cold-start
+                logger.warning(f"User {request.user_id} missing from matrix, fallback to cold-start")
+                is_cold_start = True
+                user_interaction_count = 0
+        
+        # ⚡ TAMBAHAN: Check recent interactions untuk informasi saja (tidak affect logic)
+        has_recent_interactions = _check_recent_interactions(request.user_id)
+        if has_recent_interactions and is_cold_start:
+            logger.info(f"User {request.user_id} has recent interactions but matrix not updated - recommend model retrain")
+            # Bisa add flag untuk monitoring
+            cold_start_invalidated = True
+        
+        # Determine cache TTL
+        if is_cold_start:
+            cache_ttl = _cache_ttl["cold_start"]  # 2 menit
+        elif user_interaction_count < 10:
+            cache_ttl = _cache_ttl["low_activity"]  # 3 menit
+        elif user_interaction_count < 50:
+            cache_ttl = _cache_ttl["normal"]  # 4 menit
+        else:
+            cache_ttl = _cache_ttl["active"]  # 5 menit
+
+        # Generate recommendations
         if is_cold_start:
             logger.info(f"Cold-start user detected: {request.user_id}")
             
-            if request.model_type == "fecf" or request.model_type == "hybrid":
+            if hasattr(model, 'get_cold_start_recommendations'):
                 recommendations = model.get_cold_start_recommendations(
                     user_interests=request.user_interests,
                     n=request.num_recommendations
                 )
-            else:  # NCF doesn't have specialized cold-start handling
-                # Fallback to popular projects
-                recommendations = get_model("fecf").get_popular_projects(n=request.num_recommendations)
-        else:
-            # Regular recommendations
-            if request.category:
-                # Category-filtered recommendations
-                if hasattr(model, 'get_recommendations_by_category'):
-                    recommendations = model.get_recommendations_by_category(
-                        request.user_id, 
-                        request.category, 
-                        n=request.num_recommendations
-                    )
-                else:
-                    # Fallback
-                    recommendations = model.recommend_projects(request.user_id, n=request.num_recommendations)
-            elif request.chain:
-                # Chain-filtered recommendations
-                if hasattr(model, 'get_recommendations_by_chain'):
-                    recommendations = model.get_recommendations_by_chain(
-                        request.user_id, 
-                        request.chain, 
-                        n=request.num_recommendations
-                    )
-                else:
-                    # Fallback
-                    recommendations = model.recommend_projects(request.user_id, n=request.num_recommendations)
             else:
-                # Standard recommendations
-                recommendations = model.recommend_projects(
-                    request.user_id, 
-                    n=request.num_recommendations
-                )
+                logger.warning(f"Model {request.model_type} tidak memiliki method get_cold_start_recommendations, fallback ke popular_projects")
+                recommendations = model.get_popular_projects(n=request.num_recommendations)
+        else:
+            # ⚡ PERBAIKAN: Tambah safety check sebelum akses matrix
+            try:
+                # Regular recommendations logic (sama seperti sebelumnya)
+                if request.category and request.chain:
+                    logger.info(f"Filtering by both category '{request.category}' and chain '{request.chain}'")
+                    
+                    if hasattr(model, 'get_recommendations_by_category_and_chain'):
+                        recommendations = model.get_recommendations_by_category_and_chain(
+                            request.user_id, 
+                            request.category,
+                            request.chain,
+                            n=request.num_recommendations,
+                            strict=request.strict_filter
+                        )
+                    elif hasattr(model, 'get_recommendations_by_category'):
+                        if 'chain' in inspect.signature(model.get_recommendations_by_category).parameters:
+                            recommendations = model.get_recommendations_by_category(
+                                request.user_id, 
+                                request.category,
+                                n=request.num_recommendations,
+                                chain=request.chain,
+                                strict=request.strict_filter
+                            )
+                        else:
+                            category_recs = model.get_recommendations_by_category(
+                                request.user_id, 
+                                request.category,
+                                n=request.num_recommendations * 3
+                            )
+                            
+                            chain_filtered = []
+                            for rec in category_recs:
+                                if 'chain' in rec and rec['chain'] and request.chain.lower() in str(rec['chain']).lower():
+                                    rec['filter_match'] = 'exact'
+                                    chain_filtered.append(rec)
+                            
+                            recommendations = chain_filtered[:request.num_recommendations]
+                            
+                            if len(recommendations) < request.num_recommendations // 2:
+                                logger.warning(f"Too few results after chain filtering ({len(recommendations)}). Adding some category-only results.")
+                                remaining = request.num_recommendations - len(recommendations)
+                                existing_ids = [rec['id'] for rec in recommendations]
+                                additional = []
+                                for rec in category_recs:
+                                    if rec['id'] not in existing_ids:
+                                        rec['filter_match'] = 'category_only'
+                                        additional.append(rec)
+                                        if len(additional) >= remaining:
+                                            break
+                                recommendations.extend(additional)
+                    else:
+                        logger.warning(f"Model {request.model_type} doesn't support category and chain filtering. Using standard recommendations.")
+                        recommendations = model.recommend_projects(request.user_id, n=request.num_recommendations)
+                elif request.category:
+                    if hasattr(model, 'get_recommendations_by_category'):
+                        recommendations = model.get_recommendations_by_category(
+                            request.user_id, 
+                            request.category, 
+                            n=request.num_recommendations,
+                            strict=request.strict_filter
+                        )
+                    else:
+                        logger.warning(f"Model {request.model_type} doesn't support category filtering. Using standard recommendations.")
+                        recommendations = model.recommend_projects(request.user_id, n=request.num_recommendations)
+                elif request.chain:
+                    if hasattr(model, 'get_recommendations_by_chain'):
+                        recommendations = model.get_recommendations_by_chain(
+                            request.user_id, 
+                            request.chain, 
+                            n=request.num_recommendations,
+                            strict=request.strict_filter
+                        )
+                    else:
+                        logger.warning(f"Model {request.model_type} doesn't support chain filtering. Using standard recommendations.")
+                        recommendations = model.recommend_projects(request.user_id, n=request.num_recommendations)
+                else:
+                    recommendations = model.recommend_projects(
+                        request.user_id, 
+                        n=request.num_recommendations
+                    )
+            except KeyError as e:
+                # ⚡ SAFETY: Jika ada KeyError saat generate recommendations, fallback ke cold-start
+                logger.error(f"KeyError during recommendation generation for user {request.user_id}: {e}")
+                logger.info(f"Falling back to cold-start recommendations")
+                
+                is_cold_start = True  # Update status
+                if hasattr(model, 'get_cold_start_recommendations'):
+                    recommendations = model.get_cold_start_recommendations(
+                        user_interests=request.user_interests,
+                        n=request.num_recommendations
+                    )
+                else:
+                    recommendations = model.get_popular_projects(n=request.num_recommendations)
         
-        # Create response with sanitized data
+        # Process recommendations (tetap sama seperti sebelumnya)
         project_responses = []
+        exact_match_count = 0
+        
         for rec in recommendations:
-            # Sanitize data (handle NaN values)
-            clean_rec = sanitize_project_data(rec)
-            
-            project_responses.append(
-                ProjectResponse(
-                    id=clean_rec.get('id'),
-                    name=clean_rec.get('name'),
-                    symbol=clean_rec.get('symbol'),
-                    image=clean_rec.get('image'),  # Using image field
-                    price_usd=clean_rec.get('price_usd'),
-                    price_change_24h=clean_rec.get('price_change_24h'),
-                    price_change_7d=clean_rec.get('price_change_7d'),
-                    market_cap=clean_rec.get('market_cap'),
-                    volume_24h=clean_rec.get('volume_24h'),
-                    popularity_score=clean_rec.get('popularity_score'),
-                    trend_score=clean_rec.get('trend_score'),
-                    category=clean_rec.get('primary_category', clean_rec.get('category')),
-                    chain=clean_rec.get('chain'),
-                    recommendation_score=clean_rec.get('recommendation_score', 0.5)
+            try:
+                clean_rec = sanitize_project_data(rec)
+
+                if 'filter_match' in clean_rec and clean_rec['filter_match'] == 'exact':
+                    exact_match_count += 1
+                
+                if 'recommendation_score' in clean_rec:
+                    clean_rec['recommendation_score'] = float(clean_rec['recommendation_score'])
+                
+                project_responses.append(
+                    ProjectResponse(
+                        id=clean_rec.get('id'),
+                        name=clean_rec.get('name'),
+                        symbol=clean_rec.get('symbol'),
+                        image=clean_rec.get('image'),
+                        current_price=clean_rec.get('current_price'),
+                        price_change_24h=clean_rec.get('price_change_24h'),
+                        price_change_percentage_7d_in_currency=clean_rec.get('price_change_percentage_7d_in_currency'),
+                        market_cap=clean_rec.get('market_cap'),
+                        total_volume=clean_rec.get('total_volume'),
+                        popularity_score=clean_rec.get('popularity_score'),
+                        trend_score=clean_rec.get('trend_score'),
+                        category=clean_rec.get('primary_category', clean_rec.get('category')),
+                        chain=clean_rec.get('chain'),
+                        recommendation_score=clean_rec.get('recommendation_score', 0.5),
+                        filter_match=clean_rec.get('filter_match')
+                    )
                 )
-            )
+            except Exception as e:
+                logger.warning(f"Error processing recommendation item: {e}. Skipping item.")
+                continue
+        
+        logger.info(f"Found {exact_match_count} exact matches out of {len(project_responses)} recommendations")
         
         response = RecommendationResponse(
             user_id=request.user_id,
@@ -396,14 +634,28 @@ async def recommend_projects(request: RecommendationRequest):
             is_cold_start=is_cold_start,
             category_filter=request.category,
             chain_filter=request.chain,
-            execution_time=(datetime.now() - start_time).total_seconds()
+            execution_time=(datetime.now() - start_time).total_seconds(),
+            exact_match_count=exact_match_count,
+            cache_hit=cache_hit,
+            cold_start_invalidated=cold_start_invalidated
         )
         
         # Store in cache
-        _recommendations_cache[cache_key] = {
+        if request.user_id not in _user_recommendations_cache:
+            _user_recommendations_cache[request.model_type] = {}
+            
+        _user_recommendations_cache[request.model_type][cache_key] = {
             'response': response,
-            'expires': datetime.now() + timedelta(seconds=_cache_ttl)
+            'expires': datetime.now() + timedelta(seconds=cache_ttl)
         }
+        
+        # Save persistent cache
+        try:
+            _save_persistent_cache()
+        except Exception as e:
+            logger.warning(f"Failed to save persistent cache: {e}")
+        
+        logger.info(f"Cached response for {cache_key} with TTL {cache_ttl} seconds")
         
         return response
         
@@ -413,43 +665,185 @@ async def recommend_projects(request: RecommendationRequest):
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Recommendation error: {str(e)}")
 
+# Sanitize function (tetap sama)
+def sanitize_project_data(project_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Sanitize project data dengan validasi score yang ketat"""
+    result = {}
+    
+    if not isinstance(project_dict, dict):
+        logger.warning(f"Input bukan dictionary: {type(project_dict)}")
+        return {"id": "unknown", "recommendation_score": 0.5}
+    
+    for key, value in project_dict.items():
+        if value is None:
+            result[key] = None
+            continue
+        
+        try:
+            if isinstance(value, np.ndarray):
+                if value.size == 0:
+                    result[key] = None
+                elif value.size == 1:
+                    if np.issubdtype(value.dtype, np.floating):
+                        result[key] = float(value.item())
+                    elif np.issubdtype(value.dtype, np.integer):
+                        result[key] = int(value.item())
+                    else:
+                        result[key] = value.item()
+                else:
+                    if value.dtype.kind == 'f' and np.isnan(value).all():
+                        result[key] = None
+                    else:
+                        result[key] = value.tolist()
+            
+            elif isinstance(value, np.number):
+                if np.issubdtype(type(value), np.floating):
+                    result[key] = float(value)
+                else:
+                    result[key] = int(value)
+            
+            elif pd.api.types.is_scalar(value) and pd.isna(value):
+                result[key] = None
+            
+            elif isinstance(value, str) and key in ['category', 'primary_category'] and (value.startswith('[') or value.startswith('"[')):
+                try:
+                    cleaned_value = value
+                    if cleaned_value.startswith('"[') and cleaned_value.endswith(']"'):
+                        cleaned_value = cleaned_value[1:-1]
+                    
+                    parsed = json.loads(cleaned_value)
+                    if isinstance(parsed, list) and parsed:
+                        result[key] = parsed[0]
+                    else:
+                        result[key] = cleaned_value
+                except:
+                    result[key] = value
+            
+            elif isinstance(value, (list, tuple)) and key in ['category', 'primary_category']:
+                if value:
+                    result[key] = value[0]
+                else:
+                    result[key] = 'unknown'
+            
+            else:
+                result[key] = value
+                
+        except Exception as e:
+            logger.warning(f"Error processing field {key}: {str(e)}")
+            if key == 'id':
+                result[key] = 'unknown'
+            elif key == 'recommendation_score':
+                result[key] = 0.5
+            else:
+                result[key] = None
+    
+    # Validasi score fields
+    score_fields = ['trend_score', 'popularity_score', 'developer_activity_score', 
+                   'social_engagement_score', 'maturity_score']
+    
+    for field in score_fields:
+        if field in result and result[field] is not None:
+            try:
+                score_value = float(result[field])
+                result[field] = float(np.clip(score_value, 0.0, 100.0))
+                
+                if score_value > 100.0 or score_value < 0.0:
+                    logger.warning(f"Score {field} di-clip: {score_value} -> {result[field]}")
+                    
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid {field} value: {result[field]}, setting to 0")
+                result[field] = 0.0
+    
+    # Final safety check
+    if 'primary_category' in result and isinstance(result['primary_category'], (list, tuple)):
+        if result['primary_category']:
+            result['primary_category'] = result['primary_category'][0]
+        else:
+            result['primary_category'] = 'unknown'
+    
+    if 'category' in result and isinstance(result['category'], (list, tuple)):
+        if result['category']:
+            result['category'] = result['category'][0]
+        else:
+            result['category'] = 'unknown'
+    
+    # Safety check for recommendation_score
+    if 'recommendation_score' in result:
+        if isinstance(result['recommendation_score'], (np.ndarray, list, tuple)):
+            if len(result['recommendation_score']) > 0:
+                value = result['recommendation_score'][0]
+                try:
+                    result['recommendation_score'] = float(np.clip(value, 0.0, 1.0))
+                except:
+                    result['recommendation_score'] = 0.5
+            else:
+                result['recommendation_score'] = 0.5
+        elif result['recommendation_score'] is None:
+            result['recommendation_score'] = 0.5
+        else:
+            try:
+                rec_score = float(result['recommendation_score'])
+                result['recommendation_score'] = float(np.clip(rec_score, 0.0, 1.0))
+                
+                if rec_score > 1.0 or rec_score < 0.0:
+                    logger.warning(f"Recommendation score di-clip: {rec_score} -> {result['recommendation_score']}")
+                    
+            except:
+                result['recommendation_score'] = 0.5
+    
+    return result
+
+# Endpoints lainnya (trending, popular, similar) tetap sama...
 @router.get("/trending", response_model=List[ProjectResponse])
 async def get_trending_projects(
     limit: int = Query(10, ge=1, le=100),
     model_type: str = Query("fecf", enum=["fecf", "ncf", "hybrid"])
 ):
-    """
-    Get trending projects based on trend score
-    """
     try:
         model = get_model(model_type)
         trending = model.get_trending_projects(n=limit)
         
-        # Create response with sanitized data
         project_responses = []
         for rec in trending:
-            # Sanitize data (handle NaN values)
-            clean_rec = sanitize_project_data(rec)
-            
-            project_responses.append(
-                ProjectResponse(
-                    id=clean_rec.get('id'),
-                    name=clean_rec.get('name'),
-                    symbol=clean_rec.get('symbol'),
-                    image=clean_rec.get('image'),  # Using image field
-                    price_usd=clean_rec.get('price_usd'),
-                    price_change_24h=clean_rec.get('price_change_24h'),
-                    price_change_7d=clean_rec.get('price_change_7d'),
-                    market_cap=clean_rec.get('market_cap'),
-                    volume_24h=clean_rec.get('volume_24h'),
-                    popularity_score=clean_rec.get('popularity_score'),
-                    trend_score=clean_rec.get('trend_score'),
-                    category=clean_rec.get('primary_category', clean_rec.get('category')),
-                    chain=clean_rec.get('chain'),
-                    recommendation_score=clean_rec.get('recommendation_score', 0.5)
+            try:
+                clean_rec = sanitize_project_data(rec)
+                
+                if 'trend_score' in clean_rec and clean_rec['trend_score'] is not None:
+                    trend_score = float(clean_rec['trend_score'])
+                    clean_rec['trend_score'] = float(np.clip(trend_score, 0.0, 100.0))
+                    
+                    if trend_score > 100.0:
+                        logger.warning(f"Trending project {clean_rec.get('id', 'unknown')} had trend_score {trend_score} > 100, clipped to 100")
+                
+                for field in ['current_price', 'market_cap', 'total_volume', 'price_change_24h', 
+                            'price_change_percentage_7d_in_currency', 'popularity_score', 
+                            'trend_score', 'recommendation_score']:
+                    if field in clean_rec and clean_rec[field] is not None:
+                        if isinstance(clean_rec[field], np.number):
+                            clean_rec[field] = float(clean_rec[field])
+                
+                project_responses.append(
+                    ProjectResponse(
+                        id=clean_rec.get('id'),
+                        name=clean_rec.get('name'),
+                        symbol=clean_rec.get('symbol'),
+                        image=clean_rec.get('image'),
+                        current_price=clean_rec.get('current_price'),
+                        price_change_24h=clean_rec.get('price_change_24h'),
+                        price_change_percentage_7d_in_currency=clean_rec.get('price_change_percentage_7d_in_currency'),
+                        market_cap=clean_rec.get('market_cap'),
+                        total_volume=clean_rec.get('total_volume'),
+                        popularity_score=clean_rec.get('popularity_score'),
+                        trend_score=clean_rec.get('trend_score'),
+                        category=clean_rec.get('primary_category', clean_rec.get('category')),
+                        chain=clean_rec.get('chain'),
+                        recommendation_score=clean_rec.get('recommendation_score', 0.5)
+                    )
                 )
-            )
-            
+            except Exception as e:
+                logger.warning(f"Error processing trending item: {e}. Skipping item.")
+                continue
+                
         return project_responses
     
     except Exception as e:
@@ -461,40 +855,62 @@ async def get_trending_projects(
 @router.get("/popular", response_model=List[ProjectResponse])
 async def get_popular_projects(
     limit: int = Query(10, ge=1, le=100),
-    model_type: str = Query("fecf", enum=["fecf", "ncf", "hybrid"])
+    model_type: str = Query("fecf", enum=["fecf", "ncf", "hybrid"]),
+    sort: str = Query("popularity_score", enum=["popularity_score", "market_cap", "trend_score"]),
+    order: str = Query("desc", enum=["desc", "asc"])
 ):
-    """
-    Get popular projects based on popularity score
-    """
     try:
         model = get_model(model_type)
         popular = model.get_popular_projects(n=limit)
         
-        # Create response with sanitized data
+        if sort == "popularity_score":
+            popular = sorted(popular, key=lambda x: x.get('popularity_score', 0), reverse=(order == "desc"))
+        elif sort == "market_cap":
+            popular = sorted(popular, key=lambda x: x.get('market_cap', 0), reverse=(order == "desc"))
+        elif sort == "trend_score":
+            popular = sorted(popular, key=lambda x: x.get('trend_score', 0), reverse=(order == "desc"))
+        
         project_responses = []
         for rec in popular:
-            # Sanitize data (handle NaN values)
-            clean_rec = sanitize_project_data(rec)
-            
-            project_responses.append(
-                ProjectResponse(
-                    id=clean_rec.get('id'),
-                    name=clean_rec.get('name'),
-                    symbol=clean_rec.get('symbol'),
-                    image=clean_rec.get('image'),  # Using image field
-                    price_usd=clean_rec.get('price_usd'),
-                    price_change_24h=clean_rec.get('price_change_24h'),
-                    price_change_7d=clean_rec.get('price_change_7d'),
-                    market_cap=clean_rec.get('market_cap'),
-                    volume_24h=clean_rec.get('volume_24h'),
-                    popularity_score=clean_rec.get('popularity_score'),
-                    trend_score=clean_rec.get('trend_score'),
-                    category=clean_rec.get('primary_category', clean_rec.get('category')),
-                    chain=clean_rec.get('chain'),
-                    recommendation_score=clean_rec.get('recommendation_score', 0.5)
+            try:
+                clean_rec = sanitize_project_data(rec)
+                
+                if 'popularity_score' in clean_rec and clean_rec['popularity_score'] is not None:
+                    pop_score = float(clean_rec['popularity_score'])
+                    clean_rec['popularity_score'] = float(np.clip(pop_score, 0.0, 100.0))
+                    
+                    if pop_score > 100.0:
+                        logger.warning(f"Popular project {clean_rec.get('id', 'unknown')} had popularity_score {pop_score} > 100, clipped to 100")
+                
+                for field in ['current_price', 'market_cap', 'total_volume', 'price_change_24h', 
+                            'price_change_percentage_7d_in_currency', 'popularity_score', 
+                            'trend_score', 'recommendation_score']:
+                    if field in clean_rec and clean_rec[field] is not None:
+                        if isinstance(clean_rec[field], np.number):
+                            clean_rec[field] = float(clean_rec[field])
+                
+                project_responses.append(
+                    ProjectResponse(
+                        id=clean_rec.get('id'),
+                        name=clean_rec.get('name'),
+                        symbol=clean_rec.get('symbol'),
+                        image=clean_rec.get('image'),
+                        current_price=clean_rec.get('current_price'),
+                        price_change_24h=clean_rec.get('price_change_24h'),
+                        price_change_percentage_7d_in_currency=clean_rec.get('price_change_percentage_7d_in_currency'),
+                        market_cap=clean_rec.get('market_cap'),
+                        total_volume=clean_rec.get('total_volume'),
+                        popularity_score=clean_rec.get('popularity_score'),
+                        trend_score=clean_rec.get('trend_score'),
+                        category=clean_rec.get('primary_category', clean_rec.get('category')),
+                        chain=clean_rec.get('chain'),
+                        recommendation_score=clean_rec.get('recommendation_score', 0.5)
+                    )
                 )
-            )
-            
+            except Exception as e:
+                logger.warning(f"Error processing popular item: {e}. Skipping item.")
+                continue
+                
         return project_responses
     
     except Exception as e:
@@ -509,42 +925,47 @@ async def get_similar_projects(
     limit: int = Query(10, ge=1, le=100),
     model_type: str = Query("fecf", enum=["fecf", "ncf", "hybrid"])
 ):
-    """
-    Get similar projects based on feature similarity
-    """
     try:
         model = get_model(model_type)
         
         if not hasattr(model, 'get_similar_projects'):
-            # Fallback to FECF model if current model doesn't support similarity
             model = get_model("fecf")
         
         similar = model.get_similar_projects(project_id, n=limit)
         
-        # Create response with sanitized data
         project_responses = []
         for rec in similar:
-            # Sanitize data (handle NaN values)
-            clean_rec = sanitize_project_data(rec)
-            
-            project_responses.append(
-                ProjectResponse(
-                    id=clean_rec.get('id'),
-                    name=clean_rec.get('name'),
-                    symbol=clean_rec.get('symbol'),
-                    image=clean_rec.get('image'),  # Using image field
-                    price_usd=clean_rec.get('price_usd'),
-                    price_change_24h=clean_rec.get('price_change_24h'),
-                    price_change_7d=clean_rec.get('price_change_7d'),
-                    market_cap=clean_rec.get('market_cap'),
-                    volume_24h=clean_rec.get('volume_24h'),
-                    popularity_score=clean_rec.get('popularity_score'),
-                    trend_score=clean_rec.get('trend_score'),
-                    category=clean_rec.get('primary_category', clean_rec.get('category')),
-                    chain=clean_rec.get('chain'),
-                    recommendation_score=clean_rec.get('similarity_score', 0.5)
+            try:
+                clean_rec = sanitize_project_data(rec)
+                
+                for field in ['current_price', 'market_cap', 'total_volume', 'price_change_24h', 
+                            'price_change_percentage_7d_in_currency', 'popularity_score', 
+                            'trend_score', 'recommendation_score', 'similarity_score']:
+                    if field in clean_rec and clean_rec[field] is not None:
+                        if isinstance(clean_rec[field], np.number):
+                            clean_rec[field] = float(clean_rec[field])
+                
+                project_responses.append(
+                    ProjectResponse(
+                        id=clean_rec.get('id'),
+                        name=clean_rec.get('name'),
+                        symbol=clean_rec.get('symbol'),
+                        image=clean_rec.get('image'),
+                        current_price=clean_rec.get('current_price'),
+                        price_change_24h=clean_rec.get('price_change_24h'),
+                        price_change_percentage_7d_in_currency=clean_rec.get('price_change_percentage_7d_in_currency'),
+                        market_cap=clean_rec.get('market_cap'),
+                        total_volume=clean_rec.get('total_volume'),
+                        popularity_score=clean_rec.get('popularity_score'),
+                        trend_score=clean_rec.get('trend_score'),
+                        category=clean_rec.get('primary_category', clean_rec.get('category')),
+                        chain=clean_rec.get('chain'),
+                        recommendation_score=clean_rec.get('similarity_score', clean_rec.get('recommendation_score', 0.5))
+                    )
                 )
-            )
+            except Exception as e:
+                logger.warning(f"Error processing similar item: {e}. Skipping item.")
+                continue
             
         return project_responses
     
@@ -554,19 +975,45 @@ async def get_similar_projects(
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
-# Clear cache endpoint (admin only)
+# ⚡ PERBAIKAN: Enhanced cache clear dengan persistent storage
 @router.post("/cache/clear")
-async def clear_cache():
-    """
-    Clear recommendation cache (admin only)
-    """
-    global _recommendations_cache
+async def clear_cache(full_clear: bool = False):
+    global _user_recommendations_cache, _models, _cold_start_tracking
     
     try:
-        cache_size = len(_recommendations_cache)
-        _recommendations_cache = {}
+        # Count items before clearing
+        total_items = sum(len(cache) for cache in _user_recommendations_cache.values())
+        tracking_items = len(_cold_start_tracking)
         
-        return {"message": f"Cache cleared ({cache_size} entries)"}
+        # Clear recommendation cache
+        for model_type in _user_recommendations_cache:
+            _user_recommendations_cache[model_type] = {}
+        
+        # Clear cold-start tracking
+        _cold_start_tracking = {}
+        
+        # ⚡ TAMBAHAN: Clear persistent cache files
+        try:
+            for cache_type in ["fecf", "ncf", "hybrid"]:
+                cache_file = _get_cache_file_path(f"recommendations_{cache_type}")
+                if os.path.exists(cache_file):
+                    os.remove(cache_file)
+            
+            tracking_file = _get_cache_file_path("cold_start_tracking")
+            if os.path.exists(tracking_file):
+                os.remove(tracking_file)
+                
+            logger.info("Persistent cache files cleared")
+        except Exception as e:
+            logger.warning(f"Error clearing persistent cache files: {e}")
+        
+        # Optionally clear loaded models
+        if full_clear:
+            for model_type in _models:
+                _models[model_type] = None
+            return {"message": f"All caches cleared ({total_items} recommendations, {tracking_items} tracking entries, and all loaded models)"}
+        
+        return {"message": f"All caches cleared ({total_items} recommendations, {tracking_items} tracking entries)"}
     
     except Exception as e:
         logger.error(f"Error clearing cache: {str(e)}")
