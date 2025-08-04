@@ -1,19 +1,23 @@
 <?php
 
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\WelcomeController;
 use App\Http\Controllers\Admin\AdminController;
 use App\Http\Controllers\Auth\Web3AuthController;
-use App\Http\Controllers\Backend\DashboardController;
-use App\Http\Controllers\Backend\PortfolioController;
 use App\Http\Controllers\Backend\ProfileController;
 use App\Http\Controllers\Backend\ProjectController;
+use App\Http\Controllers\Backend\DashboardController;
+use App\Http\Controllers\Backend\PortfolioController;
 use App\Http\Controllers\Backend\RecommendationController;
 use App\Http\Controllers\Backend\TechnicalAnalysisController;
-use Illuminate\Support\Facades\Route;
 
 // Halaman Utama
 Route::get('/', function () {
     return view('welcome');
 })->name('welcome');
+
+// NEW: AJAX endpoint untuk today's recommendations
+Route::get('/api/today-recommendations', [WelcomeController::class, 'getTodayRecommendationsAjax'])->name('api.today-recommendations');
 
 // Rute autentikasi Web3
 Route::get('/login', [Web3AuthController::class, 'showLoginForm'])->name('login');
