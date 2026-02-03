@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-    @vite(['resources/css/app.css'])
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="min-h-screen">
     <!-- Clay Gradient Background -->
@@ -69,6 +69,318 @@
                     <a href="{{ route('login') }}" class="clay-button clay-button-success px-8 py-4 text-lg font-bold transform transition hover:translate-y-[-5px]">
                         <i class="fas fa-wallet mr-2"></i> Login dengan Crypto Wallet
                     </a>
+                </div>
+            </div>
+
+            <!-- NEW: Tutorial Section -->
+            <div class="clay-card p-8 mb-12" x-data="{ activeStep: 1 }">
+                <h2 class="text-3xl font-bold mb-6 flex items-center">
+                    <i class="fas fa-graduation-cap mr-3 text-warning"></i>
+                    <span class="clay-badge clay-badge-warning p-2 text-lg">📚 Tutorial Menggunakan Sistem</span>
+                </h2>
+
+                <p class="text-lg mb-8 text-gray-700">
+                    Ikuti langkah-langkah sederhana berikut untuk mulai mendapatkan rekomendasi cryptocurrency yang dipersonalisasi dengan AI.
+                </p>
+
+                <!-- Tutorial Steps -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                    <!-- Step 1: MetaMask Setup -->
+                    <div class="clay-card p-6 cursor-pointer transition-all border-2"
+                         :class="activeStep === 1 ? 'bg-primary/10 border-primary shadow-lg' : 'bg-gray-50 border-transparent hover:border-primary/30'"
+                         @click="activeStep = 1">
+                        <div class="flex items-center mb-4">
+                            <div class="clay-badge clay-badge-primary w-10 h-10 flex items-center justify-center text-lg font-bold mr-3">1</div>
+                            <h3 class="text-xl font-bold">Setup MetaMask</h3>
+                        </div>
+                        <div class="space-y-4 text-sm" x-show="activeStep === 1" x-transition>
+                            <div class="flex items-start">
+                                <i class="fas fa-download text-primary mr-3 mt-1 text-lg"></i>
+                                <div>
+                                    <p class="font-medium mb-1">Install MetaMask</p>
+                                    <p class="text-gray-600">Download dan install ekstensi MetaMask di browser Anda dari <a href="https://metamask.io" target="_blank" class="text-primary hover:underline">metamask.io</a></p>
+                                </div>
+                            </div>
+                            <div class="flex items-start">
+                                <i class="fas fa-key text-primary mr-3 mt-1 text-lg"></i>
+                                <div>
+                                    <p class="font-medium mb-1">Buat Wallet Baru</p>
+                                    <p class="text-gray-600">Ikuti panduan MetaMask untuk membuat wallet dan backup seed phrase dengan aman</p>
+                                </div>
+                            </div>
+                            <div class="flex items-start">
+                                <i class="fas fa-shield-alt text-primary mr-3 mt-1 text-lg"></i>
+                                <div>
+                                    <p class="font-medium mb-1">Amankan Akun</p>
+                                    <p class="text-gray-600">Simpan seed phrase di tempat yang aman dan jangan bagikan ke siapapun</p>
+                                </div>
+                            </div>
+                            <div class="clay-card bg-primary/5 p-3 mt-4">
+                                <p class="text-xs text-primary font-medium">💡 Tips: MetaMask adalah wallet crypto yang paling populer dan aman untuk Web3</p>
+                            </div>
+                        </div>
+                        <div x-show="activeStep !== 1" class="text-sm text-gray-600">
+                            Install MetaMask dan buat wallet untuk Web3 authentication
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Connect Wallet -->
+                    <div class="clay-card p-6 cursor-pointer transition-all border-2"
+                         :class="activeStep === 2 ? 'bg-success/10 border-success shadow-lg' : 'bg-gray-50 border-transparent hover:border-success/30'"
+                         @click="activeStep = 2">
+                        <div class="flex items-center mb-4">
+                            <div class="clay-badge clay-badge-success w-10 h-10 flex items-center justify-center text-lg font-bold mr-3">2</div>
+                            <h3 class="text-xl font-bold">Hubungkan Wallet</h3>
+                        </div>
+                        <div class="space-y-4 text-sm" x-show="activeStep === 2" x-transition>
+                            <div class="flex items-start">
+                                <i class="fas fa-mouse-pointer text-success mr-3 mt-1 text-lg"></i>
+                                <div>
+                                    <p class="font-medium mb-1">Klik "Login dengan Crypto Wallet"</p>
+                                    <p class="text-gray-600">Tekan tombol login hijau di halaman utama sistem</p>
+                                </div>
+                            </div>
+                            <div class="flex items-start">
+                                <i class="fas fa-link text-success mr-3 mt-1 text-lg"></i>
+                                <div>
+                                    <p class="font-medium mb-1">Hubungkan MetaMask</p>
+                                    <p class="text-gray-600">Pilih akun MetaMask yang ingin digunakan dan approve connection</p>
+                                </div>
+                            </div>
+                            <div class="flex items-start">
+                                <i class="fas fa-signature text-success mr-3 mt-1 text-lg"></i>
+                                <div>
+                                    <p class="font-medium mb-1">Tanda Tangani Pesan</p>
+                                    <p class="text-gray-600">Verifikasi kepemilikan wallet dengan menandatangani pesan (gratis, tidak ada gas fee)</p>
+                                </div>
+                            </div>
+                            <div class="clay-card bg-success/5 p-3 mt-4">
+                                <p class="text-xs text-success font-medium">🔒 Aman: Kami tidak pernah menyimpan private key atau seed phrase Anda</p>
+                            </div>
+                        </div>
+                        <div x-show="activeStep !== 2" class="text-sm text-gray-600">
+                            Login ke sistem menggunakan Web3 wallet authentication
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Explore Features -->
+                    <div class="clay-card p-6 cursor-pointer transition-all border-2"
+                         :class="activeStep === 3 ? 'bg-info/10 border-info shadow-lg' : 'bg-gray-50 border-transparent hover:border-info/30'"
+                         @click="activeStep = 3">
+                        <div class="flex items-center mb-4">
+                            <div class="clay-badge clay-badge-info w-10 h-10 flex items-center justify-center text-lg font-bold mr-3">3</div>
+                            <h3 class="text-xl font-bold">Jelajahi Fitur</h3>
+                        </div>
+                        <div class="space-y-4 text-sm" x-show="activeStep === 3" x-transition>
+                            <div class="flex items-start">
+                                <i class="fas fa-star text-info mr-3 mt-1 text-lg"></i>
+                                <div>
+                                    <p class="font-medium mb-1">Dapatkan Rekomendasi Personal</p>
+                                    <p class="text-gray-600">AI akan belajar dari interaksi Anda untuk memberikan rekomendasi crypto terbaik</p>
+                                </div>
+                            </div>
+                            <div class="flex items-start">
+                                <i class="fas fa-chart-line text-info mr-3 mt-1 text-lg"></i>
+                                <div>
+                                    <p class="font-medium mb-1">Analisis Teknikal</p>
+                                    <p class="text-gray-600">Gunakan indikator teknikal dengan periode yang dapat disesuaikan</p>
+                                </div>
+                            </div>
+                            <div class="flex items-start">
+                                <i class="fas fa-wallet text-info mr-3 mt-1 text-lg"></i>
+                                <div>
+                                    <p class="font-medium mb-1">Kelola Portfolio</p>
+                                    <p class="text-gray-600">Track portfolio onchain real-time dan manual transaction management</p>
+                                </div>
+                            </div>
+                            <div class="clay-card bg-info/5 p-3 mt-4">
+                                <p class="text-xs text-info font-medium">🚀 Sistem akan semakin pintar seiring dengan interaksi Anda</p>
+                            </div>
+                        </div>
+                        <div x-show="activeStep !== 3" class="text-sm text-gray-600">
+                            Mulai menggunakan rekomendasi AI dan fitur-fitur canggih lainnya
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Start Button -->
+                <div class="text-center">
+                    <a href="{{ route('login') }}" class="clay-button clay-button-primary px-8 py-4 text-lg font-bold transform transition hover:translate-y-[-2px] hover:shadow-lg">
+                        <i class="fas fa-rocket mr-2"></i> Mulai Sekarang - Gratis!
+                    </a>
+                    <p class="text-sm text-gray-600 mt-3">Tidak ada biaya, hanya butuh MetaMask wallet • Proses 30 detik</p>
+                </div>
+            </div>
+
+            <!-- NEW: Today's Recommendations Preview -->
+            <div class="clay-card p-8 mb-12" x-data="{
+                loading: true,
+                recommendations: [],
+                error: null,
+                refreshing: false
+            }" x-init="
+                // Load recommendations on page init
+                fetch('{{ route('api.today-recommendations') }}')
+                    .then(response => response.json())
+                    .then(data => {
+                        recommendations = data;
+                        loading = false;
+                    })
+                    .catch(error => {
+                        console.error('Error loading recommendations:', error);
+                        error = 'Gagal memuat rekomendasi';
+                        loading = false;
+                    });
+            ">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-3xl font-bold flex items-center">
+                        <i class="fas fa-calendar-day mr-3 text-primary"></i>
+                        <span class="clay-badge clay-badge-primary p-2 text-lg">🌟 Rekomendasi Hari Ini</span>
+                    </h2>
+                    <button @click="
+                        refreshing = true;
+                        fetch('{{ route('api.today-recommendations') }}')
+                            .then(response => response.json())
+                            .then(data => {
+                                recommendations = data;
+                                refreshing = false;
+                                error = null;
+                            })
+                            .catch(err => {
+                                error = 'Gagal memuat rekomendasi';
+                                refreshing = false;
+                            });
+                    " class="clay-button clay-button-secondary py-2 px-4 text-sm">
+                        <i class="fas fa-sync-alt mr-2" :class="{'animate-spin': refreshing}"></i>
+                        <span x-text="refreshing ? 'Loading...' : 'Refresh'"></span>
+                    </button>
+                </div>
+
+                <p class="text-lg mb-8 text-gray-700">
+                    Proyek cryptocurrency trending yang direkomendasikan hari ini berdasarkan analisis AI terkini dan data pasar real-time.
+                </p>
+
+                <!-- Loading State -->
+                <div x-show="loading" class="py-12 text-center">
+                    <div class="inline-block animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-primary"></div>
+                    <p class="mt-6 text-lg text-gray-600">Memuat rekomendasi terbaru...</p>
+                    <p class="text-sm text-gray-500">Menganalisis data dari 1000+ cryptocurrency</p>
+                </div>
+
+                <!-- Error State -->
+                <div x-show="!loading && error" class="clay-alert clay-alert-warning py-8">
+                    <div class="text-center">
+                        <i class="fas fa-exclamation-triangle text-3xl mb-4 text-warning"></i>
+                        <h3 class="text-lg font-bold mb-2">Terjadi Kesalahan</h3>
+                        <p x-text="error" class="mb-4"></p>
+                        <button @click="window.location.reload()" class="clay-button clay-button-warning py-2 px-6">
+                            <i class="fas fa-refresh mr-2"></i> Coba Lagi
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Recommendations Grid -->
+                <div x-show="!loading && !error && recommendations.length > 0" x-transition>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                        <template x-for="(item, index) in recommendations" :key="item.id">
+                            <div class="clay-card p-6 hover:shadow-xl transform transition-all duration-300 hover:translate-y-[-8px] hover:scale-105 cursor-pointer border-2 border-transparent hover:border-primary/20">
+                                <!-- Project Header -->
+                                <div class="flex items-center justify-between mb-6">
+                                    <div class="flex items-center">
+                                        <template x-if="item.image">
+                                            <img :src="item.image" :alt="item.symbol" class="w-12 h-12 rounded-full mr-3 shadow-md" loading="lazy">
+                                        </template>
+                                        <template x-if="!item.image">
+                                            <div class="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center mr-3 shadow-md">
+                                                <i class="fas fa-coins text-white text-lg"></i>
+                                            </div>
+                                        </template>
+                                        <div>
+                                            <div class="font-bold text-lg" x-text="item.symbol"></div>
+                                            <div class="text-xs text-gray-500 truncate max-w-[100px]" x-text="item.name"></div>
+                                        </div>
+                                    </div>
+                                    <div class="clay-badge clay-badge-success text-xs animate-pulse">
+                                        🔥 Hot
+                                    </div>
+                                </div>
+
+                                <!-- Price Info -->
+                                <template x-if="item.current_price > 0">
+                                    <div class="mb-6">
+                                        <div class="text-2xl font-bold mb-2" x-text="'$' + item.current_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 8})"></div>
+                                        <div class="flex items-center">
+                                            <template x-if="item.price_change_percentage_24h >= 0">
+                                                <div class="flex items-center text-success font-medium">
+                                                    <i class="fas fa-arrow-up mr-2 text-sm"></i>
+                                                    <span x-text="'+' + item.price_change_percentage_24h.toFixed(2) + '%'"></span>
+                                                </div>
+                                            </template>
+                                            <template x-if="item.price_change_percentage_24h < 0">
+                                                <div class="flex items-center text-danger font-medium">
+                                                    <i class="fas fa-arrow-down mr-2 text-sm"></i>
+                                                    <span x-text="item.price_change_percentage_24h.toFixed(2) + '%'"></span>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+
+                                <!-- Category & Chain -->
+                                <div class="flex flex-wrap gap-2 mb-4">
+                                    <span class="clay-badge clay-badge-primary text-xs" x-text="item.primary_category"></span>
+                                    <span class="clay-badge clay-badge-secondary text-xs" x-text="item.chain"></span>
+                                </div>
+
+                                <!-- Market Cap -->
+                                <template x-if="item.market_cap > 0">
+                                    <div class="text-xs text-gray-600 mb-4">
+                                        <span class="font-medium">Market Cap: </span>
+                                        <span x-text="'$' + (item.market_cap / 1000000000).toFixed(2) + 'B'"></span>
+                                    </div>
+                                </template>
+
+                                <!-- Scores -->
+                                <template x-if="item.popularity_score > 0 || item.trend_score > 0">
+                                    <div class="grid grid-cols-2 gap-4 text-xs">
+                                        <div class="text-center clay-card bg-primary/5 p-2">
+                                            <div class="font-medium text-primary">Popularitas</div>
+                                            <div class="text-lg font-bold" x-text="item.popularity_score.toFixed(1)"></div>
+                                        </div>
+                                        <div class="text-center clay-card bg-info/5 p-2">
+                                            <div class="font-medium text-info">Trend</div>
+                                            <div class="text-lg font-bold" x-text="item.trend_score.toFixed(1)"></div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Call to Action -->
+                    <div class="text-center clay-card bg-gradient-to-r from-primary/10 to-secondary/10 p-8">
+                        <h3 class="text-2xl font-bold mb-4">Ingin Rekomendasi yang Lebih Personal?</h3>
+                        <p class="text-lg text-gray-700 mb-6">
+                            Login dan biarkan AI mempelajari preferensi Anda untuk mendapatkan rekomendasi yang disesuaikan khusus untuk profil trading Anda.
+                        </p>
+                        <a href="{{ route('login') }}" class="clay-button clay-button-warning px-8 py-4 text-xl font-bold transform transition hover:translate-y-[-3px] hover:shadow-xl">
+                            <i class="fas fa-star mr-2"></i> Login untuk Rekomendasi Personal
+                        </a>
+                        <p class="text-sm text-gray-600 mt-3">
+                            ✨ AI akan mempelajari pola trading Anda • 🎯 Rekomendasi semakin akurat • 🚀 Fitur advanced analytics
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Empty State -->
+                <div x-show="!loading && !error && recommendations.length === 0" class="py-12 text-center text-gray-500">
+                    <i class="fas fa-chart-line text-6xl mb-6 text-gray-300"></i>
+                    <h3 class="text-xl font-bold mb-2">Belum Ada Rekomendasi</h3>
+                    <p class="text-lg mb-4">Rekomendasi sedang dipersiapkan oleh sistem AI.</p>
+                    <p class="text-sm mb-6">Coba lagi dalam beberapa saat atau hubungi support jika masalah berlanjut.</p>
+                    <button @click="window.location.reload()" class="clay-button clay-button-primary py-2 px-6">
+                        <i class="fas fa-refresh mr-2"></i> Muat Ulang Halaman
+                    </button>
                 </div>
             </div>
 
